@@ -77,6 +77,45 @@ def cmd_tcp(args):
     return 0 if report.passed > 0 else 1
 
 
+def cmd_udp(args):
+    """Test UDP voice strategies via STUN probe."""
+    loader = StrategyLoader()
+    mode = None
+
+    if args.config:
+        configs = loader.from_config(args.config)
+        mode = "config"
+    elif args.configs_dir:
+        configs = loader.from_config_dir(args.configs_dir)
+        mode = "configs"
+    else:
+        print("ERROR: specify --config or --configs-dir")
+        return 1
+
+    if not configs:
+        print("ERROR: no configs loaded")
+        return 1
+
+    print(f"\n  blockcheckS — UDP Voice test")
+    print(f"  Target:     {args.ip}:{args.port}")
+    print(f"  Mode:       {mode}")
+    print(f"  Configs:    {len(configs)}")
+    print(f"  Timeout:    {args.timeout}s")
+    print()
+
+    runner = TestRunner(ns_name=args.ns)
+    report = runner.test_sequential_udp(
+        configs, args.ip,
+        port=args.port,
+        timeout=args.timeout,
+        qnum=args.qnum,
+    )
+
+    print(f"\n  Results: {report.passed}/{len(report.results)} passed "
+          f"({report.total_time_sec:.1f}s)")
+    return 0 if report.passed > 0 else 1
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="blockcheckS — lightspeed DPI strategy tester"
@@ -122,22 +161,31 @@ def main():
     scan.add_argument("--qnum", type=int, default=200)
     scan.add_argument("--ns")
 
-    # udp command (placeholder for Phase 3)
-    udp = sub.add_parser("udp", help="Test UDP voice strategies (Phase 3)")
-    udp.add_argument("-d", "--domain")
-    udp.add_argument("-s", "--strategy")
-    udp.add_argument("--ip", default="35.217.31.203")
-    udp.add_argument("--port", type=int, default=50004)
+    # udp command
+    udp = sub.add_parser("udp", help="Test UDP voice strategies (STUN probe)")
+    udp.add_argument("-c", "--config",
+                     help="Path to nfqws2 .conf file (UDP config)")
+    udp.add_argument("-C", "--configs-dir",
+                     help="Directory with UDP .conf files (test all)")
+    udp.add_argument("--ip", default="35.217.31.203",
+                     help="Voice server IP (default: 35.217.31.203)")
+    udp.add_argument("--port", type=int, default=50004,
+                     help="Voice server port (default: 50004)")
+    udp.add_argument("--timeout", type=float, default=3.0,
+                     help="STUN timeout in seconds (default: 3)")
+    udp.add_argument("--qnum", type=int, default=201,
+                     help="NFQUEUE number for UDP (default: 201)")
+    udp.add_argument("--ns",
+                     help="Run inside network namespace")
 
     args = parser.parse_args()
 
     if args.command == "tcp":
         return cmd_tcp(args)
     elif args.command == "scan":
-        return cmd_tcp(args)  # redirect to tcp for now
+        return cmd_tcp(args)
     elif args.command == "udp":
-        print("UDP testing coming in Phase 3")
-        return 0
+        return cmd_udp(args)
     else:
         parser.print_help()
         return 0

@@ -1,6 +1,7 @@
-"""Test runner — sequential strategy testing (Phase 1)."""
+"""Test runner — sequential strategy testing (Phase 1 + UDP voice Phase 3)."""
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -203,6 +204,79 @@ class TestRunner:
             err = f" — {r.error[:60]}" if r.error else ""
             print(f"  [{tag}] {r.latency_ms:6.0f}ms  {status}  "
                   f"config={r.strategy[:60]}{err}")
+
+        report.total_time_sec = time.perf_counter() - t0
+        return report
+
+    # ── UDP Voice testing (Phase 3) ──────────────────────────
+
+    def _run_stun_check(self, ip: str, port: int, timeout: float) -> dict:
+        """Run STUN probe via subprocess (inside namespace if configured)."""
+        code = f"""
+import sys, json
+sys.path.insert(0, "{os.path.dirname(os.path.dirname(__file__))}")
+from checkers.udp_voice import stun_probe
+ok, lat, detail = stun_probe("{ip}", {port}, {timeout})
+print(json.dumps({{"success": ok, "latency_ms": round(lat, 1), "detail": detail}}))
+"""
+        if self.ns_name:
+            cmd = ["sudo", "ip", "netns", "exec", self.ns_name,
+                   self._python, "-c", code]
+        else:
+            cmd = [self._python, "-c", code]
+
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                          timeout=timeout + 5)
+        try:
+            return json.loads(r.stdout)
+        except json.JSONDecodeError:
+            return {"success": False, "latency_ms": 0.0,
+                    "detail": f"parse error: {r.stdout[:100]}"}
+
+    def test_udp_config(self, config_path: str, ip: str,
+                        port: int = 50004, timeout: float = 3.0,
+                        qnum: int = 201) -> StrategyResult:
+        """Test a UDP nfqws2 config against a voice server IP."""
+        basename = os.path.basename(config_path).replace(".conf", "")
+        result = StrategyResult(strategy=basename, domain=f"{ip}:{port}")
+        t0 = time.perf_counter()
+
+        fw = Firewall(ns_name=self.ns_name)
+        nfqws2 = Nfqws2Manager(ns_name=self.ns_name)
+
+        try:
+            fw.prepare_udp(ports=str(port), qnum=qnum)
+            nfqws2.start_config(config_path)
+
+            data = self._run_stun_check(ip, port, timeout)
+            result.success = data.get("success", False)
+            result.latency_ms = data.get("latency_ms", 0.0)
+            result.error = data.get("detail", "") if not result.success else None
+        except Exception as e:
+            result.error = str(e)[:200]
+        finally:
+            nfqws2.stop()
+            fw.cleanup()
+
+        result.time_total_ms = (time.perf_counter() - t0) * 1000
+        return result
+
+    def test_sequential_udp(self, config_paths: list[str], ip: str,
+                            port: int = 50004, timeout: float = 3.0,
+                            qnum: int = 201) -> ScanReport:
+        """Test multiple UDP configs against a voice server IP."""
+        report = ScanReport(domain=f"{ip}:{port}", protocol="udp_voice")
+        t0 = time.perf_counter()
+
+        for config_path in config_paths:
+            r = self.test_udp_config(config_path, ip, port=port,
+                                     timeout=timeout, qnum=qnum)
+            report.results.append(r)
+
+            tag = "OK" if r.success else "FAIL"
+            err = f" — {r.error[:60]}" if r.error else ""
+            lat = f"{r.latency_ms:.0f}ms" if r.success else ""
+            print(f"  [{tag}] {lat:>6s}  config={r.strategy[:55]}{err}")
 
         report.total_time_sec = time.perf_counter() - t0
         return report
