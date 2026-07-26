@@ -3,13 +3,13 @@
 
 Usage:
   sudo python3 bs.py tcp -d discord.com -s "hostfakesplit:tcp_md5:tcp_ts_up"
-  sudo python3 bs.py scan -d discord.com --test custom --protocol tls12
-  sudo python3 bs.py scan -d discord.com -f strategies.txt
+  sudo python3 bs.py tcp -d discord.com -c configs/simple_fake_alt2.conf
+  sudo python3 bs.py tcp -d discord.com -C configs/          # all configs
+  sudo python3 bs.py tcp -d discord.com --test custom --protocol tls12
 """
 
 import argparse
 import sys
-import time
 
 from engine.strategy_loader import StrategyLoader
 from engine.test_runner import TestRunner
@@ -18,16 +18,25 @@ from engine.test_runner import TestRunner
 def cmd_tcp(args):
     """Test TCP TLS strategies."""
     loader = StrategyLoader()
-    if args.file:
+    mode = None
+
+    if args.config:
+        strategies = loader.from_config(args.config)
+        mode = "config"
+    elif args.configs_dir:
+        strategies = loader.from_config_dir(args.configs_dir)
+        mode = "configs"
+    elif args.file:
         strategies = loader.from_file(args.file)
+        mode = "string"
     elif args.strategy:
         strategies = loader.from_string(args.strategy)
+        mode = "string"
     elif args.test == "custom":
-        strategies = loader.from_custom_dir(
-            args.test_dir, args.protocol
-        )
+        strategies = loader.from_custom_dir(args.test_dir, args.protocol)
+        mode = "string"
     else:
-        print("ERROR: specify --strategy, --file, or --test")
+        print("ERROR: specify --strategy, --config, --configs-dir, --file, or --test")
         return 1
 
     if not strategies:
@@ -36,17 +45,32 @@ def cmd_tcp(args):
 
     print(f"\n  blockcheckS — TCP TLS test")
     print(f"  Domain:     {args.domain}")
-    print(f"  Strategies: {len(strategies)}")
+    print(f"  Mode:       {mode}")
+    print(f"  Items:      {len(strategies)}")
     print(f"  Timeout:    {args.timeout}s")
     print()
 
     runner = TestRunner(ns_name=args.ns)
-    report = runner.test_sequential(
-        strategies, args.domain,
-        timeout=args.timeout,
-        hostlist=[args.domain] if not args.no_hostlist else None,
-        qnum=args.qnum,
-    )
+
+    if mode == "configs" and strategies:
+        report = runner.test_sequential_configs(
+            strategies, args.domain,
+            timeout=args.timeout,
+            qnum=args.qnum,
+        )
+    elif mode == "config" and strategies:
+        report = runner.test_sequential_configs(
+            strategies, args.domain,
+            timeout=args.timeout,
+            qnum=args.qnum,
+        )
+    else:
+        report = runner.test_sequential(
+            strategies, args.domain,
+            timeout=args.timeout,
+            hostlist=[args.domain] if not args.no_hostlist else None,
+            qnum=args.qnum,
+        )
 
     print(f"\n  Results: {report.passed}/{len(report.results)} passed "
           f"({report.total_time_sec:.1f}s)")
@@ -64,7 +88,11 @@ def main():
     tcp.add_argument("-d", "--domain", required=True,
                      help="Domain to test (e.g., 'discord.com')")
     tcp.add_argument("-s", "--strategy",
-                     help="Single strategy string")
+                     help="Single strategy string (e.g. 'fake:repeats=6:tcp_ts=-1000')")
+    tcp.add_argument("-c", "--config",
+                     help="Path to nfqws2 .conf file")
+    tcp.add_argument("-C", "--configs-dir",
+                     help="Directory with .conf files (test all)")
     tcp.add_argument("-f", "--file",
                      help="File with strategies (one per line)")
     tcp.add_argument("--test", choices=["custom", "standard"],
@@ -74,8 +102,8 @@ def main():
     tcp.add_argument("--protocol", default="tls12",
                      choices=["http", "tls12", "tls13", "quic", "udp_voice"],
                      help="Protocol for custom test")
-    tcp.add_argument("--timeout", type=float, default=3.0,
-                     help="Curl timeout in seconds (default: 3)")
+    tcp.add_argument("--timeout", type=float, default=5.0,
+                     help="Curl timeout in seconds (default: 5)")
     tcp.add_argument("--no-hostlist", action="store_true",
                      help="Process ALL TCP 443 (no hostlist filter)")
     tcp.add_argument("--qnum", type=int, default=200,

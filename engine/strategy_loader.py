@@ -1,7 +1,6 @@
-"""Strategy loader — reads strategies from inline strings, files, or custom lists."""
+"""Strategy loader — reads strategies from inline strings, files, or config dirs."""
 
 from pathlib import Path
-from typing import Optional
 
 
 class StrategyLoader:
@@ -24,6 +23,20 @@ class StrategyLoader:
                     continue
                 strategies.append(line)
         return strategies
+
+    @staticmethod
+    def from_config_dir(config_dir: str) -> list[str]:
+        """Load nfqws2 .conf files from a directory (sorted by name)."""
+        configs = sorted(Path(config_dir).glob("*.conf"))
+        return [str(c) for c in configs]
+
+    @staticmethod
+    def from_config(path: str) -> list[str]:
+        """Load a single .conf file (returns as single-element list)."""
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"Config not found: {p}")
+        return [str(p)]
 
     @staticmethod
     def from_custom_dir(test_dir: str, protocol: str) -> list[str]:

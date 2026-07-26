@@ -110,7 +110,7 @@ class TestRunner:
                     timeout: float = 3.0,
                     hostlist: Optional[list[str]] = None,
                     qnum: int = 200) -> StrategyResult:
-        """Test a single strategy against a single domain."""
+        """Test a single strategy string against a single domain."""
         result = StrategyResult(strategy=strategy, domain=domain)
         t0 = time.perf_counter()
 
@@ -120,6 +120,35 @@ class TestRunner:
         try:
             fw.prepare_tcp(qnum=qnum)
             nfqws2.start(strategy, hostlist=hostlist, qnum=qnum)
+
+            check = self._run_check(domain, timeout)
+            result.success = check.success
+            result.latency_ms = check.latency_ms
+            result.http_status = check.http_status
+            result.error = check.error
+        except Exception as e:
+            result.error = str(e)[:200]
+        finally:
+            nfqws2.stop()
+            fw.cleanup()
+
+        result.time_total_ms = (time.perf_counter() - t0) * 1000
+        return result
+
+    def test_config(self, config_path: str, domain: str,
+                    timeout: float = 3.0, qnum: int = 200) -> StrategyResult:
+        """Test a pre-built nfqws2 .conf file against a domain."""
+        import os
+        basename = os.path.basename(config_path).replace(".conf", "")
+        result = StrategyResult(strategy=basename, domain=domain)
+        t0 = time.perf_counter()
+
+        fw = Firewall(ns_name=self.ns_name)
+        nfqws2 = Nfqws2Manager(ns_name=self.ns_name)
+
+        try:
+            fw.prepare_tcp(qnum=qnum)
+            nfqws2.start_config(config_path)
 
             check = self._run_check(domain, timeout)
             result.success = check.success
@@ -153,6 +182,27 @@ class TestRunner:
             err = f" — {r.error[:60]}" if r.error else ""
             print(f"  [{tag}] {r.latency_ms:6.0f}ms  {status}  "
                   f"strategy={r.strategy[:70]}{err}")
+
+        report.total_time_sec = time.perf_counter() - t0
+        return report
+
+    def test_sequential_configs(self, config_paths: list[str], domain: str,
+                                timeout: float = 3.0,
+                                qnum: int = 200) -> ScanReport:
+        """Test multiple .conf files against one domain sequentially."""
+        report = ScanReport(domain=domain, protocol="tls")
+        t0 = time.perf_counter()
+
+        for config_path in config_paths:
+            r = self.test_config(config_path, domain, timeout=timeout,
+                                 qnum=qnum)
+            report.results.append(r)
+
+            tag = "OK" if r.success else "FAIL"
+            status = f"HTTP {r.http_status}" if r.http_status else ""
+            err = f" — {r.error[:60]}" if r.error else ""
+            print(f"  [{tag}] {r.latency_ms:6.0f}ms  {status}  "
+                  f"config={r.strategy[:60]}{err}")
 
         report.total_time_sec = time.perf_counter() - t0
         return report
