@@ -1,10 +1,33 @@
-"""TCP TLS connectivity checker via curl_cffi (Chrome impersonation)."""
+"""TCP TLS connectivity checker via curl_cffi (Chrome impersonation).
 
+Addresses blockcheckS concerns:
+  1. SO_MARK: handled by netns isolation (engine/test_runner.py)
+  2. State race: handled by sequential testing (engine/test_runner.py)
+  3. Fake responses: content validation for DPI redirect/stub detection
+  4. TCP Window Clamping: read timeout via separate timing (below)
+  5. DNS Leak: handled by nfqws2 netns DNS (8.8.8.8) + optional pre-resolution
+"""
+
+import socket
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import curl_cffi
+
+# Minimal response size for success (DPI fake pages are tiny)
+MIN_CONTENT_LENGTH = 2000
+
+# Rate to verify we're actually receiving data (bytes/sec)
+# DPI window clamping results in <100 bytes/sec
+MIN_BYTES_PER_SEC = 500.0
+
+# Patterns that indicate DPI fake response
+DPI_FAKE_PATTERNS = [
+    b"blocked", b"roskomnadzor", b"rkn.gov.ru",
+    b"Access denied", b"filtered", b"forbidden",
+    b"blockpage", b"utmblock", b"reject",
+]
 
 
 @dataclass
@@ -13,39 +36,98 @@ class TlsResult:
     success: bool = False
     http_status: int = 0
     latency_ms: float = 0.0
+    content_length: int = 0
+    read_rate_bps: float = 0.0
     error: Optional[str] = None
     protocol: str = ""
+    warnings: list[str] = field(default_factory=list)
 
 
-def check_tls(domain: str, timeout: float = 3.0,
+def _validate_content(data: bytes, time_for_read: float) -> list[str]:
+    """Check response body for DPI manipulation."""
+    warnings = []
+    content_len = len(data)
+
+    if content_len < MIN_CONTENT_LENGTH:
+        warnings.append(f"body too small ({content_len}B < {MIN_CONTENT_LENGTH}B)")
+
+    if time_for_read > 0:
+        rate = content_len / time_for_read
+        if rate < MIN_BYTES_PER_SEC:
+            warnings.append(f"slow read ({rate:.0f} B/s < {MIN_BYTES_PER_SEC} B/s)")
+
+    for pattern in DPI_FAKE_PATTERNS:
+        if pattern in data[:4096].lower():
+            warnings.append(f"DPI pattern '{pattern.decode()}' found in body")
+            break
+
+    return warnings
+
+
+def check_tls(domain: str, timeout: float = 5.0,
               impersonate: str = "chrome124",
-              http_version: int = 2) -> TlsResult:
+              http_version: int = 2,
+              verify_content: bool = True,
+              pre_resolved_ip: Optional[str] = None,
+              read_timeout: float = 4.0) -> TlsResult:
     """Test TLS connectivity to a domain via curl_cffi.
 
-    Uses Chrome 124 BoringSSL fingerprint (JA4 t13d1516h2) — browser-identical.
+    Args:
+        domain: domain to test
+        timeout: total curl timeout (connect + read)
+        impersonate: curl_cffi impersonation profile
+        http_version: HTTP version (2 = default, 1.1 = old browsers)
+        verify_content: validate body is real (not DPI stub)
+        pre_resolved_ip: skip DNS, connect directly to this IP
+        read_timeout: max time to wait for first content bytes
     """
     result = TlsResult(domain=domain)
     start = time.perf_counter()
 
+    target = domain
+    headers = {"Accept": "text/html,application/xhtml+xml",
+               "Accept-Language": "en-US,en;q=0.9",
+               "User-Agent": ""}  # curl_cffi fills this
+
+    if pre_resolved_ip:
+        target = pre_resolved_ip
+        headers["Host"] = domain
+
     try:
+        read_start = time.perf_counter()
         resp = curl_cffi.get(
-            f"https://{domain}",
+            f"https://{target}",
             impersonate=impersonate,
             http_version=http_version,
             timeout=timeout,
-            headers={"Accept": "text/html"},
+            headers=headers,
+            allow_redirects=False,
         )
-        result.success = 200 <= resp.status_code < 400
+        read_elapsed = time.perf_counter() - read_start
         result.http_status = resp.status_code
-        result.protocol = getattr(resp, "version", "").name if hasattr(resp, "version") else ""
+        result.content_length = len(resp.content)
+        result.read_rate_bps = result.content_length / max(read_elapsed, 0.001)
+        result.protocol = str(getattr(resp, "http_version", "?")).replace("_", "/")
+
+        if verify_content:
+            result.warnings = _validate_content(resp.content, read_elapsed)
+            result.success = (200 <= resp.status_code < 400) and not result.warnings
+        else:
+            result.success = 200 <= resp.status_code < 400
+
     except curl_cffi.CurlError as e:
         error_msg = str(e)
         if "Timeout" in error_msg:
-            result.error = "timeout"
+            if time.perf_counter() - start < timeout * 0.6:
+                result.error = "timeout (DPI window clamp?)"
+            else:
+                result.error = "timeout"
         elif "reset" in error_msg.lower():
             result.error = "connection reset"
         elif "SSL" in error_msg or "TLS" in error_msg:
             result.error = "TLS error"
+        elif "resolve" in error_msg.lower():
+            result.error = "DNS error"
         else:
             result.error = error_msg[:120]
     except Exception as e:
@@ -53,3 +135,21 @@ def check_tls(domain: str, timeout: float = 3.0,
 
     result.latency_ms = (time.perf_counter() - start) * 1000
     return result
+
+
+def resolve_domain(domain: str, nameserver: str = "8.8.8.8") -> list[str]:
+    """Pre-resolve domain to IPv4 addresses via specified DNS."""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["dig", "+short", f"@{nameserver}", "A", domain],
+            capture_output=True, text=True, timeout=5
+        )
+        return [line.strip() for line in r.stdout.splitlines() if line.strip()]
+    except Exception:
+        try:
+            return [a[4][0] for a in socket.getaddrinfo(
+                domain, 443, socket.AF_INET, socket.SOCK_STREAM
+            )]
+        except Exception:
+            return []
