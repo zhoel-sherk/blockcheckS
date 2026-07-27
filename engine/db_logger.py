@@ -28,8 +28,6 @@ class StateDB:
 
     async def init(self):
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA busy_timeout=5000")
             await db.executescript("""
                 CREATE TABLE IF NOT EXISTS strategies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,6 +113,8 @@ class StateDB:
                 GROUP BY domain
                 ORDER BY last_test DESC;)
             await db.commit()
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
 
     # ── Strategy registry ──────────────────────────
 
@@ -134,6 +134,8 @@ class StateDB:
                 (name, proto, config_path, ts)
             )
             await db.commit()
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
             return cur.lastrowid
 
     # ── Results logging ────────────────────────────
@@ -155,6 +157,8 @@ class StateDB:
                  gateway_ms, int(content_valid), error, ts)
             )
             await db.commit()
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
 
     async def log_udp(self, strategy: str, target: str,
                        status: str, latency_ms: float = 0,
@@ -169,6 +173,8 @@ class StateDB:
                 (sid, target, status, latency_ms, error, ts)
             )
             await db.commit()
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
 
     async def log_pair(self, tcp: str, udp: str, domain: str,
                         tcp_ok: bool, gateway_ok: bool, udp_ok: bool,
@@ -187,6 +193,8 @@ class StateDB:
                  tcp_ms, gateway_ms, udp_ms, overall, ts)
             )
             await db.commit()
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
 
     # ── Checkpoints ────────────────────────────────
 
@@ -200,6 +208,8 @@ class StateDB:
                 (tcp_idx, udp_idx, fingerprint, tcp_label, udp_label, ts, note)
             )
             await db.commit()
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
 
     async def latest_checkpoint(self) -> Optional[tuple[int, int, str, str, str, str]]:
         """Return (tcp_idx, udp_idx, timestamp, note) or None."""
