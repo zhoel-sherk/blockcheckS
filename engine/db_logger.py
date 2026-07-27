@@ -28,13 +28,16 @@ class StateDB:
 
     async def init(self):
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
             await db.executescript("""
                 CREATE TABLE IF NOT EXISTS strategies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
                     proto TEXT NOT NULL DEFAULT 'tcp',  -- 'tcp' or 'udp'
                     config_path TEXT NOT NULL,
-                    first_seen TEXT NOT NULL DEFAULT ''
+                    first_seen TEXT NOT NULL DEFAULT '',
+                    UNIQUE(name, proto)
                 );
                 CREATE TABLE IF NOT EXISTS tcp_results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,13 +78,42 @@ class StateDB:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     tcp_idx INTEGER NOT NULL,
                     udp_idx INTEGER NOT NULL,
+                    fingerprint TEXT NOT NULL DEFAULT '',
+                    tcp_label TEXT NOT NULL DEFAULT '',
+                    udp_label TEXT NOT NULL DEFAULT '',
                     timestamp TEXT NOT NULL DEFAULT '',
                     note TEXT DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS idx_tcp_status ON tcp_results(status);
                 CREATE INDEX IF NOT EXISTS idx_udp_status ON udp_results(status);
                 CREATE INDEX IF NOT EXISTS idx_pair_overall ON pair_results(overall);
-            """)
+            """
+                CREATE VIEW IF NOT EXISTS v_working_tcp AS
+                SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
+                       t.content_valid, t.timestamp
+                FROM tcp_results t
+                JOIN strategies s ON t.strategy_id = s.id
+                WHERE t.status = 'PASS'
+                ORDER BY t.domain, t.latency_ms;
+
+                CREATE VIEW IF NOT EXISTS v_coverage AS
+                SELECT s.name AS strategy, s.proto,
+                       COUNT(DISTINCT t.domain) AS domains_passed,
+                       ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
+                FROM tcp_results t
+                JOIN strategies s ON t.strategy_id = s.id
+                WHERE t.status = 'PASS'
+                GROUP BY s.name, s.proto
+                HAVING domains_passed > 0
+                ORDER BY domains_passed DESC;
+
+                CREATE VIEW IF NOT EXISTS v_latest_run AS
+                SELECT domain, COUNT(*) AS total,
+                       SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) AS passed,
+                       MAX(timestamp) AS last_test
+                FROM tcp_results
+                GROUP BY domain
+                ORDER BY last_test DESC;)
             await db.commit()
 
     # ── Strategy registry ──────────────────────────
@@ -159,20 +191,21 @@ class StateDB:
     # ── Checkpoints ────────────────────────────────
 
     async def save_checkpoint(self, tcp_idx: int, udp_idx: int,
-                                note: str = "") -> None:
+                                note: str = "", fingerprint: str = "",
+                                tcp_label: str = "", udp_label: str = "") -> None:
         async with aiosqlite.connect(self.db_path) as db:
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
-                "INSERT INTO checkpoints(tcp_idx,udp_idx,timestamp,note) VALUES(?,?,?,?)",
-                (tcp_idx, udp_idx, ts, note)
+                "INSERT INTO checkpoints(tcp_idx,udp_idx,fingerprint,tcp_label,udp_label,timestamp,note) VALUES(?,?,?,?,?,?,?)",
+                (tcp_idx, udp_idx, fingerprint, tcp_label, udp_label, ts, note)
             )
             await db.commit()
 
-    async def latest_checkpoint(self) -> Optional[tuple[int, int, str, str]]:
+    async def latest_checkpoint(self) -> Optional[tuple[int, int, str, str, str, str]]:
         """Return (tcp_idx, udp_idx, timestamp, note) or None."""
         async with aiosqlite.connect(self.db_path) as db:
             row = await db.execute(
-                "SELECT tcp_idx,udp_idx,timestamp,note FROM checkpoints ORDER BY id DESC LIMIT 1"
+                "SELECT tcp_idx,udp_idx,timestamp,note,fingerprint,tcp_label FROM checkpoints ORDER BY id DESC LIMIT 1"
             )
             r = await row.fetchone()
             return r if r else None
@@ -183,7 +216,7 @@ class StateDB:
         """Get names of TCP strategies that passed for this domain."""
         async with aiosqlite.connect(self.db_path) as db:
             rows = await db.execute(
-                """SELECT s.name FROM tcp_results t
+                """SELECT DISTINCT s.name FROM tcp_results t
                    JOIN strategies s ON t.strategy_id = s.id
                    WHERE t.domain=? AND t.status='PASS'""",
                 (domain,)
