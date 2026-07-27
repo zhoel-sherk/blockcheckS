@@ -291,6 +291,15 @@ def main():
     scan.add_argument("--auto-discover", action="store_true", help=argparse.SUPPRESS)
     scan.add_argument("--full-voice", action="store_true", help=argparse.SUPPRESS)
 
+    # composite — single config, multiple domains
+    composite = sub.add_parser("composite", help="Test composite nfqws2 config")
+    composite.add_argument("-c", "--config", required=True,
+                           help="Path to composite .conf file")
+    composite.add_argument("-d", "--domains", nargs="+",
+                           help="Domains to test (default: Discord set)")
+    composite.add_argument("--parallel", type=int, default=4)
+    composite.add_argument("--timeout", type=float, default=5.0)
+
     # pair — async TCP×UDP matrix
     pair = sub.add_parser("pair", help="TCP×UDP pair matrix (async)")
     pair.add_argument("-d", "--domain", required=True)
@@ -350,6 +359,11 @@ def main():
         args.generate = bool(args.generate) or bool(getattr(args, 'tcp_sources', '') != "custom,configs"
                                                      or getattr(args, 'udp_sources', '') != "custom")
         return asyncio.run(cmd_pair(args))
+    elif args.command == "composite":
+        from checkers.composite_runner import run as run_composite
+        return asyncio.run(run_composite(
+            args.config, args.domains, args.parallel, args.timeout
+        ))
     else:
         parser.print_help()
         tcp_passed_local = sum(1 for r in tcp_results if r.success) if "tcp_results" in dir() else 0

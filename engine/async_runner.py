@@ -135,7 +135,7 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
 
     # Setup nfqws2
     if is_config:
-        config_path = strategy
+        config_path = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
         _nfqws2_daemon(ns_name, config_path)
     else:
         # Build config from inline strategy
