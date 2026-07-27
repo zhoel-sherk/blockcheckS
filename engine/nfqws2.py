@@ -1,10 +1,17 @@
-"""nfqws2 process manager — start, stop, load config files."""
+"""nfqws2 process manager — start, stop, load config files.
+
+Uses foreground subprocess with start_new_session for clean killpg.
+No --daemon, no pkill -9 — only kills owned process groups via PID.
+"""
 
 import os
+import signal
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
+
 
 NFQWS2_BIN = "/opt/zapret2/nfq2/nfqws2"
 LUA_INIT = [
@@ -14,56 +21,42 @@ LUA_INIT = [
 
 
 class Nfqws2Manager:
-    """Manages nfqws2 daemon lifecycle.
+    """Manages a single nfqws2 process via foreground Popen + killpg."""
 
-    start():        build config from strategy string + options
-    start_config(): use pre-built .conf file directly
-    Phase 2:        reconfigure without restart via SIGHUP or config file.
-    """
-
-    def __init__(self, ns_name: Optional[str] = None):
+    def __init__(self, ns_name: Optional[str] = None, qnum: int = 200):
         self.ns_name = ns_name
+        self._qnum = qnum
         self._proc: Optional[subprocess.Popen] = None
-        self._qnum = 200
+        self._pid: Optional[int] = None
 
     def _launch(self, config_arg: str) -> None:
-        """Launch nfqws2 with @config_arg and verify it's running."""
+        """Start nfqws2 in foreground, verify it's alive."""
+        args = [NFQWS2_BIN, config_arg]
         if self.ns_name:
-            cmd = ["sudo", "ip", "netns", "exec", self.ns_name,
-                   NFQWS2_BIN, config_arg, "--daemon"]
+            args = ["sudo", "ip", "netns", "exec", self.ns_name] + args
         else:
-            cmd = ["sudo", NFQWS2_BIN, config_arg, "--daemon"]
+            args = ["sudo"] + args
 
         self._proc = subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+            args,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            start_new_session=True,
         )
-        time.sleep(1.0)
+        self._pid = self._proc.pid
+        time.sleep(0.8)
 
-        check_cmd = ["pgrep", "-x", "nfqws2"]
-        if self.ns_name:
-            check_cmd = (
-                ["sudo", "ip", "netns", "exec", self.ns_name] + check_cmd
-            )
-
-        r = subprocess.run(check_cmd, capture_output=True, text=True, timeout=5)
-        if r.returncode != 0:
+        if self._proc.poll() is not None:
             stderr = ""
             try:
-                self._proc.wait(timeout=1)
-                stderr = (
-                    self._proc.stderr.read().decode()
-                    if self._proc.stderr else ""
-                )
+                stderr = self._proc.stderr.read().decode()
             except Exception:
                 pass
+            self._proc = None
+            self._pid = None
             raise RuntimeError(f"nfqws2 failed to start: {stderr[:300]}")
 
     def start_config(self, config_path: str) -> None:
-        """Start nfqws2 using a pre-built .conf file.
-
-        The config file should contain all --qnum, --filter-*, --lua-init,
-        --blob, --hostlist, --lua-desync lines (same format as keenetic .conf).
-        """
+        """Start nfqws2 using a pre-built .conf file."""
         abspath = Path(config_path).resolve()
         if not abspath.exists():
             raise FileNotFoundError(f"Config not found: {abspath}")
@@ -73,12 +66,7 @@ class Nfqws2Manager:
               qnum: int = 200, filter_tcp: str = "443",
               blobs: Optional[list[str]] = None,
               extra_lua_desync: Optional[list[str]] = None) -> None:
-        """Start nfqws2 daemon with given strategy (backward compat).
-
-        blobs: list of blob names to load (e.g. ['stun', 'max_ru'])
-          -- loaded from /opt/zapret2/blobs/<name>.bin
-        extra_lua_desync: additional --lua-desync lines (e.g. for multi-strategy)
-        """
+        """Start nfqws2 daemon with inline strategy (backward compat)."""
         self._qnum = qnum
         lines = [
             f"--qnum={qnum}",
@@ -99,11 +87,14 @@ class Nfqws2Manager:
                     lines.append(f"--blob={blob_name}:@{blob_path}")
 
         if hostlist:
-            hostlist_path = f"/tmp/bs_hostlist_{os.getpid()}.txt"
-            with open(hostlist_path, "w") as f:
-                for d in hostlist:
-                    f.write(f"{d}\n")
-            lines.append(f"--hostlist={hostlist_path}")
+            fd, hostlist_path = tempfile.mkstemp(prefix="bs_hostlist_", suffix=".txt")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    for d in hostlist:
+                        f.write(f"{d}\n")
+                lines.append(f"--hostlist={hostlist_path}")
+            finally:
+                pass  # keep the file — nfqws2 needs it while running
 
         lines.append("--payload=tls_client_hello")
         lines.append(f"--lua-desync={strategy}")
@@ -111,23 +102,37 @@ class Nfqws2Manager:
             for extra in extra_lua_desync:
                 lines.append(f"--lua-desync={extra}")
 
-        config_path = f"/tmp/bs_nfqws2_{os.getpid()}.conf"
-        with open(config_path, "w") as f:
-            f.write("\n".join(lines))
-        self._launch(f"@{config_path}")
+        fd, config_path = tempfile.mkstemp(prefix="bs_nfqws2_", suffix=".conf")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write("\n".join(lines))
+            self._launch(f"@{config_path}")
+        finally:
+            pass
 
     def stop(self) -> None:
-        """Kill nfqws2 daemon."""
-        if self._proc:
-            kill_cmd = ["sudo", "pkill", "-9", "nfqws2"]
-            if self.ns_name:
-                kill_cmd = ["sudo", "ip", "netns", "exec", self.ns_name,
-                            "pkill", "-9", "nfqws2"]
-            subprocess.run(kill_cmd, capture_output=True, timeout=5)
+        """Kill the owned nfqws2 process group via killpg."""
+        if self._pid is not None:
+            try:
+                os.killpg(os.getpgid(self._pid), signal.SIGTERM)
+                time.sleep(0.3)
+                try:
+                    os.killpg(os.getpgid(self._pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+            except (ProcessLookupError, OSError):
+                pass
+            self._pid = None
+
+        if self._proc is not None:
             try:
                 self._proc.wait(timeout=3)
             except Exception:
-                pass
+                try:
+                    self._proc.kill()
+                    self._proc.wait(timeout=2)
+                except Exception:
+                    pass
             self._proc = None
 
     def __enter__(self):

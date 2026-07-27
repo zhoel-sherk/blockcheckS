@@ -29,9 +29,6 @@ SMALL_BODY_STATUSES = frozenset({101, 204, 301, 302, 303, 307, 308, 304, 206})
 
 # Patterns that indicate DPI fake response
 DPI_FAKE_PATTERNS = [
-    b"blocked", b"roskomnadzor", b"rkn.gov.ru",
-    b"Access denied", b"filtered", b"forbidden",
-    b"blockpage", b"utmblock", b"reject",
 ]
 
 

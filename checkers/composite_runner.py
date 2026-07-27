@@ -27,7 +27,7 @@ DOMAINS = [
     "discordapp.com", "discordcdn.com", "gateway.discord.gg",
 ]
 
-PYTHON = "/home/zhoel/workspace/dpi-tester/.venv/bin/python"
+from engine.config import PYTHON_BIN as PYTHON
 
 CHECK_CODE = """
 import json, time

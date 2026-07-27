@@ -22,20 +22,33 @@ from engine.config import (
 )
 
 
+_singbox_proc = None
+
 def _manage_singbox(start: bool) -> Optional[subprocess.Popen]:
+    global _singbox_proc
     if start:
-        subprocess.run(["pkill", "-f", "sing-box"], capture_output=True)
-        time.sleep(0.5)
+        if _singbox_proc is not None:
+            try:
+                _singbox_proc.terminate()
+                _singbox_proc.wait(timeout=2)
+            except Exception:
+                pass
         if not os.path.exists(SING_BOX_CONFIG):
             return None
-        proc = subprocess.Popen(
+        _singbox_proc = subprocess.Popen(
             [SING_BOX_BIN, "run", "-c", SING_BOX_CONFIG],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         time.sleep(2)
-        return proc
+        return _singbox_proc
     else:
-        subprocess.run(["pkill", "-f", "sing-box"], capture_output=True)
+        if _singbox_proc is not None:
+            try:
+                _singbox_proc.terminate()
+                _singbox_proc.wait(timeout=2)
+            except Exception:
+                pass
+            _singbox_proc = None
         return None
 
 
@@ -109,12 +122,7 @@ async def discover_voice_endpoint() -> Optional[dict]:
                 "intents": 513
             }})
 
-            if guild_id and channel_id:
-                await ws.send_json({"op": 4, "d": {
-                    "guild_id": guild_id,
-                    "channel_id": channel_id,
-                    "self_mute": True, "self_deaf": True
-                }})
+
 
             voice_endpoint = ""
             voice_token_shard = ""
@@ -135,6 +143,12 @@ async def discover_voice_endpoint() -> Optional[dict]:
 
                 if t == "READY":
                     user_id = d["user"]["id"]
+                    if guild_id and channel_id:
+                        await ws.send_json({"op": 4, "d": {
+                            "guild_id": guild_id,
+                            "channel_id": channel_id,
+                            "self_mute": True, "self_deaf": True
+                        }})
 
                 if t == "VOICE_STATE_UPDATE":
                     session_id = d.get("session_id", "")
@@ -166,7 +180,7 @@ async def discover_voice_endpoint() -> Optional[dict]:
             v_port = int(parts[1]) if len(parts) > 1 else 443
 
             vws = await asyncio.wait_for(
-                session.ws_connect(f"wss://{v_host}:{v_port}"),
+                session.ws_connect(f"wss://{v_host}:{v_port}/?v=4"),
                 timeout=10
             )
             await asyncio.wait_for(vws.receive_json(), 10)

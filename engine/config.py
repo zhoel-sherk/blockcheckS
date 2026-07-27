@@ -54,6 +54,6 @@ DEFAULT_VOICE_IP   = "35.217.5.42"
 DEFAULT_VOICE_PORT = 50006
 
 # Content validation thresholds
-MIN_CONTENT_LENGTH = 2000   # bytes — minimum for a real web page
+MIN_CONTENT_LENGTH = 300    # bytes — minimum for a real web page (aligned with tcp_tls)
 MIN_READ_RATE_BPS  = 500.0  # bytes/sec — below this = TCP window clamp
 MIN_REDIRECT_LENGTH = 10    # bytes — redirects have tiny bodies, don't fail them

@@ -30,7 +30,13 @@ def stun_probe(ip: str, port: int = 50004,
         sock.sendto(msg, (ip, port))
         data, addr = sock.recvfrom(512)
         elapsed = (time.perf_counter() - start) * 1000
-        return True, elapsed, f"{len(data)}B from {addr[0]}:{addr[1]}"
+        # Validate RFC 5389 Binding Success response
+        if len(data) >= 20:
+            msg_type = struct.unpack(">H", data[:2])[0]
+            magic = struct.unpack(">I", data[4:8])[0]
+            if msg_type == 0x0101 and magic == 0x2112A442:
+                return True, elapsed, f"{len(data)}B STUN from {addr[0]}:{addr[1]}"
+        return False, elapsed, f"invalid STUN response ({len(data)}B)"
     except socket.timeout:
         elapsed = (time.perf_counter() - start) * 1000
         return False, elapsed, "timeout"

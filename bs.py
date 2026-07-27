@@ -198,6 +198,9 @@ async def cmd_pair(args):
         print(f"  TCP:        {len(tcp_items)} strategies")
         print(f"  UDP:        {len(udp_items)} strategies")
         print(f"  Voice:      {voice_ip}:{voice_port}")
+        if not tcp_items:
+            print(f"  ERROR: no strategies loaded")
+            return 1
         print(f"  Full Voice: {'yes' if full_voice else 'STUN only'}")
         print(f"  UDP Bypass: {'yes' if args.udp_bypass else 'no'}")
         print(f"  Workers:    {pool_size}")
@@ -233,7 +236,7 @@ async def cmd_pair(args):
         elapsed = time.perf_counter() - t0
         print(f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
         tcp_passed_local = sum(1 for r in tcp_results if r.success) if "tcp_results" in dir() else 0
-        return 0 if tcp_passed_local > 0 else 1
+        return 0 if tcp_passed > 0 else 1 if tcp_passed_local > 0 else 1
 
     finally:
         await runner.stop()

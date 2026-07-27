@@ -1,7 +1,8 @@
-"""Firewall management — iptables OUTPUT NFQUEUE for nfqws2.
+"""Firewall management — precise iptables rules with tracked cleanup.
 
-Phase 1: iptables (simple, one worker).
-Phase 2: nftables vmap (O(1) dispatch, N workers).
+Uses iptables -D to remove only the rules we added.
+Always uses --queue-bypass on NFQUEUE rules.
+No destructive -F OUTPUT.
 """
 
 import subprocess
@@ -9,65 +10,63 @@ from typing import Optional
 
 
 class Firewall:
-    """Manage iptables NFQUEUE rules for strategy testing."""
+    """Manage iptables NFQUEUE rules for strategy testing.
+
+    Stores each added rule as a list of iptables arguments.
+    cleanup() removes them precisely via iptables -D.
+    """
 
     def __init__(self, ns_name: Optional[str] = None):
         self.ns_name = ns_name
-        self._rules_added = False
+        self._rules: list[list[str]] = []
+
+    def _ns_prefix(self) -> list[str]:
+        if self.ns_name:
+            return ["sudo", "ip", "netns", "exec", self.ns_name]
+        return []
 
     def _run(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
-        """Run iptables command, optionally inside a network namespace."""
-        cmd = ["sudo"]
-        if self.ns_name:
-            cmd.extend(["ip", "netns", "exec", self.ns_name])
-        cmd.extend(["iptables"] + list(args))
+        """Run single iptables command."""
+        cmd = self._ns_prefix() + ["iptables"] + list(args)
         result = subprocess.run(cmd, capture_output=True, text=True)
         if check and result.returncode != 0:
-            raise RuntimeError(f"iptables failed: {result.stderr[:200]}")
+            raise RuntimeError(f"iptables: {result.stderr[:200]}")
         return result
+
+    def _add_rule(self, *args: str) -> None:
+        """Add a rule and track it for cleanup."""
+        self._run("-A", *args, check=True)
+        self._rules.append(["-D"] + list(args))
 
     def prepare_tcp(self, port: int = 443, qnum: int = 200,
                     dst_ip: Optional[str] = None) -> None:
-        """Add OUTPUT NFQUEUE rule for TCP traffic.
-
-        Args:
-            port: destination TCP port
-            qnum: NFQUEUE queue number (must match nfqws2 --qnum)
-            dst_ip: optional destination IP filter (e.g., '162.159.128.233')
-        """
+        """Add OUTPUT NFQUEUE rule for TCP with queue-bypass."""
         if dst_ip:
-            self._run("-A", "OUTPUT", "-p", "tcp", "--dport", str(port),
-                      "-d", dst_ip, "-j", "NFQUEUE", "--queue-num", str(qnum),
-                      check=True)
+            self._add_rule("OUTPUT", "-p", "tcp", "--dport", str(port),
+                           "-d", dst_ip,
+                           "-j", "NFQUEUE", "--queue-num", str(qnum),
+                           "--queue-bypass")
         else:
-            self._run("-A", "OUTPUT", "-p", "tcp", "--dport", str(port),
-                      "-j", "NFQUEUE", "--queue-num", str(qnum),
-                      check=True)
-        self._rules_added = True
+            self._add_rule("OUTPUT", "-p", "tcp", "--dport", str(port),
+                           "-j", "NFQUEUE", "--queue-num", str(qnum),
+                           "--queue-bypass")
 
     def prepare_udp(self, ports: str = "50000:50100", qnum: int = 200) -> None:
-        """Add OUTPUT NFQUEUE rule for UDP traffic.
-
-        Args:
-            ports: port range (e.g., '50000:50100' or '50004')
-            qnum: NFQUEUE queue number
-        """
+        """Add OUTPUT NFQUEUE rule for UDP with queue-bypass."""
         if ":" in ports:
-            self._run("-A", "OUTPUT", "-p", "udp", "-m", "multiport",
-                      "--dports", ports, "-j", "NFQUEUE",
-                      "--queue-num", str(qnum), check=True)
+            self._add_rule("OUTPUT", "-p", "udp", "--dport", ports,
+                           "-j", "NFQUEUE", "--queue-num", str(qnum),
+                           "--queue-bypass")
         else:
-            self._run("-A", "OUTPUT", "-p", "udp", "--dport", ports,
-                      "-j", "NFQUEUE", "--queue-num", str(qnum),
-                      check=True)
-        self._rules_added = True
+            self._add_rule("OUTPUT", "-p", "udp", "--dport", ports,
+                           "-j", "NFQUEUE", "--queue-num", str(qnum),
+                           "--queue-bypass")
 
     def cleanup(self) -> None:
-        """Remove all NFQUEUE rules from OUTPUT chain."""
-        if not self._rules_added:
-            return
-        self._run("-F", "OUTPUT")
-        self._rules_added = False
+        """Remove only the rules we added via iptables -D."""
+        for rule_args in self._rules:
+            self._run(*rule_args, check=False)
+        self._rules.clear()
 
     def __enter__(self):
         return self
