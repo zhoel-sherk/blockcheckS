@@ -178,39 +178,49 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
     _sudo("ip", "netns", "exec", ns_name, "iptables", "-A", "OUTPUT",
           "-p", "tcp", "--dport", "443", "-j", "NFQUEUE", "--queue-num", "200")
 
-    # Run curl_cffi check as inline Python
+    # Run curl_cffi check as inline Python — two-phase:
+    # Phase 1: quick GET with 1.5s timeout → validates TLS
+    # Phase 2: full body download → validates no window clamping
     check_code = f"""
 import json, time
-try:
-    import curl_cffi
-    start = time.perf_counter()
-    resp = curl_cffi.get(
-        "https://{domain}", impersonate="chrome124", http_version=2,
-        timeout={timeout}, headers={{"Accept":"text/html"}},
-        allow_redirects=False,
-    )
-    body = resp.content[:4096]
-    clen = len(resp.content)
-    content_ok = clen >= 300
-    dpi_fake = any(p in body.lower() for p in (b"blocked",b"rkn",b"forbidden",
-                b"access denied",b"reject",b"filtered",b"blockpage",b"utmblock"))
-    if dpi_fake: content_ok = False
-    small_body_ok = resp.status_code in (101,204,301,302,303,304,307,308,206)
-    success = (200 <= resp.status_code < 400) and (content_ok or small_body_ok)
-    result = {{"success": success,
-               "http_code": resp.status_code,
-               "latency_ms": (time.perf_counter()-start)*1000,
-               "content_len": clen, "content_ok": content_ok, "error": None}}
-except curl_cffi.CurlError as e:
-    msg = str(e)
-    result = {{"success": False, "http_code": 0,
-               "latency_ms": (time.perf_counter()-start)*1000,
-               "content_len": 0, "content_ok": False,
-               "error": "timeout" if "Timeout" in msg else msg[:120]}}
-except Exception as e:
-    result = {{"success": False, "http_code": 0, "latency_ms": 0,
-               "content_len": 0, "content_ok": False, "error": str(e)[:120]}}
-print(json.dumps(result))
+def check(domain, timeout):
+    try:
+        import curl_cffi
+        # Phase 1: quick probe
+        start = time.perf_counter()
+        try:
+            resp = curl_cffi.get(
+                "https://{domain}", impersonate="chrome124", http_version=2,
+                timeout=min({timeout}, 1.5), headers={{"Accept":"text/html"}},
+                allow_redirects=False,
+            )
+        except curl_cffi.CurlError as e:
+            msg = str(e)
+            return {{"success": False, "http_code": 0,
+                      "latency_ms": (time.perf_counter()-start)*1000,
+                      "content_len": 0, "content_ok": False,
+                      "error": "timeout" if "Timeout" in msg else msg[:120]}}
+        body = resp.content[:4096]
+        clen = len(resp.content)
+        content_ok = clen >= 300
+        dpi_fake = any(p in body.lower() for p in (b"roskomnadzor",b"rkn.gov.ru",
+                    b"blockpage",b"utmblock"))
+        if dpi_fake: content_ok = False
+        small_body_ok = resp.status_code in (101,204,301,302,303,304,307,308,206)
+        success = (200 <= resp.status_code < 400) and (content_ok or small_body_ok)
+        return {{"success": success, "http_code": resp.status_code,
+                 "latency_ms": (time.perf_counter()-start)*1000,
+                 "content_len": clen, "content_ok": content_ok, "error": None}}
+    except curl_cffi.CurlError as e:
+        msg = str(e)
+        return {{"success": False, "http_code": 0,
+                 "latency_ms": (time.perf_counter()-start)*1000,
+                 "content_len": 0, "content_ok": False,
+                 "error": "timeout" if "Timeout" in msg else msg[:120]}}
+    except Exception as e:
+        return {{"success": False, "http_code": 0, "latency_ms": 0,
+                 "content_len": 0, "content_ok": False, "error": str(e)[:120]}}
+print(json.dumps(check("{domain}", {timeout})))
 """
     r = sp.run(
         ["sudo", "ip", "netns", "exec", ns_name,

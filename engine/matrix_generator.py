@@ -124,9 +124,9 @@ class ConfigFileGenerator(StrategyGenerator):
 
 # Fooling options mapped from def.inc
 FOOLINGS_TCP = [
+    "tcp_ts=-1000",
     "",
     "tcp_md5",
-    "tcp_ts=-1000",
     "tcp_ack=-66000:tcp_ts_up",
 ]
 REPEATS_VALUES = [6, 3, 1, 10, 12]  # 6 first — known working on Fryazino
@@ -167,6 +167,7 @@ class FakeTcpGenerator(StrategyGenerator):
         if state_db and domain:
             known_working = await state_db.get_working_tcp(domain)
 
+        # In-run set: gets updated with PASS labels during the scan
         for blob in BLOBS_TCP:
             blob_part = f":blob={blob}" if blob else ""
             for repeats in REPEATS_VALUES:
@@ -179,9 +180,14 @@ class FakeTcpGenerator(StrategyGenerator):
                     if len(items) >= max_count:
                         return items[:max_count]
 
-                    # SCANLEVEL: if base works, skip TTL variations
-                    if scan_level == "fast" and label in known_working:
-                        continue
+                    # fast: skip TTL only if base already PASSES (in-run or DB)
+                    if scan_level == "fast":
+                        skip = label in known_working
+                        if not skip and state_db and domain:
+                            # Check DB as fallback
+                            skip = label in await state_db.get_working_tcp(domain)
+                        if skip:
+                            continue
                     if scan_level == "single":
                         continue
 
@@ -218,8 +224,13 @@ class HostfakeTcpGenerator(StrategyGenerator):
             label = f"hf_nofake2_{fool or 'nofool'}"
             items.append(StrategyItem(label=label, strategy=strat))
 
-            if scan_level == "fast" and label in known_working:
-                continue
+            # fast: skip expansions only if base PASSES
+            if scan_level == "fast":
+                skip = label in known_working
+                if not skip and state_db and domain:
+                    skip = label in await state_db.get_working_tcp(domain)
+                if skip:
+                    continue
             if scan_level == "single":
                 continue
 
