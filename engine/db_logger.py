@@ -168,11 +168,11 @@ class StateDB:
             )
             await db.commit()
 
-    async def latest_checkpoint(self) -> Optional[tuple[int, int, str]]:
-        """Return (tcp_idx, udp_idx, timestamp) or None."""
+    async def latest_checkpoint(self) -> Optional[tuple[int, int, str, str]]:
+        """Return (tcp_idx, udp_idx, timestamp, note) or None."""
         async with aiosqlite.connect(self.db_path) as db:
             row = await db.execute(
-                "SELECT tcp_idx,udp_idx,timestamp FROM checkpoints ORDER BY id DESC LIMIT 1"
+                "SELECT tcp_idx,udp_idx,timestamp,note FROM checkpoints ORDER BY id DESC LIMIT 1"
             )
             r = await row.fetchone()
             return r if r else None

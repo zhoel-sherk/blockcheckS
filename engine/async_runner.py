@@ -25,6 +25,13 @@ CYAN = Fore.CYAN
 GREY = Fore.LIGHTBLACK_EX
 RESET = Style.RESET_ALL
 
+GREEN = Fore.GREEN + Style.BRIGHT
+RED = Fore.RED + Style.BRIGHT
+YELLOW = Fore.YELLOW
+CYAN = Fore.CYAN
+GREY = Fore.LIGHTBLACK_EX
+RESET = Style.RESET_ALL
+
 NFQWS2_BIN = "/opt/zapret2/nfq2/nfqws2"
 
 
@@ -106,7 +113,7 @@ def _add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
     """Parse strategy string for blob:NAME references, add --blob=NAME:@/path."""
     import re
     BLOB_DIR = "/opt/zapret2/blobs"
-    known = [f for f in os.listdir(BLOB_DIR) if f.endswith(".bin")]
+    known = sorted(f for f in os.listdir(BLOB_DIR) if f.endswith(".bin"))
     for m in re.finditer(r"blob=(\w+)", strategy):
         name = m.group(1)
         if name == "0x00000000":

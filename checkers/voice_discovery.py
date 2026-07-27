@@ -8,31 +8,28 @@ Flow (with token):
 
 Flow (without token):
   Returns None → caller uses static IP fallback.
-
-Storage: non-sensitive state in /tmp/blockcheckS_discovery.json
 """
 
 import asyncio
-import json
 import os
 import subprocess
 import time
 from typing import Optional
 
-SING_BOX = "/usr/local/bin/sing-box"
-SING_BOX_CONFIG = os.path.expanduser("~/.config/sing-box/config.json")
-PROXY_URL = "socks5://127.0.0.1:11080"
+from engine.config import (
+    SING_BOX_BIN, SING_BOX_CONFIG, SOCKS5_PROXY,
+    DPI_TESTER_SETTINGS, PYTHON_BIN,
+)
 
 
 def _manage_singbox(start: bool) -> Optional[subprocess.Popen]:
-    """Start or stop sing-box proxy."""
     if start:
         subprocess.run(["pkill", "-f", "sing-box"], capture_output=True)
         time.sleep(0.5)
         if not os.path.exists(SING_BOX_CONFIG):
             return None
         proc = subprocess.Popen(
-            [SING_BOX, "run", "-c", SING_BOX_CONFIG],
+            [SING_BOX_BIN, "run", "-c", SING_BOX_CONFIG],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         time.sleep(2)
@@ -43,8 +40,7 @@ def _manage_singbox(start: bool) -> Optional[subprocess.Popen]:
 
 
 def load_token() -> Optional[str]:
-    """Load Discord token from dpi-tester settings.ini."""
-    settings = "/home/zhoel/workspace/dpi-tester/settings.ini"
+    settings = DPI_TESTER_SETTINGS
     if not os.path.exists(settings):
         return None
     import configparser as cp
@@ -77,7 +73,7 @@ async def discover_voice_endpoint() -> Optional[dict]:
         from aiohttp_socks import ProxyConnector
         import aiohttp
 
-        connector = ProxyConnector.from_url(PROXY_URL)
+        connector = ProxyConnector.from_url(SOCKS5_PROXY)
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         session = aiohttp.ClientSession(timeout=timeout, connector=connector)
 
@@ -96,8 +92,7 @@ async def discover_voice_endpoint() -> Optional[dict]:
                                    comment_prefixes=("#", ";"),
                                    inline_comment_prefixes=("#", ";"))
             cfg.optionxform = str
-            settings = "/home/zhoel/workspace/dpi-tester/settings.ini"
-            cfg.read(settings, encoding="utf-8")
+            cfg.read(DPI_TESTER_SETTINGS, encoding="utf-8")
             guild_id = cfg.get("discord", "guild_id", fallback="")
             channel_id = cfg.get("discord", "channel_id", fallback="")
 
@@ -114,7 +109,6 @@ async def discover_voice_endpoint() -> Optional[dict]:
                 "intents": 513
             }})
 
-            # Join voice channel
             if guild_id and channel_id:
                 await ws.send_json({"op": 4, "d": {
                     "guild_id": guild_id,
@@ -126,6 +120,8 @@ async def discover_voice_endpoint() -> Optional[dict]:
             voice_token_shard = ""
             user_id = ""
             session_id = ""
+            got_session = False
+            got_server = False
             t0 = asyncio.get_event_loop().time()
 
             while True:
@@ -142,10 +138,16 @@ async def discover_voice_endpoint() -> Optional[dict]:
 
                 if t == "VOICE_STATE_UPDATE":
                     session_id = d.get("session_id", "")
+                    if session_id:
+                        got_session = True
 
                 if t == "VOICE_SERVER_UPDATE":
                     voice_endpoint = d["endpoint"]
                     voice_token_shard = d["token"]
+                    got_server = True
+
+                # Wait for BOTH events before breaking
+                if got_session and got_server:
                     break
 
                 if asyncio.get_event_loop().time() - t0 > 25:
@@ -154,11 +156,11 @@ async def discover_voice_endpoint() -> Optional[dict]:
             hbt.cancel()
             await ws.close()
 
-            # ── Voice WS → OP2 Ready ──
             if not voice_endpoint or not voice_token_shard:
                 await session.close()
                 return None
 
+            # ── Voice WS → OP2 Ready ──
             parts = voice_endpoint.rsplit(":", 1)
             v_host = parts[0]
             v_port = int(parts[1]) if len(parts) > 1 else 443
@@ -177,6 +179,7 @@ async def discover_voice_endpoint() -> Optional[dict]:
             }})
 
             result = {}
+            op9_retries = 0
             v_t0 = asyncio.get_event_loop().time()
             while True:
                 vmsg = await asyncio.wait_for(vws.receive_json(), 10)
@@ -193,13 +196,17 @@ async def discover_voice_endpoint() -> Optional[dict]:
                         "voice_ws_endpoint": voice_endpoint,
                     }
                     break
-                if vop == 9:  # Invalid session — retry without session_id
+                if vop == 9 and op9_retries < 2:
+                    op9_retries += 1
                     await vws.send_json({"op": 0, "d": {
                         "server_id": guild_id,
                         "user_id": user_id,
-                        "session_id": "",
+                        "session_id": "" if op9_retries > 1 else session_id,
                         "token": voice_token_shard,
                     }})
+                    continue
+                if vop == 9:
+                    break
                 if asyncio.get_event_loop().time() - v_t0 > 15:
                     break
 

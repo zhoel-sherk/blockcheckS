@@ -87,6 +87,8 @@ class DualNfqws2Manager:
                 self._udp_proc.wait(timeout=3)
             except Exception:
                 self._udp_proc.kill()
+            try: self._udp_proc.wait(timeout=2)
+            except: pass
             self._udp_proc = None
 
         # Keep iptables rules (port range doesn't change)

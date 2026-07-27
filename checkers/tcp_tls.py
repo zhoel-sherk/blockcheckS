@@ -15,12 +15,17 @@ from typing import Optional
 
 import curl_cffi
 
-# Minimal response size for success (DPI fake pages are tiny)
-MIN_CONTENT_LENGTH = 2000
+# Minimal response size for a real web page.
+# Redirects (301/302), No Content (204), WebSocket upgrades (101), and
+# small API responses are excluded — they are valid but have tiny bodies.
+MIN_CONTENT_LENGTH = 300
 
-# Rate to verify we're actually receiving data (bytes/sec)
-# DPI window clamping results in <100 bytes/sec
-MIN_BYTES_PER_SEC = 500.0
+# Rate to verify we're actually receiving data (bytes/sec).
+# DPI window clamping results in <100 bytes/sec.
+MIN_BYTES_PER_SEC = 400.0
+
+# HTTP statuses that produce tiny bodies legitimately
+SMALL_BODY_STATUSES = frozenset({101, 204, 301, 302, 303, 307, 308, 304, 206})
 
 # Patterns that indicate DPI fake response
 DPI_FAKE_PATTERNS = [
@@ -43,13 +48,20 @@ class TlsResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def _validate_content(data: bytes, time_for_read: float) -> list[str]:
-    """Check response body for DPI manipulation."""
+def _validate_content(data: bytes, time_for_read: float,
+                      http_status: int = 200) -> list[str]:
+    """Check response body for DPI manipulation.
+
+    Small-body HTTP status codes (301, 302, 101, 204, etc.) are
+    excluded from the minimum-size check — they legitimately carry
+    tiny or empty bodies.
+    """
     warnings = []
     content_len = len(data)
 
-    if content_len < MIN_CONTENT_LENGTH:
-        warnings.append(f"body too small ({content_len}B < {MIN_CONTENT_LENGTH}B)")
+    if http_status not in SMALL_BODY_STATUSES:
+        if content_len < MIN_CONTENT_LENGTH:
+            warnings.append(f"body too small ({content_len}B < {MIN_CONTENT_LENGTH}B)")
 
     if time_for_read > 0:
         rate = content_len / time_for_read
@@ -110,7 +122,8 @@ def check_tls(domain: str, timeout: float = 5.0,
         result.protocol = str(getattr(resp, "http_version", "?")).replace("_", "/")
 
         if verify_content:
-            result.warnings = _validate_content(resp.content, read_elapsed)
+            result.warnings = _validate_content(resp.content, read_elapsed,
+                                                resp.status_code)
             result.success = (200 <= resp.status_code < 400) and not result.warnings
         else:
             result.success = 200 <= resp.status_code < 400

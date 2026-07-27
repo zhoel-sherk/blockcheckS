@@ -1,34 +1,32 @@
 """Network namespace pool for async parallel testing.
 
-Fixed-size pool of pre-created netns. Workers acquire/release ns instead of
+Fixed-size pool of pre-created netns. Workers acquire/release instead of
 create/destroy per test — avoids kernel race conditions on veth creation.
 
-Lifecycle:
-  1. create_all() — create N veth pairs + netns + MASQUERADE
-  2. acquire() / release() — get/return ns via asyncio.Queue
-  3. destroy_all() — clean shutdown; also registered as atexit + SIGINT handler
-
-Between tests: release() flushes iptables + kills stale nfqws2 inside the ns.
+Thread safety: create_all() and destroy_all() are synchronous (called once).
+acquire() and release() are async and run only from the event loop thread.
+The pool uses asyncio.Queue exclusively from the event loop.
 """
 
 import asyncio
 import os
 import subprocess
 import time
+import threading
 from typing import Optional
 
 BASE_CIDR = 20  # networks: 10.200.<n>.0/30 for pool member n
 
 
 class NetNsPool:
-    """Pre-created network namespace pool."""
-
     def __init__(self, size: int = 4, base: str = "bs-p"):
         self.size = size
         self.base = base
         self._queue: asyncio.Queue[str] = asyncio.Queue(size)
         self._created = False
         self._names: list[str] = []
+        self._iface: str = ""  # cached interface name
+        self._lock = threading.Lock()
 
     def _run(self, *args, check: bool = True) -> subprocess.CompletedProcess:
         """Run a command with sudo, optionally checking for errors."""
@@ -39,14 +37,18 @@ class NetNsPool:
         return r
 
     def _get_iface(self) -> str:
-        """Find a working non-loopback interface."""
+        """Find a working non-loopback interface (cached)."""
+        if self._iface:
+            return self._iface
         r = subprocess.run(["ip", "-br", "link", "show"], capture_output=True,
                           text=True)
         for line in r.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 2 and parts[1] == "UP" and parts[0] != "lo":
-                return parts[0]
-        return "eth0"
+                self._iface = parts[0]
+                return self._iface
+        self._iface = "eth0"
+        return self._iface
 
     def _create_one(self, idx: int) -> str:
         """Create one netns + veth pair. Returns ns name."""
@@ -87,6 +89,11 @@ class NetNsPool:
 
         # Enable forwarding
         self._run("sysctl", "-w", "net.ipv4.ip_forward=1", check=False)
+        # Allow forwarded traffic from veth pairs
+        self._run("iptables", "-A", "FORWARD", "-i", veth_h,
+                  "-j", "ACCEPT", check=False)
+        self._run("iptables", "-A", "FORWARD", "-o", veth_h,
+                  "-j", "ACCEPT", check=False)
         self._run("iptables", "-t", "nat", "-I", "POSTROUTING", "1",
                   "-s", f"{host_ip}/{cidr_mask}", "-o", out_iface,
                   "-j", "MASQUERADE")
@@ -115,6 +122,10 @@ class NetNsPool:
                   check=False)
         self._run("ip", "netns", "delete", name, check=False)
         self._run("ip", "link", "delete", veth_h, check=False)
+        self._run("iptables", "-D", "FORWARD", "-i", veth_h,
+                  "-j", "ACCEPT", check=False)
+        self._run("iptables", "-D", "FORWARD", "-o", veth_h,
+                  "-j", "ACCEPT", check=False)
         self._run("iptables", "-t", "nat", "-D", "POSTROUTING",
                   "-s", f"{host_ip}/{cidr_mask}", "-o", out_iface,
                   "-j", "MASQUERADE", check=False)
@@ -125,28 +136,30 @@ class NetNsPool:
 
     def create_all(self) -> None:
         """Synchronous — call once at startup via asyncio.to_thread()."""
-        if self._created:
-            return
-        for i in range(self.size):
-            name = self._create_one(i)
-            self._queue.put_nowait(name)
-        self._created = True
+        with self._lock:
+            if self._created:
+                return
+            for i in range(self.size):
+                name = self._create_one(i)
+                self._queue.put_nowait(name)
+            self._created = True
         print(f"[netns] Pool created: {self.size} namespaces")
 
     def destroy_all(self) -> None:
         """Synchronous — call at shutdown or SIGINT."""
-        if not self._created:
-            return
+        with self._lock:
+            if not self._created:
+                return
+            self._created = False
+        names_to_destroy = list(self._names)
         while not self._queue.empty():
             try:
-                name = self._queue.get_nowait()
-                self._destroy_one(name)
+                self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        for name in self._names:
+        for name in names_to_destroy:
             self._destroy_one(name)
         self._names.clear()
-        self._created = False
         print(f"[netns] Pool destroyed")
 
     async def acquire(self) -> str:

@@ -232,7 +232,8 @@ async def cmd_pair(args):
 
         elapsed = time.perf_counter() - t0
         print(f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
-        return 0
+        tcp_passed_local = sum(1 for r in tcp_results if r.success) if "tcp_results" in dir() else 0
+        return 0 if tcp_passed_local > 0 else 1
 
     finally:
         await runner.stop()
@@ -343,21 +344,16 @@ def main():
             pass
         return asyncio.run(cmd_pair(args))
     elif args.command == "pair":
+        # Forward custom --generate values to tcp_sources
         if args.generate and args.generate != "custom,configs":
-            pass  # use --generate value
-        args.generate = bool(args.generate) or bool(args.tcp_sources != "custom,configs" or args.udp_sources != "custom")
-        if args.config:
-            # Single config override
-            loader = StrategyLoader()
-            configs = loader.from_config(args.config)
-            tcp_items = [StrategyItem(label=os.path.basename(args.config).replace(".conf", ""),
-                                       strategy=args.config, is_config=True)]
-            args.tcp_sources = ""
-            args.generate = False
+            args.tcp_sources = args.generate
+        args.generate = bool(args.generate) or bool(getattr(args, 'tcp_sources', '') != "custom,configs"
+                                                     or getattr(args, 'udp_sources', '') != "custom")
         return asyncio.run(cmd_pair(args))
     else:
         parser.print_help()
-        return 0
+        tcp_passed_local = sum(1 for r in tcp_results if r.success) if "tcp_results" in dir() else 0
+        return 0 if tcp_passed_local > 0 else 1
 
 
 if __name__ == "__main__":

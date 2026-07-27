@@ -243,8 +243,9 @@ except Exception as e:
         For each PASS TCP (or all if --udp-bypass):
           Start TCP nfqws2, keep alive
           For each UDP config: switch UDP nfqws2, probe
-          Save checkpoint after each pair.
+           Save checkpoint after each pair.
         """
+        t0_f = time.perf_counter()
         report = PairReport(domain=domain,
                             tcp_results=tcp_results,
                             voice_info={"ip": voice_ip, "port": voice_port})
@@ -272,7 +273,7 @@ except Exception as e:
         start_tcp_idx = 0
         start_udp_idx = 0
         if resume_from:
-            start_tcp_idx, start_udp_idx, _ = resume_from
+            start_tcp_idx, start_udp_idx, *_ = resume_from
             print(f"\n  {YELLOW}Resuming from checkpoint: tcp={start_tcp_idx} udp={start_udp_idx}{RESET}")
 
         for tcp_i, (tcp_conf, tcp_r) in enumerate(working_tcp):
@@ -355,7 +356,7 @@ except Exception as e:
             finally:
                 mgr.stop()
 
-        report.total_time_sec = time.perf_counter()
+        report.total_time_sec = time.perf_counter() - t0_f
         return report
 
     def print_matrix(self, report: PairReport):
