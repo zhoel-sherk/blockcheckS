@@ -351,6 +351,7 @@ except Exception as e:
                     await self.db.save_checkpoint(
                         tcp_i, udp_i,
                         f"{tcp_name}+{udp_name}",
+                        tcp_label=tcp_name, udp_label=udp_name,
                         tcp_label=tcp_name, udp_label=udp_name
                     )
 

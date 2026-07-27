@@ -31,11 +31,10 @@ class StateDB:
             await db.executescript("""
                 CREATE TABLE IF NOT EXISTS strategies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
+                    name TEXT NOT NULL UNIQUE,
                     proto TEXT NOT NULL DEFAULT 'tcp',  -- 'tcp' or 'udp'
                     config_path TEXT NOT NULL,
-                    first_seen TEXT NOT NULL DEFAULT '',
-                    UNIQUE(name, proto)
+                    first_seen TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS tcp_results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,33 +84,7 @@ class StateDB:
                 CREATE INDEX IF NOT EXISTS idx_tcp_status ON tcp_results(status);
                 CREATE INDEX IF NOT EXISTS idx_udp_status ON udp_results(status);
                 CREATE INDEX IF NOT EXISTS idx_pair_overall ON pair_results(overall);
-            """
-                CREATE VIEW IF NOT EXISTS v_working_tcp AS
-                SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
-                       t.content_valid, t.timestamp
-                FROM tcp_results t
-                JOIN strategies s ON t.strategy_id = s.id
-                WHERE t.status = 'PASS'
-                ORDER BY t.domain, t.latency_ms;
-
-                CREATE VIEW IF NOT EXISTS v_coverage AS
-                SELECT s.name AS strategy, s.proto,
-                       COUNT(DISTINCT t.domain) AS domains_passed,
-                       ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
-                FROM tcp_results t
-                JOIN strategies s ON t.strategy_id = s.id
-                WHERE t.status = 'PASS'
-                GROUP BY s.name, s.proto
-                HAVING domains_passed > 0
-                ORDER BY domains_passed DESC;
-
-                CREATE VIEW IF NOT EXISTS v_latest_run AS
-                SELECT domain, COUNT(*) AS total,
-                       SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) AS passed,
-                       MAX(timestamp) AS last_test
-                FROM tcp_results
-                GROUP BY domain
-                ORDER BY last_test DESC;)
+            """)
             await db.commit()
             await db.execute("PRAGMA journal_mode=WAL")
             await db.execute("PRAGMA busy_timeout=5000")
@@ -134,8 +107,6 @@ class StateDB:
                 (name, proto, config_path, ts)
             )
             await db.commit()
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA busy_timeout=5000")
             return cur.lastrowid
 
     # ── Results logging ────────────────────────────
@@ -157,8 +128,6 @@ class StateDB:
                  gateway_ms, int(content_valid), error, ts)
             )
             await db.commit()
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA busy_timeout=5000")
 
     async def log_udp(self, strategy: str, target: str,
                        status: str, latency_ms: float = 0,
@@ -173,8 +142,6 @@ class StateDB:
                 (sid, target, status, latency_ms, error, ts)
             )
             await db.commit()
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA busy_timeout=5000")
 
     async def log_pair(self, tcp: str, udp: str, domain: str,
                         tcp_ok: bool, gateway_ok: bool, udp_ok: bool,
@@ -193,8 +160,6 @@ class StateDB:
                  tcp_ms, gateway_ms, udp_ms, overall, ts)
             )
             await db.commit()
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA busy_timeout=5000")
 
     # ── Checkpoints ────────────────────────────────
 
@@ -208,8 +173,6 @@ class StateDB:
                 (tcp_idx, udp_idx, fingerprint, tcp_label, udp_label, ts, note)
             )
             await db.commit()
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA busy_timeout=5000")
 
     async def latest_checkpoint(self) -> Optional[tuple[int, int, str, str, str, str]]:
         """Return (tcp_idx, udp_idx, timestamp, note) or None."""
