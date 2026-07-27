@@ -117,29 +117,44 @@ async def cmd_pair(args):
         # Voice target
         voice_ip = getattr(args, 'ip', None) or "35.217.5.42"
         voice_port = getattr(args, 'port', None) or 50006
+        gateway_result = None  # for --full-voice
 
-        # Auto-discovery
-        if args.auto_discover:
-            print(f"\n  {CYAN}Auto-discovering voice endpoint via sing-box...{RESET}")
-            try:
-                from checkers.voice_discovery import discover_voice_endpoint
-                voice_info = await discover_voice_endpoint()
-                if voice_info:
-                    voice_ip = voice_info["ip"]
-                    voice_port = voice_info["port"]
-                    print(f"  {GREEN}Discovered: {voice_ip}:{voice_port}{RESET}")
-                else:
-                    print(f"  {YELLOW}Auto-discovery failed. Using: {voice_ip}:{voice_port}{RESET}")
-            except Exception as e:
-                print(f"  {YELLOW}Discovery error: {e} — using static IP{RESET}")
-
-        # Token check for --full-voice
+        # Token check
         from checkers.voice_discovery import load_token
         token = load_token()
         has_token = bool(token)
         full_voice = args.full_voice and has_token
+
+        # Auto-discovery / --full-voice
+        if args.auto_discover or (full_voice and has_token):
+            if not has_token and args.auto_discover:
+                print(f"\n  {YELLOW}No token — auto-discover needs token, using static IP{RESET}")
+            else:
+                print(f"\n  {CYAN}Auto-discovering voice endpoint via sing-box...{RESET}")
+                try:
+                    from checkers.voice_discovery import discover_voice_endpoint
+                    voice_info = await discover_voice_endpoint()
+                    if voice_info:
+                        voice_ip = voice_info["ip"]
+                        voice_port = voice_info["port"]
+                        gateway_result = {"endpoint": voice_info.get("voice_ws_endpoint", ""),
+                                          "ssrc": voice_info.get("ssrc", 0),
+                                          "ip": voice_ip, "port": voice_port}
+                        print(f"  {GREEN}Discovered: {voice_ip}:{voice_port} "
+                              f"(SSRC={gateway_result['ssrc']}){RESET}")
+                        print(f"  {GREEN}Gateway: {gateway_result['endpoint']}{RESET}")
+                    else:
+                        print(f"  {YELLOW}Auto-discovery failed. Using: {voice_ip}:{voice_port}{RESET}")
+                        if full_voice:
+                            full_voice = False
+                except Exception as e:
+                    print(f"  {YELLOW}Discovery error: {e} — using static IP{RESET}")
+                    if full_voice:
+                        full_voice = False
+
         if args.full_voice and not has_token:
             print(f"  {YELLOW}No Discord token. --full-voice → SKIP (STUN probe only){RESET}")
+            print(f"  Add token to ~/workspace/dpi-tester/settings.ini for full voice testing.")
 
         # Generate or load strategies
         do_generate = getattr(args, 'generate', False)
