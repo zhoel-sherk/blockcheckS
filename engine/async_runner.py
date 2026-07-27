@@ -117,13 +117,17 @@ def _add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
     for m in re.finditer(r"blob=(\w+)", strategy):
         name = m.group(1)
         if name == "0x00000000":
-            continue  # null blob, no file needed
-        for fname in known:
-            if fname.startswith(name) or name in fname:
-                if any(l.startswith(f"--blob={name}:@") for l in lines):
-                    break  # already added
-                lines.append(f"--blob={name}:@{BLOB_DIR}/{fname}")
+            continue
+        # Prefer TLS/Stun blobs over QUIC for TCP strategies
+        candidates = [f for f in known if name in f and "quic_initial" not in f]
+        if not candidates:
+            candidates = [f for f in known if name in f]
+        if candidates:
+            fname = candidates[0]
+            if any(l.startswith(f"--blob={name}:@") for l in lines):
                 break
+            lines.append(f"--blob={name}:@{BLOB_DIR}/{fname}")
+            break
 
 
 # ── In-namespace test workers (sync, called via asyncio.to_thread) ──
@@ -410,14 +414,16 @@ class AsyncTestRunner:
                                 udp_timeout: float = 3.0,
                                 udp_bypass: bool = False,
                                 ) -> list[PairResult]:
-        """Run UDP probes for each PASS TCP × each UDP strategy.
+        """Parallel UDP probes for each PASS TCP × each UDP strategy.
 
-        TCP nfqws2 stays alive inside each ns during UDP scan.
-        Each pair tested in its own netns.
+        Each pair runs in its own netns via asyncio.create_task + Semaphore.
+        TCP nfqws2 started once per pair, UDP nfqws2 per strategy.
+        DB writes serialized via asyncio.Lock.
         """
         pairs: list[PairResult] = []
+        db_lock = asyncio.Lock()
+        pair_sem = asyncio.Semaphore(self.pool.size)
 
-        # Filter working TCP
         if udp_bypass:
             working = list(enumerate(tcp_results))
         else:
@@ -428,63 +434,79 @@ class AsyncTestRunner:
             return pairs
 
         total = len(working) * len(udp_strategies)
-        pair_count = 0
+        print(f"  {CYAN}Pair matrix: {len(working)} TCP × {len(udp_strategies)} UDP "
+              f"= {total} pairs, {self.pool.size} parallel{RESET}")
 
-        for tcp_i, tcp_r in working:
-            for udp_s in udp_strategies:
-                pair_count += 1
-                async with self.semaphore:
-                    ns_name = await self.pool.acquire()
-                    try:
-                        # Start TCP nfqws2
-                        await asyncio.to_thread(
-                            _run_tcp_check, ns_name,
-                            tcp_r.item.strategy, domain, 0.1,
-                            tcp_r.item.is_config
-                        )
-                        # Start UDP nfqws2 on same ns
-                        data = await asyncio.to_thread(
-                            _run_udp_check, ns_name,
-                            udp_s.strategy, voice_ip, voice_port,
-                            udp_timeout, udp_s.is_config
-                        )
-                        udp_ok = data.get("success", False)
-                        udp_ms = data.get("latency_ms", 0)
+        async def run_pair(tcp_i: int, tcp_r: TcpTestResult,
+                            udp_s: StrategyItem, pair_idx: int):
+            async with pair_sem:
+                ns_name = await self.pool.acquire()
+                try:
+                    # Start TCP nfqws2 — uses cached result (already known PASS)
+                    await asyncio.to_thread(
+                        _run_tcp_check, ns_name,
+                        tcp_r.item.strategy, domain, 0.1,
+                        tcp_r.item.is_config
+                    )
+                    # Start UDP nfqws2 on same ns
+                    data = await asyncio.to_thread(
+                        _run_udp_check, ns_name,
+                        udp_s.strategy, voice_ip, voice_port,
+                        udp_timeout, udp_s.is_config
+                    )
+                    udp_ok = data.get("success", False)
+                    udp_ms = data.get("latency_ms", 0)
 
-                        pair = PairResult(
-                            tcp_item=tcp_r.item, udp_item=udp_s,
-                            tcp_ok=tcp_r.success, udp_ok=udp_ok,
-                            tcp_ms=tcp_r.latency_ms, udp_ms=udp_ms,
-                        )
-                        if tcp_r.success and udp_ok:
-                            pair.overall = "PASS"
-                        elif tcp_r.success and not udp_ok:
-                            pair.overall = "PARTIAL"
-                        else:
-                            pair.overall = "FAIL"
+                    pair = PairResult(
+                        tcp_item=tcp_r.item, udp_item=udp_s,
+                        tcp_ok=tcp_r.success, udp_ok=udp_ok,
+                        tcp_ms=tcp_r.latency_ms, udp_ms=udp_ms,
+                    )
+                    if tcp_r.success and udp_ok:
+                        pair.overall = "PASS"
+                    elif tcp_r.success and not udp_ok:
+                        pair.overall = "PARTIAL"
+                    else:
+                        pair.overall = "FAIL"
 
-                        pairs.append(pair)
+                    pairs.append(pair)
 
-                        pair_tag = {"PASS": f"{GREEN}PASS{RESET}",
-                                     "PARTIAL": f"{YELLOW}PARTIAL{RESET}",
-                                     "FAIL": f"{RED}FAIL{RESET}"}[pair.overall]
-                        udp_tag = f"{GREEN}{udp_ms:.0f}ms{RESET}" if udp_ok else f"{RED}timeout{RESET}"
-                        print(f"  [{pair_tag}] {tcp_r.item.label[:22]:22s} "
-                              f"+ {udp_s.label[:22]:22s}  udp={udp_tag}")
+                    pair_tag = {"PASS": f"{GREEN}PASS{RESET}",
+                                 "PARTIAL": f"{YELLOW}PARTIAL{RESET}",
+                                 "FAIL": f"{RED}FAIL{RESET}"}[pair.overall]
+                    udp_tag = f"{GREEN}{udp_ms:.0f}ms{RESET}" if udp_ok else f"{RED}timeout{RESET}"
+                    print(f"  [{pair_tag}] {tcp_r.item.label[:22]:22s} "
+                          f"+ {udp_s.label[:22]:22s}  udp={udp_tag}")
 
-                        if self.db:
+                    # DB writes serialized via lock
+                    if self.db:
+                        async with db_lock:
                             await self.db.log_pair(
                                 tcp_r.item.label, udp_s.label, domain,
                                 tcp_r.success, False, udp_ok,
                                 tcp_r.latency_ms, 0, udp_ms, pair.overall,
                             )
                             await self.db.save_checkpoint(
-                                tcp_i, pair_count - 1,
-                                f"{tcp_r.item.label}+{udp_s.label}"
+                                tcp_i, pair_idx,
+                                f"{tcp_r.item.label}+{udp_s.label}",
+                                tcp_label=tcp_r.item.label,
+                                udp_label=udp_s.label,
                             )
-                    finally:
-                        await self.pool.release(ns_name)
+                finally:
+                    await self.pool.release(ns_name)
 
+        tasks = []
+        pair_idx = 0
+        for tcp_i, tcp_r in working:
+            for udp_s in udp_strategies:
+                pair_idx += 1
+                tasks.append(
+                    asyncio.create_task(
+                        run_pair(tcp_i, tcp_r, udp_s, pair_idx - 1)
+                    )
+                )
+
+        await asyncio.gather(*tasks)
         return pairs
 
     # ── Matrix display ──
