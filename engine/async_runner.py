@@ -151,15 +151,23 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
         _add_blobs_from_strategy(config_lines, strategy)
         # Strategy may already contain nfqws2 CLI args (from custom lists)
         # or just the lua-desync value (from generators)
-        # Multi-strategy separated by \n
-        for line in strategy.split("\n"):
-            line = line.strip()
-            if not line:
+        # Multi-strategy separated by \n. Full CLI args split on ' --' boundaries.
+        for raw_line in strategy.split("\n"):
+            raw_line = raw_line.strip()
+            if not raw_line:
                 continue
-            if line.startswith("--"):
-                config_lines.append(line)
+            if raw_line.startswith("--"):
+                # Full CLI args — split into individual args
+                # e.g., "--payload tls_client_hello --lua-desync=syndata --lua-desync=hostfakesplit:..."
+                for arg in raw_line.split(" --"):
+                    arg = arg.strip()
+                    if not arg:
+                        continue
+                    if not arg.startswith("--"):
+                        arg = "--" + arg
+                    config_lines.append(arg)
             else:
-                config_lines.append(f"--lua-desync={line}")
+                config_lines.append(f"--lua-desync={raw_line}")
         tmp_conf = f"/tmp/bs_async_{os.getpid()}_{int(time.time())}.conf"
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
@@ -183,11 +191,13 @@ try:
     )
     body = resp.content[:4096]
     clen = len(resp.content)
-    content_ok = clen >= 2000
+    content_ok = clen >= 300
     dpi_fake = any(p in body.lower() for p in (b"blocked",b"rkn",b"forbidden",
-                b"access denied",b"reject",b"filtered"))
+                b"access denied",b"reject",b"filtered",b"blockpage",b"utmblock"))
     if dpi_fake: content_ok = False
-    result = {{"success": 200<=resp.status_code<400 and content_ok,
+    small_body_ok = resp.status_code in (101,204,301,302,303,304,307,308,206)
+    success = (200 <= resp.status_code < 400) and (content_ok or small_body_ok)
+    result = {{"success": success,
                "http_code": resp.status_code,
                "latency_ms": (time.perf_counter()-start)*1000,
                "content_len": clen, "content_ok": content_ok, "error": None}}

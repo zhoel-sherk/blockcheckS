@@ -331,6 +331,13 @@ class UserMatrixGenerator(StrategyGenerator):
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
+                # Filter by protocol: skip UDP-only strategies for TCP generation
+                if protocol != "udp_voice" and not any(kw in line.lower() for kw in ("--filter-udp", "--qnum=201")):
+                    is_udp_only = any(kw in line for kw in ("filter-udp", "blob=discord_udp", "discord_ip_discovery"))
+                    if is_udp_only:
+                        continue
+                if protocol == "udp_voice" and "tcp" in line.lower() and "udp" not in line.lower():
+                    continue
                 label = line[:50].replace(" ", "_").replace(":", "_")
                 items.append(StrategyItem(label=label, strategy=line))
         return items[:max_count]
