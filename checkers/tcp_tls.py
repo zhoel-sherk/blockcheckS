@@ -96,9 +96,9 @@ def check_tls(domain: str, timeout: float = 5.0,
     start = time.perf_counter()
 
     target = domain
+    # Omit User-Agent so curl_cffi impersonation supplies a real browser UA
     headers = {"Accept": "text/html,application/xhtml+xml",
-               "Accept-Language": "en-US,en;q=0.9",
-               "User-Agent": ""}  # curl_cffi fills this
+               "Accept-Language": "en-US,en;q=0.9"}
 
     if pre_resolved_ip:
         target = pre_resolved_ip

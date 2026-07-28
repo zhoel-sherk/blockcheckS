@@ -34,9 +34,10 @@ colorama_init(autoreset=True)
 
 from engine.strategy_loader import StrategyLoader
 from engine.test_runner import TestRunner
-from engine.db_logger import StateDB
+from engine.db_logger import StateDB, matrix_fingerprint
 from engine.matrix_generator import MatrixGenerator, StrategyItem
 from engine.async_runner import AsyncTestRunner
+from engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -101,31 +102,35 @@ async def cmd_pair(args):
     db = StateDB(args.db)
     await db.init()
 
-    # Prepare runner + pool
     pool_size = args.parallel or 4
     runner = AsyncTestRunner(pool_size=pool_size, db=db)
-    await runner.start()
+    stop_event = asyncio.Event()
 
-    # Register signal handlers for clean shutdown
-    def cleanup():
-        try: asyncio.get_event_loop().create_task(runner.stop())
-        except: pass
-    signal.signal(signal.SIGINT, lambda *a: (cleanup(), sys.exit(0)))
-    signal.signal(signal.SIGTERM, lambda *a: (cleanup(), sys.exit(0)))
+    loop = asyncio.get_running_loop()
+
+    def _request_stop():
+        stop_event.set()
 
     try:
-        # Voice target
-        voice_ip = getattr(args, 'ip', None) or "35.217.5.42"
-        voice_port = getattr(args, 'port', None) or 50006
-        gateway_result = None  # for --full-voice
+        loop.add_signal_handler(signal.SIGINT, _request_stop)
+        loop.add_signal_handler(signal.SIGTERM, _request_stop)
+    except (NotImplementedError, RuntimeError):
+        # Windows: fallback
+        signal.signal(signal.SIGINT, lambda *a: _request_stop())
+        signal.signal(signal.SIGTERM, lambda *a: _request_stop())
 
-        # Token check
+    try:
+        await runner.start()
+
+        voice_ip = getattr(args, 'ip', None) or DEFAULT_VOICE_IP
+        voice_port = getattr(args, 'port', None) or DEFAULT_VOICE_PORT
+        gateway_result = None
+
         from checkers.voice_discovery import load_token
         token = load_token()
         has_token = bool(token)
         full_voice = args.full_voice and has_token
 
-        # Auto-discovery / --full-voice
         if args.auto_discover or (full_voice and has_token):
             if not has_token and args.auto_discover:
                 print(f"\n  {YELLOW}No token — auto-discover needs token, using static IP{RESET}")
@@ -153,47 +158,68 @@ async def cmd_pair(args):
                         full_voice = False
 
         if args.full_voice and not has_token:
-            print(f"  {YELLOW}No Discord token. --full-voice → SKIP (STUN probe only){RESET}")
-            print(f"  Add token to ~/workspace/dpi-tester/settings.ini for full voice testing.")
+            print(f"  {YELLOW}No Discord token. --full-voice → STUN only{RESET}")
+            print(f"  Add token to {DPI_TESTER_SETTINGS}")
 
-        # Generate or load strategies
+        if full_voice:
+            print(f"  {CYAN}Full-voice mode: discovery+STUN "
+                  f"(gateway WS probe not implemented){RESET}")
+
         do_generate = getattr(args, 'generate', False)
         user_matrix = getattr(args, 'user_matrix', '') or ""
-        run_set: set = set()  # in-run PASS tracking
+        run_set: set = set()
+        tcp_items = []
+        udp_items = []
+
+        # -c / -u single configs
+        if getattr(args, 'config', None):
+            tcp_items = [StrategyItem(
+                label=os.path.basename(args.config).replace(".conf", ""),
+                strategy=args.config, is_config=True)]
+            do_generate = False
+        if getattr(args, 'udp_config', None):
+            udp_items = [StrategyItem(
+                label=os.path.basename(args.udp_config).replace(".conf", ""),
+                strategy=args.udp_config, is_config=True)]
+
         if do_generate or user_matrix:
             scanner = MatrixGenerator()
             tcp_src = getattr(args, 'tcp_sources', '') or "custom,configs"
             udp_src = getattr(args, 'udp_sources', '') or "custom"
-            tcp_sources = tcp_src.split(",")
-            udp_sources = udp_src.split(",")
+            # scan tcp_only: don't generate unused UDP
+            if getattr(args, 'tcp_only', False):
+                udp_src = ""
+            tcp_sources = [s for s in tcp_src.split(",") if s]
+            udp_sources = [s for s in udp_src.split(",") if s]
 
             print(f"\n  {CYAN}Generating strategies...{RESET}")
-            tcp_items = await scanner.generate_tcp(
-                sources=tcp_sources, domain=args.domain,
-                scan_level=getattr(args, 'scan_level', 'fast'),
-                max_count=getattr(args, 'max', 100),
-                state_db=db, user_matrix=user_matrix,
-                run_set=run_set,
-            )
-            udp_items = await scanner.generate_udp(
-                sources=udp_sources, domain=args.domain,
-                scan_level=args.scan_level, max_count=args.max // 2 or 50,
-                state_db=db, user_matrix=user_matrix,
-            )
+            if not tcp_items:
+                tcp_items = await scanner.generate_tcp(
+                    sources=tcp_sources or ["custom", "configs"],
+                    domain=args.domain,
+                    scan_level=getattr(args, 'scan_level', 'fast'),
+                    max_count=getattr(args, 'max', 100),
+                    state_db=db, user_matrix=user_matrix,
+                    run_set=run_set,
+                )
+            if not udp_items and udp_sources and not args.tcp_only:
+                udp_items = await scanner.generate_udp(
+                    sources=udp_sources, domain=args.domain,
+                    scan_level=args.scan_level,
+                    max_count=max(1, args.max // 2) if args.max >= 2 else 50,
+                    state_db=db, user_matrix=user_matrix,
+                )
             print(f"  Generated: {len(tcp_items)} TCP + {len(udp_items)} UDP strategies")
-        else:
-            # Legacy: load from configs
+        elif not tcp_items:
             loader = StrategyLoader()
             tcp_configs = loader.from_config_dir(args.configs_dir or "configs")
             tcp_items = [StrategyItem(label=os.path.basename(c).replace(".conf", ""),
                                        strategy=c, is_config=True)
                           for c in tcp_configs if "udp_voice" not in c.lower()]
-            udp_configs = [c for c in tcp_configs if "udp_voice" in c.lower()]
-            if not udp_configs:
-                udp_configs = loader.from_config_dir(args.configs_dir or "configs")
-            udp_items = [StrategyItem(label=os.path.basename(c).replace(".conf", ""),
-                                       strategy=c, is_config=True)
-                          for c in udp_configs if "udp_voice" in c.lower()]
+            if not udp_items:
+                udp_items = [StrategyItem(label=os.path.basename(c).replace(".conf", ""),
+                                           strategy=c, is_config=True)
+                              for c in tcp_configs if "udp_voice" in c.lower()]
 
         print(f"\n  {CYAN}blockcheckS — {'Pair Matrix' if not args.tcp_only else 'TCP Scan'}{RESET}")
         print(f"  Domain:     {args.domain}")
@@ -203,31 +229,51 @@ async def cmd_pair(args):
         if not tcp_items:
             print(f"  ERROR: no strategies loaded")
             return 1
-        print(f"  Full Voice: {'yes' if full_voice else 'STUN only'}")
+        print(f"  Full Voice: {'discovery+STUN' if full_voice else 'STUN only'}")
         print(f"  UDP Bypass: {'yes' if args.udp_bypass else 'no'}")
         print(f"  Workers:    {pool_size}")
         print(f"  DB:         {args.db}")
 
-        # Resume
+        fp = matrix_fingerprint(
+            [i.strategy for i in tcp_items],
+            [i.strategy for i in udp_items],
+            getattr(args, 'scan_level', 'fast'),
+            getattr(args, 'max', 100),
+        )
+        runner.matrix_fingerprint = fp
+
         resume_from = None
         if args.resume:
             resume_from = await db.latest_checkpoint()
             if resume_from:
-                print(f"  {YELLOW}Resuming: tcp={resume_from[0]} udp={resume_from[1]}{RESET}")
+                if resume_from.fingerprint and resume_from.fingerprint != fp:
+                    print(f"  {RED}ERROR: matrix changed, refuse --resume; start fresh{RESET}")
+                    print(f"  checkpoint fp={resume_from.fingerprint} current fp={fp}")
+                    return 1
+                print(f"  {YELLOW}Resuming after "
+                      f"{resume_from.tcp_label}+{resume_from.udp_label}{RESET}")
             else:
                 print(f"  {YELLOW}No checkpoint found — starting fresh{RESET}")
 
+        if stop_event.is_set():
+            return 130
+
         t0 = time.perf_counter()
 
-        # ── TCP phase ──
         print(f"\n  {CYAN}[TCP Phase]{RESET} {len(tcp_items)} strategies...")
         tcp_results = await runner.test_batch_tcp(tcp_items, args.domain, args.timeout)
 
         tcp_passed = sum(1 for r in tcp_results if r.success)
         print(f"\n  TCP: {GREEN}{tcp_passed}{RESET}/{len(tcp_results)} passed")
 
-        # ── UDP pairs (skip if tcp-only) ──
+        for r in tcp_results:
+            if r.success:
+                run_set.add(r.item.label)
+
+        pairs = []
         if not args.tcp_only and udp_items:
+            if stop_event.is_set():
+                return 130
             print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
             pairs = await runner.test_pair_matrix(
                 tcp_results, udp_items, args.domain,
@@ -236,13 +282,17 @@ async def cmd_pair(args):
                 udp_bypass=args.udp_bypass,
                 resume_from=resume_from,
                 full_voice=full_voice,
+                fingerprint=fp,
             )
             AsyncTestRunner.print_matrix(pairs)
 
         elapsed = time.perf_counter() - t0
         print(f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
-        tcp_passed_local = sum(1 for r in tcp_results if r.success) if "tcp_results" in dir() else 0
-        return 0 if tcp_passed > 0 else 1 if tcp_passed_local > 0 else 1
+        if tcp_passed <= 0:
+            return 1
+        if pairs and not any(p.overall == "PASS" for p in pairs) and not args.tcp_only:
+            return 1
+        return 0
 
     finally:
         await runner.stop()
@@ -274,8 +324,8 @@ def main():
     udp = sub.add_parser("udp", help="Single UDP strategy test (sync)")
     udp.add_argument("-c", "--config")
     udp.add_argument("-C", "--configs-dir")
-    udp.add_argument("--ip", default="35.217.31.203")
-    udp.add_argument("--port", type=int, default=50004)
+    udp.add_argument("--ip", default=DEFAULT_VOICE_IP)
+    udp.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
     udp.add_argument("--timeout", type=float, default=3.0)
     udp.add_argument("--qnum", type=int, default=201)
     udp.add_argument("--ns")
@@ -328,8 +378,8 @@ def main():
     pair.add_argument("-c", "--config", help="Single TCP .conf file")
     pair.add_argument("-u", "--udp-config", help="Single UDP .conf file")
     pair.add_argument("-C", "--configs-dir", default="configs")
-    pair.add_argument("--ip", default="35.217.5.42")
-    pair.add_argument("--port", type=int, default=50006)
+    pair.add_argument("--ip", default=DEFAULT_VOICE_IP)
+    pair.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
     pair.add_argument("--auto-discover", action="store_true")
     pair.add_argument("--full-voice", action="store_true")
     pair.add_argument("--udp-bypass", action="store_true")
@@ -378,8 +428,7 @@ def main():
         ))
     else:
         parser.print_help()
-        tcp_passed_local = sum(1 for r in tcp_results if r.success) if "tcp_results" in dir() else 0
-        return 0 if tcp_passed_local > 0 else 1
+        return 1
 
 
 if __name__ == "__main__":

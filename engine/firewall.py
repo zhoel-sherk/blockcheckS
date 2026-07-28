@@ -23,7 +23,7 @@ class Firewall:
     def _ns_prefix(self) -> list[str]:
         if self.ns_name:
             return ["sudo", "ip", "netns", "exec", self.ns_name]
-        return []
+        return ["sudo"]
 
     def _run(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
         """Run single iptables command."""
@@ -51,8 +51,14 @@ class Firewall:
                            "-j", "NFQUEUE", "--queue-num", str(qnum),
                            "--queue-bypass")
 
-    def prepare_udp(self, ports: str = "50000:50100", qnum: int = 200) -> None:
-        """Add OUTPUT NFQUEUE rule for UDP with queue-bypass."""
+    def prepare_udp(self, ports: str = "50000:50100", qnum: int = 200,
+                    voice_port: int = None) -> None:
+        """Add OUTPUT NFQUEUE rule for UDP with queue-bypass.
+
+        If voice_port is set, queue that single port (Discord voice).
+        """
+        if voice_port is not None:
+            ports = str(voice_port)
         if ":" in ports:
             self._add_rule("OUTPUT", "-p", "udp", "--dport", ports,
                            "-j", "NFQUEUE", "--queue-num", str(qnum),
@@ -63,9 +69,12 @@ class Firewall:
                            "--queue-bypass")
 
     def cleanup(self) -> None:
-        """Remove only the rules we added via iptables -D."""
+        """Remove only the rules we added via iptables -D (exception-safe)."""
         for rule_args in self._rules:
-            self._run(*rule_args, check=False)
+            try:
+                self._run(*rule_args, check=False)
+            except Exception:
+                pass
         self._rules.clear()
 
     def __enter__(self):

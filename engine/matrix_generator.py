@@ -44,7 +44,8 @@ class StrategyGenerator(ABC):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         ...
 
 
@@ -68,7 +69,8 @@ class CustomListGenerator(StrategyGenerator):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         filename = self.FILE_MAP.get(protocol)
         if not filename:
             return []
@@ -85,6 +87,8 @@ class CustomListGenerator(StrategyGenerator):
                     continue
                 label = line[:60].replace(" ", "_").replace(":", "_")
                 items.append(StrategyItem(label=label, strategy=line))
+                if scan_level == "single" and items:
+                    break
         return items[:max_count]
 
 
@@ -100,7 +104,8 @@ class ConfigFileGenerator(StrategyGenerator):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         if not os.path.isdir(self.config_dir):
             return []
 
@@ -117,6 +122,8 @@ class ConfigFileGenerator(StrategyGenerator):
             label = fname.replace(".conf", "")
             items.append(StrategyItem(label=label, strategy=path,
                                       is_config=True))
+            if scan_level == "single" and items:
+                break
         return items[:max_count]
 
 
@@ -214,9 +221,10 @@ class HostfakeTcpGenerator(StrategyGenerator):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         items = []
-        known_working = []
+        known_working = list(run_set or [])
         if state_db and domain:
             known_working = await state_db.get_working_tcp(domain)
 
@@ -264,7 +272,8 @@ class FakedTcpGenerator(StrategyGenerator):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         items = []
         for pos in [1, "midsld", "sniext+1"]:
             for fool in ["", "tcp_md5", "tcp_ts=-1000"]:
@@ -272,6 +281,8 @@ class FakedTcpGenerator(StrategyGenerator):
                 strat = f"multisplit:pos={pos}:seqovl=1{fool_part}"
                 label = f"faked_p{pos}_{fool or 'nofool'}"
                 items.append(StrategyItem(label=label, strategy=strat))
+                if scan_level == "single":
+                    return items[:max_count]
                 if len(items) >= max_count:
                     return items[:max_count]
         return items[:max_count]
@@ -284,7 +295,8 @@ class FakeMultiGenerator(StrategyGenerator):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         items = []
         blob_pairs = [("stun", "max_ru"), ("stun", "google"),
                        ("max_ru", "google")]
@@ -296,6 +308,8 @@ class FakeMultiGenerator(StrategyGenerator):
                              f"fake:blob={b2}:repeats={r}{fool_part}")
                     label = f"fake_multi_{b1}+{b2}_r{r}_{fool or 'nofool'}"
                     items.append(StrategyItem(label=label, strategy=strat))
+                    if scan_level == "single":
+                        return items[:max_count]
                     if len(items) >= max_count:
                         return items[:max_count]
         return items[:max_count]
@@ -337,7 +351,8 @@ class UserMatrixGenerator(StrategyGenerator):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         if not os.path.exists(self.filepath):
             print(f"[matrix] User matrix file not found: {self.filepath}")
             return []
@@ -357,6 +372,8 @@ class UserMatrixGenerator(StrategyGenerator):
                     continue
                 label = line[:50].replace(" ", "_").replace(":", "_")
                 items.append(StrategyItem(label=label, strategy=line))
+                if scan_level == "single" and items:
+                    break
         return items[:max_count]
 
 
@@ -417,7 +434,15 @@ class MatrixGenerator:
             )
             all_items.extend(items)
 
-        return all_items[:max_count]
+        # Dedup by strategy string while preserving order
+        seen: set[str] = set()
+        deduped: list[StrategyItem] = []
+        for item in all_items:
+            if item.strategy in seen:
+                continue
+            seen.add(item.strategy)
+            deduped.append(item)
+        return deduped[:max_count]
 
     async def generate_udp(self,
                             sources: list[str] = None,
@@ -445,10 +470,18 @@ class MatrixGenerator:
                 protocol="udp_voice", state_db=state_db,
                 domain=domain, scan_level=scan_level,
                 max_count=max_count // len(sources) or max_count,
+                run_set=None,
             )
             all_items.extend(items)
 
-        return all_items[:max_count]
+        seen: set[str] = set()
+        deduped: list[StrategyItem] = []
+        for item in all_items:
+            if item.strategy in seen:
+                continue
+            seen.add(item.strategy)
+            deduped.append(item)
+        return deduped[:max_count]
 
     async def generate_pairs(self,
                               tcp_sources: list[str] = None,

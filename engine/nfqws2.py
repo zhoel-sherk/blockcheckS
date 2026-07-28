@@ -12,12 +12,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-
-NFQWS2_BIN = "/opt/zapret2/nfq2/nfqws2"
-LUA_INIT = [
-    "/opt/zapret2/lua/zapret-lib.lua",
-    "/opt/zapret2/lua/zapret-antidpi.lua",
-]
+from engine.config import NFQWS2_BIN, LUA_INIT_SCRIPTS
 
 
 class Nfqws2Manager:
@@ -28,9 +23,12 @@ class Nfqws2Manager:
         self._qnum = qnum
         self._proc: Optional[subprocess.Popen] = None
         self._pid: Optional[int] = None
+        self._temp_files: list[str] = []
 
     def _launch(self, config_arg: str) -> None:
-        """Start nfqws2 in foreground, verify it's alive."""
+        """Start nfqws2 in foreground, verify it's alive. Stops any prior proc."""
+        self.stop()
+
         args = [NFQWS2_BIN, config_arg]
         if self.ns_name:
             args = ["sudo", "ip", "netns", "exec", self.ns_name] + args
@@ -39,21 +37,17 @@ class Nfqws2Manager:
 
         self._proc = subprocess.Popen(
             args,
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
         self._pid = self._proc.pid
         time.sleep(0.8)
 
         if self._proc.poll() is not None:
-            stderr = ""
-            try:
-                stderr = self._proc.stderr.read().decode()
-            except Exception:
-                pass
             self._proc = None
             self._pid = None
-            raise RuntimeError(f"nfqws2 failed to start: {stderr[:300]}")
+            raise RuntimeError("nfqws2 failed to start (exited immediately)")
 
     def start_config(self, config_path: str) -> None:
         """Start nfqws2 using a pre-built .conf file."""
@@ -66,7 +60,7 @@ class Nfqws2Manager:
               qnum: int = 200, filter_tcp: str = "443",
               blobs: Optional[list[str]] = None,
               extra_lua_desync: Optional[list[str]] = None) -> None:
-        """Start nfqws2 daemon with inline strategy (backward compat)."""
+        """Start nfqws2 with inline strategy (backward compat)."""
         self._qnum = qnum
         lines = [
             f"--qnum={qnum}",
@@ -76,7 +70,7 @@ class Nfqws2Manager:
             "--ipcache-lifetime=0",
             "--bind-fix4",
         ]
-        for lua in LUA_INIT:
+        for lua in LUA_INIT_SCRIPTS:
             if os.path.exists(lua):
                 lines.append(f"--lua-init=@{lua}")
 
@@ -93,8 +87,13 @@ class Nfqws2Manager:
                     for d in hostlist:
                         f.write(f"{d}\n")
                 lines.append(f"--hostlist={hostlist_path}")
-            finally:
-                pass  # keep the file — nfqws2 needs it while running
+                self._temp_files.append(hostlist_path)
+            except Exception:
+                try:
+                    os.unlink(hostlist_path)
+                except OSError:
+                    pass
+                raise
 
         lines.append("--payload=tls_client_hello")
         lines.append(f"--lua-desync={strategy}")
@@ -106,12 +105,19 @@ class Nfqws2Manager:
         try:
             with os.fdopen(fd, "w") as f:
                 f.write("\n".join(lines))
+            self._temp_files.append(config_path)
             self._launch(f"@{config_path}")
-        finally:
-            pass
+        except Exception:
+            try:
+                os.unlink(config_path)
+            except OSError:
+                pass
+            if config_path in self._temp_files:
+                self._temp_files.remove(config_path)
+            raise
 
     def stop(self) -> None:
-        """Kill the owned nfqws2 process group via killpg."""
+        """Kill the owned nfqws2 process group via killpg; unlink temp files."""
         if self._pid is not None:
             try:
                 os.killpg(os.getpgid(self._pid), signal.SIGTERM)
@@ -134,6 +140,13 @@ class Nfqws2Manager:
                 except Exception:
                     pass
             self._proc = None
+
+        for path in self._temp_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        self._temp_files.clear()
 
     def __enter__(self):
         return self

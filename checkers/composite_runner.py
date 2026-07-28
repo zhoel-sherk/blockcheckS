@@ -42,11 +42,13 @@ try:
     body = resp.content[:4096]
     clen = len(resp.content)
     content_ok = clen >= 300
-    dpi_fake = any(p in body.lower() for p in (b"blocked",b"rkn",b"forbidden",
-                b"access denied",b"reject",b"filtered",b"blockpage",b"utmblock"))
+    dpi_fake = any(p in body.lower() for p in (
+        b"roskomnadzor", b"rkn.gov.ru", b"utmblock", b"blockpage"))
     if dpi_fake: content_ok = False
-    small_body_ok = resp.status_code in (101,204,301,302,303,304,307,308,206)
-    success = (200<=resp.status_code<400) and (content_ok or small_body_ok)
+    # Do not treat 301/302 as success when DPI fake page is present
+    small_body_ok = (not dpi_fake) and resp.status_code in (
+        101, 204, 301, 302, 303, 304, 307, 308, 206)
+    success = (200<=resp.status_code<400) and (content_ok or small_body_ok) and not dpi_fake
     result = dict(success=success, http_code=resp.status_code,
                   latency_ms=(time.perf_counter()-start)*1000,
                   content_len=clen, content_ok=content_ok, error=None)

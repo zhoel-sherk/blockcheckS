@@ -10,9 +10,7 @@ import subprocess
 import time
 from typing import Optional
 
-NFQWS2_BIN = "/opt/zapret2/nfq2/nfqws2"
-TCP_QNUM = 200
-UDP_QNUM = 201
+from engine.config import NFQWS2_BIN, NFQUEUE_TCP as TCP_QNUM, NFQUEUE_UDP as UDP_QNUM
 
 
 class DualNfqws2Manager:
@@ -29,7 +27,7 @@ class DualNfqws2Manager:
     def _ns_prefix(self) -> list[str]:
         if self.ns_name:
             return ["sudo", "ip", "netns", "exec", self.ns_name]
-        return []
+        return ["sudo"]
 
     def _add_iptables(self, *args: str) -> None:
         cmd = self._ns_prefix() + ["iptables", "-A"] + list(args)
@@ -127,10 +125,13 @@ class DualNfqws2Manager:
         self._udp_proc = None
         self._udp_pid = None
 
-        # Remove only our iptables rules
+        # Remove only our iptables rules (exception-safe -D)
         for rule in reversed(self._rules):
-            cmd = self._ns_prefix() + ["iptables"] + rule
-            subprocess.run(cmd, capture_output=True, timeout=5)
+            try:
+                cmd = self._ns_prefix() + ["iptables"] + rule
+                subprocess.run(cmd, capture_output=True, timeout=5)
+            except Exception:
+                pass
         self._rules.clear()
 
     def __enter__(self):

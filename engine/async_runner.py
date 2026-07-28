@@ -16,7 +16,7 @@ from colorama import Fore, Style, init as colorama_init
 colorama_init(autoreset=True)
 
 from engine.db_logger import StateDB
-from engine.config import PYTHON_BIN
+from engine.config import PYTHON_BIN, NFQWS2_BIN
 from engine.netns_pool import NetNsPool
 
 GREEN = Fore.GREEN + Style.BRIGHT
@@ -25,15 +25,6 @@ YELLOW = Fore.YELLOW
 CYAN = Fore.CYAN
 GREY = Fore.LIGHTBLACK_EX
 RESET = Style.RESET_ALL
-
-GREEN = Fore.GREEN + Style.BRIGHT
-RED = Fore.RED + Style.BRIGHT
-YELLOW = Fore.YELLOW
-CYAN = Fore.CYAN
-GREY = Fore.LIGHTBLACK_EX
-RESET = Style.RESET_ALL
-
-NFQWS2_BIN = "/opt/zapret2/nfq2/nfqws2"
 
 
 @dataclass
@@ -128,9 +119,12 @@ def _add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
 # ── In-namespace test workers (sync, called via asyncio.to_thread) ──
 
 def _run_tcp_check(ns_name: str, strategy: str, domain: str,
-                   timeout: float, is_config: bool = False) -> dict:
+                   timeout: float, is_config: bool = False,
+                   python_bin: str = None) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
     import subprocess as sp
+
+    py = python_bin or PYTHON_BIN
 
     # Setup nfqws2
     if is_config:
@@ -177,15 +171,12 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
     _sudo("ip", "netns", "exec", ns_name, "iptables", "-A", "OUTPUT",
           "-p", "tcp", "--dport", "443", "-j", "NFQUEUE", "--queue-num", "200")
 
-    # Run curl_cffi check as inline Python — two-phase:
-    # Phase 1: quick GET with 1.5s timeout → validates TLS
-    # Phase 2: full body download → validates no window clamping
+    # Run curl_cffi check as inline Python
     check_code = f"""
 import json, time
 def check(domain, timeout):
     try:
         import curl_cffi
-        # Phase 1: quick probe
         start = time.perf_counter()
         try:
             resp = curl_cffi.get(
@@ -204,9 +195,12 @@ def check(domain, timeout):
         content_ok = clen >= 300
         dpi_fake = any(p in body.lower() for p in (b"roskomnadzor",b"rkn.gov.ru",
                     b"blockpage",b"utmblock"))
-        if dpi_fake: content_ok = False
-        small_body_ok = resp.status_code in (101,204,301,302,303,304,307,308,206)
-        success = (200 <= resp.status_code < 400) and (content_ok or small_body_ok)
+        if dpi_fake:
+            content_ok = False
+        small_body_ok = (not dpi_fake) and resp.status_code in (
+            101,204,301,302,303,304,307,308,206)
+        success = ((200 <= resp.status_code < 400)
+                   and (content_ok or small_body_ok) and not dpi_fake)
         return {{"success": success, "http_code": resp.status_code,
                  "latency_ms": (time.perf_counter()-start)*1000,
                  "content_len": clen, "content_ok": content_ok, "error": None}}
@@ -223,7 +217,7 @@ print(json.dumps(check("{domain}", {timeout})))
 """
     r = sp.run(
         ["sudo", "ip", "netns", "exec", ns_name,
-         "PYTHON_BIN", "-c", check_code],
+         py, "-c", check_code],
         capture_output=True, text=True, timeout=timeout + 10
     )
     try:
@@ -235,9 +229,12 @@ print(json.dumps(check("{domain}", {timeout})))
 
 
 def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
-                   timeout: float, is_config: bool = False) -> dict:
+                   timeout: float, is_config: bool = False,
+                   python_bin: str = None) -> dict:
     """Start nfqws2 UDP in ns, run STUN probe, return result."""
     import subprocess as sp
+
+    py = python_bin or PYTHON_BIN
 
     if is_config:
         _nfqws2_daemon(ns_name, strategy)
@@ -264,17 +261,22 @@ def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
           "--queue-num", "201")
 
     probe_code = f"""
-import json, socket, struct, time
+import json, socket, struct, time, random
 try:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout({timeout})
-    msg = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442)+b"\\x00"*12
+    tid = bytes(random.randint(0, 255) for _ in range(12))
+    msg = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442) + tid
     start = time.perf_counter()
     sock.sendto(msg, ("{ip}", {port}))
     data, addr = sock.recvfrom(512)
     elapsed = (time.perf_counter()-start)*1000
     sock.close()
-    print(json.dumps({{"success": True, "latency_ms": elapsed,
+    ok = (len(data) >= 20
+          and struct.unpack(">H", data[:2])[0] == 0x0101
+          and struct.unpack(">I", data[4:8])[0] == 0x2112A442
+          and data[8:20] == tid)
+    print(json.dumps({{"success": ok, "latency_ms": elapsed,
         "detail": f"{{len(data)}}B from {{addr[0]}}:{{addr[1]}}"}}))
 except socket.timeout:
     elapsed = (time.perf_counter()-start)*1000
@@ -284,7 +286,7 @@ except Exception as e:
 """
     r = sp.run(
         ["sudo", "ip", "netns", "exec", ns_name,
-         "PYTHON_BIN", "-c", probe_code],
+         py, "-c", probe_code],
         capture_output=True, text=True, timeout=timeout + 5
     )
     try:
@@ -298,18 +300,21 @@ class AsyncTestRunner:
     """Parallel strategy tester using NetNsPool + asyncio.Semaphore."""
 
     def __init__(self, pool_size: int = 4, db: StateDB = None,
-                 python_path: str = "PYTHON_BIN"):
+                 python_path: str = None):
         self.pool = NetNsPool(size=pool_size)
         self.semaphore = asyncio.Semaphore(pool_size)
         self.db = db
-        self.python = python_path
+        self.python = python_path or PYTHON_BIN
+        self.matrix_fingerprint: str = ""
 
     async def start(self):
-        """Create netns pool."""
+        """Create netns pool and seed the asyncio Queue on the event loop."""
         await asyncio.to_thread(self.pool.create_all)
+        await self.pool.seed()
 
     async def stop(self):
-        """Destroy netns pool."""
+        """Drain queue then destroy netns pool."""
+        await self.pool.drain()
         await asyncio.to_thread(self.pool.destroy_all)
 
     async def test_tcp(self, item: StrategyItem, domain: str,
@@ -322,7 +327,7 @@ class AsyncTestRunner:
             try:
                 data = await asyncio.to_thread(
                     _run_tcp_check, ns_name, item.strategy, domain,
-                    timeout, item.is_config
+                    timeout, item.is_config, self.python
                 )
                 result.success = data.get("success", False)
                 result.http_code = data.get("http_code", 0)
@@ -357,7 +362,7 @@ class AsyncTestRunner:
             try:
                 data = await asyncio.to_thread(
                     _run_udp_check, ns_name, item.strategy, ip, port,
-                    timeout, item.is_config
+                    timeout, item.is_config, self.python
                 )
                 result.success = data.get("success", False)
                 result.latency_ms = data.get("latency_ms", 0)
@@ -408,8 +413,9 @@ class AsyncTestRunner:
                                 voice_ip: str, voice_port: int,
                                 udp_timeout: float = 3.0,
                                 udp_bypass: bool = False,
-                                resume_from: tuple = None,
+                                resume_from=None,
                                 full_voice: bool = False,
+                                fingerprint: str = "",
                                 ) -> list[PairResult]:
         """Parallel UDP probes for each PASS TCP × each UDP strategy.
 
@@ -417,9 +423,12 @@ class AsyncTestRunner:
         TCP nfqws2 started once per pair, UDP nfqws2 per strategy.
         DB writes serialized via asyncio.Lock.
         """
+        from engine.db_logger import Checkpoint
+
         pairs: list[PairResult] = []
         db_lock = asyncio.Lock()
         pair_sem = asyncio.Semaphore(self.pool.size)
+        fp = fingerprint or self.matrix_fingerprint
 
         if udp_bypass:
             working = list(enumerate(tcp_results))
@@ -435,36 +444,38 @@ class AsyncTestRunner:
         # Resume: skip completed pairs based on checkpoint labels
         resume_tcp_label = None
         resume_udp_label = None
-        if resume_from and len(resume_from) >= 6:
-            resume_tcp_label = resume_from[5] if len(resume_from) > 5 else None
-            resume_udp_label = resume_from[4] if len(resume_from) > 4 else None
-            if resume_tcp_label:
-                print(f"  {YELLOW}Resuming from {resume_tcp_label}+{resume_udp_label}{RESET}")
+        if isinstance(resume_from, Checkpoint):
+            resume_tcp_label = resume_from.tcp_label or None
+            resume_udp_label = resume_from.udp_label or None
+        elif resume_from is not None and hasattr(resume_from, "tcp_label"):
+            resume_tcp_label = getattr(resume_from, "tcp_label", None) or None
+            resume_udp_label = getattr(resume_from, "udp_label", None) or None
+        if resume_tcp_label:
+            print(f"  {YELLOW}Resuming after {resume_tcp_label}+{resume_udp_label}{RESET}")
         print(f"  {CYAN}Pair matrix: {len(working)} TCP × {len(udp_strategies)} UDP "
               f"= {total} pairs, {self.pool.size} parallel{RESET}")
 
         async def run_pair(tcp_i: int, tcp_r: TcpTestResult,
                             udp_s: StrategyItem, pair_idx: int):
-            # Resume skip
+            # Resume skip — inclusive of last completed pair
             if resume_tcp_label and resume_udp_label:
                 if tcp_r.item.label < resume_tcp_label:
                     return
-                if tcp_r.item.label == resume_tcp_label and udp_s.label <= resume_udp_label:
+                if (tcp_r.item.label == resume_tcp_label
+                        and udp_s.label <= resume_udp_label):
                     return
             async with pair_sem:
                 ns_name = await self.pool.acquire()
                 try:
-                    # Start TCP nfqws2 — uses cached result (already known PASS)
                     await asyncio.to_thread(
                         _run_tcp_check, ns_name,
                         tcp_r.item.strategy, domain, 0.1,
-                        tcp_r.item.is_config
+                        tcp_r.item.is_config, self.python
                     )
-                    # Start UDP nfqws2 on same ns
                     data = await asyncio.to_thread(
                         _run_udp_check, ns_name,
                         udp_s.strategy, voice_ip, voice_port,
-                        udp_timeout, udp_s.is_config
+                        udp_timeout, udp_s.is_config, self.python
                     )
                     udp_ok = data.get("success", False)
                     udp_ms = data.get("latency_ms", 0)
@@ -491,7 +502,6 @@ class AsyncTestRunner:
                     print(f"  [{pair_tag}] {tcp_r.item.label[:22]:22s} "
                           f"+ {udp_s.label[:22]:22s}  udp={udp_tag}{voice_tag}")
 
-                    # DB writes serialized via lock
                     if self.db:
                         async with db_lock:
                             await self.db.log_pair(
@@ -502,6 +512,7 @@ class AsyncTestRunner:
                             await self.db.save_checkpoint(
                                 tcp_i, pair_idx,
                                 f"{tcp_r.item.label}+{udp_s.label}",
+                                fingerprint=fp,
                                 tcp_label=tcp_r.item.label,
                                 udp_label=udp_s.label,
                             )
@@ -519,7 +530,7 @@ class AsyncTestRunner:
                     )
                 )
 
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks, return_exceptions=True)
         return pairs
 
     # ── Matrix display ──

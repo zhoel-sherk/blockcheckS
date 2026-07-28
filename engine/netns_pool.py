@@ -3,13 +3,12 @@
 Fixed-size pool of pre-created netns. Workers acquire/release instead of
 create/destroy per test — avoids kernel race conditions on veth creation.
 
-Thread safety: create_all() and destroy_all() are synchronous (called once).
-acquire() and release() are async and run only from the event loop thread.
-The pool uses asyncio.Queue exclusively from the event loop.
+Thread safety: create_all() and destroy_all() are synchronous (called via
+asyncio.to_thread). Queue mutations (seed/drain/acquire/release) run only
+on the event loop thread.
 """
 
 import asyncio
-import os
 import subprocess
 import time
 import threading
@@ -22,11 +21,16 @@ class NetNsPool:
     def __init__(self, size: int = 4, base: str = "bs-p"):
         self.size = size
         self.base = base
-        self._queue: asyncio.Queue[str] = asyncio.Queue(size)
+        self._queue: Optional[asyncio.Queue] = None
         self._created = False
         self._names: list[str] = []
         self._iface: str = ""  # cached interface name
         self._lock = threading.Lock()
+
+    def _ensure_queue(self) -> asyncio.Queue:
+        if self._queue is None:
+            self._queue = asyncio.Queue(self.size)
+        return self._queue
 
     def _run(self, *args, check: bool = True) -> subprocess.CompletedProcess:
         """Run a command with sudo, optionally checking for errors."""
@@ -132,31 +136,48 @@ class NetNsPool:
         dns_dir = f"/etc/netns/{name}"
         self._run("rm", "-rf", dns_dir, check=False)
 
+    def _cleanup_ns(self, ns_name: str) -> None:
+        """Best-effort cleanup inside a netns before returning to pool."""
+        self._run("ip", "netns", "exec", ns_name,
+                  "pkill", "-9", "nfqws2", check=False)
+        self._run("ip", "netns", "exec", ns_name,
+                  "iptables", "-F", "OUTPUT", check=False)
+
     # ── Public API ──
 
     def create_all(self) -> None:
-        """Synchronous — call once at startup via asyncio.to_thread()."""
+        """Synchronous — create namespaces only (no Queue mutations)."""
         with self._lock:
             if self._created:
                 return
             for i in range(self.size):
-                name = self._create_one(i)
-                self._queue.put_nowait(name)
+                self._create_one(i)
             self._created = True
         print(f"[netns] Pool created: {self.size} namespaces")
 
+    async def seed(self) -> None:
+        """Put created ns names onto the asyncio.Queue (event-loop only)."""
+        q = self._ensure_queue()
+        for name in self._names:
+            await q.put(name)
+
+    async def drain(self) -> None:
+        """Empty the queue on the event loop before destroy_all()."""
+        if self._queue is None:
+            return
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
     def destroy_all(self) -> None:
-        """Synchronous — call at shutdown or SIGINT."""
+        """Synchronous — destroy namespaces. Call drain() on loop first."""
         with self._lock:
             if not self._created:
                 return
             self._created = False
         names_to_destroy = list(self._names)
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
         for name in names_to_destroy:
             self._destroy_one(name)
         self._names.clear()
@@ -164,12 +185,11 @@ class NetNsPool:
 
     async def acquire(self) -> str:
         """Get a free netns from the pool. Blocks if all busy."""
-        return await self._queue.get()
+        return await self._ensure_queue().get()
 
     async def release(self, ns_name: str) -> None:
-        """Return ns to pool after cleaning it up."""
-        self._run("ip", "netns", "exec", ns_name,
-                  "pkill", "-9", "nfqws2", check=False)
-        self._run("ip", "netns", "exec", ns_name,
-                  "iptables", "-F", "OUTPUT", check=False)
-        await self._queue.put(ns_name)
+        """Return ns to pool after cleaning it up. Always re-queues."""
+        try:
+            await asyncio.to_thread(self._cleanup_ns, ns_name)
+        finally:
+            await self._ensure_queue().put(ns_name)

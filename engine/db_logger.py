@@ -1,25 +1,35 @@
-"""State DB — aiosqlite-powered persistent results log.
+"""State DB — aiosqlite-powered persistent results log."""
 
-Tables:
-  strategies    — registry of TCP/UDP strategy config paths
-  tcp_results   — HTTP/TLS test results per strategy+domain
-  udp_results   — STUN probe results per strategy+target
-  pair_results  — aggregated TCP×UDP pair outcomes
-  checkpoints   — (tcp_idx, udp_idx, timestamp) for --resume
-
-Usage:
-  db = StateDB("state.db")
-  await db.init()
-  await db.log_tcp_result(strategy, domain, status, latency, http_code, gateway_ms)
-  tcp_idx, udp_idx = await db.latest_checkpoint()
-  await db.save_checkpoint(tcp_idx, udp_idx)
-"""
-
-import os
+import hashlib
 import time
-import aiosqlite
+from dataclasses import dataclass
 from typing import Optional
-from pathlib import Path
+
+import aiosqlite
+
+
+@dataclass
+class Checkpoint:
+    tcp_idx: int
+    udp_idx: int
+    timestamp: str
+    note: str
+    fingerprint: str
+    tcp_label: str
+    udp_label: str
+
+
+def matrix_fingerprint(tcp_strategies: list[str], udp_strategies: list[str],
+                       scan_level: str = "", max_count: int = 0) -> str:
+    """Stable hash of the strategy matrix for --resume drift detection."""
+    parts = (
+        sorted(tcp_strategies)
+        + ["|"]
+        + sorted(udp_strategies)
+        + [f"level={scan_level}", f"max={max_count}"]
+    )
+    raw = "\n".join(parts).encode()
+    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 class StateDB:
@@ -32,7 +42,7 @@ class StateDB:
                 CREATE TABLE IF NOT EXISTS strategies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
-                    proto TEXT NOT NULL DEFAULT 'tcp',  -- 'tcp' or 'udp'
+                    proto TEXT NOT NULL DEFAULT 'tcp',
                     config_path TEXT NOT NULL,
                     first_seen TEXT NOT NULL DEFAULT '',
                     UNIQUE(name, proto)
@@ -41,7 +51,7 @@ class StateDB:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     strategy_id INTEGER REFERENCES strategies(id),
                     domain TEXT NOT NULL,
-                    status TEXT NOT NULL,       -- PASS, FAIL, SKIP
+                    status TEXT NOT NULL,
                     http_code INTEGER DEFAULT 0,
                     latency_ms REAL DEFAULT 0,
                     gateway_ws_ms REAL DEFAULT 0,
@@ -52,8 +62,8 @@ class StateDB:
                 CREATE TABLE IF NOT EXISTS udp_results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     strategy_id INTEGER REFERENCES strategies(id),
-                    target TEXT NOT NULL,        -- ip:port
-                    status TEXT NOT NULL,        -- PASS, FAIL, SKIP
+                    target TEXT NOT NULL,
+                    status TEXT NOT NULL,
                     latency_ms REAL DEFAULT 0,
                     error TEXT DEFAULT '',
                     timestamp TEXT NOT NULL DEFAULT ''
@@ -69,7 +79,7 @@ class StateDB:
                     tcp_ms REAL DEFAULT 0,
                     gateway_ms REAL DEFAULT 0,
                     udp_ms REAL DEFAULT 0,
-                    overall TEXT NOT NULL,       -- PASS, PARTIAL, FAIL
+                    overall TEXT NOT NULL,
                     timestamp TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS checkpoints (
@@ -114,27 +124,31 @@ class StateDB:
             await db.execute("PRAGMA journal_mode=WAL")
             await db.execute("PRAGMA busy_timeout=5000")
 
-    # ── Strategy registry ──────────────────────────
-
     async def ensure_strategy(self, name: str, proto: str,
-                               config_path: str) -> int:
-        """Insert or get strategy ID."""
-        async with aiosqlite.connect(self.db_path) as db:
-            row = await db.execute(
-                "SELECT id FROM strategies WHERE name=? AND proto=?", (name, proto)
+                               config_path: str,
+                               db: aiosqlite.Connection = None) -> int:
+        """Insert or get strategy ID. Reuses open `db` when provided."""
+        async def _body(conn):
+            row = await conn.execute(
+                "SELECT id FROM strategies WHERE name=? AND proto=?",
+                (name, proto),
             )
             existing = await row.fetchone()
             if existing:
                 return existing[0]
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-            cur = await db.execute(
-                "INSERT INTO strategies(name,proto,config_path,first_seen) VALUES(?,?,?,?)",
-                (name, proto, config_path, ts)
+            cur = await conn.execute(
+                "INSERT INTO strategies(name,proto,config_path,first_seen) "
+                "VALUES(?,?,?,?)",
+                (name, proto, config_path, ts),
             )
-            await db.commit()
+            await conn.commit()
             return cur.lastrowid
 
-    # ── Results logging ────────────────────────────
+        if db is not None:
+            return await _body(db)
+        async with aiosqlite.connect(self.db_path) as conn:
+            return await _body(conn)
 
     async def log_tcp(self, strategy: str, domain: str,
                        status: str, latency_ms: float,
@@ -142,7 +156,7 @@ class StateDB:
                        content_valid: bool = True,
                        error: str = "") -> None:
         async with aiosqlite.connect(self.db_path) as db:
-            sid = await self.ensure_strategy(strategy, "tcp", strategy)
+            sid = await self.ensure_strategy(strategy, "tcp", strategy, db=db)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
                 """INSERT INTO tcp_results
@@ -150,7 +164,7 @@ class StateDB:
                     gateway_ws_ms,content_valid,error,timestamp)
                    VALUES(?,?,?,?,?,?,?,?,?)""",
                 (sid, domain, status, http_code, latency_ms,
-                 gateway_ms, int(content_valid), error, ts)
+                 gateway_ms, int(content_valid), error, ts),
             )
             await db.commit()
 
@@ -158,13 +172,13 @@ class StateDB:
                        status: str, latency_ms: float = 0,
                        error: str = "") -> None:
         async with aiosqlite.connect(self.db_path) as db:
-            sid = await self.ensure_strategy(strategy, "udp", strategy)
+            sid = await self.ensure_strategy(strategy, "udp", strategy, db=db)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
                 """INSERT INTO udp_results
                    (strategy_id,target,status,latency_ms,error,timestamp)
                    VALUES(?,?,?,?,?,?)""",
-                (sid, target, status, latency_ms, error, ts)
+                (sid, target, status, latency_ms, error, ts),
             )
             await db.commit()
 
@@ -182,11 +196,9 @@ class StateDB:
                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (tcp, udp, domain,
                  int(tcp_ok), int(gateway_ok), int(udp_ok),
-                 tcp_ms, gateway_ms, udp_ms, overall, ts)
+                 tcp_ms, gateway_ms, udp_ms, overall, ts),
             )
             await db.commit()
-
-    # ── Checkpoints ────────────────────────────────
 
     async def save_checkpoint(self, tcp_idx: int, udp_idx: int,
                                 note: str = "", fingerprint: str = "",
@@ -194,40 +206,48 @@ class StateDB:
         async with aiosqlite.connect(self.db_path) as db:
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
-                "INSERT INTO checkpoints(tcp_idx,udp_idx,fingerprint,tcp_label,udp_label,timestamp,note) VALUES(?,?,?,?,?,?,?)",
-                (tcp_idx, udp_idx, fingerprint, tcp_label, udp_label, ts, note)
+                "INSERT INTO checkpoints(tcp_idx,udp_idx,fingerprint,"
+                "tcp_label,udp_label,timestamp,note) VALUES(?,?,?,?,?,?,?)",
+                (tcp_idx, udp_idx, fingerprint, tcp_label, udp_label, ts, note),
             )
             await db.commit()
 
-    async def latest_checkpoint(self) -> Optional[tuple[int, int, str, str, str, str]]:
-        """Return (tcp_idx, udp_idx, timestamp, note) or None."""
+    async def latest_checkpoint(self) -> Optional[Checkpoint]:
+        """Return latest Checkpoint or None."""
         async with aiosqlite.connect(self.db_path) as db:
             row = await db.execute(
-                "SELECT tcp_idx,udp_idx,timestamp,note,fingerprint,tcp_label FROM checkpoints ORDER BY id DESC LIMIT 1"
+                "SELECT tcp_idx,udp_idx,timestamp,note,fingerprint,"
+                "tcp_label,udp_label FROM checkpoints ORDER BY id DESC LIMIT 1"
             )
             r = await row.fetchone()
-            return r if r else None
-
-    # ── Query helpers ──────────────────────────────
+            if not r:
+                return None
+            return Checkpoint(
+                tcp_idx=r[0], udp_idx=r[1], timestamp=r[2], note=r[3],
+                fingerprint=r[4], tcp_label=r[5], udp_label=r[6],
+            )
 
     async def get_working_tcp(self, domain: str) -> list[str]:
-        """Get names of TCP strategies that passed for this domain."""
+        """Names whose *latest* result for domain is PASS."""
         async with aiosqlite.connect(self.db_path) as db:
             rows = await db.execute(
-                """SELECT DISTINCT s.name FROM tcp_results t
-                   JOIN strategies s ON t.strategy_id = s.id
-                   WHERE t.domain=? AND t.status='PASS'""",
-                (domain,)
+                """SELECT s.name FROM strategies s
+                   JOIN tcp_results t ON t.strategy_id = s.id
+                   WHERE t.domain=? AND t.id = (
+                       SELECT t2.id FROM tcp_results t2
+                       WHERE t2.strategy_id = s.id AND t2.domain=?
+                       ORDER BY t2.id DESC LIMIT 1
+                   ) AND t.status='PASS'""",
+                (domain, domain),
             )
             return [r[0] for r in await rows.fetchall()]
 
     async def get_passing_pairs(self, domain: str) -> list[dict]:
-        """Get all pairs where overall='PASS'."""
         async with aiosqlite.connect(self.db_path) as db:
             rows = await db.execute(
                 """SELECT tcp_strategy,udp_strategy,tcp_ms,gateway_ms,udp_ms
                    FROM pair_results WHERE domain=? AND overall='PASS'""",
-                (domain,)
+                (domain,),
             )
             cols = ["tcp", "udp", "tcp_ms", "gateway_ms", "udp_ms"]
             return [dict(zip(cols, r)) for r in await rows.fetchall()]
