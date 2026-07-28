@@ -46,26 +46,3 @@ async def test_discovery_uses_cache():
     assert len(eps) >= 1
     assert elapsed < 1.0, f"Cache load too slow: {elapsed:.2f}s"
 </tz-doc>
-
-cat > /home/zhoel/workspace/blockcheckS/tmp-scripts/README.md << 'EOF'
-# tmp-scripts — blockcheckS research & test scripts
-
-## Voice discovery
-
-```bash
-# Test DNS discovery
-python3 -c "
-import asyncio, sys
-sys.path.insert(0, '.')
-from checkers.voice_dns import discover_voice_endpoints
-eps = asyncio.run(discover_voice_endpoints(5, use_cache=False))
-for e in eps: print(f'{e[\"ip\"]}:{e[\"port\"]} ({e[\"hostname\"]})')
-"
-
-# --auto-discover N pair test
-sudo python3 bs.py pair -d discord.com \
-  --generate fake_multi --max 3 \
-  --auto-discover 3 --parallel 4
-
-# Cache: logs/bs_voice_cache.json (90min TTL)
-# Rotated: bs_voice_cache_old_<date>.json when expired
