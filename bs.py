@@ -131,31 +131,26 @@ async def cmd_pair(args):
         has_token = bool(token)
         full_voice = args.full_voice and has_token
 
-        if args.auto_discover or (full_voice and has_token):
-            if not has_token and args.auto_discover:
-                print(f"\n  {YELLOW}No token — auto-discover needs token, using static IP{RESET}")
-            else:
-                print(f"\n  {CYAN}Auto-discovering voice endpoint via sing-box...{RESET}")
-                try:
-                    from checkers.voice_discovery import discover_voice_endpoint
-                    voice_info = await discover_voice_endpoint()
-                    if voice_info:
-                        voice_ip = voice_info["ip"]
-                        voice_port = voice_info["port"]
-                        gateway_result = {"endpoint": voice_info.get("voice_ws_endpoint", ""),
-                                          "ssrc": voice_info.get("ssrc", 0),
-                                          "ip": voice_ip, "port": voice_port}
-                        print(f"  {GREEN}Discovered: {voice_ip}:{voice_port} "
-                              f"(SSRC={gateway_result['ssrc']}){RESET}")
-                        print(f"  {GREEN}Gateway: {gateway_result['endpoint']}{RESET}")
-                    else:
-                        print(f"  {YELLOW}Auto-discovery failed. Using: {voice_ip}:{voice_port}{RESET}")
-                        if full_voice:
-                            full_voice = False
-                except Exception as e:
-                    print(f"  {YELLOW}Discovery error: {e} — using static IP{RESET}")
-                    if full_voice:
-                        full_voice = False
+        auto_discover = getattr(args, 'auto_discover', None)
+        multi_eps = []
+        if auto_discover is not None:
+            count = int(auto_discover)
+            print(f"\n  {CYAN}Auto-discovering {count} voice endpoints...{RESET}")
+            try:
+                from checkers.voice_discovery import discover_multiple
+                multi_eps = await discover_multiple(count, use_dns=True)
+                if multi_eps:
+                    for ep in multi_eps[:3]:
+                        print(f"  {GREEN}  {ep['ip']}:{ep['port']} ({ep['hostname']}){RESET}")
+                    if len(multi_eps) > 3:
+                        print(f"  {GREEN}  ... and {len(multi_eps)-3} more{RESET}")
+                    # Store all endpoints for multi-endpoint test
+                    voice_ip = multi_eps[0]["ip"]
+                    voice_port = multi_eps[0]["port"]
+                else:
+                    print(f"  {YELLOW}No endpoints found — using static{RESET}")
+            except Exception as e:
+                print(f"  {YELLOW}Discovery error: {e}{RESET}")
 
         if args.full_voice and not has_token:
             print(f"  {YELLOW}No Discord token. --full-voice → STUN only{RESET}")
@@ -347,7 +342,7 @@ def main():
     scan.add_argument("--port", type=int, default=50006, help=argparse.SUPPRESS)
     scan.add_argument("--udp-timeout", type=float, default=3.0, help=argparse.SUPPRESS)
     scan.add_argument("--udp-bypass", action="store_true", help=argparse.SUPPRESS)
-    scan.add_argument("--auto-discover", action="store_true", help=argparse.SUPPRESS)
+    scan.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None, help=argparse.SUPPRESS)
     scan.add_argument("--full-voice", action="store_true", help=argparse.SUPPRESS)
 
     # composite — single config, multiple domains
@@ -380,7 +375,7 @@ def main():
     pair.add_argument("-C", "--configs-dir", default="configs")
     pair.add_argument("--ip", default=DEFAULT_VOICE_IP)
     pair.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
-    pair.add_argument("--auto-discover", action="store_true")
+    pair.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None)
     pair.add_argument("--full-voice", action="store_true")
     pair.add_argument("--udp-bypass", action="store_true")
     pair.add_argument("--user-matrix", default="",

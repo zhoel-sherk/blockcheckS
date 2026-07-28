@@ -16,6 +16,7 @@ import subprocess
 import time
 from typing import Optional
 
+from checkers.voice_dns import discover_voice_endpoints as dns_discover
 from engine.config import (
     SING_BOX_BIN, SING_BOX_CONFIG, SOCKS5_PROXY,
     DPI_TESTER_SETTINGS, PYTHON_BIN,
@@ -240,3 +241,53 @@ async def discover_voice_endpoint() -> Optional[dict]:
     finally:
         _manage_singbox(False)
         print("[discovery] sing-box stopped")
+
+
+async def discover_multiple(count: int = 5,
+                             use_dns: bool = True,
+                             use_cache: bool = True) -> list[dict]:
+    """Discover N Discord voice UDP endpoints.
+
+    Layer 1 (DNS): finland{N}.discord.gg bulk resolution (no auth needed)
+    Layer 2 (Gateway): WS → OP2 Ready (needs token)
+    Layer 3 (Cache): previously discovered endpoints
+
+    Returns: [{"ip": str, "port": int, "hostname": str}, ...]
+    """
+    endpoints = []
+    seen_ips: set[str] = set()
+
+    # ── Layer 1: DNS bulk ──
+    if use_dns:
+        try:
+            dns_eps = await dns_discover(count, use_cache=use_cache)
+            for ep in dns_eps:
+                ip = ep.get("ip", "")
+                if ip and ip not in seen_ips:
+                    seen_ips.add(ip)
+                    endpoints.append(ep)
+        except Exception as e:
+            print(f"[discovery] DNS layer failed: {e}")
+
+    if len(endpoints) >= count:
+        return endpoints[:count]
+
+    # ── Layer 2: Gateway (token required) ──
+    token = load_token()
+    if token and len(endpoints) < count:
+        print(f"[discovery] Gateway layer (up to {count - len(endpoints)} more)...")
+        for _ in range(min(count - len(endpoints), 3)):
+            try:
+                ep = await discover_voice_endpoint()
+                if ep and ep.get("ip") and ep["ip"] not in seen_ips:
+                    seen_ips.add(ep["ip"])
+                    endpoints.append({
+                        "ip": ep["ip"],
+                        "port": ep["port"],
+                        "hostname": ep.get("voice_ws_endpoint", ""),
+                    })
+            except Exception as e:
+                print(f"[discovery] Gateway attempt failed: {e}")
+                break
+
+    return endpoints[:count]
