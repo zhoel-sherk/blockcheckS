@@ -37,7 +37,7 @@ from blockchecks.engine.test_runner import TestRunner
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.async_runner import AsyncTestRunner
-from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS, CONFIGS_DIR
+from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS, CONFIGS_DIR, CONFIGS_DIR
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -55,7 +55,7 @@ def cmd_tcp(args):
     if args.config:
         strategies = loader.from_config(args.config); mode = "config"
     elif args.configs_dir:
-        strategies = loader.from_config_dir(args.configs_dir); mode = "configs"
+        strategies = loader.from_config_dir(args.configs_dir); mode = CONFIGS_DIR
     elif args.file:
         strategies = loader.from_file(args.file); mode = "string"
     elif args.strategy:
@@ -72,7 +72,7 @@ def cmd_tcp(args):
     print(f"\n  blockcheckS — TCP TLS test")
     print(f"  Domain: {args.domain}  Items: {len(strategies)}  Timeout: {args.timeout}s\n")
     runner = TestRunner(ns_name=args.ns)
-    if mode in ("configs", "config") and strategies:
+    if mode in (CONFIGS_DIR, "config") and strategies:
         report = runner.test_sequential_configs(strategies, args.domain, timeout=args.timeout, qnum=args.qnum)
     else:
         report = runner.test_sequential(strategies, args.domain, timeout=args.timeout,
@@ -84,7 +84,7 @@ def cmd_tcp(args):
 def cmd_udp(args):
     loader = StrategyLoader()
     if args.config: configs = loader.from_config(args.config); mode = "config"
-    elif args.configs_dir: configs = loader.from_config_dir(args.configs_dir); mode = "configs"
+    elif args.configs_dir: configs = loader.from_config_dir(args.configs_dir); mode = CONFIGS_DIR
     else: print("ERROR: specify --config or --configs-dir"); return 1
     if not configs: print("ERROR: no configs loaded"); return 1
     print(f"\n  blockcheckS — UDP Voice test")
@@ -190,7 +190,7 @@ async def cmd_pair(args):
             print(f"\n  {CYAN}Generating strategies...{RESET}")
             if not tcp_items:
                 tcp_items = await scanner.generate_tcp(
-                    sources=tcp_sources or ["custom", "configs"],
+                    sources=tcp_sources or ["custom", CONFIGS_DIR],
                     domain=args.domain,
                     scan_level=getattr(args, 'scan_level', 'fast'),
                     max_count=getattr(args, 'max', 100),
@@ -331,6 +331,7 @@ def main():
     scan.add_argument("-d", "--domain", required=True)
     scan.add_argument("--generate", nargs="?", const="custom,configs",
                       default="", help="Use matrix generator (sources: custom,configs,fake,faked,...)")
+    scan.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"], help="TLS protocol version to test")
     scan.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
     scan.add_argument("--parallel", type=int, default=4)
     scan.add_argument("--max", type=int, default=100)
@@ -364,6 +365,7 @@ def main():
                       help="TCP sources: custom,configs,fake,faked,hostfake,fake_multi,fake_faked")
     pair.add_argument("--udp-sources", default="custom",
                       help="UDP sources: custom,configs")
+    pair.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"], help="TLS protocol version to test")
     pair.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
     pair.add_argument("--parallel", type=int, default=4)
     pair.add_argument("--max", type=int, default=100)

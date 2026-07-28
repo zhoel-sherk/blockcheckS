@@ -44,6 +44,12 @@ class Nfqws2Manager:
         self._pid = self._proc.pid
         time.sleep(0.8)
 
+        # Drain stderr on success path to avoid buffer leak
+        try:
+            self._proc.stderr.read(1)
+        except Exception:
+            pass
+
         if self._proc.poll() is not None:
             stderr = ""
             try:

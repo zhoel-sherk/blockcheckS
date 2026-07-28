@@ -7,3 +7,12 @@ state.db
 *.egg-info/
 src/*.egg-info/
 .cursor-audit/
+state.db
+state.db-journal
+state.db-wal
+*.egg-info/
+logs/*.json
+logs/*.log
+__pycache__/
+*.pyc
+.pytest_cache/
