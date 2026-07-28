@@ -97,8 +97,9 @@ class CustomListGenerator(StrategyGenerator):
 class ConfigFileGenerator(StrategyGenerator):
     """Load pre-built .conf files."""
 
-    def __init__(self, config_dir: str = "configs"):
-        self.config_dir = config_dir
+    def __init__(self, config_dir: str = None):
+        from blockchecks.engine.config import CONFIGS_DIR
+        self.config_dir = config_dir or CONFIGS_DIR
 
     async def generate(self, protocol: str = "tls12",
                         state_db: StateDB = None,

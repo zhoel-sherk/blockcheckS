@@ -1,59 +1,65 @@
 # blockcheckS — lightspeed DPI strategy tester
 
-Замена стандартного `blockcheck.sh` из zapret2. В ~10 раз быстрее,
-с поддержкой UDP-стратегий и легитимными TLS-отпечатками браузеров.
+Замена `blockcheck.sh` / blockcheckw: быстрый подбор DPI-стратегий для
+zapret2/nfqws2 с репрезентативными проверками (curl_cffi JA4, netns,
+TCP×UDP matrix, checkpoint/resume).
+
+## Установка
+
+```bash
+pip install -e ".[dev,discovery]"
+# CLI:
+bs --help
+# или
+python -m blockchecks.bs --help
+```
+
+Linux host с zapret2/nfqws2 и root (netns + iptables). Unit-тесты — без root.
 
 ## Отличия от blockcheck.sh
 
 | blockcheck.sh | blockcheckS |
 |--------------|-------------|
-| ~60-120s на стратегию | ~3-5s на стратегию |
-| Curl с OpenSSL (JA4 t13d0202) | curl_cffi с BoringSSL (JA4 t13d1516h2) |
-| Только TCP (HTTP/HTTPS/QUIC) | TCP + UDP (Discord voice, игры) |
-| Последовательный перебор | Параллельный (8-16 потоков) |
-| Shell-скрипт (~3000 строк) | Python (~500 строк) |
-| Нет изоляции | Network namespace изоляция |
-| Нет JA4 fingerprinting | 8 браузерных JA4 профилей |
+| ~60-120s на стратегию | ~3-5s на стратегию (parallel netns) |
+| Curl/OpenSSL | curl_cffi / BoringSSL (браузерный JA4) |
+| В основном TCP | TCP + UDP voice (STUN) |
+| Последовательный shell | asyncio + NetNsPool |
+| Легко «ложно-зелёный» | Контрактные pytest + content/DPI checks |
 
-## Архитектура
+## Структура (v0.3)
 
 ```
 blockcheckS/
-├── bs.py              # main: strategy discovery engine
-├── strategies/         # built-in strategy sets
-│   ├── tcp_tls.txt    # TLS strategies
-│   ├── tcp_http.txt   # HTTP strategies
-│   ├── udp_voice.txt  # Discord voice UDP
-│   └── quic.txt       # QUIC/HTTP3
-├── checkers/           # connectivity validators
-│   ├── tcp_tls.py     # curl_cffi TLS check
-│   ├── tcp_http.py    # HTTP check
-│   ├── udp_stun.py    # STUN binding check
-│   └── dns.py         # DNS tampering check
-├── configs/            # nfqws2 config templates
-└── reports/            # JSON output
+├── src/blockchecks/     # пакет
+│   ├── bs.py            # CLI: tcp | udp | scan | pair | composite
+│   ├── engine/          # nfqws2, firewall, matrix, async runner, DB
+│   └── checkers/        # tcp_tls, udp_voice, voice_dns/discovery
+├── configs/             # nfqws2 .conf (Flowseal→zapret2)
+├── tests/unit|integration/
+├── docs/                # guide.md, todo.md
+└── pyproject.toml
 ```
 
-## Режимы
+## Быстрый старт
 
 ```bash
-# Быстрый скан: TCP TLS для доменов
-sudo python3 bs.py --mode tcp --domains "youtube.com,discord.com"
+# TCP batch
+sudo bs scan -d discord.com --generate --parallel 4
 
-# Полный скан: TCP + UDP + QUIC
-sudo python3 bs.py --mode all --domains "discord.com"
+# TCP×UDP pair matrix
+sudo bs pair -d discord.com --generate --auto-discover 5
 
-# Кастомные стратегии из файла
-sudo python3 bs.py --strategies my_strategies.txt --domains "discord.media"
+# Один .conf
+sudo bs tcp -d discord.com -c configs/simple_fake__fake_ts.conf
+sudo bs composite -c configs/composite_discord.conf
 
-# Параллельный режим
-sudo python3 bs.py --mode tcp --parallel 8 --domains "youtube.com,discord.com"
+# Тесты (Windows/dev OK)
+pytest -m "not integration"
 ```
+
+Подробнее: [docs/guide.md](docs/guide.md). План: [docs/todo.md](docs/todo.md).
 
 ## Status
 
-**Phase 1 (current):** проектирование, базовая архитектура
-**Phase 2:** TCP стратегии (curl_cffi + nfqws2)
-**Phase 3:** UDP стратегии (STUN + DTLS для Discord voice)
-**Phase 4:** QUIC стратегии
-**Phase 5:** WebUI + GP-control-plane интеграция
+Пакет `blockchecks` 0.3.0: scan/pair/async, checkpoint fingerprint, unit suite.
+Дальше — покрытие матриц bol-van/zapret2 и flowseal-like (см. todo).

@@ -37,7 +37,7 @@ from blockchecks.engine.test_runner import TestRunner
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.async_runner import AsyncTestRunner
-from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS
+from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS, CONFIGS_DIR
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -207,7 +207,7 @@ async def cmd_pair(args):
             print(f"  Generated: {len(tcp_items)} TCP + {len(udp_items)} UDP strategies")
         elif not tcp_items:
             loader = StrategyLoader()
-            tcp_configs = loader.from_config_dir(args.configs_dir or "configs")
+            tcp_configs = loader.from_config_dir(args.configs_dir or CONFIGS_DIR)
             tcp_items = [StrategyItem(label=os.path.basename(c).replace(".conf", ""),
                                        strategy=c, is_config=True)
                           for c in tcp_configs if "udp_voice" not in c.lower()]
@@ -296,7 +296,8 @@ async def cmd_pair(args):
 # ── CLI ──
 
 def main():
-    parser = argparse.ArgumentParser(description="blockcheckS — lightspeed DPI strategy tester")
+    parser = argparse.ArgumentParser(
+        description="blockcheckS - lightspeed DPI strategy tester")
     sub = parser.add_subparsers(dest="command", help="Commands")
 
     # tcp — legacy synchronous
@@ -355,7 +356,7 @@ def main():
     composite.add_argument("--timeout", type=float, default=5.0)
 
     # pair — async TCP×UDP matrix
-    pair = sub.add_parser("pair", help="TCP×UDP pair matrix (async)")
+    pair = sub.add_parser("pair", help="TCP x UDP pair matrix (async)")
     pair.add_argument("-d", "--domain", required=True)
     pair.add_argument("--generate", nargs="?", const="custom,configs",
                       default="", help="Use matrix generator")
@@ -372,7 +373,7 @@ def main():
                       help="Skip UDP pair testing (TCP scan only)")
     pair.add_argument("-c", "--config", help="Single TCP .conf file")
     pair.add_argument("-u", "--udp-config", help="Single UDP .conf file")
-    pair.add_argument("-C", "--configs-dir", default="configs")
+    pair.add_argument("-C", "--configs-dir", default=CONFIGS_DIR)
     pair.add_argument("--ip", default=DEFAULT_VOICE_IP)
     pair.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
     pair.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None)
@@ -400,7 +401,7 @@ def main():
         args.udp_bypass = False
         args.auto_discover = False
         args.udp_sources = ""
-        args.configs_dir = "configs"
+        args.configs_dir = CONFIGS_DIR
         args.config = None
         args.udp_config = None
         if args.user_matrix:

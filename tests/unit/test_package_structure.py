@@ -52,44 +52,25 @@ class TestSubmoduleImports:
             f"{module_name} has no __file__ or __path__"
 
 
-class TestPackageData:
-    def test_configs_dir_exists(self):
-        """configs/ directory exists in the installed package."""
-        import blockchecks
-        pkg_dir = os.path.dirname(blockchecks.__file__)
-        # Navigate up from src/blockchecks/ to project root
-        root = os.path.dirname(os.path.dirname(pkg_dir))
-        configs = os.path.join(root, "configs")
-        if not os.path.isdir(configs):
-            # Try relative to installed package location
-            alt = os.path.join(pkg_dir, "..", "..", "configs")
-            if os.path.isdir(alt):
-                configs = alt
-        assert os.path.isdir(configs), f"configs/ not found at {configs}"
+class TestProjectPaths:
+    def test_configs_dir_resolves(self):
+        """PROJECT_DIR is repo root (not src/) and CONFIGS_DIR exists."""
+        from blockchecks.engine.config import PROJECT_DIR, CONFIGS_DIR
+        assert os.path.basename(PROJECT_DIR) != "src", PROJECT_DIR
+        assert os.path.isdir(CONFIGS_DIR), f"missing {CONFIGS_DIR}"
 
     def test_key_configs_present(self):
         """At least one composite config exists."""
-        import blockchecks
-        pkg_dir = os.path.dirname(blockchecks.__file__)
-        root = os.path.dirname(os.path.dirname(pkg_dir))
-        composite = os.path.join(root, "configs", "composite_discord.conf")
-        if not os.path.exists(composite):
-            composite = os.path.join(pkg_dir, "..", "..", "configs", "composite_discord.conf")
+        from blockchecks.engine.config import CONFIGS_DIR
+        composite = os.path.join(CONFIGS_DIR, "composite_discord.conf")
         assert os.path.exists(composite), f"composite_discord.conf not found at {composite}"
 
     def test_conf_files_found(self):
         """configs/ has .conf files."""
         import glob
-        import blockchecks
-        pkg_dir = os.path.dirname(blockchecks.__file__)
-        root = os.path.dirname(os.path.dirname(pkg_dir))
-        for candidate in [os.path.join(root, "configs"),
-                          os.path.join(pkg_dir, "..", "..", "configs")]:
-            if os.path.isdir(candidate):
-                confs = glob.glob(os.path.join(candidate, "*.conf"))
-                assert len(confs) >= 1, f"No .conf files in {candidate}"
-                return
-        pytest.fail("Could not locate configs/ directory")
+        from blockchecks.engine.config import CONFIGS_DIR
+        confs = glob.glob(os.path.join(CONFIGS_DIR, "*.conf"))
+        assert len(confs) >= 1, f"No .conf files in {CONFIGS_DIR}"
 
 
 class TestEntryPoint:

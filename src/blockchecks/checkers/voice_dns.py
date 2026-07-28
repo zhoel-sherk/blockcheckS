@@ -6,7 +6,7 @@ No Discord token or gateway connection needed.
 Range: N=14000-14147 → ~148 unique IPs, all GCP Hamina.
 Ports: UDP 50000-50006 confirmed open on all GCP backends.
 
-Cache: /logs/bs_voice_cache.json, rotated after 1-2 hours.
+Cache: <project>/logs/bs_voice_cache.json, rotated after 1-2 hours.
 """
 
 import asyncio
@@ -15,8 +15,9 @@ import os
 import random
 import socket
 import time
-from pathlib import Path
 from typing import Optional
+
+from blockchecks.engine.config import PROJECT_DIR
 
 # DNS range for finland region (the only active one)
 DNS_RANGE = (14000, 14148)
@@ -24,28 +25,20 @@ DNS_RANGE = (14000, 14148)
 # Typical voice UDP ports
 VOICE_PORTS = [50000, 50001, 50002, 50003, 50004, 50005, 50006]
 
-# Cache settings
-CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
+# Cache settings — under project logs/
+CACHE_DIR = os.path.join(PROJECT_DIR, "logs")
 CACHE_FILE = "bs_voice_cache.json"
 CACHE_TTL_SECONDS = 90 * 60  # 90 minutes
 
 
-def _cache_path() -> str:
-    return os.path.join(CACHE_DIR, _get_root(), CACHE_FILE)
-
-
-def _get_root() -> str:
-    """Project root directory."""
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+def _cache_file() -> str:
+    return os.path.join(CACHE_DIR, CACHE_FILE)
 
 
 def _load_cache() -> Optional[dict]:
     """Load cached voice endpoints if not expired."""
-    os.makedirs(os.path.dirname(_cache_path()), exist_ok=True)
-    cache_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "logs", "bs_voice_cache.json"
-    )
+    cache_file = _cache_file()
+    os.makedirs(CACHE_DIR, exist_ok=True)
     if not os.path.exists(cache_file):
         return None
     try:
@@ -65,15 +58,9 @@ def _load_cache() -> Optional[dict]:
 
 def _save_cache(endpoints: list[dict]) -> None:
     """Save voice endpoints to cache."""
-    os.makedirs(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs"
-    ), exist_ok=True)
-    cache_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "logs", "bs_voice_cache.json"
-    )
+    os.makedirs(CACHE_DIR, exist_ok=True)
     data = {"timestamp": time.time(), "endpoints": endpoints}
-    with open(cache_file, "w") as f:
+    with open(_cache_file(), "w") as f:
         json.dump(data, f)
 
 

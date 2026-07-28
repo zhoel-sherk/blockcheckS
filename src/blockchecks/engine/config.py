@@ -7,7 +7,27 @@ import os
 
 # ── Resolvable paths ─────────────────────────────
 
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
+_PACKAGE_DIR = os.path.dirname(_ENGINE_DIR)          # .../blockchecks
+_PARENT = os.path.dirname(_PACKAGE_DIR)              # .../src or site-packages
+_REPO_CANDIDATE = os.path.dirname(_PARENT)           # repo root (editable src layout)
+
+
+def _resolve_project_dir() -> str:
+    """Repo root (editable) or package dir (wheel with packaged configs)."""
+    for candidate in (_REPO_CANDIDATE, _PARENT, _PACKAGE_DIR):
+        if os.path.isdir(os.path.join(candidate, "configs")):
+            return candidate
+    # Editable src/ layout without relying on configs/
+    if os.path.basename(_PARENT) == "src":
+        return _REPO_CANDIDATE
+    return _PACKAGE_DIR
+
+
+PROJECT_DIR = _resolve_project_dir()
+PACKAGE_DIR = _PACKAGE_DIR
+CONFIGS_DIR = os.path.join(PROJECT_DIR, "configs")
+
 
 def _env_or(key, default: str) -> str:
     return os.environ.get(key, default)
