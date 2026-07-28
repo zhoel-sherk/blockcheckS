@@ -38,16 +38,21 @@ class Nfqws2Manager:
         self._proc = subprocess.Popen(
             args,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             start_new_session=True,
         )
         self._pid = self._proc.pid
         time.sleep(0.8)
 
         if self._proc.poll() is not None:
+            stderr = ""
+            try:
+                stderr = self._proc.stderr.read().decode()
+            except Exception:
+                pass
             self._proc = None
             self._pid = None
-            raise RuntimeError("nfqws2 failed to start (exited immediately)")
+            raise RuntimeError(f"nfqws2 failed to start (exited immediately): {stderr[:200]}")
 
     def start_config(self, config_path: str) -> None:
         """Start nfqws2 using a pre-built .conf file."""
@@ -105,6 +110,7 @@ class Nfqws2Manager:
         try:
             with os.fdopen(fd, "w") as f:
                 f.write("\n".join(lines))
+            os.chmod(config_path, 0o644)
             self._temp_files.append(config_path)
             self._launch(f"@{config_path}")
         except Exception:
