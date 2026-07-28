@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from engine.async_runner import AsyncTestRunner
-from engine.db_logger import StateDB
+from blockchecks.engine.async_runner import AsyncTestRunner
+from blockchecks.engine.db_logger import StateDB
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ def mock_pool(monkeypatch):
         async def release(self, ns_name: str):
             await q.put(ns_name)
 
-    monkeypatch.setattr("engine.async_runner.NetNsPool", FakePool)
+    monkeypatch.setattr("blockchecks.engine.async_runner.NetNsPool", FakePool)
     return FakePool
 
 
@@ -93,10 +93,10 @@ def mock_tcp_udp(monkeypatch):
             "detail": "ok",
         }
 
-    monkeypatch.setattr("engine.async_runner._run_tcp_check", fake_tcp)
-    monkeypatch.setattr("engine.async_runner._run_udp_check", fake_udp)
+    monkeypatch.setattr("blockchecks.engine.async_runner._run_tcp_check", fake_tcp)
+    monkeypatch.setattr("blockchecks.engine.async_runner._run_udp_check", fake_udp)
     monkeypatch.setattr(
-        "engine.async_runner._nfqws2_daemon", lambda *a, **k: None
+        "blockchecks.engine.async_runner._nfqws2_daemon", lambda *a, **k: None
     )
     return {"tcp": fake_tcp, "udp": fake_udp}
 
@@ -120,7 +120,7 @@ def pytest_configure(config):
 @pytest.fixture
 def nfqws2_available():
     """Skip integration if nfqws2 binary missing."""
-    from engine.config import NFQWS2_BIN
+    from blockchecks.engine.config import NFQWS2_BIN
     if not os.path.exists(NFQWS2_BIN):
         pytest.skip(f"nfqws2 not available: {NFQWS2_BIN}")
     return NFQWS2_BIN

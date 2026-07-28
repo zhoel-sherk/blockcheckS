@@ -32,12 +32,12 @@ from typing import Optional
 from colorama import Fore, Style, init as colorama_init
 colorama_init(autoreset=True)
 
-from engine.strategy_loader import StrategyLoader
-from engine.test_runner import TestRunner
-from engine.db_logger import StateDB, matrix_fingerprint
-from engine.matrix_generator import MatrixGenerator, StrategyItem
-from engine.async_runner import AsyncTestRunner
-from engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS
+from blockchecks.engine.strategy_loader import StrategyLoader
+from blockchecks.engine.test_runner import TestRunner
+from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
+from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
+from blockchecks.engine.async_runner import AsyncTestRunner
+from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -126,7 +126,7 @@ async def cmd_pair(args):
         voice_port = getattr(args, 'port', None) or DEFAULT_VOICE_PORT
         gateway_result = None
 
-        from checkers.voice_discovery import load_token
+        from blockchecks.checkers.voice_discovery import load_token
         token = load_token()
         has_token = bool(token)
         full_voice = args.full_voice and has_token
@@ -137,7 +137,7 @@ async def cmd_pair(args):
             count = int(auto_discover)
             print(f"\n  {CYAN}Auto-discovering {count} voice endpoints...{RESET}")
             try:
-                from checkers.voice_discovery import discover_multiple
+                from blockchecks.checkers.voice_discovery import discover_multiple
                 multi_eps = await discover_multiple(count, use_dns=True)
                 if multi_eps:
                     for ep in multi_eps[:3]:
@@ -417,7 +417,7 @@ def main():
                                                          or getattr(args, 'udp_sources', '') != "custom")
         return asyncio.run(cmd_pair(args))
     elif args.command == "composite":
-        from checkers.composite_runner import run as run_composite
+        from blockchecks.checkers.composite_runner import run as run_composite
         return asyncio.run(run_composite(
             args.config, args.domains, args.parallel, args.timeout
         ))

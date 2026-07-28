@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from engine.async_runner import StrategyItem, TcpTestResult
-from engine.db_logger import Checkpoint
+from blockchecks.engine.async_runner import StrategyItem, TcpTestResult
+from blockchecks.engine.db_logger import Checkpoint
 
 
 pytestmark = pytest.mark.unit

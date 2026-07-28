@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 
-from engine.db_logger import StateDB
+from blockchecks.engine.db_logger import StateDB
 
 
 @dataclass

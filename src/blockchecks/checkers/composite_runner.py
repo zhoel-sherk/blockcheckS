@@ -12,8 +12,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from engine.async_runner import AsyncTestRunner, StrategyItem, TcpTestResult
-from engine.async_runner import _nfqws2_daemon as start_nfqws2
+from blockchecks.engine.async_runner import AsyncTestRunner, StrategyItem, TcpTestResult
+from blockchecks.engine.async_runner import _nfqws2_daemon as start_nfqws2
 from colorama import Fore, Style, init as colorama_init
 colorama_init(autoreset=True)
 
@@ -27,7 +27,7 @@ DOMAINS = [
     "discordapp.com", "discordcdn.com", "gateway.discord.gg",
 ]
 
-from engine.config import PYTHON_BIN as PYTHON
+from blockchecks.engine.config import PYTHON_BIN as PYTHON
 
 CHECK_CODE = """
 import json, time

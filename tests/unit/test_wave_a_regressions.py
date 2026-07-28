@@ -8,15 +8,15 @@ from unittest.mock import patch
 
 import pytest
 
-from engine import async_runner
-from engine.async_runner import (
+from blockchecks.engine import async_runner
+from blockchecks.engine.async_runner import (
     StrategyItem,
     TcpTestResult,
     _run_tcp_check,
 )
-from engine.config import PYTHON_BIN
-from engine.db_logger import Checkpoint, StateDB, matrix_fingerprint
-from engine.matrix_generator import MatrixGenerator
+from blockchecks.engine.config import PYTHON_BIN
+from blockchecks.engine.db_logger import Checkpoint, StateDB, matrix_fingerprint
+from blockchecks.engine.matrix_generator import MatrixGenerator
 
 
 pytestmark = pytest.mark.unit

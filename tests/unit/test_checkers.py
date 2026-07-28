@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from checkers.udp_voice import stun_probe
-from engine.config import PYTHON_BIN
+from blockchecks.checkers.udp_voice import stun_probe
+from blockchecks.engine.config import PYTHON_BIN
 
 
 pytestmark = pytest.mark.unit
@@ -27,8 +27,8 @@ def test_stun_txn_id_mismatch_rejected():
     sock = MagicMock()
     sock.recvfrom.return_value = (bad, ("1.2.3.4", 50006))
 
-    with patch("checkers.udp_voice.socket.socket", return_value=sock), \
-         patch("checkers.udp_voice.random.randint", return_value=1):
+    with patch("blockchecks.checkers.udp_voice.socket.socket", return_value=sock), \
+         patch("blockchecks.checkers.udp_voice.random.randint", return_value=1):
         ok, _, detail = stun_probe("1.2.3.4", 50006, timeout=0.2)
     assert ok is False
     assert "invalid" in detail
@@ -41,8 +41,8 @@ def test_stun_txn_id_match_accepted():
     sock = MagicMock()
     sock.recvfrom.return_value = (good, ("1.2.3.4", 50006))
 
-    with patch("checkers.udp_voice.socket.socket", return_value=sock), \
-         patch("checkers.udp_voice.random.randint", return_value=1):
+    with patch("blockchecks.checkers.udp_voice.socket.socket", return_value=sock), \
+         patch("blockchecks.checkers.udp_voice.random.randint", return_value=1):
         ok, latency, detail = stun_probe("1.2.3.4", 50006, timeout=0.2)
     assert ok is True
     assert "STUN" in detail

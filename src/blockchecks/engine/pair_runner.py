@@ -27,8 +27,8 @@ from typing import Optional
 from colorama import Fore, Style, init as colorama_init
 colorama_init(autoreset=True)
 
-from engine.pair_manager import DualNfqws2Manager
-from engine.db_logger import StateDB
+from blockchecks.engine.pair_manager import DualNfqws2Manager
+from blockchecks.engine.db_logger import StateDB
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT

@@ -8,8 +8,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from engine.firewall import Firewall
-from engine.nfqws2 import Nfqws2Manager
+from blockchecks.engine.firewall import Firewall
+from blockchecks.engine.nfqws2 import Nfqws2Manager
 
 
 @dataclass
@@ -215,7 +215,7 @@ class TestRunner:
         code = f"""
 import sys, json
 sys.path.insert(0, "{os.path.dirname(os.path.dirname(__file__))}")
-from checkers.udp_voice import stun_probe
+from blockchecks.checkers.udp_voice import stun_probe
 ok, lat, detail = stun_probe("{ip}", {port}, {timeout})
 print(json.dumps({{"success": ok, "latency_ms": round(lat, 1), "detail": detail}}))
 """

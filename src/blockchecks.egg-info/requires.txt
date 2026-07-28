@@ -1,0 +1,11 @@
+curl-cffi>=0.8.0
+colorama>=0.4.6
+aiosqlite>=0.20.0
+
+[dev]
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+[discovery]
+aiohttp-socks>=0.11.0
+aiohttp>=3.9

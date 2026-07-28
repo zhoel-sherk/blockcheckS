@@ -25,7 +25,7 @@ DNS_RANGE = (14000, 14148)
 VOICE_PORTS = [50000, 50001, 50002, 50003, 50004, 50005, 50006]
 
 # Cache settings
-CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
 CACHE_FILE = "bs_voice_cache.json"
 CACHE_TTL_SECONDS = 90 * 60  # 90 minutes
 
@@ -36,14 +36,14 @@ def _cache_path() -> str:
 
 def _get_root() -> str:
     """Project root directory."""
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _load_cache() -> Optional[dict]:
     """Load cached voice endpoints if not expired."""
     os.makedirs(os.path.dirname(_cache_path()), exist_ok=True)
     cache_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "logs", "bs_voice_cache.json"
     )
     if not os.path.exists(cache_file):
@@ -66,10 +66,10 @@ def _load_cache() -> Optional[dict]:
 def _save_cache(endpoints: list[dict]) -> None:
     """Save voice endpoints to cache."""
     os.makedirs(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs"
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs"
     ), exist_ok=True)
     cache_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "logs", "bs_voice_cache.json"
     )
     data = {"timestamp": time.time(), "endpoints": endpoints}

@@ -16,8 +16,8 @@ import subprocess
 import time
 from typing import Optional
 
-from checkers.voice_dns import discover_voice_endpoints as dns_discover
-from engine.config import (
+from blockchecks.checkers.voice_dns import discover_voice_endpoints as dns_discover
+from blockchecks.engine.config import (
     SING_BOX_BIN, SING_BOX_CONFIG, SOCKS5_PROXY,
     DPI_TESTER_SETTINGS, PYTHON_BIN,
 )

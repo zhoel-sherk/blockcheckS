@@ -10,7 +10,7 @@ import subprocess
 import time
 from typing import Optional
 
-from engine.config import NFQWS2_BIN, NFQUEUE_TCP as TCP_QNUM, NFQUEUE_UDP as UDP_QNUM
+from blockchecks.engine.config import NFQWS2_BIN, NFQUEUE_TCP as TCP_QNUM, NFQUEUE_UDP as UDP_QNUM
 
 
 class DualNfqws2Manager:

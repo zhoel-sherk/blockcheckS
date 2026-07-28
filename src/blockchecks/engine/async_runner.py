@@ -15,9 +15,9 @@ from typing import Optional
 from colorama import Fore, Style, init as colorama_init
 colorama_init(autoreset=True)
 
-from engine.db_logger import StateDB
-from engine.config import PYTHON_BIN, NFQWS2_BIN
-from engine.netns_pool import NetNsPool
+from blockchecks.engine.db_logger import StateDB
+from blockchecks.engine.config import PYTHON_BIN, NFQWS2_BIN
+from blockchecks.engine.netns_pool import NetNsPool
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -423,7 +423,7 @@ class AsyncTestRunner:
         TCP nfqws2 started once per pair, UDP nfqws2 per strategy.
         DB writes serialized via asyncio.Lock.
         """
-        from engine.db_logger import Checkpoint
+        from blockchecks.engine.db_logger import Checkpoint
 
         pairs: list[PairResult] = []
         db_lock = asyncio.Lock()

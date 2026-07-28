@@ -7,7 +7,7 @@ import os
 
 # ── Resolvable paths ─────────────────────────────
 
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def _env_or(key, default: str) -> str:
     return os.environ.get(key, default)

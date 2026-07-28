@@ -1,8 +1,7 @@
 """Tests for voice DNS discovery."""
 import os, sys, pytest, asyncio, time
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from checkers.voice_dns import discover_voice_endpoints
+from blockchecks.checkers.voice_dns import discover_voice_endpoints
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from engine.config import NFQWS2_BIN, LUA_INIT_SCRIPTS
+from blockchecks.engine.config import NFQWS2_BIN, LUA_INIT_SCRIPTS
 
 
 class Nfqws2Manager:

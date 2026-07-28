@@ -6,9 +6,9 @@ import signal
 
 import pytest
 
-from engine.config import NFQWS2_BIN, PYTHON_BIN
-from engine.firewall import Firewall
-from engine.nfqws2 import Nfqws2Manager
+from blockchecks.engine.config import NFQWS2_BIN, PYTHON_BIN
+from blockchecks.engine.firewall import Firewall
+from blockchecks.engine.nfqws2 import Nfqws2Manager
 
 
 pytestmark = pytest.mark.integration

@@ -6,7 +6,7 @@ import tempfile
 
 import pytest
 
-from engine.matrix_generator import (
+from blockchecks.engine.matrix_generator import (
     FakeTcpGenerator,
     HostfakeTcpGenerator,
     MatrixGenerator,

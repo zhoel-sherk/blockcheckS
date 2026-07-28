@@ -4,7 +4,7 @@ from __future__ import annotations
 import aiosqlite
 import pytest
 
-from engine.db_logger import Checkpoint, StateDB
+from blockchecks.engine.db_logger import Checkpoint, StateDB
 
 
 pytestmark = pytest.mark.unit
