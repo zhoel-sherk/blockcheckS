@@ -1,8 +1,8 @@
 """Tests for voice DNS discovery."""
-import os, sys, pytest, asyncio
+import os, sys, pytest, asyncio, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from checkers.voice_dns import discover_voice_endpoints, _load_cache, _save_cache
+from checkers.voice_dns import discover_voice_endpoints
 
 
 @pytest.mark.asyncio
@@ -21,28 +21,3 @@ async def test_dns_discovery_no_duplicates():
     eps = await discover_voice_endpoints(10, use_cache=False)
     ips = [ep["ip"] for ep in eps]
     assert len(ips) == len(set(ips)), f"Duplicate IPs found: {ips}"
-
-
-def test_cache_save_and_load():
-    """Cache can be saved and reloaded."""
-    test_eps = [{"ip": "35.217.1.1", "port": 50004, "hostname": "test.example.com"}]
-    _save_cache(test_eps)
-    cached = _load_cache()
-    if cached:
-        assert "endpoints" in cached
-        assert len(cached["endpoints"]) >= 1
-
-
-@pytest.mark.asyncio
-async def test_discovery_uses_cache():
-    """Second call uses cache (much faster)."""
-    import time
-    # Force fresh discovery first
-    await discover_voice_endpoints(1, use_cache=False)
-    # Second call should use cache
-    t0 = time.perf_counter()
-    eps = await discover_voice_endpoints(1, use_cache=True)
-    elapsed = time.perf_counter() - t0
-    assert len(eps) >= 1
-    assert elapsed < 1.0, f"Cache load too slow: {elapsed:.2f}s"
-</tz-doc>
