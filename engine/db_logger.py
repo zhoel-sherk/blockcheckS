@@ -85,6 +85,30 @@ class StateDB:
                 CREATE INDEX IF NOT EXISTS idx_tcp_status ON tcp_results(status);
                 CREATE INDEX IF NOT EXISTS idx_udp_status ON udp_results(status);
                 CREATE INDEX IF NOT EXISTS idx_pair_overall ON pair_results(overall);
+                CREATE VIEW IF NOT EXISTS v_working_tcp AS
+                SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
+                       t.content_valid, t.timestamp
+                FROM tcp_results t
+                JOIN strategies s ON t.strategy_id = s.id
+                WHERE t.status = 'PASS'
+                ORDER BY t.domain, t.latency_ms;
+                CREATE VIEW IF NOT EXISTS v_coverage AS
+                SELECT s.name AS strategy, s.proto,
+                       COUNT(DISTINCT t.domain) AS domains_passed,
+                       ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
+                FROM tcp_results t
+                JOIN strategies s ON t.strategy_id = s.id
+                WHERE t.status = 'PASS'
+                GROUP BY s.name, s.proto
+                HAVING domains_passed > 0
+                ORDER BY domains_passed DESC;
+                CREATE VIEW IF NOT EXISTS v_latest_run AS
+                SELECT domain, COUNT(*) AS total,
+                       SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) AS passed,
+                       MAX(timestamp) AS last_test
+                FROM tcp_results
+                GROUP BY domain
+                ORDER BY last_test DESC;
             """)
             await db.commit()
             await db.execute("PRAGMA journal_mode=WAL")
