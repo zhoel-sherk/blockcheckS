@@ -68,3 +68,16 @@ state.db                 SQLite: strategies, results, pairs, checkpoints
 4. **Sing-box auto-managed** — started inside netns for discovery, stopped after.
 5. **Token optional** — without token, `--full-voice` SKIPs with message. UDP probe on static IPs.
 6. **Colorama** output — green PASS, red FAIL, grey SKIP.
+
+### 📋 Phase 7 — QUIC/HTTP3 Testing (separate)
+- curl_cffi supports HTTP3 via quiche backend
+- `--http3-only` flag for QUIC transport tests
+- `--filter-udp=443 --filter-l7=quic` nfqws2 config
+- Blob: quic_initial (1200B) + fake:repeats=6
+- Implemented after TCP+UDP pair stabilization
+
+### 📋 Phase 8 — HTTP Port 80 Testing (separate)
+- `--filter-tcp=80 --filter-l7=http` nfqws2 config
+- Strategy types: http_hostcase, http_methodeol, http_domcase, http_unixeol, http_fake
+- Blob: fake_default_http (263B)
+- Lower priority — HTTP blocking is less common than TLS SNI blocking

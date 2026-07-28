@@ -160,11 +160,12 @@ class FakeTcpGenerator(StrategyGenerator):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         items = []
-        known_working = []
+        known_working = list(run_set or [])
 
-        if state_db and domain:
+        if state_db and domain and not known_working:
             known_working = await state_db.get_working_tcp(domain)
 
         # In-run set: gets updated with PASS labels during the scan
@@ -177,6 +178,8 @@ class FakeTcpGenerator(StrategyGenerator):
                     strat = f"fake{blob_part}:repeats={repeats}{fool_part}"
                     label = f"fake_{blob or 'none'}_r{repeats}_{fool or 'nofool'}"
                     items.append(StrategyItem(label=label, strategy=strat))
+                    if scan_level == "single":
+                        return items[:max_count]
                     if len(items) >= max_count:
                         return items[:max_count]
 
@@ -223,6 +226,8 @@ class HostfakeTcpGenerator(StrategyGenerator):
             strat = f"hostfakesplit:nofake2{fool_part}:repeats=1"
             label = f"hf_nofake2_{fool or 'nofool'}"
             items.append(StrategyItem(label=label, strategy=strat))
+            if scan_level == "single":
+                return items[:max_count]
 
             # fast: skip expansions only if base PASSES
             if scan_level == "fast":
@@ -303,7 +308,8 @@ class FakeSplitComboGenerator(StrategyGenerator):
                         state_db: StateDB = None,
                         domain: str = "",
                         scan_level: str = "fast",
-                        max_count: int = 100) -> list[StrategyItem]:
+                        max_count: int = 100,
+                        run_set: set = None) -> list[StrategyItem]:
         items = []
         for r in [6, 3]:
             for fool in ["", "tcp_ts=-1000"]:
@@ -387,6 +393,7 @@ class MatrixGenerator:
                             state_db: StateDB = None,
                             protocol: str = "tls12",
                             user_matrix: str = "",
+                            run_set: set = None,
                             ) -> list[StrategyItem]:
         """Generate TCP strategies from specified sources."""
         if not sources:
@@ -406,6 +413,7 @@ class MatrixGenerator:
                 protocol=protocol, state_db=state_db,
                 domain=domain, scan_level=scan_level,
                 max_count=max_count // len(sources) or max_count,
+                run_set=run_set,
             )
             all_items.extend(items)
 

@@ -131,12 +131,12 @@ async def run(config_path: str, domains: list[str] = None,
 
     finally:
         await runner.pool.release(ns_name)
+        try:
+            await runner.stop()
+        except Exception:
+            pass
 
     passed = sum(1 for r in results if r.success)
     elapsed = time.perf_counter() - t0
     print(f"\n  {GREEN}{passed}/{len(results)} PASS{RESET} in {elapsed:.0f}s")
-    try:
-        await runner.stop()
-    except Exception:
-        pass
     return 0 if passed > 0 else 1

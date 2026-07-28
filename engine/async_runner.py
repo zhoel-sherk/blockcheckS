@@ -408,6 +408,8 @@ class AsyncTestRunner:
                                 voice_ip: str, voice_port: int,
                                 udp_timeout: float = 3.0,
                                 udp_bypass: bool = False,
+                                resume_from: tuple = None,
+                                full_voice: bool = False,
                                 ) -> list[PairResult]:
         """Parallel UDP probes for each PASS TCP × each UDP strategy.
 
@@ -429,11 +431,26 @@ class AsyncTestRunner:
             return pairs
 
         total = len(working) * len(udp_strategies)
+
+        # Resume: skip completed pairs based on checkpoint labels
+        resume_tcp_label = None
+        resume_udp_label = None
+        if resume_from and len(resume_from) >= 6:
+            resume_tcp_label = resume_from[5] if len(resume_from) > 5 else None
+            resume_udp_label = resume_from[4] if len(resume_from) > 4 else None
+            if resume_tcp_label:
+                print(f"  {YELLOW}Resuming from {resume_tcp_label}+{resume_udp_label}{RESET}")
         print(f"  {CYAN}Pair matrix: {len(working)} TCP × {len(udp_strategies)} UDP "
               f"= {total} pairs, {self.pool.size} parallel{RESET}")
 
         async def run_pair(tcp_i: int, tcp_r: TcpTestResult,
                             udp_s: StrategyItem, pair_idx: int):
+            # Resume skip
+            if resume_tcp_label and resume_udp_label:
+                if tcp_r.item.label < resume_tcp_label:
+                    return
+                if tcp_r.item.label == resume_tcp_label and udp_s.label <= resume_udp_label:
+                    return
             async with pair_sem:
                 ns_name = await self.pool.acquire()
                 try:
@@ -470,8 +487,9 @@ class AsyncTestRunner:
                                  "PARTIAL": f"{YELLOW}PARTIAL{RESET}",
                                  "FAIL": f"{RED}FAIL{RESET}"}[pair.overall]
                     udp_tag = f"{GREEN}{udp_ms:.0f}ms{RESET}" if udp_ok else f"{RED}timeout{RESET}"
+                    voice_tag = " [voice]" if full_voice else ""
                     print(f"  [{pair_tag}] {tcp_r.item.label[:22]:22s} "
-                          f"+ {udp_s.label[:22]:22s}  udp={udp_tag}")
+                          f"+ {udp_s.label[:22]:22s}  udp={udp_tag}{voice_tag}")
 
                     # DB writes serialized via lock
                     if self.db:

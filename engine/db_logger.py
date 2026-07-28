@@ -31,10 +31,11 @@ class StateDB:
             await db.executescript("""
                 CREATE TABLE IF NOT EXISTS strategies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
                     proto TEXT NOT NULL DEFAULT 'tcp',  -- 'tcp' or 'udp'
                     config_path TEXT NOT NULL,
-                    first_seen TEXT NOT NULL DEFAULT ''
+                    first_seen TEXT NOT NULL DEFAULT '',
+                    UNIQUE(name, proto)
                 );
                 CREATE TABLE IF NOT EXISTS tcp_results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,7 +97,7 @@ class StateDB:
         """Insert or get strategy ID."""
         async with aiosqlite.connect(self.db_path) as db:
             row = await db.execute(
-                "SELECT id FROM strategies WHERE name=?", (name,)
+                "SELECT id FROM strategies WHERE name=? AND proto=?", (name, proto)
             )
             existing = await row.fetchone()
             if existing:

@@ -159,6 +159,7 @@ async def cmd_pair(args):
         # Generate or load strategies
         do_generate = getattr(args, 'generate', False)
         user_matrix = getattr(args, 'user_matrix', '') or ""
+        run_set: set = set()  # in-run PASS tracking
         if do_generate or user_matrix:
             scanner = MatrixGenerator()
             tcp_src = getattr(args, 'tcp_sources', '') or "custom,configs"
@@ -172,6 +173,7 @@ async def cmd_pair(args):
                 scan_level=getattr(args, 'scan_level', 'fast'),
                 max_count=getattr(args, 'max', 100),
                 state_db=db, user_matrix=user_matrix,
+                run_set=run_set,
             )
             udp_items = await scanner.generate_udp(
                 sources=udp_sources, domain=args.domain,
@@ -232,6 +234,8 @@ async def cmd_pair(args):
                 voice_ip, voice_port,
                 udp_timeout=args.udp_timeout,
                 udp_bypass=args.udp_bypass,
+                resume_from=resume_from,
+                full_voice=full_voice,
             )
             AsyncTestRunner.print_matrix(pairs)
 
