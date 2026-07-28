@@ -158,13 +158,13 @@ async def cmd_pair(args):
 
         # Generate or load strategies
         do_generate = getattr(args, 'generate', False)
-        if do_generate:
+        user_matrix = getattr(args, 'user_matrix', '') or ""
+        if do_generate or user_matrix:
             scanner = MatrixGenerator()
             tcp_src = getattr(args, 'tcp_sources', '') or "custom,configs"
             udp_src = getattr(args, 'udp_sources', '') or "custom"
             tcp_sources = tcp_src.split(",")
             udp_sources = udp_src.split(",")
-            user_matrix = getattr(args, 'user_matrix', '') or ""
 
             print(f"\n  {CYAN}Generating strategies...{RESET}")
             tcp_items = await scanner.generate_tcp(
@@ -212,6 +212,8 @@ async def cmd_pair(args):
             resume_from = await db.latest_checkpoint()
             if resume_from:
                 print(f"  {YELLOW}Resuming: tcp={resume_from[0]} udp={resume_from[1]}{RESET}")
+            else:
+                print(f"  {YELLOW}No checkpoint found — starting fresh{RESET}")
 
         t0 = time.perf_counter()
 
@@ -356,11 +358,14 @@ def main():
             pass
         return asyncio.run(cmd_pair(args))
     elif args.command == "pair":
-        # Forward custom --generate values to tcp_sources
         if args.generate and args.generate != "custom,configs":
             args.tcp_sources = args.generate
-        args.generate = bool(args.generate) or bool(getattr(args, 'tcp_sources', '') != "custom,configs"
-                                                     or getattr(args, 'udp_sources', '') != "custom")
+        # Single config flags (-c/-u) force non-generate path
+        if getattr(args, 'config', None) or getattr(args, 'udp_config', None):
+            args.generate = False
+        else:
+            args.generate = bool(args.generate) or bool(getattr(args, 'tcp_sources', '') != "custom,configs"
+                                                         or getattr(args, 'udp_sources', '') != "custom")
         return asyncio.run(cmd_pair(args))
     elif args.command == "composite":
         from checkers.composite_runner import run as run_composite

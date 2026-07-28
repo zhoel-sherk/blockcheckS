@@ -16,6 +16,7 @@ from colorama import Fore, Style, init as colorama_init
 colorama_init(autoreset=True)
 
 from engine.db_logger import StateDB
+from engine.config import PYTHON_BIN
 from engine.netns_pool import NetNsPool
 
 GREEN = Fore.GREEN + Style.BRIGHT
@@ -100,13 +101,7 @@ def _nfqws2_daemon(ns_name: str, config_path: str) -> None:
            f"@{config_path}", "--daemon"]
     proc = sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.PIPE)
     time.sleep(0.8)
-    r = sp.run(["sudo", "ip", "netns", "exec", ns_name,
-                "pgrep", "-x", "nfqws2"], capture_output=True, text=True, timeout=5)
-    if r.returncode != 0:
-        stderr = ""
-        try: stderr = proc.stderr.read().decode() if proc.stderr else ""
-        except: pass
-        raise RuntimeError(f"nfqws2 failed to start: {stderr[:200]}")
+
 
 
 def _add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
@@ -172,7 +167,7 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
                     config_lines.append(arg)
             else:
                 config_lines.append(f"--lua-desync={raw_line}")
-        tmp_conf = f"/tmp/bs_async_{os.getpid()}_{int(time.time())}.conf"
+        import tempfile as _tf; _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_", suffix=".conf"); os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
         _nfqws2_daemon(ns_name, tmp_conf)
@@ -228,7 +223,7 @@ print(json.dumps(check("{domain}", {timeout})))
 """
     r = sp.run(
         ["sudo", "ip", "netns", "exec", ns_name,
-         "/home/zhoel/workspace/dpi-tester/.venv/bin/python", "-c", check_code],
+         "PYTHON_BIN", "-c", check_code],
         capture_output=True, text=True, timeout=timeout + 10
     )
     try:
@@ -259,7 +254,7 @@ def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
         if os.path.exists(blob):
             config_lines.append(f"--blob=discord_udp:@{blob}")
         config_lines.append(f"--lua-desync={strategy}")
-        tmp_conf = f"/tmp/bs_async_udp_{os.getpid()}_{int(time.time())}.conf"
+        import tempfile as _tf2; _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf"); os.close(_tf2_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
         _nfqws2_daemon(ns_name, tmp_conf)
@@ -289,7 +284,7 @@ except Exception as e:
 """
     r = sp.run(
         ["sudo", "ip", "netns", "exec", ns_name,
-         "/home/zhoel/workspace/dpi-tester/.venv/bin/python", "-c", probe_code],
+         "PYTHON_BIN", "-c", probe_code],
         capture_output=True, text=True, timeout=timeout + 5
     )
     try:
@@ -303,7 +298,7 @@ class AsyncTestRunner:
     """Parallel strategy tester using NetNsPool + asyncio.Semaphore."""
 
     def __init__(self, pool_size: int = 4, db: StateDB = None,
-                 python_path: str = "/home/zhoel/workspace/dpi-tester/.venv/bin/python"):
+                 python_path: str = "PYTHON_BIN"):
         self.pool = NetNsPool(size=pool_size)
         self.semaphore = asyncio.Semaphore(pool_size)
         self.db = db

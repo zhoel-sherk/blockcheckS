@@ -352,7 +352,6 @@ except Exception as e:
                         tcp_i, udp_i,
                         f"{tcp_name}+{udp_name}",
                         tcp_label=tcp_name, udp_label=udp_name,
-                        tcp_label=tcp_name, udp_label=udp_name
                     )
 
             finally:

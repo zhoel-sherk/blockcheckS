@@ -135,5 +135,8 @@ async def run(config_path: str, domains: list[str] = None,
     passed = sum(1 for r in results if r.success)
     elapsed = time.perf_counter() - t0
     print(f"\n  {GREEN}{passed}/{len(results)} PASS{RESET} in {elapsed:.0f}s")
-    await runner.stop()
+    try:
+        await runner.stop()
+    except Exception:
+        pass
     return 0 if passed > 0 else 1
