@@ -137,7 +137,7 @@ FOOLINGS_TCP = [
     "tcp_md5",
     "tcp_ack=-66000:tcp_ts_up",
 ]
-REPEATS_VALUES = [6, 3, 1, 10, 12]  # 6 first — known working on Fryazino
+REPEATS_VALUES = [6, 3, 1, 8, 10, 11, 12, 2]  # 6,8 working on Fryazino; 2,11 from Flowseal
 TTL_VALUES = [1, 5, 7, 12]
 AUTOTTL_RANGES = ["-1,3-20", "-2,5-15", "-3,7-12"]
 
@@ -485,7 +485,7 @@ ALL_FOOLINGS_UDP = ["badsum"]
 ALL_FOOLINGS_IPV6 = ["ip6_hopbyhop"]  # минимально, остальные 4 — низкий приоритет
 
 # Extended repeats, TTL
-ALL_REPEATS = [6, 3, 1, 8, 10, 12, 20]  # 100, 260 — only for tcpseg
+ALL_REPEATS = [6, 3, 1, 8, 10, 11, 12, 2, 5, 7, 9, 15, 20]  # 100,260 only for tcpseg
 ALL_TTL = [1, 5, 7, 12]
 ALL_AUTOTTL = ["-1,3-20", "-2,5-15", "-3,7-12", "-4,3-20", "-5,5-15"]
 
@@ -531,7 +531,7 @@ class StandardGenerator(StrategyGenerator):
         # 25-fake.sh: fake + blob + fooling + TTL + TLS mod
         "fake": {
             "blobs": ALL_BLOBS_TCP,
-            "repeats": ALL_REPEATS[:6],  # skip 100,260 (tcpseg only)
+            "repeats": [r for r in ALL_REPEATS if r not in (100, 260)],  # skip tcpseg-only values
             "foolings": ALL_FOOLINGS_TCP,
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
@@ -546,6 +546,7 @@ class StandardGenerator(StrategyGenerator):
         },
         # 30-faked.sh + 20-multi.sh: multisplit/fakedsplit positions
         "multisplit": {
+            "repeats": [1, 6, 11],
             "positions": ALL_SPLIT_POSITIONS,
             "foolings": ALL_FOOLINGS_TCP[:4],  # no tcp_seq/tcp_flags for split
             "seqovl": ALL_SEQOVL,
@@ -574,13 +575,13 @@ class StandardGenerator(StrategyGenerator):
         "multi_fake": {
             "blob_pairs": [("stun","max_ru"),("stun","google"),
                            ("max_ru","google"),("stun","4pda")],
-            "repeats": [6, 3, 8, 12],
+            "repeats": [6, 3, 8, 12, 11, 2],
             "foolings": ["tcp_ts=-1000", "tcp_md5"],
         },
         # Fake + hostfakesplit combo (60-fake-hostfake.sh)
         "fake_hostfake": {
             "blobs": ALL_BLOBS_TCP,
-            "repeats": [6, 3, 8],
+            "repeats": [6, 3, 8, 11, 2],
             "foolings": ["tcp_ts=-1000", "tcp_md5"],
             "hf_variants": ["base", "disorder"],
         },
@@ -588,14 +589,14 @@ class StandardGenerator(StrategyGenerator):
         "udp_discord": {
             "port_ranges": ["19294-19344,50000-50100"],
             "blobs": ["quic_initial_dbankcloud_ru", "discord_udp"],
-            "repeats": [6, 12, 3],
+            "repeats": [6, 12, 3, 2],
             "out_range": [None, "n1-<n3", "n1-<n4"],
             "dual_blob": [False, True],  # ALT12 dual-blob pattern
         },
         "udp_quic": {
             "port_ranges": ["443"],
             "blobs": ["quic_initial_www_google_com", "quic_initial_dbankcloud_ru"],
-            "repeats": [6, 11],
+            "repeats": [1, 2, 5, 6, 10, 11, 20],  # blockcheck.sh 90-quic.sh spectrum
         },
         "udp_game": {
             "port_ranges": ["1024-65535"],
@@ -710,7 +711,8 @@ class StandardGenerator(StrategyGenerator):
                         self._add(items, seen, f"{label}_autottl{ttl}", f"{core}:ip_autottl={ttl}")
 
         elif stype == "multisplit":
-            # Limit: most useful pos,seqovl pairs (not full Cartesian — 10K is too many)
+            # Limit: most useful pos,seqovl pairs
+            repeats_list = family.get("repeats", [1])
             pos_seqovl_pairs = [
                 ("1", 1), ("2", 652), ("midsld", 1),
                 ("sniext+1", 679), ("1,midsld", 1),
