@@ -135,6 +135,8 @@ class Nfqws2Manager:
                 with os.fdopen(fd, "w") as f:
                     for d in hostlist:
                         f.write(f"{d}\n")
+                # nfqws2 drops UID after init and re-opens hostlist — must be world-readable
+                os.chmod(hostlist_path, 0o644)
                 lines.append(f"--hostlist={hostlist_path}")
                 self._temp_files.append(hostlist_path)
             except Exception:
