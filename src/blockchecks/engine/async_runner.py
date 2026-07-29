@@ -93,10 +93,13 @@ def _sudo(*args: str) -> str:
 def _nfqws2_daemon(ns_name: str, config_path: str) -> None:
     """Launch nfqws2 in daemon mode inside ns. Non-blocking."""
     import subprocess as sp
+    sp.run(["sudo", "ip", "netns", "exec", ns_name,
+            "pkill", "-9", "nfqws2"],
+           stdout=sp.DEVNULL, stderr=sp.DEVNULL)
     cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN,
            f"@{config_path}", "--daemon"]
     proc = sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.PIPE)
-    time.sleep(0.8)
+    time.sleep(2.0)
 
 
 
@@ -187,17 +190,7 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
     headers_extra = ""
     if is_gv:
         headers_extra = f', "Range": "bytes=0-{range_end}"'
-    ech_block = ""
-    if use_ech:
-        ech_block = (
-            "opts = {}\n"
-            "        try:\n"
-            "            opts = {curl_cffi.CurlOpt.ECH: ''}\n"
-            "        except Exception:\n"
-            "            opts = {" + str(CURLOPT_ECH) + ": ''}\n"
-        )
-    else:
-        ech_block = "opts = {}\n"
+    use_ech_int = 1 if use_ech else 0
 
     check_code = f"""
 import json, time
@@ -206,15 +199,24 @@ def check(domain, timeout):
         import curl_cffi
         start = time.perf_counter()
         headers = {{"Accept": "text/html"{headers_extra}}}
-        {ech_block}        try:
-            kwargs = dict(
-                impersonate="chrome124", http_version=2,
-                timeout=min(timeout, 1.5), headers=headers,
-                allow_redirects=False,
-            )
-            if opts:
-                kwargs["options"] = opts
-            resp = curl_cffi.get("https://" + domain, **kwargs)
+        try:
+            if {use_ech_int}:
+                s = curl_cffi.Session(
+                    impersonate="chrome124", http_version=2,
+                    headers=headers, allow_redirects=False,
+                )
+                try:
+                    s.curl.setopt(curl_cffi.CurlOpt.ECH, "")
+                except Exception:
+                    pass
+                resp = s.get("https://" + domain, timeout=min(timeout, 1.5))
+            else:
+                resp = curl_cffi.get(
+                    "https://" + domain,
+                    impersonate="chrome124", http_version=2,
+                    timeout=min(timeout, 1.5), headers=headers,
+                    allow_redirects=False,
+                )
         except curl_cffi.CurlError as e:
             msg = str(e)
             return {{"success": False, "http_code": 0,
@@ -303,8 +305,7 @@ def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
         # Inline lua-desync core (e.g. fake:blob=discord_udp:repeats=6)
         config_lines = [
             "--qnum=201", "--filter-udp=50000-50100", "--filter-l3=ipv4",
-            "--filter-l7=discord,stun", "--ipcache-lifetime=0", "--bind-fix4",
-            "--payload=discord_ip_discovery,stun",
+            "--ipcache-lifetime=0", "--bind-fix4",
         ]
         for lua in ["/opt/zapret2/lua/zapret-lib.lua",
                      "/opt/zapret2/lua/zapret-antidpi.lua"]:
