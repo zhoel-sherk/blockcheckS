@@ -25,15 +25,22 @@ class Nfqws2Manager:
         self._pid: Optional[int] = None
         self._temp_files: list[str] = []
 
-    def _launch(self, config_arg: str) -> None:
-        """Start nfqws2 in foreground, verify it's alive. Stops any prior proc."""
-        self.stop()
+    def _launch(self, config_arg: str, *, stop_first: bool = True) -> None:
+        """Start nfqws2 in foreground, verify it's alive.
+
+        stop_first=True clears any prior process/temps. Callers that just
+        created a temp config and appended it to ``_temp_files`` must pass
+        stop_first=False (and call ``stop()`` themselves beforehand),
+        otherwise ``stop()`` deletes the config before nfqws2 can read it.
+        """
+        if stop_first:
+            self.stop()
 
         args = [NFQWS2_BIN, config_arg]
         if self.ns_name:
-            args = ["sudo", "ip", "netns", "exec", self.ns_name] + args
+            args = ["sudo", "-n", "ip", "netns", "exec", self.ns_name] + args
         else:
-            args = ["sudo"] + args
+            args = ["sudo", "-n"] + args
 
         self._proc = subprocess.Popen(
             args,
@@ -61,6 +68,7 @@ class Nfqws2Manager:
               blobs: Optional[list[str]] = None,
               extra_lua_desync: Optional[list[str]] = None) -> None:
         """Start nfqws2 with inline strategy (backward compat)."""
+        self.stop()  # clear prior proc/temps before creating a new conf
         self._qnum = qnum
         lines = [
             f"--qnum={qnum}",
@@ -107,7 +115,7 @@ class Nfqws2Manager:
                 f.write("\n".join(lines))
             os.chmod(config_path, 0o644)
             self._temp_files.append(config_path)
-            self._launch(f"@{config_path}")
+            self._launch(f"@{config_path}", stop_first=False)
         except Exception:
             try:
                 os.unlink(config_path)
