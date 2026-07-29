@@ -584,6 +584,25 @@ class StandardGenerator(StrategyGenerator):
             "foolings": ["tcp_ts=-1000", "tcp_md5"],
             "hf_variants": ["base", "disorder"],
         },
+        # ── Flowseal UDP families (full nfqws2 inline configs) ──
+        "udp_discord": {
+            "port_ranges": ["19294-19344,50000-50100"],
+            "blobs": ["quic_initial_dbankcloud_ru", "discord_udp"],
+            "repeats": [6, 12, 3],
+            "out_range": [None, "n1-<n3", "n1-<n4"],
+            "dual_blob": [False, True],  # ALT12 dual-blob pattern
+        },
+        "udp_quic": {
+            "port_ranges": ["443"],
+            "blobs": ["quic_initial_www_google_com", "quic_initial_dbankcloud_ru"],
+            "repeats": [6, 11],
+        },
+        "udp_game": {
+            "port_ranges": ["1024-65535"],
+            "blobs": ["quic_initial_dbankcloud_ru"],
+            "repeats": [10, 12, 14],
+            "out_range": [None, "n1-<n3", "n1-<n4", "n1-<n5"],
+        },
     }
 
     def __init__(self, strategy_types: list[str] | None = None):
@@ -743,6 +762,53 @@ class StandardGenerator(StrategyGenerator):
                         strat = (f"fake:blob={b1}:repeats={r}{f}\n"
                                  f"fake:blob={b2}:repeats={r}{f}")
                         self._add(items, seen, f"std_multi_{b1}+{b2}_r{r}_{fool or 'nofool'}", strat)
+
+        elif stype == "udp_discord":
+            for ports in family["port_ranges"]:
+                for blob_name in family["blobs"]:
+                    for r in family["repeats"]:
+                        for dual in family["dual_blob"]:
+                            if dual:
+                                # ALT12 dual-blob pattern: stun + dbankcloud
+                                clue = f"--filter-udp={ports} --filter-l7=discord,stun "
+                                clue += f"--blob=STUN:@/opt/zapret2/blobs/stun.bin "
+                                clue += f"--blob=DKCLOUD:@/opt/zapret2/blobs/quic_initial_dbankcloud_ru.bin "
+                                clue += f"--payload=discord_ip_discovery,stun "
+                                clue += f"--lua-desync=fake:blob=STUN:repeats={r//2} "
+                                clue += f"--lua-desync=fake:blob=DKCLOUD:repeats={r//2}"
+                                for orng in family["out_range"]:
+                                    s = clue + (f" --out-range={orng}" if orng else "")
+                                    self._add(items, seen, f"std_udp_discord_dual_r{r}_{orng or 'no'}", s)
+                            else:
+                                clue = f"--filter-udp={ports} --filter-l7=discord,stun "
+                                clue += f"--blob=DISCORD:@/opt/zapret2/blobs/{blob_name}.bin "
+                                clue += f"--payload=discord_ip_discovery,stun "
+                                clue += f"--lua-desync=fake:blob=DISCORD:repeats={r}"
+                                for orng in family["out_range"]:
+                                    s = clue + (f" --out-range={orng}" if orng else "")
+                                    self._add(items, seen, f"std_udp_d_{blob_name}_r{r}_{orng or 'no'}", s)
+
+        elif stype == "udp_quic":
+            for ports in family["port_ranges"]:
+                for blob_name in family["blobs"]:
+                    for r in family["repeats"]:
+                        s = (f"--filter-udp={ports} "
+                             f"--blob=QUIC:@/opt/zapret2/blobs/{blob_name}.bin "
+                             f"--payload=quic_initial "
+                             f"--lua-desync=fake:blob=QUIC:repeats={r}")
+                        self._add(items, seen, f"std_udp_quic_{blob_name}_r{r}", s)
+
+        elif stype == "udp_game":
+            for ports in family["port_ranges"]:
+                for blob_name in family["blobs"]:
+                    for r in family["repeats"]:
+                        for orng in family["out_range"]:
+                            s = (f"--filter-udp={ports} "
+                                 f"--blob=GAME:@/opt/zapret2/blobs/{blob_name}.bin "
+                                 f"--payload=unknown "
+                                 f"--lua-desync=fake:blob=GAME:repeats={r}" +
+                                 (f" --out-range={orng}" if orng else ""))
+                            self._add(items, seen, f"std_udp_game_r{r}_{orng or 'no'}", s)
 
         elif stype == "fake_hostfake":
             for blob_name in family["blobs"]:
