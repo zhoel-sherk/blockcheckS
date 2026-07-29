@@ -4,6 +4,7 @@ Uses BLOCKCHECKS_* env vars for portable paths. Falls back to sensible defaults.
 """
 
 import os
+import time
 from typing import Optional
 
 # ── Resolvable paths ─────────────────────────────
@@ -107,7 +108,9 @@ def nfqws2_debug_conf_line(tag: str = "") -> tuple[Optional[str], Optional[str]]
     if v.lower() in ("1", "true", "on", "yes"):
         os.makedirs(LOGS_DIR, exist_ok=True)
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (tag or "run"))[:40]
-        path = os.path.join(LOGS_DIR, f"nfqws2_{safe}_{os.getpid()}.log")
+        path = os.path.join(
+            LOGS_DIR, f"nfqws2_{safe}_{os.getpid()}_{int(time.time()*1000)%1000000}.log"
+        )
         return f"--debug=@{path}", path
     if v.lower() == "syslog":
         return "--debug=syslog", None
