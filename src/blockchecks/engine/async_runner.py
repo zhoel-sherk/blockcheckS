@@ -43,6 +43,8 @@ class TcpTestResult:
     latency_ms: float = 0
     content_length: int = 0
     content_valid: bool = True
+    throttled: bool = False
+    read_rate_bps: float = 0
     error: str = ""
 
 
@@ -334,6 +336,8 @@ class AsyncTestRunner:
                 result.latency_ms = data.get("latency_ms", 0)
                 result.content_length = data.get("content_len", 0)
                 result.content_valid = data.get("content_ok", True)
+                result.throttled = data.get("throttled", False)
+                result.read_rate_bps = data.get("read_rate_bps", 0)
                 result.error = data.get("error", "") or ""
 
                 if self.db:

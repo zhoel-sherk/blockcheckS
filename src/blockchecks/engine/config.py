@@ -81,3 +81,8 @@ MIN_REDIRECT_LENGTH = 10    # bytes — redirects have tiny bodies, don't fail t
 # ── googlevideo.com CDN testing ──────────────────
 # Range request size — just above 16KB TSPU buffer threshold
 GOOGLEVIDEO_RANGE_SIZE = 17408  # 17KB, bytes=0-17407
+
+# ── ECH (Encrypted Client Hello) ──────────────────
+# Disable ECH via curl_cffi.CurlOpt.ECH = 10325
+# Forces plaintext SNI in ClientHello — testable by standard DPI strategies
+CURLOPT_ECH = 10325

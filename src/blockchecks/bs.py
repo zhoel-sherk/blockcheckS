@@ -369,6 +369,7 @@ def main():
                       default="", help="Use matrix generator (sources: custom,configs,fake,faked,...)")
     scan.add_argument("--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)")
     scan.add_argument("-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})")
+    scan.add_argument("--disable-ech", action="store_true", help="Disable Encrypted Client Hello (force plaintext SNI)")
     scan.add_argument("--list-presets", action="store_true", help="List available presets and exit")
     scan.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"], help="TLS protocol version to test")
     scan.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
@@ -405,6 +406,7 @@ def main():
     pair.add_argument("--udp-sources", default="custom",
                       help="UDP sources: custom,configs")
     pair.add_argument("--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)")
+    pair.add_argument("--disable-ech", action="store_true", help="Disable Encrypted Client Hello (force plaintext SNI)")
     pair.add_argument("--list-presets", action="store_true", help="List available presets and exit")
     pair.add_argument("-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})")
     pair.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"], help="TLS protocol version to test")
