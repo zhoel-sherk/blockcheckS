@@ -32,6 +32,17 @@ bs scan -d discord.com -M blockcheckS-best     # Our best strategies
 # unknown -M name → exit code 1
 ```
 
+## Voice discover (pair / udp)
+
+```bash
+# No VPN: local DNS finland* + Maks-gaming IP list + STUN alive filter
+bs pair -d discord.com --generate --discover-dns 5
+# VPN/gateway path (sing-box):
+bs pair -d discord.com --generate --auto-discover 5
+# Do not combine --discover-dns and --auto-discover (mutually exclusive).
+# Archived third-party lists (GhostRooter, etc.) are not used.
+```
+
 ## Adding your own
 
 ```bash

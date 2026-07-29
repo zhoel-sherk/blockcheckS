@@ -3,6 +3,9 @@
 Resolves finland{N}.discord.gg to GCP backend IPs (35.217.x.x).
 No Discord token or gateway connection needed.
 
+Also seeds candidates from Maks-gaming discord-servers (daily bot lists)
+and filters with STUN liveness via discover_dns_alive().
+
 Range: N=14000-14147 → ~148 unique IPs, all GCP Hamina.
 Ports: UDP 50000-50006 confirmed open on all GCP backends.
 
@@ -15,6 +18,8 @@ import os
 import random
 import socket
 import time
+import urllib.error
+import urllib.request
 from typing import Optional
 
 from blockchecks.engine.config import PROJECT_DIR
@@ -25,10 +30,18 @@ DNS_RANGE = (14000, 14148)
 # Typical voice UDP ports
 VOICE_PORTS = [50000, 50001, 50002, 50003, 50004, 50005, 50006]
 
+# Maks-gaming discord-servers (daily GitHub Actions refresh)
+MAKS_IP_LIST_URL = (
+    "https://raw.githubusercontent.com/Maks-gaming/discord-servers/main"
+    "/regions/{region}/{region}-voice-ip-list.txt"
+)
+
 # Cache settings — under project logs/
 CACHE_DIR = os.path.join(PROJECT_DIR, "logs")
 CACHE_FILE = "bs_voice_cache.json"
 CACHE_TTL_SECONDS = 90 * 60  # 90 minutes
+
+STUN_PROBE_CONCURRENCY = 8
 
 
 def _cache_file() -> str:
@@ -150,3 +163,161 @@ async def discover_voice_endpoints(count: int = 5,
 
     print(f"[voice-dns] Discovered {len(endpoints[:count])} endpoints")
     return endpoints[:count]
+
+
+def check_discover_mutex(discover_dns, auto_discover) -> Optional[str]:
+    """Return error message if both discover flags are set, else None."""
+    dns_on = discover_dns is not None and int(discover_dns) > 0
+    auto_on = auto_discover is not None and int(auto_discover) > 0
+    if dns_on and auto_on:
+        return (
+            "ERROR: --discover-dns and --auto-discover are mutually exclusive "
+            "(dns-alive vs VPN/gateway path)"
+        )
+    return None
+
+
+def parse_maks_ip_list(text: str) -> list[str]:
+    """Parse one-IP-per-line text from Maks-gaming voice ip lists."""
+    ips: list[str] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(".")
+        if len(parts) != 4:
+            continue
+        try:
+            if not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+                continue
+        except ValueError:
+            continue
+        if line not in seen:
+            seen.add(line)
+            ips.append(line)
+    return ips
+
+
+def fetch_maks_voice_ips(region: str = "finland",
+                         timeout: float = 5.0) -> list[str]:
+    """Fetch voice IPs from Maks-gaming discord-servers. Soft-fail → []."""
+    url = MAKS_IP_LIST_URL.format(region=region)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "blockcheckS"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+        ips = parse_maks_ip_list(text)
+        print(f"[voice-dns] Maks-gaming ({region}): {len(ips)} IPs")
+        return ips
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        print(f"[voice-dns] Maks-gaming fetch failed (continuing with DNS): {e}")
+        return []
+
+
+async def discover_dns_alive(
+    count: int = 5,
+    *,
+    candidates: int = 64,
+    stun_timeout: float = 1.0,
+    use_cache: bool = True,
+    use_maks: bool = True,
+    region: str = "finland",
+) -> list[dict]:
+    """Discover voice endpoints via DNS + Maks seed, filtered by STUN alive.
+
+    No VPN/sing-box. Returns only endpoints that answer STUN, or [].
+    Each dict: ip, port, hostname, source (dns-alive|maks-alive|cache-alive), stun_ms.
+    """
+    from blockchecks.checkers.udp_voice import stun_probe
+
+    # ip -> metadata for merge (first source wins for priority order)
+    meta: dict[str, dict] = {}
+    dns_seed = 0
+    maks_seed = 0
+
+    def _add(ip: str, *, hostname: str, source: str, port: Optional[int] = None) -> None:
+        if not ip or ip in meta:
+            return
+        meta[ip] = {
+            "ip": ip,
+            "port": port if port is not None else random.choice(VOICE_PORTS),
+            "hostname": hostname,
+            "source": source,
+        }
+
+    # 1) Prefer previously-alive cache entries first
+    if use_cache:
+        cached = _load_cache()
+        if cached:
+            for ep in cached.get("endpoints", []):
+                ip = ep.get("ip", "")
+                if not ip:
+                    continue
+                _add(
+                    ip,
+                    hostname=ep.get("hostname", ""),
+                    source="cache-alive",
+                    port=ep.get("port"),
+                )
+
+    # 2) DNS seed
+    print(
+        f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg "
+        f"range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}..."
+    )
+    ip_map = await resolve_finland_range()
+    dns_ips = list(ip_map.keys())
+    random.shuffle(dns_ips)
+    for ip in dns_ips:
+        before = len(meta)
+        _add(ip, hostname=ip_map[ip][0], source="dns-alive")
+        if len(meta) > before:
+            dns_seed += 1
+
+    # 3) Maks-gaming seed
+    if use_maks:
+        maks_ips = await asyncio.to_thread(fetch_maks_voice_ips, region)
+        random.shuffle(maks_ips)
+        for ip in maks_ips:
+            before = len(meta)
+            _add(ip, hostname=f"maks:{region}", source="maks-alive")
+            if len(meta) > before:
+                maks_seed += 1
+
+    # Preserve insertion order (cache → dns → maks), trim
+    ordered = list(meta.values())[:candidates]
+    if not ordered:
+        print("[voice-dns] No DNS/Maks candidates to probe")
+        return []
+
+    print(
+        f"[voice-dns] STUN-probing {len(ordered)} candidates "
+        f"(dns+={dns_seed} maks+={maks_seed}, concurrency={STUN_PROBE_CONCURRENCY})..."
+    )
+
+    sem = asyncio.Semaphore(STUN_PROBE_CONCURRENCY)
+
+    async def _probe(ep: dict) -> Optional[dict]:
+        async with sem:
+            ok, ms, _detail = await asyncio.to_thread(
+                stun_probe, ep["ip"], ep["port"], stun_timeout
+            )
+            if not ok:
+                return None
+            out = dict(ep)
+            out["stun_ms"] = round(ms, 1)
+            # Re-tag cache hits that still answer as cache-alive; else keep seed source
+            return out
+
+    results = await asyncio.gather(*[_probe(ep) for ep in ordered])
+    alive = [r for r in results if r is not None][:count]
+
+    if alive:
+        _save_cache(alive)
+
+    print(
+        f"[voice-dns] dns-alive: {len(alive)}/{len(ordered)} probed "
+        f"(dns={dns_seed} maks={maks_seed})"
+    )
+    return alive

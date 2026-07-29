@@ -17,6 +17,11 @@ Usage:
   sudo python3 bs.py pair -d discord.com --generate --full-voice
   sudo python3 bs.py pair -d discord.com --user-matrix /path/to/strategies.txt
 
+  # Voice discover without VPN (DNS + Maks-gaming + STUN)
+  sudo python3 bs.py pair -d discord.com --generate --discover-dns 5
+  # vs VPN/gateway:
+  sudo python3 bs.py pair -d discord.com --generate --auto-discover 5
+
   # Resume after crash
   sudo python3 bs.py scan -d discord.com --resume
 """
@@ -85,15 +90,68 @@ def cmd_tcp(args):
 
 
 def cmd_udp(args):
+    from blockchecks.checkers.voice_dns import check_discover_mutex, discover_dns_alive
+
+    mutex_err = check_discover_mutex(
+        getattr(args, "discover_dns", None),
+        getattr(args, "auto_discover", None),
+    )
+    if mutex_err:
+        print(mutex_err)
+        return 1
+
     loader = StrategyLoader()
     if args.config: configs = loader.from_config(args.config); mode = "config"
     elif args.configs_dir: configs = loader.from_config_dir(args.configs_dir); mode = CONFIGS_DIR
     else: print("ERROR: specify --config or --configs-dir"); return 1
     if not configs: print("ERROR: no configs loaded"); return 1
+
+    voice_ip = args.ip
+    voice_port = args.port
+    explicit_ip = voice_ip != DEFAULT_VOICE_IP
+    discover_dns = getattr(args, "discover_dns", None)
+    auto_discover = getattr(args, "auto_discover", None)
+
+    if not explicit_ip and discover_dns is not None and int(discover_dns) > 0:
+        count = int(discover_dns)
+        print(f"\n  {CYAN}DNS-alive discovering {count} voice endpoints...{RESET}")
+        try:
+            eps = asyncio.run(discover_dns_alive(count))
+            if eps:
+                voice_ip, voice_port = eps[0]["ip"], eps[0]["port"]
+                print(
+                    f"  {GREEN}Voice source: dns-alive "
+                    f"({len(eps)}/{count}) {voice_ip}:{voice_port} "
+                    f"({eps[0].get('hostname', '')}){RESET}"
+                )
+            else:
+                print(f"  {YELLOW}No alive endpoints — using static DEFAULT_VOICE_*{RESET}")
+                voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+        except Exception as e:
+            print(f"  {YELLOW}discover-dns error: {e}{RESET}")
+            voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+    elif not explicit_ip and auto_discover is not None and int(auto_discover) > 0:
+        count = int(auto_discover)
+        print(f"\n  {CYAN}Auto-discovering {count} voice endpoints...{RESET}")
+        try:
+            from blockchecks.checkers.voice_discovery import discover_multiple
+            multi_eps = asyncio.run(discover_multiple(count, use_dns=True))
+            if multi_eps:
+                voice_ip, voice_port = multi_eps[0]["ip"], multi_eps[0]["port"]
+                print(f"  {GREEN}Voice source: auto-discover {voice_ip}:{voice_port}{RESET}")
+            else:
+                print(f"  {YELLOW}No endpoints found — using static{RESET}")
+                voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+        except Exception as e:
+            print(f"  {YELLOW}Discovery error: {e}{RESET}")
+            voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+
     print(f"\n  blockcheckS — UDP Voice test")
-    print(f"  Target: {args.ip}:{args.port}  Items: {len(configs)}  Timeout: {args.timeout}s\n")
+    print(f"  Target: {voice_ip}:{voice_port}  Items: {len(configs)}  Timeout: {args.timeout}s\n")
     runner = TestRunner(ns_name=args.ns)
-    report = runner.test_sequential_udp(configs, args.ip, port=args.port, timeout=args.timeout, qnum=args.qnum)
+    report = runner.test_sequential_udp(
+        configs, voice_ip, port=voice_port, timeout=args.timeout, qnum=args.qnum
+    )
     print(f"\n  Results: {report.passed}/{len(report.results)} passed ({report.total_time_sec:.1f}s)")
     return 0 if report.passed > 0 else 1
 
@@ -158,14 +216,58 @@ async def cmd_pair(args):
         voice_port = getattr(args, 'port', None) or DEFAULT_VOICE_PORT
         gateway_result = None
 
+        from blockchecks.checkers.voice_dns import check_discover_mutex, discover_dns_alive
         from blockchecks.checkers.voice_discovery import load_token
+
+        mutex_err = check_discover_mutex(
+            getattr(args, "discover_dns", None),
+            getattr(args, "auto_discover", None),
+        )
+        if mutex_err:
+            print(f"{Fore.RED}{mutex_err}{RESET}")
+            return 1
+
         token = load_token()
         has_token = bool(token)
         full_voice = args.full_voice and has_token
 
+        explicit_ip = voice_ip != DEFAULT_VOICE_IP
+        discover_dns = getattr(args, "discover_dns", None)
         auto_discover = getattr(args, 'auto_discover', None)
         multi_eps = []
-        if auto_discover is not None and int(auto_discover) > 0:
+
+        if not explicit_ip and discover_dns is not None and int(discover_dns) > 0:
+            count = int(discover_dns)
+            print(f"\n  {CYAN}DNS-alive discovering {count} voice endpoints "
+                  f"(DNS + Maks-gaming + STUN)...{RESET}")
+            try:
+                multi_eps = await discover_dns_alive(count)
+                if multi_eps:
+                    for ep in multi_eps[:3]:
+                        src = ep.get("source", "dns-alive")
+                        ms = ep.get("stun_ms", "?")
+                        print(
+                            f"  {GREEN}  {ep['ip']}:{ep['port']} "
+                            f"({ep.get('hostname', '')}) [{src} {ms}ms]{RESET}"
+                        )
+                    if len(multi_eps) > 3:
+                        print(f"  {GREEN}  ... and {len(multi_eps) - 3} more{RESET}")
+                    voice_ip = multi_eps[0]["ip"]
+                    voice_port = multi_eps[0]["port"]
+                    print(
+                        f"  {GREEN}Voice source: dns-alive "
+                        f"({len(multi_eps)}/{count}) {voice_ip}:{voice_port}{RESET}"
+                    )
+                else:
+                    print(
+                        f"  {YELLOW}No alive endpoints — using static DEFAULT_VOICE_* "
+                        f"(try --auto-discover / VPN if needed){RESET}"
+                    )
+                    voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+            except Exception as e:
+                print(f"  {YELLOW}discover-dns error: {e}{RESET}")
+                voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+        elif not explicit_ip and auto_discover is not None and int(auto_discover) > 0:
             count = int(auto_discover)
             print(f"\n  {CYAN}Auto-discovering {count} voice endpoints...{RESET}")
             try:
@@ -386,6 +488,10 @@ def main():
     udp.add_argument("-C", "--configs-dir")
     udp.add_argument("--ip", default=DEFAULT_VOICE_IP)
     udp.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
+    udp.add_argument("--discover-dns", nargs="?", const=5, type=int, default=None,
+                     help="DNS + Maks-gaming IP list + STUN alive (no VPN)")
+    udp.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None,
+                     help="DNS + gateway discover via sing-box (VPN path)")
     udp.add_argument("--timeout", type=float, default=3.0)
     udp.add_argument("--qnum", type=int, default=201)
     udp.add_argument("--ns")
@@ -454,7 +560,10 @@ def main():
     pair.add_argument("-C", "--configs-dir", default=CONFIGS_DIR)
     pair.add_argument("--ip", default=DEFAULT_VOICE_IP)
     pair.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
-    pair.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None)
+    pair.add_argument("--discover-dns", nargs="?", const=5, type=int, default=None,
+                      help="DNS + Maks-gaming IP list + STUN alive (no VPN)")
+    pair.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None,
+                      help="DNS + gateway discover via sing-box (VPN path)")
     pair.add_argument("--full-voice", action="store_true")
     pair.add_argument("--udp-bypass", action="store_true")
     pair.add_argument("--user-matrix", default="",
