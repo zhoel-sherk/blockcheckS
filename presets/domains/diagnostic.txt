@@ -1,0 +1,2 @@
+# GP DIAGNOSTIC_DOMAINS — connectivity baseline
+web.telegram.org

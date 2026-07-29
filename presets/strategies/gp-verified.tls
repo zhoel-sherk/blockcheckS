@@ -1,0 +1,12 @@
+# GP-verified TCP strategies — confirmed working on Fryazino.net
+# Source: GP state.sqlite3, top-10 by domain coverage (53-54 domains)
+#
+# BEST pattern: fake+blob with tcp_ts=-1000 (Flowseal ALT2 mapped)
+
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=max_ru:repeats=6:tcp_ts=-1000
+fake:blob=fake_default_tls:repeats=6:tcp_ts=-1000
+fake:blob=fake_default_tls:repeats=6:tcp_ts=-1000:ip_autottl=-1,3-20
+hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up:repeats=1
+hostfakesplit:nofake2:tcp_ts=-1000:repeats=1
+hostfakesplit:nofake2:tcp_md5:repeats=1

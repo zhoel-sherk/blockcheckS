@@ -1,0 +1,6 @@
+# GP custom QUIC strategies — from blockcheck2.d/custom/list_quic.txt
+# UDP 443, payload=quic_initial
+
+fake:blob=fake_default_quic:repeats=11
+fake:blob=fake_default_quic:repeats=6
+fake:blob=fake_default_quic:repeats=6:badsum

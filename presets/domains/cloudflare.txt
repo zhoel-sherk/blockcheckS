@@ -1,0 +1,10 @@
+# GP Cloudflare-related domains for DPI testing
+cloudflare.com
+www.cloudflare.com
+cloudflare-ech.com
+cloudflare-dns.com
+workers.dev
+pages.dev
+cloudflare.net
+cloudflarestatus.com
+speed.cloudflare.com

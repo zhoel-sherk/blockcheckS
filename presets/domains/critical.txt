@@ -1,0 +1,6 @@
+# GP Control Plane CRITICAL_DOMAINS — always tested first
+# 4 most important services
+youtube.com
+googlevideo.com
+discord.com
+discordcdn.com

@@ -1,0 +1,9 @@
+# Discord Voice UDP strategies — confirmed working on Fryazino.net
+# Requires: /opt/zapret2/blobs/discord_udp.bin (1200B, Flowseal ACTIVE_DISCORD_UDP.bin)
+# nfqws2: --filter-udp=50000-50100 --filter-l7=discord,stun --payload=discord_ip_discovery,stun
+
+fake:blob=discord_udp:repeats=6
+fake:blob=discord_udp:repeats=3
+fake:blob=discord_udp:repeats=12
+fake:blob=discord_udp:repeats=6:ip_autottl=-2,3-20
+fake:blob=stun:repeats=6

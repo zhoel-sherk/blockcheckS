@@ -1,0 +1,12 @@
+# GP Amazon/AWS domains for DPI testing
+amazon.com
+www.amazon.com
+amazonaws.com
+s3.amazonaws.com
+ec2.amazonaws.com
+cloudfront.net
+d1r9q4r5en4azi.cloudfront.net
+aws.amazon.com
+docs.aws.amazon.com
+ec2.us-east-1.amazonaws.com
+s3.us-east-1.amazonaws.com

@@ -1,0 +1,24 @@
+# GP GOOGLE_YOUTUBE_DOMAINS — 23 domains covering entire YouTube CDN
+youtube.com
+www.youtube.com
+m.youtube.com
+music.youtube.com
+youtu.be
+youtube-nocookie.com
+youtubei.googleapis.com
+youtube.googleapis.com
+googlevideo.com
+video.google.com
+i.ytimg.com
+i9.ytimg.com
+ytimg.com
+yt3.ggpht.com
+yt3.googleusercontent.com
+yt4.ggpht.com
+yt4.googleusercontent.com
+ggpht.com
+gstatic.com
+gvt1.com
+googleapis.com
+googleusercontent.com
+play.google.com

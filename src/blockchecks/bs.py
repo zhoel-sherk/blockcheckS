@@ -37,7 +37,8 @@ from blockchecks.engine.test_runner import TestRunner
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.async_runner import AsyncTestRunner
-from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS, CONFIGS_DIR, CONFIGS_DIR
+from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, DPI_TESTER_SETTINGS, CONFIGS_DIR
+from blockchecks.engine.config import PROJECT_DIR, CONFIGS_DIR
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -102,6 +103,14 @@ async def cmd_pair(args):
     db = StateDB(args.db)
     await db.init()
 
+    if getattr(args, 'list_presets', False):
+        _list_presets()
+        return 0
+
+    if not args.domain:
+        print(f"{Fore.RED}ERROR: --domain required{RESET}")
+        return 1
+
     pool_size = args.parallel or 4
     runner = AsyncTestRunner(pool_size=pool_size, db=db)
     stop_event = asyncio.Event()
@@ -159,6 +168,33 @@ async def cmd_pair(args):
         if full_voice:
             print(f"  {CYAN}Full-voice mode: discovery+STUN "
                   f"(gateway WS probe not implemented){RESET}")
+
+        # Resolve domain preset
+        preset_domains = []
+        preset_name = getattr(args, 'preset', None)
+        if preset_name:
+            preset_path = os.path.join(PROJECT_DIR, "presets", "domains", f"{preset_name}.txt")
+            if os.path.exists(preset_path):
+                with open(preset_path) as pf:
+                    preset_domains = [l.strip() for l in pf if l.strip() and not l.startswith("#")]
+                print(f"  {Fore.CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}")
+            else:
+                print(f"  {Fore.YELLOW}Preset '{preset_name}' not found. Available:{RESET}")
+                import glob
+                for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/domains", "*.txt"))):
+                    print(f"    {os.path.basename(f).replace('.txt','')}")
+                return 1
+
+        # Resolve strategy preset (-M flag)
+        strategy_preset = getattr(args, 'strategy_preset', None)
+        if strategy_preset:
+            for ext in ['.tls', '.txt']:
+                sp = os.path.join(PROJECT_DIR, "presets", "strategies", f"{strategy_preset}{ext}")
+                if os.path.exists(sp):
+                    args.user_matrix = sp
+                    break
+            else:
+                print(f"  {Fore.YELLOW}Strategy preset '{strategy_preset}' not found{RESET}")
 
         do_generate = getattr(args, 'generate', False)
         user_matrix = getattr(args, 'user_matrix', '') or ""
@@ -328,9 +364,11 @@ def main():
 
     # scan — async TCP batch (alias to pair --tcp-only)
     scan = sub.add_parser("scan", help="Async TCP strategy batch scan")
-    scan.add_argument("-d", "--domain", required=True)
+    scan.add_argument("-d", "--domain", default=None)
     scan.add_argument("--generate", nargs="?", const="custom,configs",
                       default="", help="Use matrix generator (sources: custom,configs,fake,faked,...)")
+    scan.add_argument("--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)")
+    scan.add_argument("--list-presets", action="store_true", help="List available presets and exit")
     scan.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"], help="TLS protocol version to test")
     scan.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
     scan.add_argument("--parallel", type=int, default=4)
@@ -358,13 +396,16 @@ def main():
 
     # pair — async TCP×UDP matrix
     pair = sub.add_parser("pair", help="TCP x UDP pair matrix (async)")
-    pair.add_argument("-d", "--domain", required=True)
+    pair.add_argument("-d", "--domain", default=None)
     pair.add_argument("--generate", nargs="?", const="custom,configs",
                       default="", help="Use matrix generator")
     pair.add_argument("--tcp-sources", default="custom,configs",
                       help="TCP sources: custom,configs,fake,faked,hostfake,fake_multi,fake_faked")
     pair.add_argument("--udp-sources", default="custom",
                       help="UDP sources: custom,configs")
+    pair.add_argument("--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)")
+    pair.add_argument("--list-presets", action="store_true", help="List available presets and exit")
+    pair.add_argument("-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})")
     pair.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"], help="TLS protocol version to test")
     pair.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
     pair.add_argument("--parallel", type=int, default=4)
@@ -394,6 +435,9 @@ def main():
     elif args.command == "udp":
         return cmd_udp(args)
     elif args.command == "scan":
+        if getattr(args, 'list_presets', False):
+            _list_presets()
+            return 0
         # Alias to pair --tcp-only
         if args.generate:
             args.tcp_sources = args.generate if args.generate != "custom,configs" else args.tcp_sources or "custom,configs"
@@ -410,6 +454,9 @@ def main():
             pass
         return asyncio.run(cmd_pair(args))
     elif args.command == "pair":
+        if getattr(args, 'list_presets', False):
+            _list_presets()
+            return 0
         if args.generate and args.generate != "custom,configs":
             args.tcp_sources = args.generate
         # Single config flags (-c/-u) force non-generate path
@@ -427,6 +474,23 @@ def main():
     else:
         parser.print_help()
         return 1
+
+
+def _list_presets():
+    """Print available domain and strategy presets."""
+    import glob, os
+    print(f"{Fore.CYAN}Domain presets (presets/domains/):{RESET}")
+    for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/domains", "*.txt"))):
+        name = os.path.basename(f).replace(".txt", "")
+        with open(f) as pf:
+            count = sum(1 for l in pf if l.strip() and not l.startswith("#"))
+        print(f"  {name:25s} {count} domains")
+    print(f"{Fore.CYAN}Strategy presets (presets/strategies/):{RESET}")
+    for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/strategies", "*.tls")) + glob.glob(os.path.join(PROJECT_DIR, "presets/strategies", "*.txt"))):
+        name = os.path.basename(f)
+        with open(f) as pf:
+            count = sum(1 for l in pf if l.strip() and not l.startswith("#"))
+        print(f"  {name:25s} {count} strategies")
 
 
 if __name__ == "__main__":

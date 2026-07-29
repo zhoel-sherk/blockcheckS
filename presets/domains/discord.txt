@@ -1,0 +1,23 @@
+# GP DISCORD_DOMAINS — 21 Discord domains
+discord.com
+discord.gg
+discordapp.com
+discordapp.net
+discordcdn.com
+discord.media
+discord.co
+discord.design
+discord.dev
+discord.gift
+discord.gifts
+discord.new
+discord.store
+discord.tools
+discordmerch.com
+discordpartygames.com
+discord-activities.com
+discordactivities.com
+discordsays.com
+discordstatus.com
+dis.gd
+discord-attachments-uploads-prd.storage.googleapis.com
