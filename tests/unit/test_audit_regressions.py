@@ -132,20 +132,20 @@ def test_disable_ech_in_check_source():
     src = Path(ar.__file__).read_text(encoding="utf-8")
     assert "CURLOPT_ECH" in src
     assert "disable_ech" in inspect.signature(ar._run_tcp_check).parameters
-    # ECH is injected via Session().curl.setopt(CurlOpt.ECH) — the inline code
-    # uses hardcoded "curl_cffi.CurlOpt.ECH" string reference inside check_code
     assert "CurlOpt.ECH" in src
+    # Numeric fallback after CurlOpt.ECH failure
+    assert "setopt({ech_opt}" in src or "ech_setopt" in src
     tree = ast.parse(src)
     names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
-    # CURLOPT_ECH may be a dead import (ECH handled via hardcoded string in f-string)
-    assert "CurlOpt" not in names  # not a direct AST Name — it's inside a string
+    assert "CURLOPT_ECH" in names
 
 
 def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
     written = {}
 
-    def fake_daemon(ns_name, config_path):
+    def fake_daemon(ns_name, config_path, kill_existing=True):
         written["text"] = Path(config_path).read_text(encoding="utf-8")
+        written["kill"] = kill_existing
 
     monkeypatch.setattr(ar, "_nfqws2_daemon", fake_daemon)
     monkeypatch.setattr(ar, "_sudo", lambda *a, **k: None)
@@ -164,6 +164,55 @@ def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
     assert "--lua-desync=--filter" not in text
     assert any(line.startswith("--filter-udp=") for line in text.splitlines())
     assert "--lua-desync=fake:blob=DISCORD:repeats=6" in text
+    assert written["kill"] is True
+
+
+def test_udp_coexist_skips_pkill(monkeypatch):
+    calls = []
+
+    def fake_daemon(ns_name, config_path, kill_existing=True):
+        calls.append(kill_existing)
+        Path(config_path).write_text("--qnum=201\n", encoding="utf-8")
+
+    monkeypatch.setattr(ar, "_nfqws2_daemon", fake_daemon)
+    monkeypatch.setattr(ar, "_sudo", lambda *a, **k: None)
+
+    class FakeCompleted:
+        stdout = '{"success": true, "latency_ms": 1.0, "detail": "ok"}'
+        returncode = 0
+
+    import subprocess as _sp
+    monkeypatch.setattr(_sp, "run", lambda *a, **k: FakeCompleted())
+
+    _run_udp_check(
+        "mock-ns", "fake:blob=discord_udp:repeats=6",
+        "1.2.3.4", 3478, 1.0, coexist=True,
+    )
+    assert calls == [False]
+
+
+def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
+    src = Path(ar.__file__).read_text(encoding="utf-8")
+    assert "stderr=sp.DEVNULL" in src or "stderr=subprocess.DEVNULL" in src
+    assert "kill_existing" in inspect.signature(ar._nfqws2_daemon).parameters
+    assert "--queue-bypass" in src
+    # 206 is not an unconditional small_body shortcut
+    assert "or (resp.status_code == 206 and clen < 300)" in src
+
+
+@pytest.mark.asyncio
+async def test_user_matrix_skips_udp_cli_on_tcp(tmp_path):
+    path = tmp_path / "m.txt"
+    path.write_text(
+        "fake:blob=stun:repeats=6\n"
+        "--filter-udp=50000 --lua-desync=fake:blob=discord_udp:repeats=6\n"
+        "fake:blob=discord_udp:repeats=12\n",
+        encoding="utf-8",
+    )
+    from blockchecks.engine.matrix_generator import UserMatrixGenerator
+    items = await UserMatrixGenerator(str(path)).generate("tls12", max_count=50)
+    assert len(items) == 1
+    assert "stun" in items[0].strategy
 
 
 def test_add_blobs_loads_all_and_seqovl(tmp_path, monkeypatch):

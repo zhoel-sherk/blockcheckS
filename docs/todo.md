@@ -42,7 +42,10 @@
 - [x] `scan`: не затирать `--auto-discover` (None = skip; только `> 0` запускает discovery)
 - [ ] multi-endpoint: pair matrix по всем `discover_multiple` EP
 - [x] untrack `state.db`; `.gitignore` уже содержит `state.db` / journal / wal
-- [x] nfqws2: DEVNULL stderr (не блокирующий `read(1)`)
+- [x] nfqws2: DEVNULL stderr (не блокирующий `read(1)`); async_runner тоже DEVNULL
+- [x] Pair coexist: `_run_udp_check(coexist=True)` не pkills TCP nfqws2
+- [x] Async iptables `--queue-bypass`; GV 206 + rate → THROTTLED; ECH setopt fallback
+- [x] UserMatrix: skip `--filter-udp` / discord_udp на TCP generate
 - [x] CLI/DB: `--protocol`, `--preset` domains, `-M` basename, ECH/Range/THROTTLED,
       `log_tcp(read_rate_bps)`, ALTER migration, sources fallback `custom,configs`
 - [x] Runner: all `blob=` + `seqovl_pattern`, TCP `--payload=tls_client_hello`,

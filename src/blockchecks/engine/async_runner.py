@@ -90,15 +90,22 @@ def _sudo(*args: str) -> str:
     return r.stdout.strip()
 
 
-def _nfqws2_daemon(ns_name: str, config_path: str) -> None:
-    """Launch nfqws2 in daemon mode inside ns. Non-blocking."""
+def _nfqws2_daemon(ns_name: str, config_path: str,
+                    kill_existing: bool = True) -> None:
+    """Launch nfqws2 in daemon mode inside ns. Non-blocking.
+
+    kill_existing=True (default) clears prior nfqws2 in the ns — for solo
+    TCP/UDP checks. Pair matrix must pass kill_existing=False when starting
+    the UDP instance so the TCP desync (qnum 200) stays alive.
+    """
     import subprocess as sp
-    sp.run(["sudo", "ip", "netns", "exec", ns_name,
-            "pkill", "-9", "nfqws2"],
-           stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+    if kill_existing:
+        sp.run(["sudo", "ip", "netns", "exec", ns_name,
+                "pkill", "-9", "nfqws2"],
+               stdout=sp.DEVNULL, stderr=sp.DEVNULL)
     cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN,
            f"@{config_path}", "--daemon"]
-    proc = sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.PIPE)
+    sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
     time.sleep(2.0)
 
 
@@ -152,6 +159,7 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
     py = python_bin or PYTHON_BIN
     is_gv = "googlevideo" in domain.lower()
     use_ech = disable_ech or is_gv
+    tmp_conf = None
 
     # Setup nfqws2
     if is_config:
@@ -184,13 +192,16 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
         _nfqws2_daemon(ns_name, tmp_conf)
 
     _sudo("ip", "netns", "exec", ns_name, "iptables", "-A", "OUTPUT",
-          "-p", "tcp", "--dport", "443", "-j", "NFQUEUE", "--queue-num", "200")
+          "-p", "tcp", "--dport", "443", "-j", "NFQUEUE",
+          "--queue-num", "200", "--queue-bypass")
 
     range_end = GOOGLEVIDEO_RANGE_SIZE - 1
     headers_extra = ""
     if is_gv:
         headers_extra = f', "Range": "bytes=0-{range_end}"'
     use_ech_int = 1 if use_ech else 0
+    # CURLOPT_ECH numeric fallback when CurlOpt.ECH is missing
+    ech_opt = CURLOPT_ECH
 
     check_code = f"""
 import json, time
@@ -205,10 +216,21 @@ def check(domain, timeout):
                     impersonate="chrome124", http_version=2,
                     headers=headers, allow_redirects=False,
                 )
+                set = False
                 try:
                     s.curl.setopt(curl_cffi.CurlOpt.ECH, "")
+                    set = True
                 except Exception:
                     pass
+                if not set:
+                    try:
+                        s.curl.setopt({ech_opt}, "")
+                    except Exception as e:
+                        return {{"success": False, "http_code": 0,
+                                  "latency_ms": (time.perf_counter()-start)*1000,
+                                  "content_len": 0, "content_ok": False,
+                                  "throttled": False, "read_rate_bps": 0,
+                                  "error": "ech_setopt:" + str(e)[:100]}}
                 resp = s.get("https://" + domain, timeout=min(timeout, 1.5))
             else:
                 resp = curl_cffi.get(
@@ -233,8 +255,13 @@ def check(domain, timeout):
                     b"blockpage",b"utmblock"))
         if dpi_fake:
             content_ok = False
-        small_body_ok = (not dpi_fake) and resp.status_code in (
-            101,204,301,302,303,304,307,308,206)
+        # 206 only counts as "small body OK" when the body is actually small;
+        # googlevideo Range replies are 206 with ~17KB — must apply rate bands.
+        small_codes = (101, 204, 301, 302, 303, 304, 307, 308)
+        small_body_ok = (not dpi_fake) and (
+            resp.status_code in small_codes
+            or (resp.status_code == 206 and clen < 300)
+        )
         status_ok = (200 <= resp.status_code < 400)
         throttled = False
         success = False
@@ -254,32 +281,45 @@ def check(domain, timeout):
         return {{"success": False, "http_code": 0, "latency_ms": 0,
                  "content_len": 0, "content_ok": False,
                  "throttled": False, "read_rate_bps": 0, "error": str(e)[:120]}}
-print(json.dumps(check("{domain}", {timeout})))
+print(json.dumps(check({domain!r}, {timeout})))
 """
-    r = sp.run(
-        ["sudo", "ip", "netns", "exec", ns_name,
-         py, "-c", check_code],
-        capture_output=True, text=True, timeout=timeout + 10
-    )
     try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        return {"success": False, "http_code": 0, "latency_ms": 0,
-                "content_len": 0, "content_ok": False,
-                "throttled": False, "read_rate_bps": 0,
-                "error": f"parse: {r.stdout[:100]}"}
+        r = sp.run(
+            ["sudo", "ip", "netns", "exec", ns_name,
+             py, "-c", check_code],
+            capture_output=True, text=True, timeout=timeout + 10
+        )
+        try:
+            return json.loads(r.stdout)
+        except json.JSONDecodeError:
+            return {"success": False, "http_code": 0, "latency_ms": 0,
+                    "content_len": 0, "content_ok": False,
+                    "throttled": False, "read_rate_bps": 0,
+                    "error": f"parse: {r.stdout[:100]}"}
+    finally:
+        if tmp_conf:
+            try:
+                os.unlink(tmp_conf)
+            except OSError:
+                pass
 
 
 def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
                    timeout: float, is_config: bool = False,
-                   python_bin: str = None) -> dict:
-    """Start nfqws2 UDP in ns, run STUN probe, return result."""
+                   python_bin: str = None,
+                   coexist: bool = False) -> dict:
+    """Start nfqws2 UDP in ns, run STUN probe, return result.
+
+    coexist=True: do not pkill existing nfqws2 (keep TCP desync for pairs).
+    """
     import subprocess as sp
 
     py = python_bin or PYTHON_BIN
+    kill_existing = not coexist
+    tmp_conf = None
 
     if is_config:
-        _nfqws2_daemon(ns_name, strategy)
+        _nfqws2_daemon(ns_name, strategy, kill_existing=kill_existing)
     elif strategy.strip().startswith("--"):
         # Full CLI config (standard_udp dual-blob etc.)
         config_lines = [
@@ -300,7 +340,7 @@ def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
         os.close(_tf2_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        _nfqws2_daemon(ns_name, tmp_conf)
+        _nfqws2_daemon(ns_name, tmp_conf, kill_existing=kill_existing)
     else:
         # Inline lua-desync core (e.g. fake:blob=discord_udp:repeats=6)
         config_lines = [
@@ -322,11 +362,11 @@ def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
         os.close(_tf2_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        _nfqws2_daemon(ns_name, tmp_conf)
+        _nfqws2_daemon(ns_name, tmp_conf, kill_existing=kill_existing)
 
     _sudo("ip", "netns", "exec", ns_name, "iptables", "-A", "OUTPUT",
           "-p", "udp", "--dport", str(port), "-j", "NFQUEUE",
-          "--queue-num", "201")
+          "--queue-num", "201", "--queue-bypass")
 
     probe_code = f"""
 import json, socket, struct, time, random
@@ -336,7 +376,7 @@ try:
     tid = bytes(random.randint(0, 255) for _ in range(12))
     msg = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442) + tid
     start = time.perf_counter()
-    sock.sendto(msg, ("{ip}", {port}))
+    sock.sendto(msg, ({ip!r}, {port}))
     data, addr = sock.recvfrom(512)
     elapsed = (time.perf_counter()-start)*1000
     sock.close()
@@ -352,15 +392,22 @@ except socket.timeout:
 except Exception as e:
     print(json.dumps({{"success": False, "latency_ms": 0, "detail": str(e)[:100]}}))
 """
-    r = sp.run(
-        ["sudo", "ip", "netns", "exec", ns_name,
-         py, "-c", probe_code],
-        capture_output=True, text=True, timeout=timeout + 5
-    )
     try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        return {"success": False, "latency_ms": 0, "detail": "parse error"}
+        r = sp.run(
+            ["sudo", "ip", "netns", "exec", ns_name,
+             py, "-c", probe_code],
+            capture_output=True, text=True, timeout=timeout + 5
+        )
+        try:
+            return json.loads(r.stdout)
+        except json.JSONDecodeError:
+            return {"success": False, "latency_ms": 0, "detail": "parse error"}
+    finally:
+        if tmp_conf:
+            try:
+                os.unlink(tmp_conf)
+            except OSError:
+                pass
 
 # ── AsyncTestRunner ─────────────────────────────────
 
@@ -557,7 +604,8 @@ class AsyncTestRunner:
                     data = await asyncio.to_thread(
                         _run_udp_check, ns_name,
                         udp_s.strategy, voice_ip, voice_port,
-                        udp_timeout, udp_s.is_config, self.python
+                        udp_timeout, udp_s.is_config, self.python,
+                        True,  # coexist — keep TCP nfqws2 (qnum 200) alive
                     )
                     udp_ok = data.get("success", False)
                     udp_ms = data.get("latency_ms", 0)

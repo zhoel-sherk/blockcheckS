@@ -88,7 +88,7 @@ def mock_tcp_udp(monkeypatch):
         }
 
     def fake_udp(ns_name, strategy, ip, port, timeout, is_config=False,
-                 python_bin=None):
+                 python_bin=None, coexist=False):
         return {
             "success": True,
             "latency_ms": 8.0,
