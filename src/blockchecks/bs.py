@@ -116,12 +116,18 @@ def cmd_udp(args):
         count = int(discover_dns)
         print(f"\n  {CYAN}DNS-alive discovering {count} voice endpoints...{RESET}")
         try:
-            eps = asyncio.run(discover_dns_alive(count))
+            eps = asyncio.run(discover_dns_alive(
+                count,
+                use_bootstrap=not getattr(args, "discover_dns_no_bootstrap", False),
+            ))
             if eps:
                 voice_ip, voice_port = eps[0]["ip"], eps[0]["port"]
+                method = eps[0].get("method", "?")
+                boot = "on" if eps[0].get("bootstrap") else "off"
                 print(
                     f"  {GREEN}Voice source: dns-alive "
                     f"({len(eps)}/{count}) {voice_ip}:{voice_port} "
+                    f"method={method} bootstrap={boot} "
                     f"({eps[0].get('hostname', '')}){RESET}"
                 )
             else:
@@ -241,22 +247,30 @@ async def cmd_pair(args):
             print(f"\n  {CYAN}DNS-alive discovering {count} voice endpoints "
                   f"(DNS + Maks-gaming + STUN)...{RESET}")
             try:
-                multi_eps = await discover_dns_alive(count)
+                multi_eps = await discover_dns_alive(
+                    count,
+                    use_bootstrap=not getattr(args, "discover_dns_no_bootstrap", False),
+                )
                 if multi_eps:
                     for ep in multi_eps[:3]:
                         src = ep.get("source", "dns-alive")
                         ms = ep.get("stun_ms", "?")
+                        method = ep.get("method", "?")
                         print(
                             f"  {GREEN}  {ep['ip']}:{ep['port']} "
-                            f"({ep.get('hostname', '')}) [{src} {ms}ms]{RESET}"
+                            f"({ep.get('hostname', '')}) "
+                            f"[{src} {method} {ms}ms]{RESET}"
                         )
                     if len(multi_eps) > 3:
                         print(f"  {GREEN}  ... and {len(multi_eps) - 3} more{RESET}")
                     voice_ip = multi_eps[0]["ip"]
                     voice_port = multi_eps[0]["port"]
+                    boot = "on" if multi_eps[0].get("bootstrap") else "off"
                     print(
                         f"  {GREEN}Voice source: dns-alive "
-                        f"({len(multi_eps)}/{count}) {voice_ip}:{voice_port}{RESET}"
+                        f"({len(multi_eps)}/{count}) {voice_ip}:{voice_port} "
+                        f"method={multi_eps[0].get('method', '?')} "
+                        f"bootstrap={boot}{RESET}"
                     )
                 else:
                     print(
@@ -489,7 +503,9 @@ def main():
     udp.add_argument("--ip", default=DEFAULT_VOICE_IP)
     udp.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
     udp.add_argument("--discover-dns", nargs="?", const=5, type=int, default=None,
-                     help="DNS + Maks-gaming IP list + STUN alive (no VPN)")
+                     help="DNS + Maks-gaming IP list + dual UDP probe (no VPN)")
+    udp.add_argument("--discover-dns-no-bootstrap", action="store_true",
+                     help="Skip nfqws2 UDP bootstrap during --discover-dns")
     udp.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None,
                      help="DNS + gateway discover via sing-box (VPN path)")
     udp.add_argument("--timeout", type=float, default=3.0)
@@ -561,7 +577,9 @@ def main():
     pair.add_argument("--ip", default=DEFAULT_VOICE_IP)
     pair.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
     pair.add_argument("--discover-dns", nargs="?", const=5, type=int, default=None,
-                      help="DNS + Maks-gaming IP list + STUN alive (no VPN)")
+                      help="DNS + Maks-gaming IP list + dual UDP probe (no VPN)")
+    pair.add_argument("--discover-dns-no-bootstrap", action="store_true",
+                      help="Skip nfqws2 UDP bootstrap during --discover-dns")
     pair.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None,
                       help="DNS + gateway discover via sing-box (VPN path)")
     pair.add_argument("--full-voice", action="store_true")

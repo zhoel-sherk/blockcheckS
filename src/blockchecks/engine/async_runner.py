@@ -414,28 +414,11 @@ def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
           "--queue-num", "201", "--queue-bypass")
 
     probe_code = f"""
-import json, socket, struct, time, random
-try:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout({timeout})
-    tid = bytes(random.randint(0, 255) for _ in range(12))
-    msg = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442) + tid
-    start = time.perf_counter()
-    sock.sendto(msg, ({ip!r}, {port}))
-    data, addr = sock.recvfrom(512)
-    elapsed = (time.perf_counter()-start)*1000
-    sock.close()
-    ok = (len(data) >= 20
-          and struct.unpack(">H", data[:2])[0] == 0x0101
-          and struct.unpack(">I", data[4:8])[0] == 0x2112A442
-          and data[8:20] == tid)
-    print(json.dumps({{"success": ok, "latency_ms": elapsed,
-        "detail": f"{{len(data)}}B from {{addr[0]}}:{{addr[1]}}"}}))
-except socket.timeout:
-    elapsed = (time.perf_counter()-start)*1000
-    print(json.dumps({{"success": False, "latency_ms": elapsed, "detail":"timeout"}}))
-except Exception as e:
-    print(json.dumps({{"success": False, "latency_ms": 0, "detail": str(e)[:100]}}))
+import json
+from blockchecks.checkers.udp_voice import voice_udp_probe
+ok, lat, detail, method = voice_udp_probe({ip!r}, {port}, {timeout})
+print(json.dumps({{"success": ok, "latency_ms": lat,
+    "detail": detail, "method": method}}))
 """
     try:
         r = sp.run(

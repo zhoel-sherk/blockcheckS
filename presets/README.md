@@ -35,11 +35,15 @@ bs scan -d discord.com -M blockcheckS-best     # Our best strategies
 ## Voice discover (pair / udp)
 
 ```bash
-# No VPN: local DNS finland* + Maks-gaming IP list + STUN alive filter
+# No VPN: DNS finland* + Maks-gaming IP list + dual UDP probe
+# (RFC5389 STUN, then Discord IP Discovery 74B). On Linux, probes run
+# through a temporary nfqws2 UDP bootstrap (discord_udp) by default.
 bs pair -d discord.com --generate --discover-dns 5
+bs pair -d discord.com --generate --discover-dns 5 --discover-dns-no-bootstrap
 # VPN/gateway path (sing-box):
 bs pair -d discord.com --generate --auto-discover 5
 # Do not combine --discover-dns and --auto-discover (mutually exclusive).
+# Exact session UDP port needs voice Ready (token); we probe 50000–50006 only.
 # Archived third-party lists (GhostRooter, etc.) are not used.
 ```
 

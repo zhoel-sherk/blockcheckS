@@ -211,13 +211,14 @@ class TestRunner:
     # ── UDP Voice testing (Phase 3) ──────────────────────────
 
     def _run_stun_check(self, ip: str, port: int, timeout: float) -> dict:
-        """Run STUN probe via subprocess (inside namespace if configured)."""
+        """Run dual voice UDP probe via subprocess (inside namespace if configured)."""
         code = f"""
 import sys, json
 sys.path.insert(0, "{os.path.dirname(os.path.dirname(__file__))}")
-from blockchecks.checkers.udp_voice import stun_probe
-ok, lat, detail = stun_probe("{ip}", {port}, {timeout})
-print(json.dumps({{"success": ok, "latency_ms": round(lat, 1), "detail": detail}}))
+from blockchecks.checkers.udp_voice import voice_udp_probe
+ok, lat, detail, method = voice_udp_probe("{ip}", {port}, {timeout})
+print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
+                   "detail": detail, "method": method}}))
 """
         if self.ns_name:
             cmd = ["sudo", "ip", "netns", "exec", self.ns_name,

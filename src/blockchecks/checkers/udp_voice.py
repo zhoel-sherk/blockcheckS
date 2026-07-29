@@ -1,7 +1,10 @@
-"""UDP voice checker — RFC 5389 STUN binding probe for Discord voice servers.
+"""UDP voice checker — Discord voice liveness probes.
 
-Sends a correct 20-byte STUN binding request (with magic cookie 0x2112A442)
-and checks for a reply. No Discord token/bot required. Under 1 second per check.
+Two protocols (not interchangeable):
+  - RFC 5389 STUN Binding (20B, magic cookie) — response type 0x0101
+  - Discord IP Discovery (74B official) — response type 0x0002
+
+No Discord token required for basic liveness. Scapy not used.
 """
 
 import random
@@ -9,6 +12,44 @@ import socket
 import struct
 import time
 from typing import Optional
+
+# Discord IP Discovery (docs): Type(2)+Length(2)+SSRC(4)+Address(64)+Port(2) = 74
+IP_DISCOVERY_BODY_LEN = 70
+IP_DISCOVERY_TOTAL = 74
+
+
+def build_ip_discovery_request(ssrc: int = 0) -> bytes:
+    """Build official 74-byte Discord IP Discovery request (big-endian)."""
+    return (
+        struct.pack(">HHI", 0x0001, IP_DISCOVERY_BODY_LEN, ssrc & 0xFFFFFFFF)
+        + (b"\x00" * 64)  # address placeholder
+        + struct.pack(">H", 0)  # port placeholder
+    )
+
+
+def parse_ip_discovery_response(data: bytes) -> Optional[dict]:
+    """Validate IP Discovery response; return mapped fields or None."""
+    if len(data) < 8:
+        return None
+    msg_type, length = struct.unpack(">HH", data[:4])
+    if msg_type != 0x0002:
+        return None
+    # Length field is body size (typically 70); tolerate short/long replies
+    if length < 6:
+        return None
+    ssrc = struct.unpack(">I", data[4:8])[0] if len(data) >= 8 else 0
+    mapped_ip = ""
+    mapped_port = 0
+    if len(data) >= 74:
+        addr_raw = data[8:72]
+        mapped_ip = addr_raw.split(b"\x00", 1)[0].decode("ascii", errors="replace")
+        mapped_port = struct.unpack(">H", data[72:74])[0]
+    return {
+        "ssrc": ssrc,
+        "mapped_ip": mapped_ip,
+        "mapped_port": mapped_port,
+        "raw_len": len(data),
+    }
 
 
 def stun_probe(ip: str, port: int = 50004,
@@ -51,3 +92,64 @@ def stun_probe(ip: str, port: int = 50004,
                 sock.close()
             except Exception:
                 pass
+
+
+def ip_discovery_probe(ip: str, port: int = 50004,
+                       ssrc: int = 0,
+                       timeout: float = 3.0) -> tuple[bool, float, str]:
+    """Send Discord IP Discovery (74B) request; return (ok, ms, detail).
+
+    SSRC from Voice Ready is ideal; 0 is used for liveness when unknown.
+    """
+    msg = build_ip_discovery_request(ssrc)
+    start = time.perf_counter()
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        sock.sendto(msg, (ip, port))
+        data, addr = sock.recvfrom(512)
+        elapsed = (time.perf_counter() - start) * 1000
+        parsed = parse_ip_discovery_response(data)
+        if parsed:
+            extra = ""
+            if parsed.get("mapped_ip"):
+                extra = f" mapped={parsed['mapped_ip']}:{parsed['mapped_port']}"
+            return (
+                True,
+                elapsed,
+                f"{parsed['raw_len']}B IP-discovery from {addr[0]}:{addr[1]}{extra}",
+            )
+        return False, elapsed, f"invalid IP-discovery response ({len(data)}B)"
+    except socket.timeout:
+        elapsed = (time.perf_counter() - start) * 1000
+        return False, elapsed, "timeout"
+    except OSError as e:
+        elapsed = (time.perf_counter() - start) * 1000
+        return False, elapsed, str(e)[:100]
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+def voice_udp_probe(ip: str, port: int = 50004,
+                    timeout: float = 3.0,
+                    ssrc: int = 0) -> tuple[bool, float, str, str]:
+    """Dual probe: RFC5389 STUN first, then Discord IP Discovery.
+
+    Returns (ok, latency_ms, detail, method) where method is
+    'rfc5389', 'ip_discovery', or ''.
+    """
+    ok, ms, detail = stun_probe(ip, port, timeout)
+    if ok:
+        return True, ms, detail, "rfc5389"
+    ok2, ms2, detail2 = ip_discovery_probe(ip, port, ssrc=ssrc, timeout=timeout)
+    if ok2:
+        return True, ms2, detail2, "ip_discovery"
+    # Prefer the more informative failure (non-timeout wins)
+    if detail2 != "timeout":
+        return False, ms2, detail2, ""
+    return False, ms, detail, ""

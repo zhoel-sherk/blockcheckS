@@ -151,25 +151,13 @@ print(json.dumps(result))
                     "error": f"parse: {r.stdout[:100]}"}
 
     def _run_stun_check(self, ip: str, port: int, timeout: float) -> dict:
-        """Run STUN probe via subprocess."""
+        """Run dual voice UDP probe via subprocess."""
         code = f"""
-import json, socket, struct, time
-try:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout({timeout})
-    msg = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442) + b"\\x00" * 12
-    start = time.perf_counter()
-    sock.sendto(msg, ("{ip}", {port}))
-    data, addr = sock.recvfrom(512)
-    elapsed = (time.perf_counter() - start) * 1000
-    sock.close()
-    print(json.dumps({{"success": True, "latency_ms": elapsed,
-                       "detail": f"{{len(data)}}B from {{addr[0]}}:{{addr[1]}}"}}))
-except socket.timeout:
-    elapsed = (time.perf_counter() - start) * 1000
-    print(json.dumps({{"success": False, "latency_ms": elapsed, "detail": "timeout"}}))
-except Exception as e:
-    print(json.dumps({{"success": False, "latency_ms": 0, "detail": str(e)[:100]}}))
+import json
+from blockchecks.checkers.udp_voice import voice_udp_probe
+ok, lat, detail, method = voice_udp_probe("{ip}", {port}, {timeout})
+print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
+                   "detail": detail, "method": method}}))
 """
         if self.ns_name:
             cmd = ["sudo", "ip", "netns", "exec", self.ns_name,

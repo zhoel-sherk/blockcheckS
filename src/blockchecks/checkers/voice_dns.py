@@ -17,9 +17,12 @@ import json
 import os
 import random
 import socket
+import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from typing import Optional
 
 from blockchecks.engine.config import PROJECT_DIR
@@ -215,6 +218,82 @@ def fetch_maks_voice_ips(region: str = "finland",
         return []
 
 
+@contextmanager
+def udp_discover_bootstrap(
+    enabled: bool = True,
+    strategy: str = "fake:blob=discord_udp:repeats=6",
+    qnum: Optional[int] = None,
+):
+    """Temporarily run nfqws2 UDP desync + iptables for discover probes.
+
+    Yields True if bootstrap is active, False if skipped/failed (probes still run).
+    Always cleans up in finally. No-op on non-Linux or enabled=False.
+    """
+    if not enabled or sys.platform != "linux":
+        yield False
+        return
+
+    from blockchecks.engine.config import (
+        BLOB_DIR, LUA_INIT_SCRIPTS, NFQUEUE_UDP, nfqws2_debug_conf_line,
+    )
+    from blockchecks.engine.firewall import Firewall
+    from blockchecks.engine.nfqws2 import Nfqws2Manager
+
+    q = NFQUEUE_UDP if qnum is None else qnum
+    fw = Firewall()
+    mgr = Nfqws2Manager(qnum=q)
+    conf_path: Optional[str] = None
+    active = False
+    try:
+        lines = [
+            f"--qnum={q}",
+            "--filter-udp=50000-50100",
+            "--filter-l3=ipv4",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+        ]
+        dbg, _dbg_path = nfqws2_debug_conf_line(tag="discover-boot")
+        if dbg:
+            lines.append(dbg)
+        for lua in LUA_INIT_SCRIPTS:
+            if os.path.exists(lua):
+                lines.append(f"--lua-init=@{lua}")
+        blob = os.path.join(BLOB_DIR, "discord_udp.bin")
+        if os.path.exists(blob):
+            lines.append(f"--blob=discord_udp:@{blob}")
+        lines.append(f"--lua-desync={strategy}")
+
+        fd, conf_path = tempfile.mkstemp(prefix="bs_discover_udp_", suffix=".conf")
+        with os.fdopen(fd, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        os.chmod(conf_path, 0o644)
+
+        fw.prepare_udp(ports="50000:50100", qnum=q)
+        mgr.start_config(conf_path)
+        active = True
+        print(f"[voice-dns] Bootstrap nfqws2 UDP active (qnum={q}, {strategy})")
+        yield True
+    except Exception as e:
+        print(f"[voice-dns] Bootstrap failed (probing without nfqws2): {e}")
+        yield False
+    finally:
+        try:
+            mgr.stop()
+        except Exception:
+            pass
+        try:
+            fw.cleanup()
+        except Exception:
+            pass
+        if conf_path:
+            try:
+                os.unlink(conf_path)
+            except OSError:
+                pass
+        if active:
+            print("[voice-dns] Bootstrap nfqws2 stopped")
+
+
 async def discover_dns_alive(
     count: int = 5,
     *,
@@ -223,15 +302,18 @@ async def discover_dns_alive(
     use_cache: bool = True,
     use_maks: bool = True,
     region: str = "finland",
+    use_bootstrap: bool = True,
 ) -> list[dict]:
-    """Discover voice endpoints via DNS + Maks seed, filtered by STUN alive.
+    """Discover voice endpoints via DNS + Maks seed, filtered by dual UDP probe.
 
-    No VPN/sing-box. Returns only endpoints that answer STUN, or [].
-    Each dict: ip, port, hostname, source (dns-alive|maks-alive|cache-alive), stun_ms.
+    No VPN/sing-box. On Linux, optionally wraps probes in nfqws2 UDP bootstrap
+    so DPI-blocked STUN/IP-discovery can still get replies.
+
+    Returns only endpoints that answer, or [].
+    Each dict: ip, port, hostname, source, stun_ms, method, bootstrap.
     """
-    from blockchecks.checkers.udp_voice import stun_probe
+    from blockchecks.checkers.udp_voice import voice_udp_probe
 
-    # ip -> metadata for merge (first source wins for priority order)
     meta: dict[str, dict] = {}
     dns_seed = 0
     maks_seed = 0
@@ -246,7 +328,6 @@ async def discover_dns_alive(
             "source": source,
         }
 
-    # 1) Prefer previously-alive cache entries first
     if use_cache:
         cached = _load_cache()
         if cached:
@@ -261,7 +342,6 @@ async def discover_dns_alive(
                     port=ep.get("port"),
                 )
 
-    # 2) DNS seed
     print(
         f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg "
         f"range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}..."
@@ -275,7 +355,6 @@ async def discover_dns_alive(
         if len(meta) > before:
             dns_seed += 1
 
-    # 3) Maks-gaming seed
     if use_maks:
         maks_ips = await asyncio.to_thread(fetch_maks_voice_ips, region)
         random.shuffle(maks_ips)
@@ -285,39 +364,44 @@ async def discover_dns_alive(
             if len(meta) > before:
                 maks_seed += 1
 
-    # Preserve insertion order (cache → dns → maks), trim
     ordered = list(meta.values())[:candidates]
     if not ordered:
         print("[voice-dns] No DNS/Maks candidates to probe")
         return []
 
+    boot_on = False
+    sem = asyncio.Semaphore(STUN_PROBE_CONCURRENCY)
     print(
-        f"[voice-dns] STUN-probing {len(ordered)} candidates "
-        f"(dns+={dns_seed} maks+={maks_seed}, concurrency={STUN_PROBE_CONCURRENCY})..."
+        f"[voice-dns] Dual-probing {len(ordered)} candidates "
+        f"(dns+={dns_seed} maks+={maks_seed}, "
+        f"concurrency={STUN_PROBE_CONCURRENCY}, bootstrap={use_bootstrap})..."
     )
 
-    sem = asyncio.Semaphore(STUN_PROBE_CONCURRENCY)
+    with udp_discover_bootstrap(enabled=use_bootstrap) as boot_on:
+        async def _probe(ep: dict) -> Optional[dict]:
+            async with sem:
+                ok, ms, _detail, method = await asyncio.to_thread(
+                    voice_udp_probe, ep["ip"], ep["port"], stun_timeout
+                )
+                if not ok:
+                    return None
+                out = dict(ep)
+                out["stun_ms"] = round(ms, 1)
+                out["method"] = method
+                out["bootstrap"] = boot_on
+                return out
 
-    async def _probe(ep: dict) -> Optional[dict]:
-        async with sem:
-            ok, ms, _detail = await asyncio.to_thread(
-                stun_probe, ep["ip"], ep["port"], stun_timeout
-            )
-            if not ok:
-                return None
-            out = dict(ep)
-            out["stun_ms"] = round(ms, 1)
-            # Re-tag cache hits that still answer as cache-alive; else keep seed source
-            return out
+        results = await asyncio.gather(*[_probe(ep) for ep in ordered])
 
-    results = await asyncio.gather(*[_probe(ep) for ep in ordered])
     alive = [r for r in results if r is not None][:count]
 
     if alive:
         _save_cache(alive)
 
+    methods = sorted({a.get("method", "") for a in alive if a.get("method")})
     print(
         f"[voice-dns] dns-alive: {len(alive)}/{len(ordered)} probed "
-        f"(dns={dns_seed} maks={maks_seed})"
+        f"(dns={dns_seed} maks={maks_seed}, bootstrap={boot_on}, "
+        f"methods={methods or ['none']})"
     )
     return alive
