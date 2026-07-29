@@ -10,23 +10,25 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
 
 from blockchecks.engine.config import (
-    NFQWS2_BIN, LUA_INIT_SCRIPTS, BLOB_DIR, nfqws2_debug_conf_line,
+    BLOB_DIR,
+    LUA_INIT_SCRIPTS,
+    NFQWS2_BIN,
+    nfqws2_debug_conf_line,
 )
 
 
 class Nfqws2Manager:
     """Manages a single nfqws2 process via foreground Popen + killpg."""
 
-    def __init__(self, ns_name: Optional[str] = None, qnum: int = 200):
+    def __init__(self, ns_name: str | None = None, qnum: int = 200):
         self.ns_name = ns_name
         self._qnum = qnum
-        self._proc: Optional[subprocess.Popen] = None
-        self._pid: Optional[int] = None
+        self._proc: subprocess.Popen | None = None
+        self._pid: int | None = None
         self._temp_files: list[str] = []
-        self.last_debug_log: Optional[str] = None
+        self.last_debug_log: str | None = None
 
     def _launch(self, config_arg: str, *, stop_first: bool = True) -> None:
         """Start nfqws2 in foreground, verify it's alive.
@@ -66,9 +68,7 @@ class Nfqws2Manager:
                     pass
             self._proc = None
             self._pid = None
-            raise RuntimeError(
-                "nfqws2 failed to start (exited immediately)" + hint
-            )
+            raise RuntimeError("nfqws2 failed to start (exited immediately)" + hint)
 
     def start_config(self, config_path: str) -> None:
         """Start nfqws2 using a pre-built .conf file."""
@@ -77,10 +77,15 @@ class Nfqws2Manager:
             raise FileNotFoundError(f"Config not found: {abspath}")
         self._launch(f"@{abspath}")
 
-    def start(self, strategy: str, hostlist: Optional[list[str]] = None,
-              qnum: int = 200, filter_tcp: str = "443",
-              blobs: Optional[list[str]] = None,
-              extra_lua_desync: Optional[list[str]] = None) -> None:
+    def start(
+        self,
+        strategy: str,
+        hostlist: list[str] | None = None,
+        qnum: int = 200,
+        filter_tcp: str = "443",
+        blobs: list[str] | None = None,
+        extra_lua_desync: list[str] | None = None,
+    ) -> None:
         """Start nfqws2 with inline strategy (backward compat)."""
         self.stop()  # clear prior proc/temps before creating a new conf
         self._qnum = qnum
@@ -105,6 +110,7 @@ class Nfqws2Manager:
         # Explicit blobs= plus auto-discover blob=/seqovl_pattern= from strategy
         blob_names: list[str] = list(blobs or [])
         import re
+
         for m in re.finditer(r"blob=(\w+)", strategy):
             if m.group(1) not in blob_names:
                 blob_names.append(m.group(1))
@@ -116,7 +122,7 @@ class Nfqws2Manager:
             for blob_name in blob_names:
                 if blob_name == "0x00000000":
                     continue
-                if any(l.startswith(f"--blob={blob_name}:@") for l in lines):
+                if any(line.startswith(f"--blob={blob_name}:@") for line in lines):
                     continue
                 candidates = [f for f in known if blob_name in f and "quic_initial" not in f]
                 if not candidates:

@@ -29,16 +29,13 @@ Linux host с zapret2/nfqws2 и root (netns + iptables). Unit-тесты — б�
 ## Структура (v0.3)
 
 ```
-blockcheckS/
-├── src/blockchecks/     # пакет
-│   ├── bs.py            # CLI: tcp | udp | scan | pair | composite
-│   ├── engine/          # nfqws2, firewall, matrix, async runner, DB
-│   └── checkers/        # tcp_tls, udp_voice, voice_dns/discovery
-├── configs/             # nfqws2 .conf (Flowseal→zapret2)
-├── tests/unit|integration/
-├── docs/                # guide.md, todo.md
-└── pyproject.toml
+src/blockchecks/   # пакет (bs, main, nfconf, engine/, checkers/)
+configs/           # nfqws2 .conf (repo root)
+presets/           # domains + strategies
+tests/ docs/       # unit/integration + guide/todo/package
 ```
+
+Подробный аудит: [docs/package.md](docs/package.md). Roadmap: [docs/todo.md](docs/todo.md).
 
 ## Быстрый старт
 
@@ -48,6 +45,11 @@ sudo bs scan -d discord.com --generate --parallel 4
 
 # TCP×UDP pair matrix
 sudo bs pair -d discord.com --generate --auto-discover 5
+
+# Mass strategy×coverage + keenetic/raw export (long run; use --resume)
+sudo bs full
+sudo bs full --parallel 2 --resume
+bc-nfconf --db state.db --out-dir output
 
 # Один .conf
 sudo bs tcp -d discord.com -c configs/simple_fake__fake_ts.conf
@@ -61,5 +63,5 @@ pytest -m "not integration"
 
 ## Status
 
-Пакет `blockchecks` 0.3.0: scan/pair/async, checkpoint fingerprint, unit suite.
-Дальше — покрытие матриц bol-van/zapret2 и flowseal-like (см. todo).
+Пакет `blockchecks` 0.3.0: scan/pair/async, `bs full` + nfconf export, ruff clean.
+Roadmap: [docs/todo.md](docs/todo.md). Layout: [docs/package.md](docs/package.md).

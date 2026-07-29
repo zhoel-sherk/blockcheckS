@@ -15,20 +15,20 @@ Flow:
   5. Stop both, export results
 """
 
-import asyncio
 import json
 import os
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 # Colorama for colored output
-from colorama import Fore, Style, init as colorama_init
+from colorama import Fore, Style
+from colorama import init as colorama_init
+
 colorama_init(autoreset=True)
 
-from blockchecks.engine.pair_manager import DualNfqws2Manager
 from blockchecks.engine.db_logger import StateDB
+from blockchecks.engine.pair_manager import DualNfqws2Manager
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -87,14 +87,12 @@ class PairReport:
 class PairTestRunner:
     """Run TCP×UDP pair matrix testing."""
 
-    def __init__(self, ns_name: Optional[str] = None,
-                 db_path: str = "state.db"):
+    def __init__(self, ns_name: str | None = None, db_path: str = "state.db"):
         self.ns_name = ns_name
         self.db = StateDB(db_path)
         self._python = sys.executable
 
-    def _run_curl_check(self, domain: str, timeout: float,
-                         check_gateway: bool = False) -> dict:
+    def _run_curl_check(self, domain: str, timeout: float, check_gateway: bool = False) -> dict:
         """Run curl_cffi TLS check via subprocess."""
         code = f"""
 import json, time, sys
@@ -135,20 +133,24 @@ except Exception as e:
 print(json.dumps(result))
 """
         if self.ns_name:
-            cmd = ["sudo", "ip", "netns", "exec", self.ns_name,
-                   self._python, "-c", code]
+            cmd = ["sudo", "ip", "netns", "exec", self.ns_name, self._python, "-c", code]
         else:
             cmd = ["sudo", self._python, "-c", code]
 
         import subprocess
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                          timeout=timeout + 10)
+
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
         try:
             return json.loads(r.stdout)
         except json.JSONDecodeError:
-            return {"success": False, "http_code": 0, "latency_ms": 0,
-                    "content_len": 0, "content_ok": False,
-                    "error": f"parse: {r.stdout[:100]}"}
+            return {
+                "success": False,
+                "http_code": 0,
+                "latency_ms": 0,
+                "content_len": 0,
+                "content_ok": False,
+                "error": f"parse: {r.stdout[:100]}",
+            }
 
     def _run_stun_check(self, ip: str, port: int, timeout: float) -> dict:
         """Run dual voice UDP probe via subprocess."""
@@ -160,24 +162,23 @@ print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
                    "detail": detail, "method": method}}))
 """
         if self.ns_name:
-            cmd = ["sudo", "ip", "netns", "exec", self.ns_name,
-                   self._python, "-c", code]
+            cmd = ["sudo", "ip", "netns", "exec", self.ns_name, self._python, "-c", code]
         else:
             cmd = ["sudo", self._python, "-c", code]
 
         import subprocess
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                          timeout=timeout + 5)
+
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
         try:
             return json.loads(r.stdout)
         except json.JSONDecodeError:
             return {"success": False, "latency_ms": 0, "detail": "parse error"}
 
-    async def test_tcp_matrix(self, tcp_configs: list[str], domain: str,
-                               timeout: float = 5.0) -> list[TcpTestResult]:
+    async def test_tcp_matrix(
+        self, tcp_configs: list[str], domain: str, timeout: float = 5.0
+    ) -> list[TcpTestResult]:
         """Test each TCP config against domain. Returns results."""
         results = []
-        import os
         for config in tcp_configs:
             name = os.path.basename(config).replace(".conf", "")
             result = TcpTestResult(config=config, name=name, domain=domain)
@@ -200,11 +201,13 @@ print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
                 print(f"  [{tag}] {lat:>6s}  {status:>8s}  TCP {name}{err}")
 
                 await self.db.log_tcp(
-                    name, domain,
+                    name,
+                    domain,
                     "PASS" if result.success else "FAIL",
-                    result.latency_ms, result.http_code,
+                    result.latency_ms,
+                    result.http_code,
                     content_valid=result.content_valid,
-                    error=result.error
+                    error=result.error,
                 )
             except Exception as e:
                 result.error = str(e)[:120]
@@ -215,17 +218,18 @@ print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
             results.append(result)
         return results
 
-    async def test_pair_matrix(self,
-                                tcp_configs: list[str],
-                                udp_configs: list[str],
-                                domain: str,
-                                tcp_results: list[TcpTestResult],
-                                voice_ip: str = "35.217.5.42",
-                                voice_port: int = 50006,
-                                udp_timeout: float = 3.0,
-                                udp_bypass: bool = False,
-                                resume_from: Optional[tuple] = None
-                                ) -> PairReport:
+    async def test_pair_matrix(
+        self,
+        tcp_configs: list[str],
+        udp_configs: list[str],
+        domain: str,
+        tcp_results: list[TcpTestResult],
+        voice_ip: str = "35.217.5.42",
+        voice_port: int = 50006,
+        udp_timeout: float = 3.0,
+        udp_bypass: bool = False,
+        resume_from: tuple | None = None,
+    ) -> PairReport:
         """Run TCP×UDP pair matrix against voice server.
 
         For each PASS TCP (or all if --udp-bypass):
@@ -234,27 +238,21 @@ print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
            Save checkpoint after each pair.
         """
         t0_f = time.perf_counter()
-        report = PairReport(domain=domain,
-                            tcp_results=tcp_results,
-                            voice_info={"ip": voice_ip, "port": voice_port})
-
-        import os
+        report = PairReport(
+            domain=domain, tcp_results=tcp_results, voice_info={"ip": voice_ip, "port": voice_port}
+        )
 
         # Filter working TCP configs
         if udp_bypass:
             working_tcp = [(c, r) for c, r in zip(tcp_configs, tcp_results)]
         else:
-            working_tcp = [
-                (c, r) for c, r in zip(tcp_configs, tcp_results)
-                if r.success
-            ]
+            working_tcp = [(c, r) for c, r in zip(tcp_configs, tcp_results) if r.success]
 
         if not working_tcp:
             print(f"\n  {RED}No PASS TCP strategies — UDP tests skipped{RESET}")
-            print(f"  Use --udp-bypass to force UDP tests on FAIL TCP strategies.")
+            print("  Use --udp-bypass to force UDP tests on FAIL TCP strategies.")
             return report
 
-        total_pairs = len(working_tcp) * len(udp_configs)
         pair_count = 0
 
         # Apply resume checkpoint
@@ -262,7 +260,9 @@ print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
         start_udp_idx = 0
         if resume_from:
             start_tcp_idx, start_udp_idx, *_ = resume_from
-            print(f"\n  {YELLOW}Resuming from checkpoint: tcp={start_tcp_idx} udp={start_udp_idx}{RESET}")
+            print(
+                f"\n  {YELLOW}Resuming from checkpoint: tcp={start_tcp_idx} udp={start_udp_idx}{RESET}"
+            )
 
         for tcp_i, (tcp_conf, tcp_r) in enumerate(working_tcp):
             if tcp_i < start_tcp_idx:
@@ -319,27 +319,42 @@ print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
 
                     udp_tag = f"{GREEN}{udp_ms:.0f}ms{RESET}" if udp_ok else f"{RED}timeout{RESET}"
                     err = f" — {data.get('detail', '')}" if not udp_ok else ""
-                    print(f"  [{pair_tag}] TCP={tcp_name[:25]:25s}  "
-                          f"UDP={udp_name[:25]:25s}  "
-                          f"udp={udp_tag}{err}")
+                    print(
+                        f"  [{pair_tag}] TCP={tcp_name[:25]:25s}  "
+                        f"UDP={udp_name[:25]:25s}  "
+                        f"udp={udp_tag}{err}"
+                    )
 
                     report.pairs.append(pair)
 
                     # Log to DB
-                    await self.db.log_udp(udp_name, target,
-                                          "PASS" if udp_ok else "FAIL",
-                                          udp_ms, data.get("detail", ""))
+                    await self.db.log_udp(
+                        udp_name,
+                        target,
+                        "PASS" if udp_ok else "FAIL",
+                        udp_ms,
+                        data.get("detail", ""),
+                    )
                     await self.db.log_pair(
-                        tcp_name, udp_name, domain,
-                        tcp_r.success, False, udp_ok,  # gateway_ok=False for now
-                        tcp_r.latency_ms, 0, udp_ms, pair.overall
+                        tcp_name,
+                        udp_name,
+                        domain,
+                        tcp_r.success,
+                        False,
+                        udp_ok,  # gateway_ok=False for now
+                        tcp_r.latency_ms,
+                        0,
+                        udp_ms,
+                        pair.overall,
                     )
 
                     # Save checkpoint after every pair
                     await self.db.save_checkpoint(
-                        tcp_i, udp_i,
+                        tcp_i,
+                        udp_i,
                         f"{tcp_name}+{udp_name}",
-                        tcp_label=tcp_name, udp_label=udp_name,
+                        tcp_label=tcp_name,
+                        udp_label=udp_name,
                     )
 
             finally:
@@ -357,13 +372,13 @@ print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
         udp_names = sorted(set(p.udp_config for p in report.pairs))
         pair_map = {f"{p.tcp_config}|{p.udp_config}": p for p in report.pairs}
 
-        print(f"\n  {CYAN}╔{'═'*70}╗{RESET}")
+        print(f"\n  {CYAN}╔{'═' * 70}╗{RESET}")
         print(f"  {CYAN}║{'TCP×UDP Pair Matrix':^70s}║{RESET}")
-        print(f"  {CYAN}╠{'═'*30}╦{'═'*39}╣{RESET}")
+        print(f"  {CYAN}╠{'═' * 30}╦{'═' * 39}╣{RESET}")
 
         header = "  ║ TCP Strategy".ljust(32) + "║ UDP Strategy".ljust(41) + "║"
         print(f"{CYAN}{header}{RESET}")
-        print(f"  {CYAN}╠{'═'*30}╬{'═'*39}╣{RESET}")
+        print(f"  {CYAN}╠{'═' * 30}╬{'═' * 39}╣{RESET}")
 
         passed = 0
         for tcp in tcp_names:
@@ -382,5 +397,5 @@ print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
                 udp_lat = f"{p.udp_ms:.0f}ms" if p.udp_ok else "timeout"
                 print(f"  ║ {tcp[:28]:28s} ║ {udp[:28]:28s} {tag:8s} udp={udp_lat:>8s} ║")
 
-        print(f"  {CYAN}╚{'═'*30}╩{'═'*39}╝{RESET}")
+        print(f"  {CYAN}╚{'═' * 30}╩{'═' * 39}╝{RESET}")
         print(f"  {GREEN}{passed} PASS{RESET} / {len(report.pairs)} pairs")

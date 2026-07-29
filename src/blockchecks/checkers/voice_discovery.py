@@ -14,18 +14,19 @@ import asyncio
 import os
 import subprocess
 import time
-from typing import Optional
 
 from blockchecks.checkers.voice_dns import discover_voice_endpoints as dns_discover
 from blockchecks.engine.config import (
-    SING_BOX_BIN, SING_BOX_CONFIG, SOCKS5_PROXY,
-    DPI_TESTER_SETTINGS, PYTHON_BIN,
+    DPI_TESTER_SETTINGS,
+    SING_BOX_BIN,
+    SING_BOX_CONFIG,
+    SOCKS5_PROXY,
 )
-
 
 _singbox_proc = None
 
-def _manage_singbox(start: bool) -> Optional[subprocess.Popen]:
+
+def _manage_singbox(start: bool) -> subprocess.Popen | None:
     global _singbox_proc
     if start:
         if _singbox_proc is not None:
@@ -38,7 +39,8 @@ def _manage_singbox(start: bool) -> Optional[subprocess.Popen]:
             return None
         _singbox_proc = subprocess.Popen(
             [SING_BOX_BIN, "run", "-c", SING_BOX_CONFIG],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         time.sleep(2)
         return _singbox_proc
@@ -53,20 +55,24 @@ def _manage_singbox(start: bool) -> Optional[subprocess.Popen]:
         return None
 
 
-def load_token() -> Optional[str]:
+def load_token() -> str | None:
     settings = DPI_TESTER_SETTINGS
     if not os.path.exists(settings):
         return None
     import configparser as cp
-    cfg = cp.ConfigParser(interpolation=None, delimiters=("=",),
-                           comment_prefixes=("#", ";"),
-                           inline_comment_prefixes=("#", ";"))
+
+    cfg = cp.ConfigParser(
+        interpolation=None,
+        delimiters=("=",),
+        comment_prefixes=("#", ";"),
+        inline_comment_prefixes=("#", ";"),
+    )
     cfg.optionxform = str
     cfg.read(settings, encoding="utf-8")
     return cfg.get("discord", "token", fallback="") or None
 
 
-async def discover_voice_endpoint() -> Optional[dict]:
+async def discover_voice_endpoint() -> dict | None:
     """Auto-discover Discord voice server via sing-box proxy.
 
     Returns dict with keys: ip, port, ssrc, voice_ws_endpoint
@@ -84,8 +90,8 @@ async def discover_voice_endpoint() -> Optional[dict]:
         return None
 
     try:
-        from aiohttp_socks import ProxyConnector
         import aiohttp
+        from aiohttp_socks import ProxyConnector
 
         connector = ProxyConnector.from_url(SOCKS5_PROXY)
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
@@ -94,17 +100,20 @@ async def discover_voice_endpoint() -> Optional[dict]:
         try:
             # ── Gateway WS ──
             ws = await asyncio.wait_for(
-                session.ws_connect("wss://gateway.discord.gg/?encoding=json&v=10"),
-                timeout=10
+                session.ws_connect("wss://gateway.discord.gg/?encoding=json&v=10"), timeout=10
             )
             hello = await asyncio.wait_for(ws.receive_json(), 10)
             hi = hello["d"]["heartbeat_interval"] / 1000
 
             # Load guild/channel
             import configparser as cp
-            cfg = cp.ConfigParser(interpolation=None, delimiters=("=",),
-                                   comment_prefixes=("#", ";"),
-                                   inline_comment_prefixes=("#", ";"))
+
+            cfg = cp.ConfigParser(
+                interpolation=None,
+                delimiters=("=",),
+                comment_prefixes=("#", ";"),
+                inline_comment_prefixes=("#", ";"),
+            )
             cfg.optionxform = str
             cfg.read(DPI_TESTER_SETTINGS, encoding="utf-8")
             guild_id = cfg.get("discord", "guild_id", fallback="")
@@ -113,17 +122,23 @@ async def discover_voice_endpoint() -> Optional[dict]:
             async def hb():
                 while True:
                     await asyncio.sleep(hi)
-                    try: await ws.send_json({"op": 1, "d": None})
-                    except: break
+                    try:
+                        await ws.send_json({"op": 1, "d": None})
+                    except Exception:
+                        break
+
             hbt = asyncio.create_task(hb())
 
-            await ws.send_json({"op": 2, "d": {
-                "token": token,
-                "properties": {"os": "linux", "browser": "chrome", "device": "pc"},
-                "intents": 513
-            }})
-
-
+            await ws.send_json(
+                {
+                    "op": 2,
+                    "d": {
+                        "token": token,
+                        "properties": {"os": "linux", "browser": "chrome", "device": "pc"},
+                        "intents": 513,
+                    },
+                }
+            )
 
             voice_endpoint = ""
             voice_token_shard = ""
@@ -145,11 +160,17 @@ async def discover_voice_endpoint() -> Optional[dict]:
                 if t == "READY":
                     user_id = d["user"]["id"]
                     if guild_id and channel_id:
-                        await ws.send_json({"op": 4, "d": {
-                            "guild_id": guild_id,
-                            "channel_id": channel_id,
-                            "self_mute": True, "self_deaf": True
-                        }})
+                        await ws.send_json(
+                            {
+                                "op": 4,
+                                "d": {
+                                    "guild_id": guild_id,
+                                    "channel_id": channel_id,
+                                    "self_mute": True,
+                                    "self_deaf": True,
+                                },
+                            }
+                        )
 
                 if t == "VOICE_STATE_UPDATE":
                     session_id = d.get("session_id", "")
@@ -181,17 +202,21 @@ async def discover_voice_endpoint() -> Optional[dict]:
             v_port = int(parts[1]) if len(parts) > 1 else 443
 
             vws = await asyncio.wait_for(
-                session.ws_connect(f"wss://{v_host}:{v_port}/?v=4"),
-                timeout=10
+                session.ws_connect(f"wss://{v_host}:{v_port}/?v=4"), timeout=10
             )
             await asyncio.wait_for(vws.receive_json(), 10)
 
-            await vws.send_json({"op": 0, "d": {
-                "server_id": guild_id,
-                "user_id": user_id,
-                "session_id": session_id,
-                "token": voice_token_shard,
-            }})
+            await vws.send_json(
+                {
+                    "op": 0,
+                    "d": {
+                        "server_id": guild_id,
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "token": voice_token_shard,
+                    },
+                }
+            )
 
             result = {}
             op9_retries = 0
@@ -213,12 +238,17 @@ async def discover_voice_endpoint() -> Optional[dict]:
                     break
                 if vop == 9 and op9_retries < 2:
                     op9_retries += 1
-                    await vws.send_json({"op": 0, "d": {
-                        "server_id": guild_id,
-                        "user_id": user_id,
-                        "session_id": "" if op9_retries > 1 else session_id,
-                        "token": voice_token_shard,
-                    }})
+                    await vws.send_json(
+                        {
+                            "op": 0,
+                            "d": {
+                                "server_id": guild_id,
+                                "user_id": user_id,
+                                "session_id": "" if op9_retries > 1 else session_id,
+                                "token": voice_token_shard,
+                            },
+                        }
+                    )
                     continue
                 if vop == 9:
                     break
@@ -229,8 +259,10 @@ async def discover_voice_endpoint() -> Optional[dict]:
             await session.close()
 
             if result:
-                print(f"[discovery] Voice server: {result['ip']}:{result['port']} "
-                      f"(SSRC={result['ssrc']})")
+                print(
+                    f"[discovery] Voice server: {result['ip']}:{result['port']} "
+                    f"(SSRC={result['ssrc']})"
+                )
             return result if result else None
 
         finally:
@@ -243,9 +275,9 @@ async def discover_voice_endpoint() -> Optional[dict]:
         print("[discovery] sing-box stopped")
 
 
-async def discover_multiple(count: int = 5,
-                             use_dns: bool = True,
-                             use_cache: bool = True) -> list[dict]:
+async def discover_multiple(
+    count: int = 5, use_dns: bool = True, use_cache: bool = True
+) -> list[dict]:
     """Discover N Discord voice UDP endpoints.
 
     Layer 1 (DNS): finland{N}.discord.gg bulk resolution (no auth needed)
@@ -281,11 +313,13 @@ async def discover_multiple(count: int = 5,
                 ep = await discover_voice_endpoint()
                 if ep and ep.get("ip") and ep["ip"] not in seen_ips:
                     seen_ips.add(ep["ip"])
-                    endpoints.append({
-                        "ip": ep["ip"],
-                        "port": ep["port"],
-                        "hostname": ep.get("voice_ws_endpoint", ""),
-                    })
+                    endpoints.append(
+                        {
+                            "ip": ep["ip"],
+                            "port": ep["port"],
+                            "hostname": ep.get("voice_ws_endpoint", ""),
+                        }
+                    )
             except Exception as e:
                 print(f"[discovery] Gateway attempt failed: {e}")
                 break

@@ -1,5 +1,6 @@
 """Tests for voice DNS discovery."""
-import os, sys, pytest, asyncio, time
+
+import pytest
 
 from blockchecks.checkers.voice_dns import discover_voice_endpoints
 

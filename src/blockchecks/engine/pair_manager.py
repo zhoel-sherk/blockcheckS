@@ -8,20 +8,21 @@ import os
 import signal
 import subprocess
 import time
-from typing import Optional
 
-from blockchecks.engine.config import NFQWS2_BIN, NFQUEUE_TCP as TCP_QNUM, NFQUEUE_UDP as UDP_QNUM
+from blockchecks.engine.config import NFQUEUE_TCP as TCP_QNUM
+from blockchecks.engine.config import NFQUEUE_UDP as UDP_QNUM
+from blockchecks.engine.config import NFQWS2_BIN
 
 
 class DualNfqws2Manager:
     """Manage two independent nfqws2 processes via foreground Popen + killpg."""
 
-    def __init__(self, ns_name: Optional[str] = None):
+    def __init__(self, ns_name: str | None = None):
         self.ns_name = ns_name
-        self._tcp_proc: Optional[subprocess.Popen] = None
-        self._udp_proc: Optional[subprocess.Popen] = None
-        self._tcp_pid: Optional[int] = None
-        self._udp_pid: Optional[int] = None
+        self._tcp_proc: subprocess.Popen | None = None
+        self._udp_proc: subprocess.Popen | None = None
+        self._tcp_pid: int | None = None
+        self._udp_pid: int | None = None
         self._rules: list[list[str]] = []
 
     def _ns_prefix(self) -> list[str]:
@@ -36,7 +37,7 @@ class DualNfqws2Manager:
             raise RuntimeError(f"iptables failed: {r.stderr[:200]}")
         self._rules.append(["-D"] + list(args))
 
-    def _kill_by_pid(self, pid: Optional[int]) -> None:
+    def _kill_by_pid(self, pid: int | None) -> None:
         if pid is None:
             return
         try:
@@ -49,8 +50,7 @@ class DualNfqws2Manager:
         except (ProcessLookupError, OSError):
             pass
 
-    def _start_nfqws2(self, config_path: str, label: str
-                       ) -> subprocess.Popen:
+    def _start_nfqws2(self, config_path: str, label: str) -> subprocess.Popen:
         args = [NFQWS2_BIN, f"@{config_path}"]
         if self.ns_name:
             cmd = ["sudo", "ip", "netns", "exec", self.ns_name] + args
@@ -59,7 +59,8 @@ class DualNfqws2Manager:
 
         proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             start_new_session=True,
         )
         time.sleep(0.8)
@@ -74,22 +75,39 @@ class DualNfqws2Manager:
         return proc
 
     def start_tcp(self, config_path: str) -> None:
-        self._add_iptables("OUTPUT", "-p", "tcp", "--dport", "443",
-                           "-j", "NFQUEUE", "--queue-num", str(TCP_QNUM),
-                           "--queue-bypass")
+        self._add_iptables(
+            "OUTPUT",
+            "-p",
+            "tcp",
+            "--dport",
+            "443",
+            "-j",
+            "NFQUEUE",
+            "--queue-num",
+            str(TCP_QNUM),
+            "--queue-bypass",
+        )
         self._tcp_proc = self._start_nfqws2(config_path, "TCP")
         self._tcp_pid = self._tcp_proc.pid
 
     def start_udp(self, config_path: str, voice_port: int = 50006) -> None:
         port_str = str(voice_port)
-        self._add_iptables("OUTPUT", "-p", "udp", "--dport", f"{port_str}:{port_str}",
-                           "-j", "NFQUEUE", "--queue-num", str(UDP_QNUM),
-                           "--queue-bypass")
+        self._add_iptables(
+            "OUTPUT",
+            "-p",
+            "udp",
+            "--dport",
+            f"{port_str}:{port_str}",
+            "-j",
+            "NFQUEUE",
+            "--queue-num",
+            str(UDP_QNUM),
+            "--queue-bypass",
+        )
         self._udp_proc = self._start_nfqws2(config_path, "UDP")
         self._udp_pid = self._udp_proc.pid
 
-    def start_pair(self, tcp_conf: str, udp_conf: str,
-                   voice_port: int = 50006) -> None:
+    def start_pair(self, tcp_conf: str, udp_conf: str, voice_port: int = 50006) -> None:
         self.start_tcp(tcp_conf)
         self.start_udp(udp_conf, voice_port)
 

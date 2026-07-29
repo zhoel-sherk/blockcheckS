@@ -10,9 +10,8 @@ on the event loop thread.
 
 import asyncio
 import subprocess
-import time
 import threading
-from typing import Optional
+import time
 
 BASE_CIDR = 20  # networks: 10.200.<n>.0/30 for pool member n
 
@@ -21,7 +20,7 @@ class NetNsPool:
     def __init__(self, size: int = 4, base: str = "bs-p"):
         self.size = size
         self.base = base
-        self._queue: Optional[asyncio.Queue] = None
+        self._queue: asyncio.Queue | None = None
         self._created = False
         self._names: list[str] = []
         self._iface: str = ""  # cached interface name
@@ -34,8 +33,7 @@ class NetNsPool:
 
     def _run(self, *args, check: bool = True) -> subprocess.CompletedProcess:
         """Run a command with sudo, optionally checking for errors."""
-        r = subprocess.run(["sudo"] + list(args), capture_output=True,
-                          text=True, timeout=15)
+        r = subprocess.run(["sudo"] + list(args), capture_output=True, text=True, timeout=15)
         if check and r.returncode != 0:
             raise RuntimeError(f"cmd failed: {' '.join(args)} → {r.stderr[:200]}")
         return r
@@ -44,8 +42,7 @@ class NetNsPool:
         """Find a working non-loopback interface (cached)."""
         if self._iface:
             return self._iface
-        r = subprocess.run(["ip", "-br", "link", "show"], capture_output=True,
-                          text=True)
+        r = subprocess.run(["ip", "-br", "link", "show"], capture_output=True, text=True)
         for line in r.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 2 and parts[1] == "UP" and parts[0] != "lo":
@@ -72,41 +69,45 @@ class NetNsPool:
 
         # Create
         self._run("ip", "netns", "add", name)
-        self._run("ip", "link", "add", veth_h, "type", "veth",
-                  "peer", "name", veth_n)
+        self._run("ip", "link", "add", veth_h, "type", "veth", "peer", "name", veth_n)
         self._run("ip", "link", "set", veth_n, "netns", name)
 
         # IP addresses
-        self._run("ip", "addr", "add", f"{host_ip}/{cidr_mask}",
-                  "dev", veth_h)
+        self._run("ip", "addr", "add", f"{host_ip}/{cidr_mask}", "dev", veth_h)
         self._run("ip", "link", "set", veth_h, "up")
-        self._run("ip", "netns", "exec", name, "ip", "addr", "add",
-                  f"{ns_ip}/{cidr_mask}", "dev", veth_n)
-        self._run("ip", "netns", "exec", name, "ip", "link", "set",
-                  veth_n, "up")
-        self._run("ip", "netns", "exec", name, "ip", "link", "set",
-                  "lo", "up")
+        self._run(
+            "ip", "netns", "exec", name, "ip", "addr", "add", f"{ns_ip}/{cidr_mask}", "dev", veth_n
+        )
+        self._run("ip", "netns", "exec", name, "ip", "link", "set", veth_n, "up")
+        self._run("ip", "netns", "exec", name, "ip", "link", "set", "lo", "up")
 
         # Routing
-        self._run("ip", "netns", "exec", name, "ip", "route", "add",
-                  "default", "via", host_ip)
+        self._run("ip", "netns", "exec", name, "ip", "route", "add", "default", "via", host_ip)
 
         # Enable forwarding
         self._run("sysctl", "-w", "net.ipv4.ip_forward=1", check=False)
         # Allow forwarded traffic from veth pairs
-        self._run("iptables", "-A", "FORWARD", "-i", veth_h,
-                  "-j", "ACCEPT", check=False)
-        self._run("iptables", "-A", "FORWARD", "-o", veth_h,
-                  "-j", "ACCEPT", check=False)
-        self._run("iptables", "-t", "nat", "-I", "POSTROUTING", "1",
-                  "-s", f"{host_ip}/{cidr_mask}", "-o", out_iface,
-                  "-j", "MASQUERADE")
+        self._run("iptables", "-A", "FORWARD", "-i", veth_h, "-j", "ACCEPT", check=False)
+        self._run("iptables", "-A", "FORWARD", "-o", veth_h, "-j", "ACCEPT", check=False)
+        self._run(
+            "iptables",
+            "-t",
+            "nat",
+            "-I",
+            "POSTROUTING",
+            "1",
+            "-s",
+            f"{host_ip}/{cidr_mask}",
+            "-o",
+            out_iface,
+            "-j",
+            "MASQUERADE",
+        )
 
         # DNS
         dns_dir = f"/etc/netns/{name}"
         self._run("mkdir", "-p", dns_dir)
-        self._run("bash", "-c",
-                  f"echo 'nameserver 8.8.8.8' > {dns_dir}/resolv.conf")
+        self._run("bash", "-c", f"echo 'nameserver 8.8.8.8' > {dns_dir}/resolv.conf")
 
         self._names.append(name)
         return name
@@ -120,28 +121,33 @@ class NetNsPool:
         out_iface = self._get_iface()
         cidr_mask = 30
 
-        self._run("ip", "netns", "exec", name, "pkill", "-9", "nfqws2",
-                  check=False)
-        self._run("ip", "netns", "exec", name, "iptables", "-F", "OUTPUT",
-                  check=False)
+        self._run("ip", "netns", "exec", name, "pkill", "-9", "nfqws2", check=False)
+        self._run("ip", "netns", "exec", name, "iptables", "-F", "OUTPUT", check=False)
         self._run("ip", "netns", "delete", name, check=False)
         self._run("ip", "link", "delete", veth_h, check=False)
-        self._run("iptables", "-D", "FORWARD", "-i", veth_h,
-                  "-j", "ACCEPT", check=False)
-        self._run("iptables", "-D", "FORWARD", "-o", veth_h,
-                  "-j", "ACCEPT", check=False)
-        self._run("iptables", "-t", "nat", "-D", "POSTROUTING",
-                  "-s", f"{host_ip}/{cidr_mask}", "-o", out_iface,
-                  "-j", "MASQUERADE", check=False)
+        self._run("iptables", "-D", "FORWARD", "-i", veth_h, "-j", "ACCEPT", check=False)
+        self._run("iptables", "-D", "FORWARD", "-o", veth_h, "-j", "ACCEPT", check=False)
+        self._run(
+            "iptables",
+            "-t",
+            "nat",
+            "-D",
+            "POSTROUTING",
+            "-s",
+            f"{host_ip}/{cidr_mask}",
+            "-o",
+            out_iface,
+            "-j",
+            "MASQUERADE",
+            check=False,
+        )
         dns_dir = f"/etc/netns/{name}"
         self._run("rm", "-rf", dns_dir, check=False)
 
     def _cleanup_ns(self, ns_name: str) -> None:
         """Best-effort cleanup inside a netns before returning to pool."""
-        self._run("ip", "netns", "exec", ns_name,
-                  "pkill", "-9", "nfqws2", check=False)
-        self._run("ip", "netns", "exec", ns_name,
-                  "iptables", "-F", "OUTPUT", check=False)
+        self._run("ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2", check=False)
+        self._run("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT", check=False)
 
     # ── Public API ──
 
@@ -181,7 +187,7 @@ class NetNsPool:
         for name in names_to_destroy:
             self._destroy_one(name)
         self._names.clear()
-        print(f"[netns] Pool destroyed")
+        print("[netns] Pool destroyed")
 
     async def acquire(self) -> str:
         """Get a free netns from the pool. Blocks if all busy."""

@@ -23,7 +23,6 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
-from typing import Optional
 
 from blockchecks.engine.config import PROJECT_DIR
 
@@ -44,14 +43,16 @@ CACHE_DIR = os.path.join(PROJECT_DIR, "logs")
 CACHE_FILE = "bs_voice_cache.json"
 CACHE_TTL_SECONDS = 90 * 60  # 90 minutes
 
-STUN_PROBE_CONCURRENCY = 8
+# Parallel probes through host NFQUEUE+bootstrap; >4 tends to queue-bypass
+# drop replies (remote Fryazino: 8→0/64 alive, 4→3/4 ip_discovery).
+STUN_PROBE_CONCURRENCY = 4
 
 
 def _cache_file() -> str:
     return os.path.join(CACHE_DIR, CACHE_FILE)
 
 
-def _load_cache() -> Optional[dict]:
+def _load_cache() -> dict | None:
     """Load cached voice endpoints if not expired."""
     cache_file = _cache_file()
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -80,7 +81,7 @@ def _save_cache(endpoints: list[dict]) -> None:
         json.dump(data, f)
 
 
-async def _resolve_host(host: str) -> Optional[str]:
+async def _resolve_host(host: str) -> str | None:
     """Resolve a single hostname to IPv4. Returns IP or None."""
     try:
         loop = asyncio.get_event_loop()
@@ -92,8 +93,9 @@ async def _resolve_host(host: str) -> Optional[str]:
     return None
 
 
-async def resolve_finland_range(start: int = DNS_RANGE[0],
-                                 end: int = DNS_RANGE[1]) -> dict[str, list[str]]:
+async def resolve_finland_range(
+    start: int = DNS_RANGE[0], end: int = DNS_RANGE[1]
+) -> dict[str, list[str]]:
     """Bulk-resolve finland{N}.discord.gg in parallel.
 
     Returns: {ip: [list of matching hostnames]}
@@ -115,8 +117,7 @@ async def resolve_finland_range(start: int = DNS_RANGE[0],
     return ip_to_hosts
 
 
-async def discover_voice_endpoints(count: int = 5,
-                                    use_cache: bool = True) -> list[dict]:
+async def discover_voice_endpoints(count: int = 5, use_cache: bool = True) -> list[dict]:
     """Discover N Discord voice UDP endpoints.
 
     Layer 1 (DNS): Resolve finland{N}.discord.gg → GCP IPs.
@@ -143,7 +144,9 @@ async def discover_voice_endpoints(count: int = 5,
                     return endpoints[:count]
 
     # ── Layer 1: DNS bulk ──
-    print(f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg range {DNS_RANGE[0]}-{DNS_RANGE[1]-1}...")
+    print(
+        f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}..."
+    )
     ip_map = await resolve_finland_range()
 
     # Pick one random port per unique IP
@@ -168,7 +171,7 @@ async def discover_voice_endpoints(count: int = 5,
     return endpoints[:count]
 
 
-def check_discover_mutex(discover_dns, auto_discover) -> Optional[str]:
+def check_discover_mutex(discover_dns, auto_discover) -> str | None:
     """Return error message if both discover flags are set, else None."""
     dns_on = discover_dns is not None and int(discover_dns) > 0
     auto_on = auto_discover is not None and int(auto_discover) > 0
@@ -202,8 +205,7 @@ def parse_maks_ip_list(text: str) -> list[str]:
     return ips
 
 
-def fetch_maks_voice_ips(region: str = "finland",
-                         timeout: float = 5.0) -> list[str]:
+def fetch_maks_voice_ips(region: str = "finland", timeout: float = 5.0) -> list[str]:
     """Fetch voice IPs from Maks-gaming discord-servers. Soft-fail → []."""
     url = MAKS_IP_LIST_URL.format(region=region)
     try:
@@ -222,7 +224,7 @@ def fetch_maks_voice_ips(region: str = "finland",
 def udp_discover_bootstrap(
     enabled: bool = True,
     strategy: str = "fake:blob=discord_udp:repeats=6",
-    qnum: Optional[int] = None,
+    qnum: int | None = None,
 ):
     """Temporarily run nfqws2 UDP desync + iptables for discover probes.
 
@@ -234,7 +236,10 @@ def udp_discover_bootstrap(
         return
 
     from blockchecks.engine.config import (
-        BLOB_DIR, LUA_INIT_SCRIPTS, NFQUEUE_UDP, nfqws2_debug_conf_line,
+        BLOB_DIR,
+        LUA_INIT_SCRIPTS,
+        NFQUEUE_UDP,
+        nfqws2_debug_conf_line,
     )
     from blockchecks.engine.firewall import Firewall
     from blockchecks.engine.nfqws2 import Nfqws2Manager
@@ -242,7 +247,7 @@ def udp_discover_bootstrap(
     q = NFQUEUE_UDP if qnum is None else qnum
     fw = Firewall()
     mgr = Nfqws2Manager(qnum=q)
-    conf_path: Optional[str] = None
+    conf_path: str | None = None
     active = False
     try:
         lines = [
@@ -318,7 +323,7 @@ async def discover_dns_alive(
     dns_seed = 0
     maks_seed = 0
 
-    def _add(ip: str, *, hostname: str, source: str, port: Optional[int] = None) -> None:
+    def _add(ip: str, *, hostname: str, source: str, port: int | None = None) -> None:
         if not ip or ip in meta:
             return
         meta[ip] = {
@@ -369,7 +374,6 @@ async def discover_dns_alive(
         print("[voice-dns] No DNS/Maks candidates to probe")
         return []
 
-    boot_on = False
     sem = asyncio.Semaphore(STUN_PROBE_CONCURRENCY)
     print(
         f"[voice-dns] Dual-probing {len(ordered)} candidates "
@@ -378,7 +382,8 @@ async def discover_dns_alive(
     )
 
     with udp_discover_bootstrap(enabled=use_bootstrap) as boot_on:
-        async def _probe(ep: dict) -> Optional[dict]:
+
+        async def _probe(ep: dict) -> dict | None:
             async with sem:
                 ok, ms, _detail, method = await asyncio.to_thread(
                     voice_udp_probe, ep["ip"], ep["port"], stun_timeout

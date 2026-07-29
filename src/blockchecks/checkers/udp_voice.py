@@ -11,7 +11,6 @@ import random
 import socket
 import struct
 import time
-from typing import Optional
 
 # Discord IP Discovery (docs): Type(2)+Length(2)+SSRC(4)+Address(64)+Port(2) = 74
 IP_DISCOVERY_BODY_LEN = 70
@@ -27,7 +26,7 @@ def build_ip_discovery_request(ssrc: int = 0) -> bytes:
     )
 
 
-def parse_ip_discovery_response(data: bytes) -> Optional[dict]:
+def parse_ip_discovery_response(data: bytes) -> dict | None:
     """Validate IP Discovery response; return mapped fields or None."""
     if len(data) < 8:
         return None
@@ -52,8 +51,7 @@ def parse_ip_discovery_response(data: bytes) -> Optional[dict]:
     }
 
 
-def stun_probe(ip: str, port: int = 50004,
-               timeout: float = 3.0) -> tuple[bool, float, str]:
+def stun_probe(ip: str, port: int = 50004, timeout: float = 3.0) -> tuple[bool, float, str]:
     """Send RFC 5389 STUN binding request, return (success, latency_ms, detail).
 
     If DPI blocks UDP, the packet never reaches the voice server
@@ -76,11 +74,10 @@ def stun_probe(ip: str, port: int = 50004,
             msg_type = struct.unpack(">H", data[:2])[0]
             magic = struct.unpack(">I", data[4:8])[0]
             resp_tid = data[8:20]
-            if (msg_type == 0x0101 and magic == 0x2112A442
-                    and resp_tid == tid):
+            if msg_type == 0x0101 and magic == 0x2112A442 and resp_tid == tid:
                 return True, elapsed, f"{len(data)}B STUN from {addr[0]}:{addr[1]}"
         return False, elapsed, f"invalid STUN response ({len(data)}B)"
-    except socket.timeout:
+    except TimeoutError:
         elapsed = (time.perf_counter() - start) * 1000
         return False, elapsed, "timeout"
     except OSError as e:
@@ -94,9 +91,9 @@ def stun_probe(ip: str, port: int = 50004,
                 pass
 
 
-def ip_discovery_probe(ip: str, port: int = 50004,
-                       ssrc: int = 0,
-                       timeout: float = 3.0) -> tuple[bool, float, str]:
+def ip_discovery_probe(
+    ip: str, port: int = 50004, ssrc: int = 0, timeout: float = 3.0
+) -> tuple[bool, float, str]:
     """Send Discord IP Discovery (74B) request; return (ok, ms, detail).
 
     SSRC from Voice Ready is ideal; 0 is used for liveness when unknown.
@@ -121,7 +118,7 @@ def ip_discovery_probe(ip: str, port: int = 50004,
                 f"{parsed['raw_len']}B IP-discovery from {addr[0]}:{addr[1]}{extra}",
             )
         return False, elapsed, f"invalid IP-discovery response ({len(data)}B)"
-    except socket.timeout:
+    except TimeoutError:
         elapsed = (time.perf_counter() - start) * 1000
         return False, elapsed, "timeout"
     except OSError as e:
@@ -135,9 +132,9 @@ def ip_discovery_probe(ip: str, port: int = 50004,
                 pass
 
 
-def voice_udp_probe(ip: str, port: int = 50004,
-                    timeout: float = 3.0,
-                    ssrc: int = 0) -> tuple[bool, float, str, str]:
+def voice_udp_probe(
+    ip: str, port: int = 50004, timeout: float = 3.0, ssrc: int = 0
+) -> tuple[bool, float, str, str]:
     """Dual probe: RFC5389 STUN first, then Discord IP Discovery.
 
     Returns (ok, latency_ms, detail, method) where method is

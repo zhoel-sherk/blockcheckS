@@ -62,6 +62,7 @@ def _fake_voice_probe(alive_ips):
         if ip in alive_ips:
             return True, 12.5, "ok", "rfc5389"
         return False, 1000.0, "timeout", ""
+
     return fake
 
 
@@ -96,9 +97,7 @@ async def test_discover_dns_alive_filters_dead():
             side_effect=_fake_voice_probe(alive_ips),
         ),
     ):
-        eps = await discover_dns_alive(
-            5, use_cache=False, use_maks=False, use_bootstrap=False
-        )
+        eps = await discover_dns_alive(5, use_cache=False, use_maks=False, use_bootstrap=False)
 
     assert len(eps) == 2
     assert {e["ip"] for e in eps} == alive_ips
@@ -132,9 +131,7 @@ async def test_discover_dns_alive_empty_when_all_timeout():
             return_value=(False, 1000.0, "timeout", ""),
         ),
     ):
-        eps = await discover_dns_alive(
-            3, use_cache=False, use_maks=True, use_bootstrap=False
-        )
+        eps = await discover_dns_alive(3, use_cache=False, use_maks=True, use_bootstrap=False)
 
     assert eps == []
     save.assert_not_called()
@@ -164,9 +161,7 @@ async def test_discover_dns_alive_merges_maks_and_tags():
             return_value=(True, 5.0, "ok", "ip_discovery"),
         ),
     ):
-        eps = await discover_dns_alive(
-            5, use_cache=False, use_maks=True, use_bootstrap=False
-        )
+        eps = await discover_dns_alive(5, use_cache=False, use_maks=True, use_bootstrap=False)
 
     ips = {e["ip"] for e in eps}
     assert ips == {"35.217.1.1", "35.217.2.2"}
@@ -201,9 +196,7 @@ async def test_discover_dns_alive_maks_fetch_soft_fail():
             return_value=(True, 1.0, "ok", "rfc5389"),
         ),
     ):
-        eps = await discover_dns_alive(
-            1, use_cache=False, use_maks=True, use_bootstrap=False
-        )
+        eps = await discover_dns_alive(1, use_cache=False, use_maks=True, use_bootstrap=False)
 
     assert len(eps) == 1
     assert eps[0]["ip"] == "35.217.3.3"

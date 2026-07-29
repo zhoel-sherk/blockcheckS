@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from blockchecks.checkers.udp_voice import (
     IP_DISCOVERY_TOTAL,
     build_ip_discovery_request,
@@ -88,7 +86,11 @@ def test_voice_udp_probe_falls_back_to_ip_discovery():
         ),
         patch(
             "blockchecks.checkers.udp_voice.ip_discovery_probe",
-            return_value=(True, 15.0, "74B IP-discovery",),
+            return_value=(
+                True,
+                15.0,
+                "74B IP-discovery",
+            ),
         ),
     ):
         ok, ms, detail, method = voice_udp_probe("1.1.1.1", 50000, timeout=1.0)

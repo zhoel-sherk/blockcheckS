@@ -1,14 +1,13 @@
 """Wave C unit regressions — UA, DPI helpers, fingerprint API."""
+
 from __future__ import annotations
 
 import inspect
 
 import pytest
 
-from blockchecks.checkers import tcp_tls
 from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS, check_tls
 from blockchecks.engine.db_logger import matrix_fingerprint
-
 
 pytestmark = pytest.mark.unit
 

@@ -1,4 +1,5 @@
 """MatrixGenerator unit tests (no root)."""
+
 from __future__ import annotations
 
 import os
@@ -12,7 +13,6 @@ from blockchecks.engine.matrix_generator import (
     MatrixGenerator,
     UserMatrixGenerator,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -43,7 +43,9 @@ async def test_fast_skip_with_run_set():
     gen = FakeTcpGenerator()
     items_full = await gen.generate("tls12", scan_level="fast", max_count=10)
     items_slim = await gen.generate(
-        "tls12", scan_level="fast", max_count=10,
+        "tls12",
+        scan_level="fast",
+        max_count=10,
         run_set={items_full[0].label},
     )
     assert len(items_slim) <= len(items_full)
@@ -51,9 +53,7 @@ async def test_fast_skip_with_run_set():
 
 @pytest.mark.asyncio
 async def test_user_matrix_loads():
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write("fake:repeats=1\nfake:repeats=6:tcp_ts=-1000\n")
         path = f.name
     try:

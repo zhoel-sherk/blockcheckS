@@ -8,8 +8,6 @@ import json
 import os
 import subprocess
 import time
-from typing import Optional
-
 
 CACHE_FILE = "bs_gv_url_cache.json"
 CACHE_TTL = 3 * 3600  # 3 hours (googlevideo URLs expire in ~6 hours)
@@ -17,13 +15,14 @@ CACHE_TTL = 3 * 3600  # 3 hours (googlevideo URLs expire in ~6 hours)
 
 def _cache_path() -> str:
     from blockchecks.engine.config import PROJECT_DIR
+
     os.makedirs(os.path.join(PROJECT_DIR, "logs"), exist_ok=True)
     return os.path.join(PROJECT_DIR, "logs", CACHE_FILE)
 
 
-def get_fresh_url(video_id: str = "dQw4w9WgXcQ",
-                  format_code: str = "18",
-                  proxy: Optional[str] = None) -> Optional[str]:
+def get_fresh_url(
+    video_id: str = "dQw4w9WgXcQ", format_code: str = "18", proxy: str | None = None
+) -> str | None:
     """Get a fresh googlevideo.com URL for testing.
 
     Uses yt-dlp to extract the direct video stream URL.
@@ -52,34 +51,42 @@ def get_fresh_url(video_id: str = "dQw4w9WgXcQ",
 
     # Fetch fresh URL
     import shutil
+
     ytdlp = shutil.which("yt-dlp")
     if not ytdlp:
         # Common venv locations
         for candidate in [
             "/home/zhoel/workspace/dpi-tester/.venv/bin/yt-dlp",
-            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))))), ".venv", "bin", "yt-dlp"),
+            os.path.join(
+                os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                ),
+                ".venv",
+                "bin",
+                "yt-dlp",
+            ),
         ]:
             if os.path.exists(candidate):
                 ytdlp = candidate
                 break
     if not ytdlp:
         return None
-    cmd = [ytdlp, "-g", "-f", format_code,
-           f"https://www.youtube.com/watch?v={video_id}"]
+    cmd = [ytdlp, "-g", "-f", format_code, f"https://www.youtube.com/watch?v={video_id}"]
     if proxy:
         cmd.insert(1, proxy)
         cmd.insert(1, "--proxy")
 
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        urls = [l.strip() for l in r.stdout.splitlines()
-                if l.startswith("https://") and "googlevideo.com" in l]
+        urls = [
+            line.strip()
+            for line in r.stdout.splitlines()
+            if line.startswith("https://") and "googlevideo.com" in line
+        ]
         if urls:
             url = urls[0]
             with open(cache_file, "w") as f:
-                json.dump({"timestamp": time.time(), "url": url,
-                           "video_id": video_id}, f)
+                json.dump({"timestamp": time.time(), "url": url, "video_id": video_id}, f)
             return url
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass

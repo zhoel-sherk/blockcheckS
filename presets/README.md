@@ -44,8 +44,25 @@ bs pair -d discord.com --generate --discover-dns 5 --discover-dns-no-bootstrap
 bs pair -d discord.com --generate --auto-discover 5
 # Do not combine --discover-dns and --auto-discover (mutually exclusive).
 # Exact session UDP port needs voice Ready (token); we probe 50000–50006 only.
+# Discover probes use concurrency=4 (higher can drop replies via NFQUEUE bypass).
 # Archived third-party lists (GhostRooter, etc.) are not used.
 ```
+
+## Full mass run (`bs full`)
+
+Runs strategy × every domain in `presets/domains/coverage.txt` (curl_cffi),
+then voice discover, optional QUIC/pairs, and exports configs:
+
+```bash
+sudo bs full                    # uncapped matrix × coverage + export
+sudo bs full --parallel 2 --resume
+sudo bs full --max 500          # shrink matrix
+bc-nfconf --db state.db --limit 3 --out-dir output
+```
+
+Writes `output/nfqws2_<timestamp>.conf` (keenetic) + `nfqws2_raw_<timestamp>.conf`
++ `user.list`. GP historically logged ~515k success links / ~968k raw curl
+attempts without curl_cffi — `bs full` is the curl_cffi replacement at that scale.
 
 ## Adding your own
 

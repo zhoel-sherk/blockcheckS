@@ -1,15 +1,14 @@
 """Integration tests — Linux + sudo + nfqws2 required."""
+
 from __future__ import annotations
 
 import os
-import signal
 
 import pytest
 
 from blockchecks.engine.config import NFQWS2_BIN, PYTHON_BIN
 from blockchecks.engine.firewall import Firewall
 from blockchecks.engine.nfqws2 import Nfqws2Manager
-
 
 pytestmark = pytest.mark.integration
 
@@ -35,8 +34,21 @@ def test_nfqws2_killpg_process_gone(nfqws2_available):
 def test_firewall_cleanup_no_flush_output():
     fw = Firewall()
     # Tracked cleanup uses -D only; never -F
-    fw._rules.append(["-D", "OUTPUT", "-p", "tcp", "--dport", "443",
-                       "-j", "NFQUEUE", "--queue-num", "219", "--queue-bypass"])
+    fw._rules.append(
+        [
+            "-D",
+            "OUTPUT",
+            "-p",
+            "tcp",
+            "--dport",
+            "443",
+            "-j",
+            "NFQUEUE",
+            "--queue-num",
+            "219",
+            "--queue-bypass",
+        ]
+    )
     # Don't actually run iptables if no sudo — just assert rule shape
     assert all(r[0] == "-D" for r in fw._rules)
     assert not any("-F" in r for r in fw._rules)
@@ -52,6 +64,7 @@ def test_firewall_queue_bypass_tracked():
         class R:
             returncode = 0
             stderr = ""
+
         recorded.append(list(args))
         return R()
 

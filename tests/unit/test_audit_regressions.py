@@ -1,4 +1,5 @@
 """Audit closure regression tests (Wave 4) — Windows-safe, no root."""
+
 from __future__ import annotations
 
 import ast
@@ -10,7 +11,6 @@ import pytest
 
 from blockchecks.engine import async_runner as ar
 from blockchecks.engine.async_runner import _add_blobs_from_strategy, _run_udp_check
-from blockchecks.engine.config import CURLOPT_ECH
 from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.matrix_generator import (
     TCP_FAMILIES,
@@ -19,20 +19,23 @@ from blockchecks.engine.matrix_generator import (
     StandardGenerator,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
 async def test_log_tcp_read_rate_not_latency(temp_db: StateDB):
     await temp_db.log_tcp(
-        "s1", "discord.com", "PASS",
-        latency_ms=123.0, http_code=200, read_rate_bps=98765.0,
+        "s1",
+        "discord.com",
+        "PASS",
+        latency_ms=123.0,
+        http_code=200,
+        read_rate_bps=98765.0,
     )
     async with aiosqlite.connect(temp_db.db_path) as db:
-        row = await (await db.execute(
-            "SELECT latency_ms, read_rate_bps FROM tcp_results"
-        )).fetchone()
+        row = await (
+            await db.execute("SELECT latency_ms, read_rate_bps FROM tcp_results")
+        ).fetchone()
     assert row[0] == 123.0
     assert row[1] == 98765.0
 
@@ -91,7 +94,7 @@ def test_scan_auto_discover_none_skips():
     for auto_discover in (None, False):
         should = auto_discover is not None and int(auto_discover) > 0
         assert should is False
-    assert (5 is not None and int(5) > 0) is True
+    assert (5 != None and 5 > 0) is True
 
     # scan path must normalize False → None (never leave False for int())
     src = Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "bs.py"
@@ -115,7 +118,10 @@ async def test_protocol_forwarded_to_generate():
 
     mg.register("fake_src", FakeGen())
     await mg.generate_tcp(
-        sources=["fake_src"], protocol="tls13", max_count=5, domain="x.com",
+        sources=["fake_src"],
+        protocol="tls13",
+        max_count=5,
+        domain="x.com",
     )
     assert captured.get("protocol") == "tls13"
 
@@ -156,6 +162,7 @@ def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
         returncode = 0
 
     import subprocess as _sp
+
     monkeypatch.setattr(_sp, "run", lambda *a, **k: FakeCompleted())
 
     strategy = "--filter-udp=50000-50100 --lua-desync=fake:blob=DISCORD:repeats=6"
@@ -182,11 +189,16 @@ def test_udp_coexist_skips_pkill(monkeypatch):
         returncode = 0
 
     import subprocess as _sp
+
     monkeypatch.setattr(_sp, "run", lambda *a, **k: FakeCompleted())
 
     _run_udp_check(
-        "mock-ns", "fake:blob=discord_udp:repeats=6",
-        "1.2.3.4", 3478, 1.0, coexist=True,
+        "mock-ns",
+        "fake:blob=discord_udp:repeats=6",
+        "1.2.3.4",
+        3478,
+        1.0,
+        coexist=True,
     )
     assert calls == [False]
 
@@ -210,6 +222,7 @@ async def test_user_matrix_skips_udp_cli_on_tcp(tmp_path):
         encoding="utf-8",
     )
     from blockchecks.engine.matrix_generator import UserMatrixGenerator
+
     items = await UserMatrixGenerator(str(path)).generate("tls12", max_count=50)
     assert len(items) == 1
     assert "stun" in items[0].strategy
@@ -229,7 +242,7 @@ def test_add_blobs_loads_all_and_seqovl(tmp_path, monkeypatch):
         "multisplit:pos=1:seqovl_pattern=google"
     )
     _add_blobs_from_strategy(lines, strategy)
-    blob_lines = [l for l in lines if l.startswith("--blob=")]
+    blob_lines = [line for line in lines if line.startswith("--blob=")]
     assert len(blob_lines) >= 3
     joined = "\n".join(blob_lines)
     assert "stun" in joined and "max_ru" in joined and "google" in joined
@@ -238,8 +251,10 @@ def test_add_blobs_loads_all_and_seqovl(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_standard_tcp_excludes_udp_families():
     items = await MatrixGenerator().generate_tcp(
-        sources=["standard"], protocol="tls12",
-        scan_level="single", max_count=200,
+        sources=["standard"],
+        protocol="tls12",
+        scan_level="single",
+        max_count=200,
     )
     for it in items:
         assert "--filter-udp" not in it.strategy
@@ -249,7 +264,9 @@ async def test_standard_tcp_excludes_udp_families():
 @pytest.mark.asyncio
 async def test_standard_udp_excludes_tcp_fakes():
     items = await MatrixGenerator().generate_udp(
-        sources=["standard_udp"], scan_level="fast", max_count=50,
+        sources=["standard_udp"],
+        scan_level="fast",
+        max_count=50,
     )
     assert items
     for it in items:

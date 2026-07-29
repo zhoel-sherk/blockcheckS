@@ -11,7 +11,6 @@ Addresses blockcheckS concerns:
 import socket
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 import curl_cffi
 
@@ -29,8 +28,10 @@ SMALL_BODY_STATUSES = frozenset({101, 204, 206, 301, 302, 303, 304, 307, 308})
 
 # Patterns that indicate DPI fake response
 DPI_FAKE_PATTERNS = [
-    b"roskomnadzor", b"rkn.gov.ru",
-    b"blockpage", b"utmblock",
+    b"roskomnadzor",
+    b"rkn.gov.ru",
+    b"blockpage",
+    b"utmblock",
 ]
 
 
@@ -42,13 +43,12 @@ class TlsResult:
     latency_ms: float = 0.0
     content_length: int = 0
     read_rate_bps: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
     protocol: str = ""
     warnings: list[str] = field(default_factory=list)
 
 
-def _validate_content(data: bytes, time_for_read: float,
-                      http_status: int = 200) -> list[str]:
+def _validate_content(data: bytes, time_for_read: float, http_status: int = 200) -> list[str]:
     """Check response body for DPI manipulation.
 
     Small-body HTTP status codes (301, 302, 101, 204, etc.) are
@@ -75,12 +75,15 @@ def _validate_content(data: bytes, time_for_read: float,
     return warnings
 
 
-def check_tls(domain: str, timeout: float = 5.0,
-              impersonate: str = "chrome124",
-              http_version: int = 2,
-              verify_content: bool = True,
-              pre_resolved_ip: Optional[str] = None,
-              read_timeout: float = 4.0) -> TlsResult:
+def check_tls(
+    domain: str,
+    timeout: float = 5.0,
+    impersonate: str = "chrome124",
+    http_version: int = 2,
+    verify_content: bool = True,
+    pre_resolved_ip: str | None = None,
+    read_timeout: float = 4.0,
+) -> TlsResult:
     """Test TLS connectivity to a domain via curl_cffi.
 
     Args:
@@ -97,8 +100,7 @@ def check_tls(domain: str, timeout: float = 5.0,
 
     target = domain
     # Omit User-Agent so curl_cffi impersonation supplies a real browser UA
-    headers = {"Accept": "text/html,application/xhtml+xml",
-               "Accept-Language": "en-US,en;q=0.9"}
+    headers = {"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9"}
 
     if pre_resolved_ip:
         target = pre_resolved_ip
@@ -121,8 +123,7 @@ def check_tls(domain: str, timeout: float = 5.0,
         result.protocol = str(getattr(resp, "http_version", "?")).replace("_", "/")
 
         if verify_content:
-            result.warnings = _validate_content(resp.content, read_elapsed,
-                                                resp.status_code)
+            result.warnings = _validate_content(resp.content, read_elapsed, resp.status_code)
             result.success = (200 <= resp.status_code < 400) and not result.warnings
         else:
             result.success = 200 <= resp.status_code < 400
@@ -152,16 +153,19 @@ def check_tls(domain: str, timeout: float = 5.0,
 def resolve_domain(domain: str, nameserver: str = "8.8.8.8") -> list[str]:
     """Pre-resolve domain to IPv4 addresses via specified DNS."""
     import subprocess
+
     try:
         r = subprocess.run(
             ["dig", "+short", f"@{nameserver}", "A", domain],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return [line.strip() for line in r.stdout.splitlines() if line.strip()]
     except Exception:
         try:
-            return [a[4][0] for a in socket.getaddrinfo(
-                domain, 443, socket.AF_INET, socket.SOCK_STREAM
-            )]
+            return [
+                a[4][0] for a in socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM)
+            ]
         except Exception:
             return []

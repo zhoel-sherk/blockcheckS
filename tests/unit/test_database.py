@@ -1,11 +1,11 @@
 """StateDB unit tests."""
+
 from __future__ import annotations
 
 import aiosqlite
 import pytest
 
 from blockchecks.engine.db_logger import Checkpoint, StateDB
-
 
 pytestmark = pytest.mark.unit
 
@@ -27,8 +27,7 @@ async def test_same_name_proto_idempotent(temp_db: StateDB):
 @pytest.mark.asyncio
 async def test_checkpoint_latest(temp_db: StateDB):
     await temp_db.save_checkpoint(0, 0, "first")
-    await temp_db.save_checkpoint(2, 2, "third", fingerprint="fp",
-                                  tcp_label="t", udp_label="u")
+    await temp_db.save_checkpoint(2, 2, "third", fingerprint="fp", tcp_label="t", udp_label="u")
     cp = await temp_db.latest_checkpoint()
     assert isinstance(cp, Checkpoint)
     assert cp.tcp_idx == 2 and cp.udp_idx == 2
@@ -38,9 +37,7 @@ async def test_checkpoint_latest(temp_db: StateDB):
 @pytest.mark.asyncio
 async def test_views_exist(temp_db: StateDB):
     async with aiosqlite.connect(temp_db.db_path) as conn:
-        r = await conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='view'"
-        )
+        r = await conn.execute("SELECT name FROM sqlite_master WHERE type='view'")
         views = [row[0] for row in await r.fetchall()]
     for v in ("v_working_tcp", "v_coverage", "v_latest_run"):
         assert v in views

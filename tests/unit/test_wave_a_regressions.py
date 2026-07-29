@@ -1,4 +1,5 @@
 """Wave A/C regression tests — critical contracts."""
+
 from __future__ import annotations
 
 import ast
@@ -17,7 +18,6 @@ from blockchecks.engine.async_runner import (
 from blockchecks.engine.config import PYTHON_BIN
 from blockchecks.engine.db_logger import Checkpoint, StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator
-
 
 pytestmark = pytest.mark.unit
 
@@ -40,8 +40,12 @@ def test_async_runner_argv_uses_python_bin_path():
 @pytest.mark.asyncio
 async def test_checkpoint_roundtrip_labels_and_fingerprint(temp_db: StateDB):
     await temp_db.save_checkpoint(
-        1, 2, note="n", fingerprint="deadbeefcafebabe",
-        tcp_label="tcp_x", udp_label="udp_y",
+        1,
+        2,
+        note="n",
+        fingerprint="deadbeefcafebabe",
+        tcp_label="tcp_x",
+        udp_label="udp_y",
     )
     cp = await temp_db.latest_checkpoint()
     assert isinstance(cp, Checkpoint)
@@ -54,12 +58,18 @@ async def test_checkpoint_roundtrip_labels_and_fingerprint(temp_db: StateDB):
 @pytest.mark.asyncio
 async def test_resume_skip_uses_db_checkpoint_shape(mock_runner):
     cp = Checkpoint(
-        tcp_idx=0, udp_idx=0, timestamp="", note="",
-        fingerprint="fp", tcp_label="tcp_a", udp_label="u_a",
+        tcp_idx=0,
+        udp_idx=0,
+        timestamp="",
+        note="",
+        fingerprint="fp",
+        tcp_label="tcp_a",
+        udp_label="u_a",
     )
     tcp = TcpTestResult(
         item=StrategyItem(label="tcp_a", strategy="f"),
-        domain="d", success=True,
+        domain="d",
+        success=True,
     )
     pairs = await mock_runner.test_pair_matrix(
         [tcp],
@@ -67,7 +77,9 @@ async def test_resume_skip_uses_db_checkpoint_shape(mock_runner):
             StrategyItem(label="u_a", strategy="f"),
             StrategyItem(label="u_b", strategy="g"),
         ],
-        "d", voice_ip="1.2.3.4", voice_port=5,
+        "d",
+        voice_ip="1.2.3.4",
+        voice_port=5,
         resume_from=cp,
     )
     # Inclusive skip of completed tcp_a+u_a → only u_b remains
@@ -82,7 +94,11 @@ async def test_fingerprint_mismatch_refuses_resume(temp_db: StateDB, tmp_path):
     fp_new = matrix_fingerprint(["a", "x"], ["b"], "fast", 10)
     assert fp_old != fp_new
     await temp_db.save_checkpoint(
-        0, 0, fingerprint=fp_old, tcp_label="t", udp_label="u",
+        0,
+        0,
+        fingerprint=fp_old,
+        tcp_label="t",
+        udp_label="u",
     )
     cp = await temp_db.latest_checkpoint()
     assert cp.fingerprint == fp_old

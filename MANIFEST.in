@@ -2,6 +2,8 @@ include configs/*.conf
 include configs/composite_discord.conf
 include LICENSE
 include README.md
-include GOALS.md
+include docs/todo.md
+include docs/guide.md
+include docs/package.md
 include changelog.md
 recursive-include src/blockchecks *.py

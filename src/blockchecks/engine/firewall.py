@@ -6,7 +6,6 @@ No destructive -F OUTPUT.
 """
 
 import subprocess
-from typing import Optional
 
 
 class Firewall:
@@ -16,7 +15,7 @@ class Firewall:
     cleanup() removes them precisely via iptables -D.
     """
 
-    def __init__(self, ns_name: Optional[str] = None):
+    def __init__(self, ns_name: str | None = None):
         self.ns_name = ns_name
         self._rules: list[list[str]] = []
 
@@ -38,21 +37,40 @@ class Firewall:
         self._run("-A", *args, check=True)
         self._rules.append(["-D"] + list(args))
 
-    def prepare_tcp(self, port: int = 443, qnum: int = 200,
-                    dst_ip: Optional[str] = None) -> None:
+    def prepare_tcp(self, port: int = 443, qnum: int = 200, dst_ip: str | None = None) -> None:
         """Add OUTPUT NFQUEUE rule for TCP with queue-bypass."""
         if dst_ip:
-            self._add_rule("OUTPUT", "-p", "tcp", "--dport", str(port),
-                           "-d", dst_ip,
-                           "-j", "NFQUEUE", "--queue-num", str(qnum),
-                           "--queue-bypass")
+            self._add_rule(
+                "OUTPUT",
+                "-p",
+                "tcp",
+                "--dport",
+                str(port),
+                "-d",
+                dst_ip,
+                "-j",
+                "NFQUEUE",
+                "--queue-num",
+                str(qnum),
+                "--queue-bypass",
+            )
         else:
-            self._add_rule("OUTPUT", "-p", "tcp", "--dport", str(port),
-                           "-j", "NFQUEUE", "--queue-num", str(qnum),
-                           "--queue-bypass")
+            self._add_rule(
+                "OUTPUT",
+                "-p",
+                "tcp",
+                "--dport",
+                str(port),
+                "-j",
+                "NFQUEUE",
+                "--queue-num",
+                str(qnum),
+                "--queue-bypass",
+            )
 
-    def prepare_udp(self, ports: str = "50000:50100", qnum: int = 200,
-                    voice_port: int = None) -> None:
+    def prepare_udp(
+        self, ports: str = "50000:50100", qnum: int = 200, voice_port: int = None
+    ) -> None:
         """Add OUTPUT NFQUEUE rule for UDP with queue-bypass.
 
         If voice_port is set, queue that single port (Discord voice).
@@ -60,13 +78,31 @@ class Firewall:
         if voice_port is not None:
             ports = str(voice_port)
         if ":" in ports:
-            self._add_rule("OUTPUT", "-p", "udp", "--dport", ports,
-                           "-j", "NFQUEUE", "--queue-num", str(qnum),
-                           "--queue-bypass")
+            self._add_rule(
+                "OUTPUT",
+                "-p",
+                "udp",
+                "--dport",
+                ports,
+                "-j",
+                "NFQUEUE",
+                "--queue-num",
+                str(qnum),
+                "--queue-bypass",
+            )
         else:
-            self._add_rule("OUTPUT", "-p", "udp", "--dport", ports,
-                           "-j", "NFQUEUE", "--queue-num", str(qnum),
-                           "--queue-bypass")
+            self._add_rule(
+                "OUTPUT",
+                "-p",
+                "udp",
+                "--dport",
+                ports,
+                "-j",
+                "NFQUEUE",
+                "--queue-num",
+                str(qnum),
+                "--queue-bypass",
+            )
 
     def cleanup(self) -> None:
         """Remove only the rules we added via iptables -D (exception-safe)."""

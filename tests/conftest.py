@@ -1,4 +1,5 @@
 """Shared fixtures for blockcheckS tests."""
+
 from __future__ import annotations
 
 import asyncio
@@ -74,8 +75,9 @@ def mock_pool(monkeypatch):
 def mock_tcp_udp(monkeypatch):
     """Mock probe workers so pair/resume tests need no netns."""
 
-    def fake_tcp(ns_name, strategy, domain, timeout, is_config=False,
-                 python_bin=None, disable_ech=False):
+    def fake_tcp(
+        ns_name, strategy, domain, timeout, is_config=False, python_bin=None, disable_ech=False
+    ):
         return {
             "success": True,
             "http_code": 200,
@@ -87,8 +89,9 @@ def mock_tcp_udp(monkeypatch):
             "read_rate_bps": 500000.0,
         }
 
-    def fake_udp(ns_name, strategy, ip, port, timeout, is_config=False,
-                 python_bin=None, coexist=False):
+    def fake_udp(
+        ns_name, strategy, ip, port, timeout, is_config=False, python_bin=None, coexist=False
+    ):
         return {
             "success": True,
             "latency_ms": 8.0,
@@ -97,9 +100,7 @@ def mock_tcp_udp(monkeypatch):
 
     monkeypatch.setattr("blockchecks.engine.async_runner._run_tcp_check", fake_tcp)
     monkeypatch.setattr("blockchecks.engine.async_runner._run_udp_check", fake_udp)
-    monkeypatch.setattr(
-        "blockchecks.engine.async_runner._nfqws2_daemon", lambda *a, **k: None
-    )
+    monkeypatch.setattr("blockchecks.engine.async_runner._nfqws2_daemon", lambda *a, **k: None)
     return {"tcp": fake_tcp, "udp": fake_udp}
 
 
@@ -114,15 +115,14 @@ async def mock_runner(mock_pool, mock_tcp_udp, temp_db):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "unit: no root/netns")
-    config.addinivalue_line(
-        "markers", "integration: needs linux+sudo+nfqws2"
-    )
+    config.addinivalue_line("markers", "integration: needs linux+sudo+nfqws2")
 
 
 @pytest.fixture
 def nfqws2_available():
     """Skip integration if nfqws2 binary missing."""
     from blockchecks.engine.config import NFQWS2_BIN
+
     if not os.path.exists(NFQWS2_BIN):
         pytest.skip(f"nfqws2 not available: {NFQWS2_BIN}")
     return NFQWS2_BIN

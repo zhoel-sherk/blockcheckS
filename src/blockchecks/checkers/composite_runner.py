@@ -12,9 +12,12 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from colorama import Fore, Style
+from colorama import init as colorama_init
+
 from blockchecks.engine.async_runner import AsyncTestRunner, StrategyItem, TcpTestResult
 from blockchecks.engine.async_runner import _nfqws2_daemon as start_nfqws2
-from colorama import Fore, Style, init as colorama_init
+
 colorama_init(autoreset=True)
 
 GREEN = Fore.GREEN + Style.BRIGHT
@@ -23,8 +26,12 @@ CYAN = Fore.CYAN
 RESET = Style.RESET_ALL
 
 DOMAINS = [
-    "discord.com", "discord.gg", "discord.media",
-    "discordapp.com", "discordcdn.com", "gateway.discord.gg",
+    "discord.com",
+    "discord.gg",
+    "discord.media",
+    "discordapp.com",
+    "discordcdn.com",
+    "gateway.discord.gg",
 ]
 
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
@@ -65,8 +72,7 @@ print(json.dumps(result))
 """
 
 
-async def run(config_path: str, domains: list[str] = None,
-              parallel: int = 2, timeout: float = 5.0):
+async def run(config_path: str, domains: list[str] = None, parallel: int = 2, timeout: float = 5.0):
     if not domains:
         domains = DOMAINS
 
@@ -75,8 +81,7 @@ async def run(config_path: str, domains: list[str] = None,
         print(f"{RED}Config not found: {config_abs}{RESET}")
         return 1
 
-    print(f"\n{CYAN}composite{RESET}  {os.path.basename(config_abs)}  "
-          f"{len(domains)} domains")
+    print(f"\n{CYAN}composite{RESET}  {os.path.basename(config_abs)}  {len(domains)} domains")
     print()
 
     # One netns + one nfqws2 for ALL domains
@@ -94,29 +99,71 @@ async def run(config_path: str, domains: list[str] = None,
         await asyncio.sleep(0.5)
 
         # Add iptables rules inside the netns
-        sp.run(["sudo", "ip", "netns", "exec", ns_name,
-                "iptables", "-A", "OUTPUT", "-p", "tcp", "--dport", "443",
-                "-j", "NFQUEUE", "--queue-num", "200"],
-               capture_output=True, timeout=5)
-        sp.run(["sudo", "ip", "netns", "exec", ns_name,
-                "iptables", "-A", "OUTPUT", "-p", "udp", "-m", "multiport",
-                "--dports", "50000:50100",
-                "-j", "NFQUEUE", "--queue-num", "200"],
-               capture_output=True, timeout=5)
+        sp.run(
+            [
+                "sudo",
+                "ip",
+                "netns",
+                "exec",
+                ns_name,
+                "iptables",
+                "-A",
+                "OUTPUT",
+                "-p",
+                "tcp",
+                "--dport",
+                "443",
+                "-j",
+                "NFQUEUE",
+                "--queue-num",
+                "200",
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+        sp.run(
+            [
+                "sudo",
+                "ip",
+                "netns",
+                "exec",
+                ns_name,
+                "iptables",
+                "-A",
+                "OUTPUT",
+                "-p",
+                "udp",
+                "-m",
+                "multiport",
+                "--dports",
+                "50000:50100",
+                "-j",
+                "NFQUEUE",
+                "--queue-num",
+                "200",
+            ],
+            capture_output=True,
+            timeout=5,
+        )
 
         # Test all domains sequentially (sharing one nfqws2)
         for domain in domains:
-            code = CHECK_CODE.replace("{domain}", domain).replace(
-                "{timeout}", str(timeout))
+            code = CHECK_CODE.replace("{domain}", domain).replace("{timeout}", str(timeout))
             r = sp.run(
                 ["sudo", "ip", "netns", "exec", ns_name, PYTHON, "-c", code],
-                capture_output=True, text=True, timeout=timeout + 10
+                capture_output=True,
+                text=True,
+                timeout=timeout + 10,
             )
             try:
                 data = json.loads(r.stdout)
             except json.JSONDecodeError:
-                data = {"success": False, "http_code": 0, "latency_ms": 0,
-                        "error": f"parse: {r.stdout[:100]}"}
+                data = {
+                    "success": False,
+                    "http_code": 0,
+                    "latency_ms": 0,
+                    "error": f"parse: {r.stdout[:100]}",
+                }
 
             result = TcpTestResult(item=item, domain=domain)
             result.success = data.get("success", False)

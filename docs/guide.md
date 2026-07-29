@@ -37,6 +37,8 @@ Entry point: `bs` → `blockchecks.bs:main`.
 | `bs scan` | async TCP batch (`pair --tcp-only`) |
 | `bs pair` | TCP×UDP matrix, resume, auto-discover |
 | `bs composite` | один composite .conf × список доменов |
+| `bs full` | mass strategy×coverage + voice/QUIC/pairs + conf export |
+| `bc-nfconf` | export keenetic+raw conf from existing `state.db` |
 
 Примеры:
 
@@ -45,7 +47,17 @@ sudo bs scan -d discord.com --generate custom,configs --max 50 --parallel 4
 sudo bs pair -d discord.com --generate --scan-level fast --auto-discover 5
 sudo bs pair -d discord.com -c configs/alt__fake_fakedsplit_ts.conf -u configs/udp_voice__fake_r6.conf
 sudo bs pair -d discord.com --resume   # откажется, если matrix fingerprint сменился
+
+# Mass run (intentionally huge — GP-scale strategy×domain). Defaults = max.
+sudo bs full
+sudo bs full --parallel 2 --resume
+sudo bs full --max 500 --domains-file presets/domains/critical.txt
+bc-nfconf --db state.db --limit 3 --out-dir output
 ```
+
+`bs full` writes `output/nfqws2_<ts>.conf` (keenetic), `nfqws2_raw_<ts>.conf`,
+and `user.list`. ETA printed as `N_strat × N_domains / parallel`. Resume skips
+`(strategy, domain)` already in DB. STUN discover concurrency is capped at 4.
 
 `--auto-discover N` — DNS bulk `finland{N}.discord.gg` (+ опционально gateway).
 Сейчас в matrix берётся **первый** найденный endpoint (multi-EP loop — в todo).
@@ -70,10 +82,20 @@ sqlite single-connection, UA, stale PASS, package imports.
 | `src/blockchecks/` | единственный source of truth |
 | `configs/` | в **корне репо** (editable); `CONFIGS_DIR` резолвится от `PROJECT_DIR` |
 | `tests/` | unit + integration |
-| `docs/` | guide / todo |
+| `docs/` | guide / todo / package |
+
+Полный разбор: [package.md](package.md). Roadmap: [todo.md](todo.md).
 
 Не запускайте устаревшие копии `engine/` / `checkers/` из корня — их больше
 нет в git; рабочий код только под `src/blockchecks/`.
+
+## Dev quality
+
+```bash
+pip install -e ".[dev]"
+ruff check src tests
+pytest -m "not integration"
+```
 
 ## Известные ограничения (post-package audit)
 

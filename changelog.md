@@ -1,5 +1,20 @@
 # blockcheckS Changelog
 
+## 2026-07-29 — Hygiene: ruff + docs merge + package audit
+
+### Added
+- `ruff` in `[dev]` + `[tool.ruff]` (E/W/F/I/UP/B/SIM)
+- `docs/package.md` — full package layout audit
+- `docs/todo.md` absorbs research + GOALS (phases, backlog, research notes)
+
+### Changed
+- Root `research.md` / `GOALS.md` → stubs pointing at `docs/todo.md`
+- `StrategyItem` single definition (`matrix_generator`; re-export from `async_runner`)
+- Removed stale root `checkers/` + `engine/` `__pycache__` leftovers
+
+### Quality
+- `ruff check src tests` clean; `ruff format` applied; unit suite 104 passed
+
 ## 2026-07-27 — Phase 3: Pair Matrix Testing
 
 ### Added

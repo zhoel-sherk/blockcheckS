@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 logs/
 reports/
+output/
 state.db
 *.egg-info/
 src/*.egg-info/
@@ -16,3 +17,5 @@ logs/*.log
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
+
