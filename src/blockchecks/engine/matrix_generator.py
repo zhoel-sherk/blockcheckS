@@ -138,7 +138,7 @@ FOOLINGS_TCP = [
     "tcp_ack=-66000:tcp_ts_up",
 ]
 REPEATS_VALUES = [6, 3, 1, 8, 10, 11, 12, 2]  # 6,8 working on Fryazino; 2,11 from Flowseal
-TTL_VALUES = [1, 5, 7, 12]
+TTL_VALUES = [1, 5, 7, 12, 63, 64, 127, 128, 255]
 AUTOTTL_RANGES = ["-1,3-20", "-2,5-15", "-3,7-12"]
 
 # Common blobs
@@ -486,12 +486,12 @@ ALL_FOOLINGS_IPV6 = ["ip6_hopbyhop"]  # минимально, остальные
 
 # Extended repeats, TTL
 ALL_REPEATS = [6, 3, 1, 8, 10, 11, 12, 2, 5, 7, 9, 15, 20]  # 100,260 only for tcpseg
-ALL_TTL = [1, 5, 7, 12]
+ALL_TTL = [1, 5, 7, 12, 63, 64, 127, 128, 255]  # 63=ttl_minus_1, boundary values for other ISPs
 ALL_AUTOTTL = ["-1,3-20", "-2,5-15", "-3,7-12", "-4,3-20", "-5,5-15"]
 
 # All split positions from blockcheck2.sh
 ALL_SPLIT_POSITIONS = [
-    "1", "2", "midsld", "sniext+1", "sniext+4", "host+1",
+    "1", "2", "3", "23", "45", "midsld", "sniext+1", "sniext+4", "host+1",
     "1,midsld", "1,midsld,1220",
     "1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
 ]

@@ -45,3 +45,14 @@
 - [ ] nfqws2: drain/DEVNULL stderr на success path
 - [ ] package-data: либо копировать `configs/` в пакет, либо явно
       документировать root-only (сейчас `CONFIGS_DIR` = repo `configs/`)
+
+## Low-priority features (near-term alpha)
+
+- [ ] **ipfrag_udp family** — `send:ipfrag:ipfrag_pos_udp=N` + `drop` (N=8,16,24,32)
+      Not used by Flowseal, niche parameter. Blocked by `send:` not being testable
+      in current subprocess architecture (needs dual nfqws2 calls).
+- [ ] **ipfrag_tcp family** — `send:ipfrag:ipfrag_pos_tcp=N` + `drop` (N=8,16,24,32)
+- [ ] **multidisorder** — `multidisorder:pos=X` variant of multisplit. Rarely works,
+      requires specific DPI config. Not used by Flowseal.
+- [ ] **TTL expansion beyond 255** — edge case, most ISP paths don't exceed 255
+- [ ] **repeats=4** — exists in one custom config (alt9), not generated yet
