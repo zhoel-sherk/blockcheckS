@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from blockchecks.engine.config import NFQWS2_BIN, LUA_INIT_SCRIPTS
+from blockchecks.engine.config import NFQWS2_BIN, LUA_INIT_SCRIPTS, nfqws2_debug_conf_line
 
 
 class Nfqws2Manager:
@@ -24,6 +24,7 @@ class Nfqws2Manager:
         self._proc: Optional[subprocess.Popen] = None
         self._pid: Optional[int] = None
         self._temp_files: list[str] = []
+        self.last_debug_log: Optional[str] = None
 
     def _launch(self, config_arg: str, *, stop_first: bool = True) -> None:
         """Start nfqws2 in foreground, verify it's alive.
@@ -78,6 +79,12 @@ class Nfqws2Manager:
             "--ipcache-lifetime=0",
             "--bind-fix4",
         ]
+        dbg, dbg_path = nfqws2_debug_conf_line(tag=f"q{qnum}")
+        if dbg:
+            lines.append(dbg)
+            self.last_debug_log = dbg_path
+            if dbg_path:
+                print(f"  [nfqws2 debug] {dbg_path}")
         for lua in LUA_INIT_SCRIPTS:
             if os.path.exists(lua):
                 lines.append(f"--lua-init=@{lua}")

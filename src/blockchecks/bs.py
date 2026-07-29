@@ -377,6 +377,8 @@ def main():
     tcp.add_argument("--no-hostlist", action="store_true")
     tcp.add_argument("--qnum", type=int, default=200)
     tcp.add_argument("--ns")
+    tcp.add_argument("--nfqws2-debug", nargs="?", const="1", default=None,
+                     help="nfqws2 --debug: 1=logs/file, syslog, or @path/path")
 
     # udp — legacy synchronous
     udp = sub.add_parser("udp", help="Single UDP strategy test (sync)")
@@ -387,6 +389,8 @@ def main():
     udp.add_argument("--timeout", type=float, default=3.0)
     udp.add_argument("--qnum", type=int, default=201)
     udp.add_argument("--ns")
+    udp.add_argument("--nfqws2-debug", nargs="?", const="1", default=None,
+                     help="nfqws2 --debug: 1=logs/file, syslog, or @path/path")
 
     # scan — async TCP batch (alias to pair --tcp-only)
     scan = sub.add_parser("scan", help="Async TCP strategy batch scan")
@@ -412,6 +416,8 @@ def main():
     scan.add_argument("--udp-bypass", action="store_true", help=argparse.SUPPRESS)
     scan.add_argument("--auto-discover", nargs="?", const=5, type=int, default=None, help=argparse.SUPPRESS)
     scan.add_argument("--full-voice", action="store_true", help=argparse.SUPPRESS)
+    scan.add_argument("--nfqws2-debug", nargs="?", const="1", default=None,
+                      help="nfqws2 --debug: 1=logs/file, syslog, or @path/path")
 
     # composite — single config, multiple domains
     composite = sub.add_parser("composite", help="Test composite nfqws2 config")
@@ -456,8 +462,14 @@ def main():
     pair.add_argument("--db", default="state.db")
     pair.add_argument("--resume", action="store_true")
     pair.add_argument("--ns")
+    pair.add_argument("--nfqws2-debug", nargs="?", const="1", default=None,
+                      help="nfqws2 --debug: 1=logs/file, syslog, or @path/path")
 
     args = parser.parse_args()
+
+    dbg = getattr(args, "nfqws2_debug", None)
+    if dbg is not None:
+        os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
 
     if args.command == "tcp":
         return cmd_tcp(args)

@@ -19,6 +19,7 @@ from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.config import (
     PYTHON_BIN, NFQWS2_BIN, BLOB_DIR, CURLOPT_ECH,
     GOOGLEVIDEO_RANGE_SIZE, MIN_READ_RATE_BPS, THROTTLED_MAX_BPS,
+    nfqws2_debug_conf_line,
 )
 from blockchecks.engine.netns_pool import NetNsPool
 
@@ -97,16 +98,48 @@ def _nfqws2_daemon(ns_name: str, config_path: str,
     kill_existing=True (default) clears prior nfqws2 in the ns — for solo
     TCP/UDP checks. Pair matrix must pass kill_existing=False when starting
     the UDP instance so the TCP desync (qnum 200) stays alive.
+
+    Note: with ``@config`` nfqws2 ignores trailing CLI flags — put ``--debug``
+    and ``--daemon`` inside the config file (see ``_inject_debug_and_daemon``).
     """
     import subprocess as sp
+    _inject_debug_and_daemon(config_path, tag=ns_name)
     if kill_existing:
         sp.run(["sudo", "ip", "netns", "exec", ns_name,
                 "pkill", "-9", "nfqws2"],
                stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+    # @config must be the only argument; daemon/debug are inside the file
     cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN,
-           f"@{config_path}", "--daemon"]
+           f"@{config_path}"]
     sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
     time.sleep(2.0)
+
+
+def _inject_debug_and_daemon(config_path: str, tag: str = "") -> Optional[str]:
+    """Ensure conf contains --daemon and optional --debug=@log. Returns log path."""
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    changed = False
+    if not any(ln.startswith("--daemon") for ln in lines):
+        lines.insert(0, "--daemon")
+        changed = True
+    dbg, dbg_path = nfqws2_debug_conf_line(tag=tag or "async")
+    if dbg and not any(ln.startswith("--debug=") for ln in lines):
+        lines.insert(1 if lines and lines[0].startswith("--daemon") else 0, dbg)
+        changed = True
+        if dbg_path:
+            print(f"  [nfqws2 debug] {dbg_path}")
+    if changed:
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except OSError:
+            return None
+    return dbg_path if dbg else None
 
 
 
@@ -163,8 +196,14 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
 
     # Setup nfqws2
     if is_config:
-        config_path = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
-        _nfqws2_daemon(ns_name, config_path)
+        src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
+        # Copy user conf — inject daemon/debug without mutating the original
+        import tempfile as _tf
+        import shutil
+        _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_", suffix=".conf")
+        os.close(_tf_fd)
+        shutil.copy2(src, tmp_conf)
+        _nfqws2_daemon(ns_name, tmp_conf)
     else:
         config_lines = [
             "--qnum=200", "--filter-tcp=443", "--filter-l3=ipv4",
@@ -319,7 +358,13 @@ def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
     tmp_conf = None
 
     if is_config:
-        _nfqws2_daemon(ns_name, strategy, kill_existing=kill_existing)
+        src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
+        import tempfile as _tf2
+        import shutil
+        _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf")
+        os.close(_tf2_fd)
+        shutil.copy2(src, tmp_conf)
+        _nfqws2_daemon(ns_name, tmp_conf, kill_existing=kill_existing)
     elif strategy.strip().startswith("--"):
         # Full CLI config (standard_udp dual-blob etc.)
         config_lines = [

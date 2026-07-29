@@ -4,6 +4,7 @@ Uses BLOCKCHECKS_* env vars for portable paths. Falls back to sensible defaults.
 """
 
 import os
+from typing import Optional
 
 # ── Resolvable paths ─────────────────────────────
 
@@ -87,3 +88,29 @@ GOOGLEVIDEO_RANGE_SIZE = 17408  # 17KB, bytes=0-17407
 # Disable ECH via curl_cffi.CurlOpt.ECH = 10325
 # Forces plaintext SNI in ClientHello — testable by standard DPI strategies
 CURLOPT_ECH = 10325
+
+# ── nfqws2 debug ─────────────────────────────────
+# BLOCKCHECKS_NFQWS2_DEBUG: empty/0=off, 1=file under logs/, syslog, @path, or path
+NFQWS2_DEBUG = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
+LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
+
+
+def nfqws2_debug_conf_line(tag: str = "") -> tuple[Optional[str], Optional[str]]:
+    """Build a conf ``--debug=…`` line from env.
+
+    Returns ``(conf_line_or_None, log_path_or_None)``.
+    When enabled as ``1``, writes under ``logs/nfqws2_<tag>_<pid>.log``.
+    """
+    v = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", NFQWS2_DEBUG).strip()
+    if not v or v.lower() in ("0", "false", "off", "no"):
+        return None, None
+    if v.lower() in ("1", "true", "on", "yes"):
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (tag or "run"))[:40]
+        path = os.path.join(LOGS_DIR, f"nfqws2_{safe}_{os.getpid()}.log")
+        return f"--debug=@{path}", path
+    if v.lower() == "syslog":
+        return "--debug=syslog", None
+    if v.startswith("@"):
+        return f"--debug={v}", v[1:]
+    return f"--debug=@{v}", v
