@@ -16,7 +16,10 @@ from colorama import Fore, Style, init as colorama_init
 colorama_init(autoreset=True)
 
 from blockchecks.engine.db_logger import StateDB
-from blockchecks.engine.config import PYTHON_BIN, NFQWS2_BIN
+from blockchecks.engine.config import (
+    PYTHON_BIN, NFQWS2_BIN, BLOB_DIR, CURLOPT_ECH,
+    GOOGLEVIDEO_RANGE_SIZE, MIN_READ_RATE_BPS, THROTTLED_MAX_BPS,
+)
 from blockchecks.engine.netns_pool import NetNsPool
 
 GREEN = Fore.GREEN + Style.BRIGHT
@@ -98,102 +101,131 @@ def _nfqws2_daemon(ns_name: str, config_path: str) -> None:
 
 
 def _add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
-    """Parse strategy string for blob:NAME references, add --blob=NAME:@/path."""
+    """Parse strategy for blob=NAME and seqovl_pattern=NAME; add --blob lines."""
     import re
-    BLOB_DIR = "/opt/zapret2/blobs"
+    if not os.path.isdir(BLOB_DIR):
+        return
     known = sorted(f for f in os.listdir(BLOB_DIR) if f.endswith(".bin"))
-    for m in re.finditer(r"blob=(\w+)", strategy):
-        name = m.group(1)
+
+    def _append_blob(name: str) -> None:
         if name == "0x00000000":
-            continue
-        # Prefer TLS/Stun blobs over QUIC for TCP strategies
+            return
+        if any(l.startswith(f"--blob={name}:@") for l in lines):
+            return
         candidates = [f for f in known if name in f and "quic_initial" not in f]
         if not candidates:
             candidates = [f for f in known if name in f]
         if candidates:
-            fname = candidates[0]
-            if any(l.startswith(f"--blob={name}:@") for l in lines):
-                break
-            lines.append(f"--blob={name}:@{BLOB_DIR}/{fname}")
-            break
+            lines.append(f"--blob={name}:@{BLOB_DIR}/{candidates[0]}")
+
+    for m in re.finditer(r"blob=(\w+)", strategy):
+        _append_blob(m.group(1))
+    for m in re.finditer(r"seqovl_pattern=(\w+)", strategy):
+        _append_blob(m.group(1))
+
+
+def _split_cli_args(raw_line: str) -> list[str]:
+    """Split a line of nfqws2 CLI args on ' --' boundaries."""
+    out = []
+    for arg in raw_line.split(" --"):
+        arg = arg.strip()
+        if not arg:
+            continue
+        if not arg.startswith("--"):
+            arg = "--" + arg
+        out.append(arg)
+    return out
 
 
 # ── In-namespace test workers (sync, called via asyncio.to_thread) ──
 
 def _run_tcp_check(ns_name: str, strategy: str, domain: str,
                    timeout: float, is_config: bool = False,
-                   python_bin: str = None) -> dict:
+                   python_bin: str = None,
+                   disable_ech: bool = False) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
     import subprocess as sp
 
     py = python_bin or PYTHON_BIN
+    is_gv = "googlevideo" in domain.lower()
+    use_ech = disable_ech or is_gv
 
     # Setup nfqws2
     if is_config:
         config_path = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
         _nfqws2_daemon(ns_name, config_path)
     else:
-        # Build config from inline strategy
         config_lines = [
             "--qnum=200", "--filter-tcp=443", "--filter-l3=ipv4",
             "--filter-l7=tls", "--ipcache-lifetime=0", "--bind-fix4",
+            "--payload=tls_client_hello",
         ]
         for lua in ["/opt/zapret2/lua/zapret-lib.lua",
                      "/opt/zapret2/lua/zapret-antidpi.lua"]:
             if os.path.exists(lua):
                 config_lines.append(f"--lua-init=@{lua}")
-        # Auto-detect blobs referenced in strategy string
         _add_blobs_from_strategy(config_lines, strategy)
-        # Strategy may already contain nfqws2 CLI args (from custom lists)
-        # or just the lua-desync value (from generators)
-        # Multi-strategy separated by \n. Full CLI args split on ' --' boundaries.
         for raw_line in strategy.split("\n"):
             raw_line = raw_line.strip()
             if not raw_line:
                 continue
             if raw_line.startswith("--"):
-                # Full CLI args — split into individual args
-                # e.g., "--payload tls_client_hello --lua-desync=syndata --lua-desync=hostfakesplit:..."
-                for arg in raw_line.split(" --"):
-                    arg = arg.strip()
-                    if not arg:
-                        continue
-                    if not arg.startswith("--"):
-                        arg = "--" + arg
-                    config_lines.append(arg)
+                config_lines.extend(_split_cli_args(raw_line))
             else:
                 config_lines.append(f"--lua-desync={raw_line}")
-        import tempfile as _tf; _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_", suffix=".conf"); os.close(_tf_fd)
+        import tempfile as _tf
+        _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_", suffix=".conf")
+        os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
         _nfqws2_daemon(ns_name, tmp_conf)
-        config_path = tmp_conf
 
-    # Add iptables rule
     _sudo("ip", "netns", "exec", ns_name, "iptables", "-A", "OUTPUT",
           "-p", "tcp", "--dport", "443", "-j", "NFQUEUE", "--queue-num", "200")
 
-    # Run curl_cffi check as inline Python
+    range_end = GOOGLEVIDEO_RANGE_SIZE - 1
+    headers_extra = ""
+    if is_gv:
+        headers_extra = f', "Range": "bytes=0-{range_end}"'
+    ech_block = ""
+    if use_ech:
+        ech_block = (
+            f"opts = {{}}\\n"
+            f"        try:\\n"
+            f"            opts = {{curl_cffi.CurlOpt.ECH: ''}}\\n"
+            f"        except Exception:\\n"
+            f"            opts = {{{CURLOPT_ECH}: ''}}\\n"
+        )
+    else:
+        ech_block = "opts = {}\\n"
+
     check_code = f"""
 import json, time
 def check(domain, timeout):
     try:
         import curl_cffi
         start = time.perf_counter()
-        try:
-            resp = curl_cffi.get(
-                "https://{domain}", impersonate="chrome124", http_version=2,
-                timeout=min({timeout}, 1.5), headers={{"Accept":"text/html"}},
+        headers = {{"Accept": "text/html"{headers_extra}}}
+        {ech_block}        try:
+            kwargs = dict(
+                impersonate="chrome124", http_version=2,
+                timeout=min(timeout, 1.5), headers=headers,
                 allow_redirects=False,
             )
+            if opts:
+                kwargs["options"] = opts
+            resp = curl_cffi.get("https://" + domain, **kwargs)
         except curl_cffi.CurlError as e:
             msg = str(e)
             return {{"success": False, "http_code": 0,
                       "latency_ms": (time.perf_counter()-start)*1000,
                       "content_len": 0, "content_ok": False,
+                      "throttled": False, "read_rate_bps": 0,
                       "error": "timeout" if "Timeout" in msg else msg[:120]}}
+        elapsed = max(time.perf_counter()-start, 0.001)
         body = resp.content[:4096]
         clen = len(resp.content)
+        rate = clen / elapsed
         content_ok = clen >= 300
         dpi_fake = any(p in body.lower() for p in (b"roskomnadzor",b"rkn.gov.ru",
                     b"blockpage",b"utmblock"))
@@ -201,20 +233,25 @@ def check(domain, timeout):
             content_ok = False
         small_body_ok = (not dpi_fake) and resp.status_code in (
             101,204,301,302,303,304,307,308,206)
-        success = ((200 <= resp.status_code < 400)
-                   and (content_ok or small_body_ok) and not dpi_fake)
+        status_ok = (200 <= resp.status_code < 400)
+        throttled = False
+        success = False
+        if status_ok and (content_ok or small_body_ok) and not dpi_fake:
+            if rate < {MIN_READ_RATE_BPS} and not small_body_ok:
+                success = False
+            elif rate < {THROTTLED_MAX_BPS} and not small_body_ok and clen >= 300:
+                success = True
+                throttled = True
+            else:
+                success = True
         return {{"success": success, "http_code": resp.status_code,
-                 "latency_ms": (time.perf_counter()-start)*1000,
-                 "content_len": clen, "content_ok": content_ok, "error": None}}
-    except curl_cffi.CurlError as e:
-        msg = str(e)
-        return {{"success": False, "http_code": 0,
-                 "latency_ms": (time.perf_counter()-start)*1000,
-                 "content_len": 0, "content_ok": False,
-                 "error": "timeout" if "Timeout" in msg else msg[:120]}}
+                 "latency_ms": elapsed*1000,
+                 "content_len": clen, "content_ok": content_ok,
+                 "throttled": throttled, "read_rate_bps": rate, "error": None}}
     except Exception as e:
         return {{"success": False, "http_code": 0, "latency_ms": 0,
-                 "content_len": 0, "content_ok": False, "error": str(e)[:120]}}
+                 "content_len": 0, "content_ok": False,
+                 "throttled": False, "read_rate_bps": 0, "error": str(e)[:120]}}
 print(json.dumps(check("{domain}", {timeout})))
 """
     r = sp.run(
@@ -227,6 +264,7 @@ print(json.dumps(check("{domain}", {timeout})))
     except json.JSONDecodeError:
         return {"success": False, "http_code": 0, "latency_ms": 0,
                 "content_len": 0, "content_ok": False,
+                "throttled": False, "read_rate_bps": 0,
                 "error": f"parse: {r.stdout[:100]}"}
 
 
@@ -240,20 +278,47 @@ def _run_udp_check(ns_name: str, strategy: str, ip: str, port: int,
 
     if is_config:
         _nfqws2_daemon(ns_name, strategy)
-    else:
+    elif strategy.strip().startswith("--"):
+        # Full CLI config (standard_udp dual-blob etc.)
         config_lines = [
-            "--qnum=201", "--filter-udp=50000-50100", "--filter-l3=ipv4",
-            "--filter-l7=discord,stun", "--ipcache-lifetime=0", "--bind-fix4",
+            "--qnum=201", "--filter-l3=ipv4",
+            "--ipcache-lifetime=0", "--bind-fix4",
         ]
         for lua in ["/opt/zapret2/lua/zapret-lib.lua",
                      "/opt/zapret2/lua/zapret-antidpi.lua"]:
             if os.path.exists(lua):
                 config_lines.append(f"--lua-init=@{lua}")
-        blob = "/opt/zapret2/blobs/discord_udp.bin"
-        if os.path.exists(blob):
-            config_lines.append(f"--blob=discord_udp:@{blob}")
+        for raw_line in strategy.split("\n"):
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            config_lines.extend(_split_cli_args(raw_line))
+        import tempfile as _tf2
+        _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf")
+        os.close(_tf2_fd)
+        with open(tmp_conf, "w") as f:
+            f.write("\n".join(config_lines))
+        _nfqws2_daemon(ns_name, tmp_conf)
+    else:
+        # Inline lua-desync core (e.g. fake:blob=discord_udp:repeats=6)
+        config_lines = [
+            "--qnum=201", "--filter-udp=50000-50100", "--filter-l3=ipv4",
+            "--filter-l7=discord,stun", "--ipcache-lifetime=0", "--bind-fix4",
+            "--payload=discord_ip_discovery,stun",
+        ]
+        for lua in ["/opt/zapret2/lua/zapret-lib.lua",
+                     "/opt/zapret2/lua/zapret-antidpi.lua"]:
+            if os.path.exists(lua):
+                config_lines.append(f"--lua-init=@{lua}")
+        _add_blobs_from_strategy(config_lines, strategy)
+        if not any(l.startswith("--blob=") for l in config_lines):
+            blob = os.path.join(BLOB_DIR, "discord_udp.bin")
+            if os.path.exists(blob):
+                config_lines.append(f"--blob=discord_udp:@{blob}")
         config_lines.append(f"--lua-desync={strategy}")
-        import tempfile as _tf2; _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf"); os.close(_tf2_fd)
+        import tempfile as _tf2
+        _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf")
+        os.close(_tf2_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
         _nfqws2_daemon(ns_name, tmp_conf)
@@ -302,12 +367,13 @@ class AsyncTestRunner:
     """Parallel strategy tester using NetNsPool + asyncio.Semaphore."""
 
     def __init__(self, pool_size: int = 4, db: StateDB = None,
-                 python_path: str = None):
+                 python_path: str = None, disable_ech: bool = False):
         self.pool = NetNsPool(size=pool_size)
         self.semaphore = asyncio.Semaphore(pool_size)
         self.db = db
         self.python = python_path or PYTHON_BIN
         self.matrix_fingerprint: str = ""
+        self.disable_ech = disable_ech
 
     async def start(self):
         """Create netns pool and seed the asyncio Queue on the event loop."""
@@ -329,7 +395,7 @@ class AsyncTestRunner:
             try:
                 data = await asyncio.to_thread(
                     _run_tcp_check, ns_name, item.strategy, domain,
-                    timeout, item.is_config, self.python
+                    timeout, item.is_config, self.python, self.disable_ech
                 )
                 result.success = data.get("success", False)
                 result.http_code = data.get("http_code", 0)
@@ -341,12 +407,18 @@ class AsyncTestRunner:
                 result.error = data.get("error", "") or ""
 
                 if self.db:
+                    if result.throttled:
+                        status = "THROTTLED"
+                    elif result.success:
+                        status = "PASS"
+                    else:
+                        status = "FAIL"
                     await self.db.log_tcp(
-                        item.label, domain,
-                        "PASS" if result.success else "FAIL",
+                        item.label, domain, status,
                         result.latency_ms, result.http_code,
                         content_valid=result.content_valid,
                         error=result.error,
+                        read_rate_bps=result.read_rate_bps,
                     )
             except Exception as e:
                 result.error = str(e)[:200]
@@ -400,7 +472,12 @@ class AsyncTestRunner:
         results = []
         for task in asyncio.as_completed(tasks):
             r = await task
-            tag = f"{GREEN}OK{RESET}" if r.success else f"{RED}FAIL{RESET}"
+            if r.throttled:
+                tag = f"{YELLOW}THROTTLED{RESET}"
+            elif r.success:
+                tag = f"{GREEN}OK{RESET}"
+            else:
+                tag = f"{RED}FAIL{RESET}"
             lat = f"{r.latency_ms:.0f}ms" if r.latency_ms else ""
             status = f"HTTP {r.http_code}" if r.http_code else ""
             err = f" — {r.error[:40]}" if r.error else ""
@@ -474,7 +551,7 @@ class AsyncTestRunner:
                     await asyncio.to_thread(
                         _run_tcp_check, ns_name,
                         tcp_r.item.strategy, domain, 0.1,
-                        tcp_r.item.is_config, self.python
+                        tcp_r.item.is_config, self.python, self.disable_ech
                     )
                     data = await asyncio.to_thread(
                         _run_udp_check, ns_name,
@@ -489,7 +566,9 @@ class AsyncTestRunner:
                         tcp_ok=tcp_r.success, udp_ok=udp_ok,
                         tcp_ms=tcp_r.latency_ms, udp_ms=udp_ms,
                     )
-                    if tcp_r.success and udp_ok:
+                    if tcp_r.throttled and udp_ok:
+                        pair.overall = "THROTTLED"
+                    elif tcp_r.success and udp_ok:
                         pair.overall = "PASS"
                     elif tcp_r.success and not udp_ok:
                         pair.overall = "PARTIAL"
@@ -498,9 +577,12 @@ class AsyncTestRunner:
 
                     pairs.append(pair)
 
-                    pair_tag = {"PASS": f"{GREEN}PASS{RESET}",
-                                 "PARTIAL": f"{YELLOW}PARTIAL{RESET}",
-                                 "FAIL": f"{RED}FAIL{RESET}"}[pair.overall]
+                    pair_tag = {
+                        "PASS": f"{GREEN}PASS{RESET}",
+                        "PARTIAL": f"{YELLOW}PARTIAL{RESET}",
+                        "THROTTLED": f"{YELLOW}THROTTLED{RESET}",
+                        "FAIL": f"{RED}FAIL{RESET}",
+                    }[pair.overall]
                     udp_tag = f"{GREEN}{udp_ms:.0f}ms{RESET}" if udp_ok else f"{RED}timeout{RESET}"
                     voice_tag = " [voice]" if full_voice else ""
                     print(f"  [{pair_tag}] {tcp_r.item.label[:22]:22s} "
@@ -560,8 +642,8 @@ class AsyncTestRunner:
                 if p.overall == "PASS":
                     passed += 1
                     tag = f"{GREEN}PASS{RESET}"
-                elif p.overall == "PARTIAL":
-                    tag = f"{YELLOW}PARTIAL{RESET}"
+                elif p.overall in ("PARTIAL", "THROTTLED"):
+                    tag = f"{YELLOW}{p.overall}{RESET}"
                 else:
                     tag = f"{RED}FAIL{RESET}"
                 udp_lat = f"{p.udp_ms:.0f}ms" if p.udp_ok else "timeout"
