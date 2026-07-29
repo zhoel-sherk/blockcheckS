@@ -12,7 +12,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from blockchecks.engine.config import NFQWS2_BIN, LUA_INIT_SCRIPTS, nfqws2_debug_conf_line
+from blockchecks.engine.config import (
+    NFQWS2_BIN, LUA_INIT_SCRIPTS, BLOB_DIR, nfqws2_debug_conf_line,
+)
 
 
 class Nfqws2Manager:
@@ -46,6 +48,8 @@ class Nfqws2Manager:
         self._proc = subprocess.Popen(
             args,
             stdout=subprocess.DEVNULL,
+            # Never PIPE: unread buffer blocks a chatty/debug nfqws2.
+            # Init/errors go to --debug=@logfile when enabled.
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
@@ -53,9 +57,18 @@ class Nfqws2Manager:
         time.sleep(0.8)
 
         if self._proc.poll() is not None:
+            hint = ""
+            if self.last_debug_log and os.path.exists(self.last_debug_log):
+                try:
+                    tail = Path(self.last_debug_log).read_text(errors="replace")[-300:]
+                    hint = f"; debug_tail={tail!r}"
+                except OSError:
+                    pass
             self._proc = None
             self._pid = None
-            raise RuntimeError("nfqws2 failed to start (exited immediately)")
+            raise RuntimeError(
+                "nfqws2 failed to start (exited immediately)" + hint
+            )
 
     def start_config(self, config_path: str) -> None:
         """Start nfqws2 using a pre-built .conf file."""
@@ -89,11 +102,32 @@ class Nfqws2Manager:
             if os.path.exists(lua):
                 lines.append(f"--lua-init=@{lua}")
 
-        if blobs:
-            for blob_name in blobs:
-                blob_path = f"/opt/zapret2/blobs/{blob_name}.bin"
-                if os.path.exists(blob_path):
-                    lines.append(f"--blob={blob_name}:@{blob_path}")
+        # Explicit blobs= plus auto-discover blob=/seqovl_pattern= from strategy
+        blob_names: list[str] = list(blobs or [])
+        import re
+        for m in re.finditer(r"blob=(\w+)", strategy):
+            if m.group(1) not in blob_names:
+                blob_names.append(m.group(1))
+        for m in re.finditer(r"seqovl_pattern=(\w+)", strategy):
+            if m.group(1) not in blob_names:
+                blob_names.append(m.group(1))
+        if os.path.isdir(BLOB_DIR):
+            known = sorted(f for f in os.listdir(BLOB_DIR) if f.endswith(".bin"))
+            for blob_name in blob_names:
+                if blob_name == "0x00000000":
+                    continue
+                if any(l.startswith(f"--blob={blob_name}:@") for l in lines):
+                    continue
+                candidates = [f for f in known if blob_name in f and "quic_initial" not in f]
+                if not candidates:
+                    candidates = [f for f in known if blob_name in f]
+                if candidates:
+                    lines.append(f"--blob={blob_name}:@{BLOB_DIR}/{candidates[0]}")
+                else:
+                    # Exact legacy path fallback
+                    blob_path = os.path.join(BLOB_DIR, f"{blob_name}.bin")
+                    if os.path.exists(blob_path):
+                        lines.append(f"--blob={blob_name}:@{blob_path}")
 
         if hostlist:
             fd, hostlist_path = tempfile.mkstemp(prefix="bs_hostlist_", suffix=".txt")
