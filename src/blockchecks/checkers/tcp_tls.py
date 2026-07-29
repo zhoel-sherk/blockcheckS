@@ -25,7 +25,7 @@ MIN_CONTENT_LENGTH = 300
 MIN_BYTES_PER_SEC = 400.0
 
 # HTTP statuses that produce tiny bodies legitimately
-SMALL_BODY_STATUSES = frozenset({101, 204, 301, 302, 303, 307, 308, 304, 206})
+SMALL_BODY_STATUSES = frozenset({101, 204, 206, 301, 302, 303, 304, 307, 308})
 
 # Patterns that indicate DPI fake response
 DPI_FAKE_PATTERNS = [

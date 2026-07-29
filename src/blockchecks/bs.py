@@ -368,6 +368,7 @@ def main():
     scan.add_argument("--generate", nargs="?", const="custom,configs",
                       default="", help="Use matrix generator (sources: custom,configs,fake,faked,...)")
     scan.add_argument("--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)")
+    scan.add_argument("-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})")
     scan.add_argument("--list-presets", action="store_true", help="List available presets and exit")
     scan.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"], help="TLS protocol version to test")
     scan.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])

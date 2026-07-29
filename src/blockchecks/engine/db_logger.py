@@ -56,6 +56,7 @@ class StateDB:
                     latency_ms REAL DEFAULT 0,
                     gateway_ws_ms REAL DEFAULT 0,
                     content_valid INTEGER DEFAULT 0,
+                    read_rate_bps REAL DEFAULT 0,
                     error TEXT DEFAULT '',
                     timestamp TEXT NOT NULL DEFAULT ''
                 );
@@ -161,10 +162,11 @@ class StateDB:
             await db.execute(
                 """INSERT INTO tcp_results
                    (strategy_id,domain,status,http_code,latency_ms,
-                    gateway_ws_ms,content_valid,error,timestamp)
-                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                    gateway_ws_ms,content_valid,error,timestamp,read_rate_bps)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (sid, domain, status, http_code, latency_ms,
-                 gateway_ms, int(content_valid), error, ts),
+                 gateway_ms, int(content_valid), error, ts,
+                 round(latency_ms, 1)),
             )
             await db.commit()
 
