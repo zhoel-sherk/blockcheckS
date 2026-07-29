@@ -190,14 +190,14 @@ def _run_tcp_check(ns_name: str, strategy: str, domain: str,
     ech_block = ""
     if use_ech:
         ech_block = (
-            f"opts = {{}}\\n"
-            f"        try:\\n"
-            f"            opts = {{curl_cffi.CurlOpt.ECH: ''}}\\n"
-            f"        except Exception:\\n"
-            f"            opts = {{{CURLOPT_ECH}: ''}}\\n"
+            "opts = {}\n"
+            "        try:\n"
+            "            opts = {curl_cffi.CurlOpt.ECH: ''}\n"
+            "        except Exception:\n"
+            "            opts = {" + str(CURLOPT_ECH) + ": ''}\n"
         )
     else:
-        ech_block = "opts = {}\\n"
+        ech_block = "opts = {}\n"
 
     check_code = f"""
 import json, time
