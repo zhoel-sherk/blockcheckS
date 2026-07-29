@@ -39,14 +39,20 @@
 
 ## Ближний техдолг (из аудита packaging)
 
-- [ ] `scan`: не затирать `--auto-discover`
+- [x] `scan`: не затирать `--auto-discover` (None = skip; только `> 0` запускает discovery)
 - [ ] multi-endpoint: pair matrix по всем `discover_multiple` EP
-- [ ] untrack `state.db`, `*.egg-info`; дополнить `.gitignore`
-- [ ] nfqws2: drain/DEVNULL stderr на success path
+- [x] untrack `state.db`; `.gitignore` уже содержит `state.db` / journal / wal
+- [x] nfqws2: DEVNULL stderr (не блокирующий `read(1)`)
+- [x] CLI/DB: `--protocol`, `--preset` domains, `-M` basename, ECH/Range/THROTTLED,
+      `log_tcp(read_rate_bps)`, ALTER migration, sources fallback `custom,configs`
+- [x] Runner: all `blob=` + `seqovl_pattern`, TCP `--payload=tls_client_hello`,
+      UDP CLI `--…` parse (не wrap в lua-desync)
+- [x] Matrix: protocol-gate `standard`/`standard_udp`/`standard_quic`,
+      `disorder_after`, `scan_level=single` per family, voice = `discord_udp` only
 - [ ] package-data: либо копировать `configs/` в пакет, либо явно
       документировать root-only (сейчас `CONFIGS_DIR` = repo `configs/`)
 
-## Low-priority features (near-term alpha)
+## Low-priority features (near-term alpha) — out of scope for audit close
 
 - [ ] **ipfrag_udp family** — `send:ipfrag:ipfrag_pos_udp=N` + `drop` (N=8,16,24,32)
       Not used by Flowseal, niche parameter. Blocked by `send:` not being testable
