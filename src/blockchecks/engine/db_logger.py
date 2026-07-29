@@ -122,6 +122,14 @@ class StateDB:
                 ORDER BY last_test DESC;
             """)
             await db.commit()
+            # Migrate older DBs created before read_rate_bps existed
+            cols = await db.execute("PRAGMA table_info(tcp_results)")
+            col_names = {row[1] for row in await cols.fetchall()}
+            if "read_rate_bps" not in col_names:
+                await db.execute(
+                    "ALTER TABLE tcp_results ADD COLUMN read_rate_bps REAL DEFAULT 0"
+                )
+                await db.commit()
             await db.execute("PRAGMA journal_mode=WAL")
             await db.execute("PRAGMA busy_timeout=5000")
 
@@ -155,7 +163,8 @@ class StateDB:
                        status: str, latency_ms: float,
                        http_code: int = 0, gateway_ms: float = 0,
                        content_valid: bool = True,
-                       error: str = "") -> None:
+                       error: str = "",
+                       read_rate_bps: float = 0.0) -> None:
         async with aiosqlite.connect(self.db_path) as db:
             sid = await self.ensure_strategy(strategy, "tcp", strategy, db=db)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -166,7 +175,7 @@ class StateDB:
                    VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (sid, domain, status, http_code, latency_ms,
                  gateway_ms, int(content_valid), error, ts,
-                 round(latency_ms, 1)),
+                 float(read_rate_bps or 0.0)),
             )
             await db.commit()
 

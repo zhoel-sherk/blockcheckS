@@ -75,7 +75,8 @@ DEFAULT_VOICE_PORT = 50006
 
 # Content validation thresholds
 MIN_CONTENT_LENGTH = 300    # bytes — minimum for a real web page (aligned with tcp_tls)
-MIN_READ_RATE_BPS  = 500.0  # bytes/sec — below this = TCP window clamp
+MIN_READ_RATE_BPS  = 500.0  # bytes/sec — below this = TCP window clamp (FAIL)
+THROTTLED_MAX_BPS  = 256000.0  # bytes/sec — below this (but >= MIN) = THROTTLED
 MIN_REDIRECT_LENGTH = 10    # bytes — redirects have tiny bodies, don't fail them
 
 # ── googlevideo.com CDN testing ──────────────────
