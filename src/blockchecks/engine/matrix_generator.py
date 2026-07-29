@@ -399,12 +399,10 @@ class FlowsealGenerator(StrategyGenerator):
                         scan_level: str = "fast",
                         max_count: int = 100,
                         run_set: set = None) -> list[StrategyItem]:
+        # Flowseal TCP families only — skip for UDP protocols
+        if protocol in ("udp_voice", "quic"):
+            return []
         items = []
-        known_working = list(run_set or [])
-        if state_db and domain and not known_working:
-            known_working = await state_db.get_working_tcp(domain)
-
-        # ── 1. Multi-blob fake (most effective on Fryazino) ──
         blob_pairs = [("stun", "max_ru"), ("stun", "google"),
                        ("max_ru", "google"), ("stun", "4pda")]
         for b1, b2 in blob_pairs:
@@ -509,8 +507,25 @@ TLS_MODS = [
     "rnd,dupsid,sni=ya.ru",
 ]
 
-# All TCP blobs (extended from Flowseal)
-ALL_BLOBS_TCP = ["stun", "max_ru", "google", "4pda", "tls_clienthello"]
+# All TCP blobs (extended from Flowseal) — no bare tls_clienthello (ambiguous file match)
+ALL_BLOBS_TCP = ["stun", "max_ru", "google", "4pda"]
+
+# Foolings for fast/default scans (tcp_flags only in full)
+FAST_FOOLINGS_TCP = [
+    "tcp_ts=-1000",
+    "",
+    "tcp_md5",
+    "tcp_ack=-66000:tcp_ts_up",
+    "tcp_md5:tcp_ts=-1000",
+]
+FAST_REPEATS = [6, 8, 3, 11, 12]
+
+TCP_FAMILIES = [
+    "fake", "hostfake", "multisplit", "syndata", "tcpseg", "oob",
+    "multi_fake", "fake_hostfake",
+]
+UDP_VOICE_FAMILIES = ["udp_discord"]
+UDP_QUIC_FAMILIES = ["udp_quic", "udp_game"]
 
 # ── Standard Generator (parameterized strategy families) ──
 
@@ -531,72 +546,61 @@ class StandardGenerator(StrategyGenerator):
         # 25-fake.sh: fake + blob + fooling + TTL + TLS mod
         "fake": {
             "blobs": ALL_BLOBS_TCP,
-            "repeats": [r for r in ALL_REPEATS if r not in (100, 260)],  # skip tcpseg-only values
-            "foolings": ALL_FOOLINGS_TCP,
+            "repeats": FAST_REPEATS,
+            "foolings": FAST_FOOLINGS_TCP,
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
-            "tls_mods": TLS_MODS[:3],  # rnd, rnd+dupsid, rnd+dupsid+padencap
+            "tls_mods": TLS_MODS[:3],
         },
-        # 35-hostfake.sh: hostfakesplit variants
         "hostfake": {
-            "foolings": ALL_FOOLINGS_TCP[:5],  # skip tcp_flags
+            "foolings": FAST_FOOLINGS_TCP[:4],
             "variants": ["base", "disorder", "nofake1", "midhost=midsld", "nodrop"],
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
         },
-        # 30-faked.sh + 20-multi.sh: multisplit/fakedsplit positions
         "multisplit": {
             "repeats": [1, 6, 11],
             "positions": ALL_SPLIT_POSITIONS,
-            "foolings": ALL_FOOLINGS_TCP[:4],  # no tcp_seq/tcp_flags for split
+            "foolings": FAST_FOOLINGS_TCP[:3],
             "seqovl": ALL_SEQOVL,
             "seqovl_blobs": ALL_BLOBS_TCP,
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
         },
-        # 24-syndata.sh: syndata + blob + TLS mod
         "syndata": {
             "blobs": ["0x1603", "fake_default_tls"],
             "tls_mods": ["rnd,dupsid", "rnd,dupsid,sni=www.google.com"],
-            "plus_split": [False, True],  # syndata alone, or syndata+split
+            "plus_split": [False, True],
         },
-        # 15-misc.sh: tcpseg (TCP segmentation)
         "tcpseg": {
             "positions": ["0,1", "0,midsld"],
             "repeats": [1, 20, 100, 260],
             "ip_id": "rnd",
         },
-        # 17-oob.sh: out-of-band urgent pointer
         "oob": {
             "urps": ["b", "0", "2", "midsld"],
             "in_range": "-s1",
         },
-        # Multi-blob fake with pairs (blockcheckS extension)
         "multi_fake": {
             "blob_pairs": [("stun","max_ru"),("stun","google"),
                            ("max_ru","google"),("stun","4pda")],
             "repeats": [6, 3, 8, 12, 11, 2],
             "foolings": ["tcp_ts=-1000", "tcp_md5"],
         },
-        # Fake + hostfakesplit combo (60-fake-hostfake.sh)
         "fake_hostfake": {
             "blobs": ALL_BLOBS_TCP,
             "repeats": [6, 3, 8, 11, 2],
             "foolings": ["tcp_ts=-1000", "tcp_md5"],
-            "hf_variants": ["base", "disorder"],
+            "hf_variants": ["base", "disorder_after"],
         },
-        # ── Flowseal UDP families (full nfqws2 inline configs) ──
+        # Voice UDP — lua-desync cores only (runner-compatible)
         "udp_discord": {
-            "port_ranges": ["19294-19344,50000-50100"],
-            "blobs": ["quic_initial_dbankcloud_ru", "discord_udp"],
             "repeats": [6, 12, 3, 2],
-            "out_range": [None, "n1-<n3", "n1-<n4"],
-            "dual_blob": [False, True],  # ALT12 dual-blob pattern
         },
         "udp_quic": {
             "port_ranges": ["443"],
             "blobs": ["quic_initial_www_google_com", "quic_initial_dbankcloud_ru"],
-            "repeats": [1, 2, 5, 6, 10, 11, 20],  # blockcheck.sh 90-quic.sh spectrum
+            "repeats": [1, 2, 5, 6, 10, 11, 20],
         },
         "udp_game": {
             "port_ranges": ["1024-65535"],
@@ -607,8 +611,7 @@ class StandardGenerator(StrategyGenerator):
     }
 
     def __init__(self, strategy_types: list[str] | None = None):
-        self.strategy_types = strategy_types or list(self.STRATEGY_FAMILIES.keys())
-        # Validate
+        self.strategy_types = strategy_types or list(TCP_FAMILIES)
         for t in self.strategy_types:
             if t not in self.STRATEGY_FAMILIES and t != "all":
                 raise ValueError(f"Unknown strategy type: {t}")
@@ -619,22 +622,38 @@ class StandardGenerator(StrategyGenerator):
                         scan_level: str = "fast",
                         max_count: int = 500,
                         run_set: set = None) -> list[StrategyItem]:
-        """Generate strategies from specified families."""
+        """Generate strategies from specified families, gated by protocol."""
         items = []
-        seen: set[str] = set()  # dedup
+        seen: set[str] = set()
         known_working = list(run_set or [])
         if state_db and domain and not known_working:
             known_working = await state_db.get_working_tcp(domain)
 
-        types = self.strategy_types
+        types = list(self.strategy_types)
         if "all" in types:
             types = list(self.STRATEGY_FAMILIES.keys())
+
+        # Protocol gate — empty intersection means nothing for this protocol
+        if protocol == "udp_voice":
+            types = [t for t in types if t in UDP_VOICE_FAMILIES]
+        elif protocol in ("quic",):
+            types = [t for t in types if t in UDP_QUIC_FAMILIES]
+        else:
+            # tls12/tls13/http — TCP only
+            types = [t for t in types if t in TCP_FAMILIES]
+
+        # Expand axes for full scan
+        full = scan_level == "full"
 
         for stype in types:
             family = self.STRATEGY_FAMILIES.get(stype)
             if not family:
                 continue
-            new = self._expand_family(stype, family, scan_level, seen, known_working)
+            fam = dict(family)
+            if full and stype == "fake":
+                fam["repeats"] = [r for r in ALL_REPEATS if r not in (100, 260)]
+                fam["foolings"] = ALL_FOOLINGS_TCP
+            new = self._expand_family(stype, fam, scan_level, seen, known_working)
             items.extend(new)
             if len(items) >= max_count:
                 break
@@ -646,7 +665,7 @@ class StandardGenerator(StrategyGenerator):
                         ) -> list[StrategyItem]:
         """Expand one strategy family into items."""
         items = []
-        first_item_added = False
+        seen: set[str] = set()
 
         if stype == "fake":
             for blob_name in family["blobs"]:
@@ -658,7 +677,6 @@ class StandardGenerator(StrategyGenerator):
                         strat = f"fake{blob}:repeats={repeats}{fool_str}"
                         label = f"std_fake_{blob_name}_r{repeats}_{fool or 'nofool'}"
                         self._add(items, seen, label, strat)
-                        first_item_added = True
 
                         if scan_level == "single":
                             return items
@@ -741,20 +759,26 @@ class StandardGenerator(StrategyGenerator):
                         if tmod:
                             strat += f":tls_mod={tmod}"
                         if plus:
-                            strat = f"syndata:blob={blob}\nmultisplit:pos=1,midsld:seqovl=1"
+                            strat = strat + "\nmultisplit:pos=1,midsld:seqovl=1"
                         label = f"std_syn_{blob}_{tmod[:15] or 'nomod'}" + ("_split" if plus else "")
                         self._add(items, seen, label, strat)
+                        if scan_level == "single":
+                            return items
 
         elif stype == "tcpseg":
             for pos in family["positions"]:
                 for r in family["repeats"]:
                     strat = f"tcpseg:pos={pos}:ip_id={family['ip_id']}:repeats={r}"
                     self._add(items, seen, f"std_tcpseg_p{pos}_r{r}", strat)
+                    if scan_level == "single":
+                        return items
 
         elif stype == "oob":
             for urp in family["urps"]:
                 strat = f"oob:urp={urp}"
                 self._add(items, seen, f"std_oob_urp{urp}", strat)
+                if scan_level == "single":
+                    return items
 
         elif stype == "multi_fake":
             for (b1, b2) in family["blob_pairs"]:
@@ -764,31 +788,16 @@ class StandardGenerator(StrategyGenerator):
                         strat = (f"fake:blob={b1}:repeats={r}{f}\n"
                                  f"fake:blob={b2}:repeats={r}{f}")
                         self._add(items, seen, f"std_multi_{b1}+{b2}_r{r}_{fool or 'nofool'}", strat)
+                        if scan_level == "single":
+                            return items
 
         elif stype == "udp_discord":
-            for ports in family["port_ranges"]:
-                for blob_name in family["blobs"]:
-                    for r in family["repeats"]:
-                        for dual in family["dual_blob"]:
-                            if dual:
-                                # ALT12 dual-blob pattern: stun + dbankcloud
-                                clue = f"--filter-udp={ports} --filter-l7=discord,stun "
-                                clue += f"--blob=STUN:@/opt/zapret2/blobs/stun.bin "
-                                clue += f"--blob=DKCLOUD:@/opt/zapret2/blobs/quic_initial_dbankcloud_ru.bin "
-                                clue += f"--payload=discord_ip_discovery,stun "
-                                clue += f"--lua-desync=fake:blob=STUN:repeats={r//2} "
-                                clue += f"--lua-desync=fake:blob=DKCLOUD:repeats={r//2}"
-                                for orng in family["out_range"]:
-                                    s = clue + (f" --out-range={orng}" if orng else "")
-                                    self._add(items, seen, f"std_udp_discord_dual_r{r}_{orng or 'no'}", s)
-                            else:
-                                clue = f"--filter-udp={ports} --filter-l7=discord,stun "
-                                clue += f"--blob=DISCORD:@/opt/zapret2/blobs/{blob_name}.bin "
-                                clue += f"--payload=discord_ip_discovery,stun "
-                                clue += f"--lua-desync=fake:blob=DISCORD:repeats={r}"
-                                for orng in family["out_range"]:
-                                    s = clue + (f" --out-range={orng}" if orng else "")
-                                    self._add(items, seen, f"std_udp_d_{blob_name}_r{r}_{orng or 'no'}", s)
+            # Runner-compatible lua-desync cores only (discord_udp blob)
+            for r in family["repeats"]:
+                strat = f"fake:blob=discord_udp:repeats={r}"
+                self._add(items, seen, f"std_udp_discord_r{r}", strat)
+                if scan_level == "single":
+                    return items
 
         elif stype == "udp_quic":
             for ports in family["port_ranges"]:
@@ -799,6 +808,8 @@ class StandardGenerator(StrategyGenerator):
                              f"--payload=quic_initial "
                              f"--lua-desync=fake:blob=QUIC:repeats={r}")
                         self._add(items, seen, f"std_udp_quic_{blob_name}_r{r}", s)
+                        if scan_level == "single":
+                            return items
 
         elif stype == "udp_game":
             for ports in family["port_ranges"]:
@@ -811,6 +822,8 @@ class StandardGenerator(StrategyGenerator):
                                  f"--lua-desync=fake:blob=GAME:repeats={r}" +
                                  (f" --out-range={orng}" if orng else ""))
                             self._add(items, seen, f"std_udp_game_r{r}_{orng or 'no'}", s)
+                            if scan_level == "single":
+                                return items
 
         elif stype == "fake_hostfake":
             for blob_name in family["blobs"]:
@@ -818,12 +831,16 @@ class StandardGenerator(StrategyGenerator):
                     for fool in family["foolings"]:
                         f = f":{fool}" if fool else ""
                         for hf in family["hf_variants"]:
-                            hf_core = (f"hostfakesplit:{hf}:nofake2{f}:repeats=1"
-                                       if hf != "base" else
-                                       f"hostfakesplit:nofake2{f}:repeats=1")
+                            if hf == "base":
+                                hf_core = f"hostfakesplit:nofake2{f}:repeats=1"
+                            else:
+                                # hf is disorder_after (or other valid token)
+                                hf_core = f"hostfakesplit:{hf}:nofake2{f}:repeats=1"
                             strat = f"fake:blob={blob_name}:repeats={r}{f}\n{hf_core}"
                             self._add(items, seen,
                                       f"std_fh_{blob_name}_r{r}_{hf}_{fool or 'nofool'}", strat)
+                            if scan_level == "single":
+                                return items
 
         return items
 
@@ -841,7 +858,9 @@ class MatrixGenerator:
     REGISTRY = {
         "custom": CustomListGenerator,
         "flowseal": FlowsealGenerator,
-        "standard": StandardGenerator,
+        "standard": lambda: StandardGenerator(strategy_types=list(TCP_FAMILIES)),
+        "standard_udp": lambda: StandardGenerator(strategy_types=list(UDP_VOICE_FAMILIES)),
+        "standard_quic": lambda: StandardGenerator(strategy_types=list(UDP_QUIC_FAMILIES)),
         "configs": ConfigFileGenerator,
         "fake": FakeTcpGenerator,
         "faked": FakedTcpGenerator,
@@ -858,7 +877,8 @@ class MatrixGenerator:
 
     def _ensure_registered(self, name: str):
         if name not in self._generators and name in self.REGISTRY:
-            self._generators[name] = self.REGISTRY[name]()
+            factory = self.REGISTRY[name]
+            self._generators[name] = factory() if callable(factory) else factory
 
     async def generate_tcp(self,
                             sources: list[str] = None,
@@ -912,11 +932,14 @@ class MatrixGenerator:
                             ) -> list[StrategyItem]:
         """Generate UDP strategies."""
         if not sources:
-            sources = ["custom"]
+            sources = ["custom", "standard_udp"]
 
         if user_matrix:
             self.register("user", UserMatrixGenerator(user_matrix))
             sources = ["user"]
+
+        # Map legacy "standard" on UDP path to voice-only source
+        sources = ["standard_udp" if s == "standard" else s for s in sources]
 
         all_items = []
         for src_name in sources:
@@ -924,8 +947,9 @@ class MatrixGenerator:
             gen = self._generators.get(src_name)
             if not gen:
                 continue
+            proto = "quic" if src_name == "standard_quic" else "udp_voice"
             items = await gen.generate(
-                protocol="udp_voice", state_db=state_db,
+                protocol=proto, state_db=state_db,
                 domain=domain, scan_level=scan_level,
                 max_count=max_count // len(sources) or max_count,
                 run_set=None,
