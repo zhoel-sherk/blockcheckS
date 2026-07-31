@@ -295,6 +295,51 @@ L2: + blob=tls_clienthello_max_ru  → PASS  → stop / optional L3 (repeats, tc
 - [ ] **H9** benchmark vs full matrix на 10 доменах: tests count, Recall(best strategy found)
 - [ ] **H10** fallback: если progressive 0 PASS → expand beam / RF top-K / full family scan
 
+### Adaptive queue: cross-domain fan-out + online family boost (AQ)
+
+Online scheduler во время `bs full` / `bs scan` — **не offline ML**, а priority queue с обучением
+на лету. Первый PASS → немедленный fan-out той же стратегии на sibling-домены; каждый PASS
+по family поднимает вес остальных стратегий этой family в очереди (**boost, не prune**).
+
+```text
+PASS discord.com + fake+multisplit(seqovl=664)
+  → enqueue (same strategy × discord.gg, discordapp.com, …)  # fan-out
+  → w_family[fake+multisplit] += 1                          # boost siblings
+  → остальные fake+multisplit в очереди +N priority points
+```
+
+**Гипотеза:** на одном провайдере ~90% рабочих стратегий обнаруживаются в первой половине
+jobs, если очередь рандомизирована + веса по family/blob обновляются после каждого PASS.
+Проверить SQL по `state.db`: time-to-first-PASS per family vs total scan.
+
+**Priority (черновик):**
+```text
+priority = base_shuffle_order
+         + w_family[family] * 10
+         + w_blob[blob] * 5
+         + fanout_bonus(sibling_domain_already_PASS) * 50
+         + uniform_random() * epsilon   # ε≈5–10% exploration
+```
+FAIL: `w_family -= 0.1` (floor 0). Никогда не удалять jobs из matrix — только переставлять.
+
+| | Full matrix | RF ranker | Adaptive queue (AQ) |
+|---|---|---|---|
+| Сигнал | нет до конца | offline train | **с первого PASS** |
+| Cross-domain | нет | если в train | **сразу fan-out** |
+| Риск | медленно | stale model | ложный fan-out → cluster limits |
+
+**Гибрид (целевой):** provider template (dpi-tester) → adaptive queue + B2 multi-domain curl
+→ RF подкрутка начальных весов из `state.db` → hierarchy (H*) для cold axes.
+
+- [ ] **AQ1** `AdaptiveJobQueue` в `main.py` / `async_runner`: priority heap + ε-random
+- [ ] **AQ2** fan-out on PASS: `(strategy, domain)` → enqueue `(strategy, sibling_domains[])`
+- [ ] **AQ3** domain clusters: `discord*`, `google*`, `youtube*`, `general` — не fan-out на все 40
+- [ ] **AQ4** family/blob weight table в памяти + persist в `state.db` (`scan_weights` table)
+- [ ] **AQ5** интеграция с B2: одна стратегия → `asyncio.gather` curl по fan-out list
+- [ ] **AQ6** CLI `bs full --adaptive` / `--fan-out`; anchor domains first (discord, youtube)
+- [ ] **AQ7** метрики: `time_to_first_pass`, `pass_found_before_50pct_jobs`, fan-out hit rate
+- [ ] **AQ8** SQL benchmark на текущем stress: validate «90% в первой половине» hypothesis
+
 - [ ] `ipfrag_udp` / `ipfrag_tcp` (`send:` dual-call)
 - [ ] TTL > 255, `repeats=4` generator
 
