@@ -144,8 +144,96 @@ blockcheckS — community mass-scan; GP — production orchestrator + import sho
 
 **Цель после B1+B2+A1 @ parallel=4:** ~6–12 job/s (7–14h на 312k), не через ↑parallel.
 
+### Исследование вариативности blobs (2026-07-31)
+
+Web/GitHub survey: Flowseal (22 `.bat`, ref-count), bol-van `files/fake` (~45),
+nfqws2-keenetic discussions, GP custom lists. Источники:
+[Flowseal/bin](https://github.com/Flowseal/zapret-discord-youtube/tree/main/bin),
+[bol-van/fake](https://github.com/bol-van/zapret/tree/master/files/fake),
+[nfqws2-keenetic #2](https://github.com/nfqws/nfqws2-keenetic/discussions/2).
+
+**Топ по популярности (Flowseal refs):** `max_ru` TLS (64) → `google` TLS (57) →
+`quic_google` (44) → `discord_udp` (43) → `stun` (25) → `game_udp` (21).
+Эталон SIMPLE FAKE ALT2: dual `stun` + `max_ru` + `repeats=6:tcp_ts=-1000`.
+
+**По сервисам:** YouTube/Discord TCP — `max_ru`/`google`+`stun`; voice UDP —
+только `discord_udp` (1200B); QUIC — `quic_google`, `quic_dbank` (VK/social);
+Telegram — blob вторичен (IP-block); built-in `fake_default_tls/http/quic` — GP baseline.
+
+| Blob (alias) | Файл | Есть в `/opt/zapret2/blobs/` | Популярность | Use case | Добавить в BS? |
+|---|---|:---:|:---:|---|:---:|
+| `max_ru` | `tls_clienthello_max_ru.bin` | ✅ | ★★★★★ | General TLS, YouTube, Discord TCP | — |
+| `google` | `tls_clienthello_www_google_com.bin` | ✅ | ★★★★★ | Google list, multisplit, Discord.media | — |
+| `stun` | `stun.bin` | ✅ | ★★★★ | Dual-fake pair, UDP STUN | — |
+| `discord_udp` | `discord_udp.bin` (Flowseal ACTIVE_DISCORD_UDP) | ✅ | ★★★★★ | Discord voice UDP 50000–50100 | — |
+| `quic_google` | `quic_initial_www_google_com.bin` | ✅ | ★★★★ | YouTube QUIC, games UDP 443 | — |
+| `quic_dbank` | `quic_initial_dbankcloud_ru.bin` | ✅ | ★★★ | VK/Instagram QUIC | — |
+| `4pda` | `tls_clienthello_4pda_to.bin` | ✅ | ★★ | Alt TLS fingerprint (alt10) | — |
+| `tls_default` | `tls_clienthello.bin` | ✅ | ★★★ | Keenetic generic baseline | каталог |
+| `quic_default` | `quic_initial.bin` | ✅ | ★★★ | Keenetic generic QUIC | каталог |
+| `fake_default_tls` | *(built-in)* | — | ★★★★ | GP/blockcheck2 без custom file | тесты есть |
+| `fake_default_quic` | *(built-in)* | — | ★★★ | GP `list_quic.txt` | тесты есть |
+| `fake_default_http` | *(built-in)* | — | ★★ | HTTP :80 families | тесты есть |
+| `game_udp` | `ACTIVE_GAME_UDP.bin` | ❌ | ★★★ | Game filter UDP (21 Flowseal ref) | **да** |
+| `stun2` | `stun2.bin` | ❌ | ★ | Alt STUN payload | опционально |
+| `quic_4pda` | `quic_initial_4pda.to.bin` | ❌ | ★ | Alt QUIC fingerprint | опционально |
+| `quic_tencent` | `quic_initial_tencent_com.bin` | ❌ | ★ | Gaming / Tencent QUIC | опционально |
+| `quic_steam` | `quic_initial_steamcommunity_com.bin` | ❌ | ★ | Steam QUIC | опционально |
+| `tls_vk` | `tls_clienthello_vk_com.bin` | в `files/fake` | ★★ | VK / RU whitelist TLS | **да** |
+| `quic_vk` | `quic_initial_vk_com.bin` | в `files/fake` | ★★ | VK QUIC | **да** |
+| `discord_ipdisc` | `discord-ip-discovery-with-port.bin` | в `files/fake` | ★★ | Official zapret 74B voice alt | сравнить |
+| `quic_gv_kyber` | `quic_initial_*_googlevideo_com_kyber_*.bin` | в `files/fake` | ★ | YouTube CDN QUIC (не apex TLS) | после B10 |
+| `wireguard_init` | `wireguard_initiation.bin` | в `files/fake` | ★ | WG / hysteria-adjacent UDP | low |
+| `http_iana` | `http_iana_org.bin` | в `files/fake` | ★ | HTTP fake desync | low |
+| `blob_zero` | `0x00000000` hex inline | — | ★★ | UDP fallback, multisplit | hex в matrix |
+
+- [ ] Синхронизировать `presets/blobs/` manifest: что в wheel vs symlink на `/opt/zapret2/blobs/`
+- [ ] Скопировать tier-1 gaps: `game_udp`, `tls_vk`, `quic_vk` из Flowseal/bol-van
+- [ ] Matrix generator: alias map `google`→`tls_clienthello_www_google_com.bin` (уже в nfqws2 conf)
+- [ ] Документировать built-in vs file blobs в `presets/README.md`
+
+### Multi-blob chains (ТСПУ) — покрытие blockcheckS (2026-07-31)
+
+Community: цепочки разных blobs подряд = несколько `--lua-desync=fake` (порядок важен) или
+`fake`+`multisplit`/`multidisorder` с `seqovl_pattern=blob`. `repeats=N` — тот же blob N раз,
+не разные blobs. Runtime BS: multi-line strategy → несколько `--lua-desync` ([`async_runner.py`](src/blockchecks/engine/async_runner.py) L234).
+
+| Паттерн | Community ref | BS | Где / пробел |
+|---|---|:---:|---|
+| Dual fake `stun→max_ru` (+repeats, tcp_ts) | Flowseal ALT2 | ✅ | `StandardGenerator.multi_fake`, `--generate fake_multi`, `flowseal` |
+| Dual fake пары (stun/google/max_ru/4pda) | Flowseal | ✅ | 4 ordered pairs; **нет reverse** (max_ru→stun) |
+| `fake` + `multisplit` + `seqovl_pattern=blob` | ALT11, PR #10293 | ⚠️ | `configs/alt11*`; `fake_faked` только seqovl=1; **нет** fake blob ≠ seqovl blob в standard |
+| Triple: fake + multisplit + hostfakesplit | ALT12 | ⚠️ | `configs/alt12*` only; **не в matrix generator** |
+| `fake` + `hostfakesplit` | fake_hostfake | ✅ | `StandardGenerator.fake_hostfake` |
+| `multisplit` seqovl 568–681 + blob | Flowseal FAKE TLS AUTO | ✅ | `multisplit` family, `FlowsealGenerator` |
+| `fake` + `multidisorder` | sonicdpi #3, zapret default | ❌ | `configs/fake_tls_auto__fake_multidisorder.conf`; **нет generator** |
+| `fakedsplit` / `fakeddisorder` | sonicdpi #4 | ❌ | `FakedTcpGenerator` = multisplit seqovl=1, **не fakedsplit** |
+| `dupfake` (multi-blob один вызов) | GP/Keenetic custom Lua | ❌ | **нет** в matrix / presets |
+| 3+ blobs в цепочке | редко | ❌ | только пары |
+| HTTP fake + TLS fake (один профиль) | Flowseal `--fake-http`+`--fake-tls` | ❌ | **нет** generator |
+| UDP dual-blob (quic_dbank на discord+stun L7) | Flowseal UDP profile | ❌ | UDP = single `discord_udp` / `quic_*` |
+| `circular` rotate strategies | zapret2-auto | ⚠️ | export [`conf_builder`](src/blockchecks/engine/conf_builder.py); **не scan** |
+| `tls_fake_flood` | keenetic discussion #82 | ❌ | **нет** |
+| `flowseal` source в `bs full` default | — | ⚠️ | default `standard,custom,configs`; flowseal — явный `--tcp-sources` |
+| Порядок blobs A→B vs B→A | эмпирика ТСПУ | ⚠️ | fixed pairs; **benchmark order matrix отсутствует** |
+| Per-blob разный `repeats` | часть Flowseal bats | ❌ | multi_fake: одинаковый repeats на оба blob |
+
+**Итог:** ядро ТСПУ-паттерна (dual fake stun+max_ru) **покрыто**. Пробелы — комбо-desync
+(multidisorder/fakedsplit/dupfake), полные Flowseal triple chains, HTTP+TLS dual fake, UDP
+multi-blob, order sensitivity.
+
+- [ ] **M1** `fake_multisplit` family: `fake:blob=X` + `multisplit:seqovl=664:seqovl_pattern=Y` (X≠Y), как ALT11
+- [ ] **M2** `fake_multisplit_hostfake` triple chain (ALT12 pattern) в StandardGenerator
+- [ ] **M3** `multidisorder` + `fakedsplit`/`fakeddisorder` families (sonicdpi tier-1)
+- [ ] **M4** `dupfake` preset / GP custom list import
+- [ ] **M5** blob order matrix: reverse pairs + 3-blob permutations subset
+- [ ] **M6** HTTP+TLS dual-fake generator (`fake_default_http` + TLS blob)
+- [ ] **M7** UDP multi-blob (discord L7: quic_dbank на stun+discord)
+- [ ] **M8** `flowseal` в default `bs full --tcp-sources` или merge combos в `standard`
+- [ ] **M9** rename/fix `FakedTcpGenerator` → real `fakedsplit` или deprecate
+- [ ] **M10** `circular` в optional scan mode (rotate blob combos on fail)
+
 - [ ] `ipfrag_udp` / `ipfrag_tcp` (`send:` dual-call)
-- [ ] `multidisorder`
 - [ ] TTL > 255, `repeats=4` generator
 
 ### Packaging tech debt (закрыто)
