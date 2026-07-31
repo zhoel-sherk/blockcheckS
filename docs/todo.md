@@ -233,6 +233,68 @@ multi-blob, order sensitivity.
 - [ ] **M9** rename/fix `FakedTcpGenerator` → real `fakedsplit` или deprecate
 - [ ] **M10** `circular` в optional scan mode (rotate blob combos on fail)
 
+### ML: sklearn Random Forest ranker (Breiman / scikit-learn)
+
+Offline ranker поверх `state.db` / GP SQLite — **не замена curl verify**, а сужение 18k → top-K.
+
+**Постановка B (рекомендуемая):** `(domain_features + strategy_features) → P(PASS)`;
+inference: rank top-20 → BS verify. Train только на BS curl_cffi labels.
+
+**sklearn:** `RandomForestClassifier(n_estimators=200, max_features="sqrt", class_weight="balanced", oob_score=True)`.
+Валидация: `GroupKFold` по domain (anti-leakage). Метрика: **Recall@K**, не accuracy.
+
+Альтернатива на больших данных: `HistGradientBoostingClassifier` (быстрее tabular).
+
+- [ ] **ML1** optional-dep `scikit-learn` в `[project.optional-dependencies] ml`
+- [ ] **ML2** `scripts/train_strategy_ranker.py` — export `state.db` → parquet → fit → `model.pkl`
+- [ ] **ML3** feature parser: domain (TLD, cdn_class) + strategy (family/blob/repeats/fooling из `strategy_safety`-подобного парсера)
+- [ ] **ML4** BS integration: `--ranker model.pkl` → top-K candidates вместо full matrix
+- [ ] **ML5** retrain policy: после mass scan / drift (blob burn) / provider change
+
+**Риски:** label noise GP≠BS, нестационарность ТСПУ, cold start → fallback brute-force.
+
+### ML: иерархическое облако параметров (progressive drill-down)
+
+Альтернатива full matrix: **дерево осей** вместо декартова произведения. Домен проходит
+уровни — на каждом добавляется один слой параметров; при PASS на уровне N можно углубляться
+или остановиться (early-exit).
+
+```text
+L0: desync=fake                    → FAIL
+L1: + ip_autottl=-2                → FAIL
+L2: + blob=tls_clienthello_max_ru  → PASS  → stop / optional L3 (repeats, tcp_ts, …)
+```
+
+Похоже на GP `SCANLEVEL=standard` (break family), но **внутри одной ветки** — наращивание
+параметров, а не перебор готовых строк из `list_https_tls12.txt`.
+
+| | Full matrix (сейчас) | Hierarchical cloud | RF ranker |
+|---|---|---|---|
+| Тестов/домен | тысячи | десятки–сотни | K verify после rank |
+| Ловит combo fake+blob+tcp_ts | ✅ | ⚠️ если порядок осей верный | ✅ если в train |
+| Скорость | медленно | **быстро** при удачном дереве | быстрый inference |
+| Риск | нет | **greedy miss** — combo без промежуточных уровней | stale model |
+
+**ML для иерархии (не RF напрямую):**
+- **Learned policy tree** — какую ось раскрывать следующей (contextual bandit / small RL)
+- **Provider template** — dpi-tester отдаёт порядок осей для Fryazino: fake → blob → repeats → tcp_ts
+- **Beam search** — держать top-B частичных конфигов, не одну greedy-ветку
+- **Monotonic priors** — blob почти всегда после fake; autottl — optional branch
+
+**Связь с RF:** RF ранжирует *готовые* стратегии; hierarchy *строит* стратегию по слоям.
+Гибрид: hierarchy для cold start → RF для уточнения blob/fooling на известном family.
+
+- [ ] **H1** спецификация «облака параметров»: оси (desync, blob, fooling, ttl, repeats, split…)
+- [ ] **H2** `ProgressiveStrategyBuilder` — API: `add_axis()` → partial conf → test → branch
+- [ ] **H3** default tree order из GP `family_rank` + Fryazino facts (fake→blob→repeats=6→tcp_ts)
+- [ ] **H4** beam width B=3 — не только greedy, чтобы не пропустить fake+blob без autottl
+- [ ] **H5** интеграция в `bs scan --progressive` / `scan_level=progressive`
+- [ ] **H6** лог partial results в DB (`partial_results`: level, axis, status) для ML train
+- [ ] **H7** learned axis order: contextual bandit или RF на «какая ось дала gain на этом domain_class»
+- [ ] **H8** provider template export из dpi-tester (`provider_summary.json` → axis order)
+- [ ] **H9** benchmark vs full matrix на 10 доменах: tests count, Recall(best strategy found)
+- [ ] **H10** fallback: если progressive 0 PASS → expand beam / RF top-K / full family scan
+
 - [ ] `ipfrag_udp` / `ipfrag_tcp` (`send:` dual-call)
 - [ ] TTL > 255, `repeats=4` generator
 
