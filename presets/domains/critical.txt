@@ -1,5 +1,5 @@
 # GP Control Plane CRITICAL_DOMAINS — always tested first
-# googlevideo.com removed: apex TLS probe misleading until GV-1 videoplayback
+# googlevideo.com in lean coverage-tcp.txt (GV-1 videoplayback probe)
 youtube.com
 discord.com
 discordcdn.com
