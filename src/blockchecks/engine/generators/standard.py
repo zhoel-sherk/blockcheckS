@@ -307,6 +307,7 @@ TCP_FAMILIES = [
 ]
 HTTP_FAMILIES = ["http_simple", "http_fake"]
 UDP_VOICE_FAMILIES = ["udp_discord"]
+QUIC_HTTP3_FAMILIES = ["quic_fake", "quic_ipfrag", "udp_quic"]
 UDP_QUIC_FAMILIES = ["udp_quic", "udp_game"]
 
 # ── Standard Generator (parameterized strategy families) ──
@@ -408,6 +409,15 @@ class StandardGenerator(StrategyGenerator):
             "repeats": FAST_REPEATS[:4],
             "foolings": FAST_FOOLINGS_TCP[:3],
         },
+        # 90-quic.sh — HTTP/3 over UDP/443
+        "quic_fake": {
+            "blobs": ["fake_default_quic", "quic_initial"],
+            "repeats": [1, 2, 5, 10, 11, 20],
+        },
+        "quic_ipfrag": {
+            "positions": [8, 16, 32, 64],
+            "repeats": [6, 11],
+        },
     }
 
     def __init__(self, strategy_types: list[str] | None = None):
@@ -439,10 +449,10 @@ class StandardGenerator(StrategyGenerator):
         # Protocol gate — empty intersection means nothing for this protocol
         if protocol == "udp_voice":
             types = [t for t in types if t in UDP_VOICE_FAMILIES]
-        elif protocol in ("quic",):
-            types = [t for t in types if t in UDP_QUIC_FAMILIES]
         elif protocol == "http":
             types = [t for t in types if t in HTTP_FAMILIES]
+        elif protocol == "quic":
+            types = [t for t in types if t in QUIC_HTTP3_FAMILIES]
         else:
             # tls12/tls13 — TCP TLS only
             types = [t for t in types if t in TCP_FAMILIES]
@@ -621,7 +631,7 @@ class StandardGenerator(StrategyGenerator):
                             f"--payload=quic_initial "
                             f"--lua-desync=fake:blob=QUIC:repeats={r}"
                         )
-                        self._add(items, seen, f"std_udp_quic_{blob_name}_r{r}", s)
+                        self._add(items, seen, f"std_udp_quic_{blob_name}_r{r}", s, protocol="quic")
                         if scan_level == "single":
                             return items
 
@@ -680,6 +690,34 @@ class StandardGenerator(StrategyGenerator):
                         self._add(items, seen, label, strat, protocol="http")
                         if scan_level == "single":
                             return items
+
+        elif stype == "quic_fake":
+            for blob_name in family["blobs"]:
+                for r in family["repeats"]:
+                    strat = f"fake:blob={blob_name}:repeats={r}"
+                    label = f"std_quic_fake_{blob_name}_r{r}"
+                    self._add(items, seen, label, strat, protocol="quic")
+                    if scan_level == "single":
+                        return items
+
+        elif stype == "quic_ipfrag":
+            for pos in family["positions"]:
+                strat = f"send:ipfrag:ipfrag_pos_udp={pos}\ndrop"
+                label = f"std_quic_ipfrag_pos{pos}"
+                self._add(items, seen, label, strat, protocol="quic")
+                if scan_level == "single":
+                    return items
+            for pos in family["positions"]:
+                for r in family["repeats"]:
+                    strat = (
+                        f"fake:blob=fake_default_quic:repeats={r}\n"
+                        f"send:ipfrag:ipfrag_pos_udp={pos}\n"
+                        f"drop"
+                    )
+                    label = f"std_quic_fake_ipfrag_r{r}_pos{pos}"
+                    self._add(items, seen, label, strat, protocol="quic")
+                    if scan_level == "single":
+                        return items
 
         return items
 

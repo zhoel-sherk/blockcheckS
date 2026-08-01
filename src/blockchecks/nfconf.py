@@ -77,8 +77,13 @@ async def collect_export_strategies(
     if not udp_strats:
         udp_strats = ["fake:blob=discord_udp:repeats=6"]
 
-    # QUIC: no dedicated PASS store yet — keenetic default
-    quic_strats = ["fake:blob=quic_initial:repeats=11"]
+    # QUIC: best HTTP/3 strategies from state.db
+    quic_strats: list[str] = []
+    for row in await db.get_best_quic(domain, limit=limit):
+        cfg = await db.get_strategy_config(row["strategy"], "quic")
+        quic_strats.append(cfg or row["strategy"])
+    if not quic_strats:
+        quic_strats = ["fake:blob=quic_initial:repeats=11"]
     return tcp_strats, udp_strats, quic_strats
 
 

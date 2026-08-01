@@ -6,8 +6,8 @@ Facade over engine.generators.*. See docs/architecture.md.
 from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.generators import (
     HTTP_FAMILIES,
+    QUIC_HTTP3_FAMILIES,
     TCP_FAMILIES,
-    UDP_QUIC_FAMILIES,
     UDP_VOICE_FAMILIES,
     ConfigFileGenerator,
     CustomListGenerator,
@@ -33,7 +33,7 @@ class MatrixGenerator:
         "flowseal": FlowsealGenerator,
         "standard": lambda: StandardGenerator(strategy_types=list(TCP_FAMILIES)),
         "standard_udp": lambda: StandardGenerator(strategy_types=list(UDP_VOICE_FAMILIES)),
-        "standard_quic": lambda: StandardGenerator(strategy_types=list(UDP_QUIC_FAMILIES)),
+        "standard_quic": lambda: StandardGenerator(strategy_types=list(QUIC_HTTP3_FAMILIES)),
         "standard_http": lambda: StandardGenerator(strategy_types=list(HTTP_FAMILIES)),
         "configs": ConfigFileGenerator,
         "fake": FakeTcpGenerator,
@@ -147,7 +147,7 @@ class MatrixGenerator:
             gen = self._generators.get(src_name)
             if not gen:
                 continue
-            proto = "quic" if src_name == "standard_quic" else "udp_voice"
+            proto = "udp_voice"
             items = await gen.generate(
                 protocol=proto,
                 state_db=state_db,
@@ -164,6 +164,51 @@ class MatrixGenerator:
             if item.strategy in seen:
                 continue
             seen.add(item.strategy)
+            deduped.append(item)
+        return deduped[:max_count]
+
+    async def generate_quic(
+        self,
+        sources: list[str] | None = None,
+        domain: str = "discord.com",
+        scan_level: str = "fast",
+        max_count: int = 50,
+        state_db: StateDB = None,
+        user_matrix: str = "",
+        run_set: set = None,
+    ) -> list[StrategyItem]:
+        """Generate HTTP/3 QUIC strategies (BC2-10)."""
+        if not sources:
+            sources = ["custom", "standard_quic"]
+
+        if user_matrix:
+            self.register("user", UserMatrixGenerator(user_matrix))
+            sources = ["user"]
+
+        all_items: list[StrategyItem] = []
+        for src_name in sources:
+            self._ensure_registered(src_name)
+            gen = self._generators.get(src_name)
+            if not gen:
+                continue
+            items = await gen.generate(
+                protocol="quic",
+                state_db=state_db,
+                domain=domain,
+                scan_level=scan_level,
+                max_count=max_count // len(sources) or max_count,
+                run_set=run_set,
+            )
+            all_items.extend(items)
+
+        seen: set[str] = set()
+        deduped: list[StrategyItem] = []
+        for item in all_items:
+            if item.strategy in seen:
+                continue
+            seen.add(item.strategy)
+            if item.protocol != "quic":
+                item.protocol = "quic"
             deduped.append(item)
         return deduped[:max_count]
 

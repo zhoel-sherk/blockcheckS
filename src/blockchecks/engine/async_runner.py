@@ -233,6 +233,145 @@ def _build_inline_nfqws_lines(
     return config_lines
 
 
+def _build_quic_nfqws_lines(strategy: str) -> list[str]:
+    """Build nfqws2 config for HTTP/3 QUIC strategies (UDP/443, BC2-10)."""
+    if strategy.strip().startswith("--"):
+        config_lines = [
+            "--qnum=201",
+            "--filter-l3=ipv4",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+        ]
+        for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
+            if os.path.exists(lua):
+                config_lines.append(f"--lua-init=@{lua}")
+        for raw_line in strategy.split("\n"):
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            config_lines.extend(_split_cli_args(raw_line))
+        return config_lines
+
+    config_lines = [
+        "--qnum=201",
+        "--filter-udp=443",
+        "--filter-l3=ipv4",
+        "--filter-l7=quic",
+        "--ipcache-lifetime=0",
+        "--bind-fix4",
+        "--payload=quic_initial",
+    ]
+    for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
+        if os.path.exists(lua):
+            config_lines.append(f"--lua-init=@{lua}")
+    _add_blobs_from_strategy(config_lines, strategy)
+    for raw_line in strategy.split("\n"):
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        if raw_line.startswith("--"):
+            config_lines.extend(_split_cli_args(raw_line))
+        else:
+            config_lines.append(f"--lua-desync={raw_line}")
+    return config_lines
+
+
+def _run_quic_check(
+    ns_name: str,
+    strategy: str,
+    domain: str,
+    timeout: float,
+    is_config: bool = False,
+    python_bin: str = None,
+    resolved_ip: str | None = None,
+) -> dict:
+    """Start nfqws2 QUIC desync in ns, probe domain via HTTP/3 HEAD."""
+    py = python_bin or PYTHON_BIN
+    tmp_conf = None
+
+    if is_config:
+        import shutil
+        import tempfile as _tf
+
+        src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
+        _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_quic_", suffix=".conf")
+        os.close(_tf_fd)
+        shutil.copy2(src, tmp_conf)
+        _nfqws2_daemon(ns_name, tmp_conf)
+    else:
+        import tempfile as _tf
+
+        config_lines = _build_quic_nfqws_lines(strategy)
+        _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_quic_", suffix=".conf")
+        os.close(_tf_fd)
+        with open(tmp_conf, "w") as f:
+            f.write("\n".join(config_lines))
+        _nfqws2_daemon(ns_name, tmp_conf)
+
+    _sudo(
+        "ip",
+        "netns",
+        "exec",
+        ns_name,
+        "iptables",
+        "-A",
+        "OUTPUT",
+        "-p",
+        "udp",
+        "--dport",
+        "443",
+        "-j",
+        "NFQUEUE",
+        "--queue-num",
+        "201",
+        "--queue-bypass",
+    )
+
+    resolved_ip_lit = repr(resolved_ip)
+    check_code = f"""
+import json
+from blockchecks.checkers.http3 import check_http3
+r = check_http3({domain!r}, {timeout}, pre_resolved_ip={resolved_ip_lit})
+print(json.dumps({{
+    "success": r.success,
+    "http_code": r.http_status,
+    "latency_ms": r.latency_ms,
+    "content_len": r.content_length,
+    "content_ok": True,
+    "throttled": False,
+    "read_rate_bps": 0,
+    "error": r.error,
+    "http_version": r.http_version,
+}}))
+"""
+    try:
+        r = sp.run(
+            ["sudo", "ip", "netns", "exec", ns_name, py, "-c", check_code],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 10,
+        )
+        try:
+            return json.loads(r.stdout)
+        except json.JSONDecodeError:
+            return {
+                "success": False,
+                "http_code": 0,
+                "latency_ms": 0,
+                "content_len": 0,
+                "content_ok": False,
+                "throttled": False,
+                "read_rate_bps": 0,
+                "error": f"parse: {r.stdout[:100]}",
+            }
+    finally:
+        if tmp_conf:
+            try:
+                os.unlink(tmp_conf)
+            except OSError:
+                pass
+
+
 def _run_tcp_check(
     ns_name: str,
     strategy: str,
@@ -704,6 +843,63 @@ class AsyncTestRunner:
                         dns_verdict=dns_verdict,
                         doh_server=doh_server,
                         proto=proto_db,
+                    )
+            except Exception as e:
+                result.error = str(e)[:200]
+            finally:
+                await self.pool.release(ns_name)
+
+        return result
+
+    async def test_quic(
+        self, item: StrategyItem, domain: str, timeout: float = 8.0
+    ) -> TcpTestResult:
+        """Test one QUIC/HTTP3 strategy in an isolated netns (BC2-10)."""
+        result = TcpTestResult(item=item, domain=domain)
+
+        async with self.semaphore:
+            ns_name = await self.pool.acquire()
+            try:
+                resolved_ip = None
+                dns_verdict = ""
+                doh_server = ""
+                if self.secure_dns and self.dns_cache:
+                    resolved_ip = self.dns_cache.primary_ip(domain)
+                    audit = self.dns_audit.get(domain)
+                    if audit:
+                        dns_verdict = audit.verdict
+                        doh_server = audit.doh_server or self.dns_cache.doh_server
+                data = await asyncio.to_thread(
+                    _run_quic_check,
+                    ns_name,
+                    item.strategy,
+                    domain,
+                    timeout,
+                    item.is_config,
+                    self.python,
+                    resolved_ip,
+                )
+                result.success = data.get("success", False)
+                result.http_code = data.get("http_code", 0)
+                result.latency_ms = data.get("latency_ms", 0)
+                result.content_length = data.get("content_len", 0)
+                result.error = data.get("error", "") or ""
+
+                if self.db:
+                    status = "PASS" if result.success else "FAIL"
+                    await self.db.log_tcp(
+                        item.label,
+                        domain,
+                        status,
+                        result.latency_ms,
+                        result.http_code,
+                        content_valid=True,
+                        error=result.error,
+                        config_path=item.strategy,
+                        resolved_ip=resolved_ip or "",
+                        dns_verdict=dns_verdict,
+                        doh_server=doh_server,
+                        proto="quic",
                     )
             except Exception as e:
                 result.error = str(e)[:200]

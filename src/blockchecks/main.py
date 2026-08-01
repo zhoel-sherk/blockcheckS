@@ -13,6 +13,7 @@ from colorama import Fore, Style
 from colorama import init as colorama_init
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
+from blockchecks.checkers.http3 import supports_http3
 from blockchecks.cli.parser import add_curl_repeats_args, add_family_gate_args
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
@@ -127,6 +128,11 @@ async def run_full(args) -> int:
     print(f"  UDP src:    {udp_sources}")
     print(f"  QUIC src:   {quic_sources}")
     print(f"  Parallel:   {parallel}  resume={bool(args.resume)}")
+    if not getattr(args, "no_quic", False) and not args.tcp_only:
+        if supports_http3():
+            print(f"  HTTP/3:     {GREEN}curl v3only supported{RESET}")
+        else:
+            print(f"  {YELLOW}HTTP/3: curl lacks --http3-only — QUIC phase will fail{RESET}")
     print(f"  DB:         {args.db}")
 
     gen = MatrixGenerator()
@@ -150,11 +156,11 @@ async def run_full(args) -> int:
         )
     quic_items: list[StrategyItem] = []
     if not args.no_quic and not args.tcp_only:
-        quic_items = await gen.generate_udp(
+        quic_items = await gen.generate_quic(
             sources=quic_sources,
             domain=primary,
             scan_level=scan_level,
-            max_count=max(30, max_n // 50),
+            max_count=max(30, max_n // 50) if max_n else 50,
             state_db=db,
         )
 
@@ -364,18 +370,46 @@ async def run_full(args) -> int:
         else:
             print(f"\n  {CYAN}[{voice_step}/{steps}] Voice discover skipped{RESET}")
 
-        # ── QUIC (best-effort UDP/443) ──
+        # ── QUIC HTTP/3 (UDP/443) ──
         if quic_items and not args.tcp_only and not args.no_quic:
-            print(f"\n  {CYAN}[{quic_step}/{steps}] QUIC strategies ({len(quic_items)})...{RESET}")
-            quic_pass = 0
-            for item in quic_items:
-                if stop.is_set():
-                    break
-                # Store as udp proto for export pickup; probe may timeout
-                r = await runner.test_udp(item, primary, 443, timeout=args.udp_timeout)
-                if r.success:
-                    quic_pass += 1
-            print(f"  QUIC PASS={quic_pass}/{len(quic_items)} (export uses defaults if 0)")
+            quic_timeout = getattr(args, "quic_timeout", args.timeout)
+            print(
+                f"\n  {CYAN}[{quic_step}/{steps}] HTTP/3 QUIC "
+                f"({len(quic_items)} strategies, timeout={quic_timeout}s)...{RESET}"
+            )
+            if not supports_http3():
+                print(f"  {YELLOW}Skipping QUIC tests — HTTP/3 not supported{RESET}")
+            else:
+                quic_done = quic_passed = quic_skipped = 0
+                sem_quic = asyncio.Semaphore(parallel)
+
+                async def _one_quic(item: StrategyItem, domain: str):
+                    nonlocal quic_done, quic_skipped, quic_passed
+                    if stop.is_set():
+                        return
+                    if args.resume and await db.has_tcp_result(
+                        item.label, domain, proto="quic"
+                    ):
+                        quic_skipped += 1
+                        quic_done += 1
+                        return
+                    async with sem_quic:
+                        if stop.is_set():
+                            return
+                        r = await runner.test_quic(item, domain, timeout=quic_timeout)
+                        quic_done += 1
+                        if r.success:
+                            quic_passed += 1
+
+                quic_tasks = [_one_quic(item, d) for item in quic_items for d in domains]
+                for i in range(0, len(quic_tasks), 200):
+                    if stop.is_set():
+                        break
+                    await asyncio.gather(*quic_tasks[i : i + 200])
+                print(
+                    f"  {GREEN}QUIC done: {quic_passed} PASS, {quic_skipped} skipped, "
+                    f"{quic_done - quic_skipped - quic_passed} FAIL/other{RESET}"
+                )
         else:
             print(f"\n  {CYAN}[{quic_step}/{steps}] QUIC skipped{RESET}")
 
@@ -458,6 +492,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--parallel", type=int, default=4)
     p.add_argument("--timeout", type=float, default=5.0)
     p.add_argument("--udp-timeout", type=float, default=3.0)
+    p.add_argument(
+        "--quic-timeout",
+        type=float,
+        default=8.0,
+        help="HTTP/3 curl timeout per strategy (BC2-10, default 8s)",
+    )
     p.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"])
     p.add_argument("--resume", action="store_true", help="Skip strategy x domain already in DB")
     p.add_argument("--tcp-only", action="store_true")

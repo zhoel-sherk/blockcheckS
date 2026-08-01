@@ -30,6 +30,12 @@ def add_curl_repeats_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Run repeats in parallel (blockcheck2 PARALLEL)",
     )
+    g.add_argument(
+        "--quic-timeout",
+        type=float,
+        default=8.0,
+        help="HTTP/3 curl timeout (BC2-10, default 8s)",
+    )
 
 
 def add_family_gate_args(parser: argparse.ArgumentParser) -> None:

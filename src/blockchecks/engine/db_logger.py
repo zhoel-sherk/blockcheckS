@@ -311,17 +311,24 @@ class StateDB:
             )
 
     async def get_working_tcp(self, domain: str) -> list[str]:
-        """Names whose *latest* result for domain is PASS."""
+        """Names whose *latest* result for domain is PASS (proto=tcp)."""
+        return await self.get_working_proto(domain, "tcp")
+
+    async def get_working_quic(self, domain: str) -> list[str]:
+        """Names whose latest QUIC result for domain is PASS."""
+        return await self.get_working_proto(domain, "quic")
+
+    async def get_working_proto(self, domain: str, proto: str) -> list[str]:
         async with aiosqlite.connect(self.db_path) as db:
             rows = await db.execute(
                 """SELECT s.name FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
-                   WHERE t.domain=? AND t.id = (
+                   WHERE s.proto=? AND t.domain=? AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain=?
                        ORDER BY t2.id DESC LIMIT 1
                    ) AND t.status='PASS'""",
-                (domain, domain),
+                (proto, domain, domain),
             )
             return [r[0] for r in await rows.fetchall()]
 
@@ -355,6 +362,26 @@ class StateDB:
                    FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.proto='tcp' AND t.domain=? AND t.status='PASS'
+                     AND t.id = (
+                       SELECT t2.id FROM tcp_results t2
+                       WHERE t2.strategy_id = s.id AND t2.domain=?
+                       ORDER BY t2.id DESC LIMIT 1
+                     )
+                   ORDER BY t.latency_ms ASC
+                   LIMIT ?""",
+                (domain, domain, limit),
+            )
+            cols = ["strategy", "latency_ms", "http_code", "timestamp"]
+            return [dict(zip(cols, r)) for r in await rows.fetchall()]
+
+    async def get_best_quic(self, domain: str, *, limit: int = 5) -> list[dict]:
+        """Latest PASS per QUIC strategy for domain, ordered by latency_ms ASC."""
+        async with aiosqlite.connect(self.db_path) as db:
+            rows = await db.execute(
+                """SELECT s.name, t.latency_ms, t.http_code, t.timestamp
+                   FROM strategies s
+                   JOIN tcp_results t ON t.strategy_id = s.id
+                   WHERE s.proto='quic' AND t.domain=? AND t.status='PASS'
                      AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain=?

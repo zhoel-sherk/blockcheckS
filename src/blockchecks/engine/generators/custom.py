@@ -44,7 +44,7 @@ class CustomListGenerator(StrategyGenerator):
                 if not line or line.startswith("#"):
                     continue
                 label = line[:60].replace(" ", "_").replace(":", "_")
-                proto = "http" if protocol == "http" else "tls12"
+                proto = "http" if protocol == "http" else "quic" if protocol == "quic" else "tls12"
                 items.append(StrategyItem(label=label, strategy=line, protocol=proto))
                 if scan_level == "single" and items:
                     break
