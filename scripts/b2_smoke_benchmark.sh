@@ -19,6 +19,7 @@ COMMON=(
   --no-quic
   --no-voice
   --skip-dns-audit
+  --no-family-gates
   --force
   --db logs/b2_smoke.db
 )

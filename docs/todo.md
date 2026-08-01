@@ -463,6 +463,15 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - **wssize retry:** для FAIL в batch — solo `_run_tcp_check` с `wssize` (дороже, но редко).
 - **Pool:** `--parallel` = concurrent strategies; `--curl-parallel` = domains per strategy session.
 
+**B2 smoke (2026-08-02, Xeon, benchmark 6 dom × 24 strat, `--no-family-gates`):**
+
+| Mode | curl-parallel | Wall time | Throughput |
+|------|---------------|-----------|------------|
+| serial | 1 | 134s | 1.60 job/s |
+| fan-out | 4 | 106s | 2.37 job/s |
+
+Скрипт: `scripts/b2_smoke_benchmark.sh` (требует `--no-family-gates`, иначе fan-out отключается).
+
 **Цель после B1+B2+A1 @ parallel=4:** ~6–12 job/s (7–14h на 312k).
 
 ---
