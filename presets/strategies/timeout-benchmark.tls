@@ -1,0 +1,4 @@
+# Phase 11 A9 — settle × curl timeout benchmark (representative strategies)
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=max_ru:repeats=6:tcp_ts=-1000
+hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up:repeats=1

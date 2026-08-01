@@ -13,7 +13,11 @@ from colorama import init as colorama_init
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.checkers.http3 import supports_http3
-from blockchecks.cli.parser import add_curl_repeats_args, add_family_gate_args
+from blockchecks.cli.parser import (
+    add_curl_repeats_args,
+    add_family_gate_args,
+    add_protocol_phase_args,
+)
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
     DEFAULT_VOICE_IP,
@@ -44,6 +48,20 @@ RESET = Style.RESET_ALL
 def _cap(n: int) -> int:
     """0 / negative → uncapped sentinel for MatrixGenerator slicing."""
     return 999_999 if n <= 0 else n
+
+
+def _apply_gp_protocol_flags(args) -> bool:
+    """A10: GP ENABLE_* mirror — returns True to skip TCP TLS phase."""
+    if getattr(args, "http_off", False):
+        args.no_http = True
+    if getattr(args, "http3_off", False):
+        args.no_quic = True
+    skip_tcp = False
+    if getattr(args, "tls12_off", False) and args.protocol == "tls12":
+        skip_tcp = True
+    if getattr(args, "tls13_off", False) and args.protocol == "tls13":
+        skip_tcp = True
+    return skip_tcp
 
 
 async def run_full(args) -> int:
@@ -79,6 +97,8 @@ async def run_full(args) -> int:
     )
     if dns_rc:
         return dns_rc
+
+    skip_tcp_tls = _apply_gp_protocol_flags(args)
 
     primary = args.domain or domains[0]
 
@@ -139,14 +159,16 @@ async def run_full(args) -> int:
 
     gen = MatrixGenerator()
     print(f"\n  {CYAN}[1/{steps}] Generating strategies...{RESET}")
-    tcp_items = await gen.generate_tcp(
-        sources=tcp_sources,
-        domain=primary,
-        scan_level=scan_level,
-        max_count=max_n,
-        state_db=db,
-        protocol=args.protocol,
-    )
+    tcp_items: list[StrategyItem] = []
+    if not skip_tcp_tls:
+        tcp_items = await gen.generate_tcp(
+            sources=tcp_sources,
+            domain=primary,
+            scan_level=scan_level,
+            max_count=max_n,
+            state_db=db,
+            protocol=args.protocol,
+        )
     udp_items: list[StrategyItem] = []
     if not args.tcp_only:
         udp_items = await gen.generate_udp(
@@ -180,13 +202,16 @@ async def run_full(args) -> int:
         f"  TCP={len(tcp_items)}  HTTP={len(http_items)}  "
         f"UDP={len(udp_items)}  QUIC={len(quic_items)}"
     )
-    if not tcp_items:
+    if skip_tcp_tls:
+        print(f"  {YELLOW}TCP TLS phase skipped (--tls{args.protocol.replace('tls', '')}-off){RESET}")
+    elif not tcp_items:
         print(f"{RED}ERROR: no TCP strategies generated{RESET}")
         return 1
 
-    total_tcp_jobs = len(tcp_items) * len(domains)
-    eta_sec = total_tcp_jobs * 3.0 / max(parallel, 1)
-    print(f"  TCP jobs:   {total_tcp_jobs}  (~ETA {eta_sec / 3600:.1f}h @ ~3s/job)")
+    total_tcp_jobs = len(tcp_items) * len(domains) if tcp_items else 0
+    if total_tcp_jobs:
+        eta_sec = total_tcp_jobs * 3.0 / max(parallel, 1)
+        print(f"  TCP jobs:   {total_tcp_jobs}  (~ETA {eta_sec / 3600:.1f}h @ ~3s/job)")
 
     use_family_gates = (
         scan_level != "full"
@@ -229,66 +254,63 @@ async def run_full(args) -> int:
     await runner.start()
     try:
         # ── TCP × coverage ──
-        print(f"\n  {CYAN}[2/{steps}] TCP × coverage ({len(domains)} domains)...{RESET}")
-        done = 0
-        skipped = 0
-        passed = 0
-        t0 = time.perf_counter()
+        if tcp_items:
+            print(f"\n  {CYAN}[2/{steps}] TCP × coverage ({len(domains)} domains)...{RESET}")
+            done = 0
+            skipped = 0
+            passed = 0
+            t0 = time.perf_counter()
 
-        def _progress(d: int, s: int, p: int):
-            nonlocal done, skipped, passed
-            done, skipped, passed = d, s, p
-            if done % 50 == 0 or done == total_tcp_jobs:
-                elapsed = time.perf_counter() - t0
-                rate = done / elapsed if elapsed > 0 else 0
-                left = (total_tcp_jobs - done) / rate if rate > 0 else 0
-                print(
-                    f"  [{done}/{total_tcp_jobs}] pass={passed} skip={skipped} "
-                    f"{rate:.2f}/s ETA {left / 60:.0f}m"
-                )
-
-        if use_family_gates:
-
-            async def _run_domain(domain: str):
+            def _progress(d: int, s: int, p: int):
                 nonlocal done, skipped, passed
-                if stop.is_set():
-                    return
+                done, skipped, passed = d, s, p
+                if done % 50 == 0 or done == total_tcp_jobs:
+                    elapsed = time.perf_counter() - t0
+                    rate = done / elapsed if elapsed > 0 else 0
+                    left = (total_tcp_jobs - done) / rate if rate > 0 else 0
+                    print(
+                        f"  [{done}/{total_tcp_jobs}] pass={passed} skip={skipped} "
+                        f"{rate:.2f}/s ETA {left / 60:.0f}m"
+                    )
 
-                async def _resume(label: str, dom: str) -> bool:
-                    return bool(args.resume and await db.has_tcp_result(label, dom))
+            if use_family_gates:
 
-                _, d_done, d_skip, d_pass = await run_tcp_with_family_gates(
-                    runner,
-                    tcp_items,
-                    domain,
-                    scan_level=scan_level,
-                    timeout=args.timeout,
-                    stop_event=stop,
-                    resume_check=_resume if args.resume else None,
-                )
-                done += d_done
-                skipped += d_skip
-                passed += d_pass
-                _progress(done, skipped, passed)
-
-            for domain in domains:
-                if stop.is_set():
-                    print(f"  {YELLOW}Stopped by signal{RESET}")
-                    break
-                await _run_domain(domain)
-        else:
-            sem = asyncio.Semaphore(parallel)
-
-            async def _one(item: StrategyItem, domain: str):
-                nonlocal done, skipped, passed
-                if stop.is_set():
-                    return
-                if args.resume and await db.has_tcp_result(item.label, domain):
-                    skipped += 1
-                    done += 1
-                    return
-                async with sem:
+                async def _run_domain(domain: str):
+                    nonlocal done, skipped, passed
                     if stop.is_set():
+                        return
+
+                    async def _resume(label: str, dom: str) -> bool:
+                        return bool(args.resume and await db.has_tcp_result(label, dom))
+
+                    _, d_done, d_skip, d_pass = await run_tcp_with_family_gates(
+                        runner,
+                        tcp_items,
+                        domain,
+                        scan_level=scan_level,
+                        timeout=args.timeout,
+                        stop_event=stop,
+                        resume_check=_resume if args.resume else None,
+                    )
+                    done += d_done
+                    skipped += d_skip
+                    passed += d_pass
+                    _progress(done, skipped, passed)
+
+                for domain in domains:
+                    if stop.is_set():
+                        print(f"  {YELLOW}Stopped by signal{RESET}")
+                        break
+                    await _run_domain(domain)
+            else:
+
+                async def _one(item: StrategyItem, domain: str):
+                    nonlocal done, skipped, passed
+                    if stop.is_set():
+                        return
+                    if args.resume and await db.has_tcp_result(item.label, domain):
+                        skipped += 1
+                        done += 1
                         return
                     r = await runner.test_tcp(item, domain, timeout=args.timeout)
                     done += 1
@@ -296,34 +318,35 @@ async def run_full(args) -> int:
                         passed += 1
                     _progress(done, skipped, passed)
 
-            tasks = [_one(item, domain) for item in tcp_items for domain in domains]
-            chunk = 200
-            for i in range(0, len(tasks), chunk):
-                if stop.is_set():
-                    print(f"  {YELLOW}Stopped by signal{RESET}")
-                    break
-                await asyncio.gather(*tasks[i : i + chunk])
+                tasks = [_one(item, domain) for item in tcp_items for domain in domains]
+                chunk = 200
+                for i in range(0, len(tasks), chunk):
+                    if stop.is_set():
+                        print(f"  {YELLOW}Stopped by signal{RESET}")
+                        break
+                    await asyncio.gather(*tasks[i : i + chunk])
 
-        print(
-            f"  {GREEN}TCP done: {passed} PASS, {skipped} skipped, "
-            f"{done - skipped - passed} FAIL/other{RESET}"
-        )
-        zero_warn = getattr(args, "zero_pass_warn", 10)
-        if zero_warn > 0:
-            zero_domains = await warn_zero_pass_domains(
-                db, domains, min_results=zero_warn, protos=("tcp",)
+            print(
+                f"  {GREEN}TCP done: {passed} PASS, {skipped} skipped, "
+                f"{done - skipped - passed} FAIL/other{RESET}"
             )
-            if zero_domains:
-                print(
-                    f"  {YELLOW}WARN: 0% PASS after {zero_warn}+ runs: "
-                    f"{', '.join(zero_domains)}{RESET}"
+            zero_warn = getattr(args, "zero_pass_warn", 10)
+            if zero_warn > 0:
+                zero_domains = await warn_zero_pass_domains(
+                    db, domains, min_results=zero_warn, protos=("tcp",)
                 )
+                if zero_domains:
+                    print(
+                        f"  {YELLOW}WARN: 0% PASS after {zero_warn}+ runs: "
+                        f"{', '.join(zero_domains)}{RESET}"
+                    )
+        else:
+            print(f"\n  {CYAN}[2/{steps}] TCP × coverage skipped{RESET}")
 
         # ── HTTP :80 ──
         if http_items and not getattr(args, "no_http", False):
             print(f"\n  {CYAN}[3/{steps}] HTTP :80 ({len(http_items)} strategies)...{RESET}")
             http_done = http_passed = http_skipped = 0
-            sem_http = asyncio.Semaphore(parallel)
 
             async def _one_http(item: StrategyItem, domain: str):
                 nonlocal http_done, http_skipped, http_passed
@@ -333,13 +356,10 @@ async def run_full(args) -> int:
                     http_skipped += 1
                     http_done += 1
                     return
-                async with sem_http:
-                    if stop.is_set():
-                        return
-                    r = await runner.test_tcp(item, domain, timeout=args.timeout)
-                    http_done += 1
-                    if r.success:
-                        http_passed += 1
+                r = await runner.test_tcp(item, domain, timeout=args.timeout)
+                http_done += 1
+                if r.success:
+                    http_passed += 1
 
             http_tasks = [_one_http(item, d) for item in http_items for d in domains]
             for i in range(0, len(http_tasks), 200):
@@ -393,7 +413,6 @@ async def run_full(args) -> int:
                 print(f"  {YELLOW}Skipping QUIC tests — HTTP/3 not supported{RESET}")
             else:
                 quic_done = quic_passed = quic_skipped = 0
-                sem_quic = asyncio.Semaphore(parallel)
 
                 async def _one_quic(item: StrategyItem, domain: str):
                     nonlocal quic_done, quic_skipped, quic_passed
@@ -405,13 +424,10 @@ async def run_full(args) -> int:
                         quic_skipped += 1
                         quic_done += 1
                         return
-                    async with sem_quic:
-                        if stop.is_set():
-                            return
-                        r = await runner.test_quic(item, domain, timeout=quic_timeout)
-                        quic_done += 1
-                        if r.success:
-                            quic_passed += 1
+                    r = await runner.test_quic(item, domain, timeout=quic_timeout)
+                    quic_done += 1
+                    if r.success:
+                        quic_passed += 1
 
                 quic_tasks = [_one_quic(item, d) for item in quic_items for d in domains]
                 for i in range(0, len(quic_tasks), 200):
@@ -573,6 +589,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     add_curl_repeats_args(p)
     add_family_gate_args(p)
+    add_protocol_phase_args(p)
     return p
 
 

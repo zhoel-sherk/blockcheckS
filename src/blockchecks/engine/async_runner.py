@@ -8,7 +8,6 @@ import asyncio
 import json
 import os
 import subprocess as sp
-import time
 from dataclasses import dataclass, field
 
 from colorama import Fore, Style
@@ -93,6 +92,9 @@ class ScanReport:
 # ── Utility: run command synchronously (called via asyncio.to_thread) ──
 
 
+from blockchecks.engine.nfqws2_settle import wait_nfqws2_ready
+
+
 def _sudo(*args: str) -> str:
     r = sp.run(["sudo"] + list(args), capture_output=True, text=True, timeout=15)
     if r.returncode != 0:
@@ -100,7 +102,14 @@ def _sudo(*args: str) -> str:
     return r.stdout.strip()
 
 
-def _nfqws2_daemon(ns_name: str, config_path: str, kill_existing: bool = True) -> None:
+def _nfqws2_daemon(
+    ns_name: str,
+    config_path: str,
+    kill_existing: bool = True,
+    *,
+    settle_max: float | None = None,
+    settle_poll: float | None = None,
+) -> float:
     """Launch nfqws2 in daemon mode inside ns. Non-blocking.
 
     kill_existing=True (default) clears prior nfqws2 in the ns — for solo
@@ -109,6 +118,8 @@ def _nfqws2_daemon(ns_name: str, config_path: str, kill_existing: bool = True) -
 
     Note: with ``@config`` nfqws2 ignores trailing CLI flags — put ``--debug``
     and ``--daemon`` inside the config file (see ``_inject_debug_and_daemon``).
+
+    Returns settle elapsed seconds (B1 readiness poll).
     """
     _inject_debug_and_daemon(config_path, tag=ns_name)
     if kill_existing:
@@ -120,7 +131,7 @@ def _nfqws2_daemon(ns_name: str, config_path: str, kill_existing: bool = True) -
     # @config must be the only argument; daemon/debug are inside the file
     cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN, f"@{config_path}"]
     sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
-    time.sleep(2.0)
+    return wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
 
 
 def _inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
@@ -385,6 +396,8 @@ def _run_tcp_check(
     parallel_repeats: bool = False,
     extra_lua_desync: str = "",
     protocol: str = "tls12",
+    settle_max: float | None = None,
+    settle_poll: float | None = None,
 ) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
 
@@ -408,7 +421,9 @@ def _run_tcp_check(
         if extra_lua_desync:
             with open(tmp_conf, "a", encoding="utf-8") as f:
                 f.write(f"\n--lua-desync={extra_lua_desync}\n")
-        _nfqws2_daemon(ns_name, tmp_conf)
+        settle_elapsed = _nfqws2_daemon(
+            ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
+        )
     else:
         config_lines = _build_inline_nfqws_lines(strategy, protocol, extra_lua_desync)
         import tempfile as _tf
@@ -417,7 +432,9 @@ def _run_tcp_check(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        _nfqws2_daemon(ns_name, tmp_conf)
+        settle_elapsed = _nfqws2_daemon(
+            ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
+        )
 
     _sudo(
         "ip",
@@ -573,7 +590,9 @@ print(json.dumps(run_checks()))
             timeout=timeout + 10,
         )
         try:
-            return json.loads(r.stdout)
+            data = json.loads(r.stdout)
+            data["settle_ms"] = round(settle_elapsed * 1000, 1)
+            return data
         except json.JSONDecodeError:
             return {
                 "success": False,

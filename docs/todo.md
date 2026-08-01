@@ -261,7 +261,7 @@ check_system → check_already → check_prerequisites
 
 - [x] **BC2-9** HTTP :80 standard generator + фаза в `bs full`
 - [ ] **M6** HTTP+TLS dual-fake generator (`fake_default_http` + TLS blob) *(Phase 10)*
-- [ ] **A10** `--http-off` — зеркало GP `ENABLE_HTTP` *(Phase 11)*
+- [ ] **A10** `--http-off` — зеркало GP `ENABLE_HTTP` *(Phase 11)* ✅
 
 ---
 
@@ -435,13 +435,13 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - [ ] **A5** *(dpi-tester)* `provider_summary.json` — custom lists, `TEST=custom`; BS shortlist import
 - [x] **A6** GP `SCANLEVEL=quick|standard` — early-exit (уже в GP; BS = B4, BC2-6)
 - [x] **A7** `--parallel 4` — **потолок**; масштабировать через B2, не ↑parallel; B7 для >4
-- [ ] **A8** короткие presets: `critical.txt`, `benchmark.txt`, `gp-verified.tls` для smoke
-- [ ] **A9** timeout benchmark matrix — settle+curl на **0.5/1/1.5/2s**; preset `timeout-benchmark.tls`
-- [ ] **A10** orchestrator flags: `--tls12-off`, `--tls13-off`, `--http3-off`, `--http-off`
+- [x] **A8** короткие presets: `critical.txt`, `benchmark.txt`, `gp-verified.tls` для smoke
+- [x] **A9** timeout benchmark matrix — settle+curl на **0.5/1/1.5/2s**; preset `timeout-benchmark.tls`
+- [x] **A10** orchestrator flags: `--tls12-off`, `--tls13-off`, `--http3-off`, `--http-off`
 
 ### Часть B — benchmark до production
 
-- [ ] **B1** settle 2s → readiness poll (100–300ms); согласовать с A9
+- [x] **B1** settle 2s → readiness poll (100–300ms); согласовать с A9
 - [ ] **B2** multi-domain fan-out — 1 nfqws2, `asyncio.gather` curl, `--curl-parallel N`
 - [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
 - [x] **B4** runtime family early-exit в `bs full` на первом PASS *(= BC2-6)*
@@ -449,7 +449,7 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - [ ] **B6** blockcheckw (Rust vmap) — fast scan reference, не drop-in voice/pair
 - [ ] **B7** nftables vmap POC — prerequisite parallel > 4
 - [ ] **B8** batch DB writes (~5%)
-- [ ] **B9** double Semaphore cleanup в `main.py`
+- [x] **B9** double Semaphore cleanup в `main.py`
 - [ ] **B10** wire `get_fresh_url()` для googlevideo → **GV-1**
 - [ ] **B11** dynamic per-strategy settle+curl из результатов A9
 

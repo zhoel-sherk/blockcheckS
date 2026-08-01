@@ -48,6 +48,23 @@ def add_domain_filter_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_protocol_phase_args(parser: argparse.ArgumentParser) -> None:
+    """Phase 11 A10 — GP ENABLE_* mirror flags for bs full."""
+    g = parser.add_argument_group("protocol phases (GP mirror)")
+    g.add_argument("--http-off", action="store_true", help="Skip HTTP :80 phase (= --no-http)")
+    g.add_argument("--http3-off", action="store_true", help="Skip QUIC HTTP/3 phase (= --no-quic)")
+    g.add_argument(
+        "--tls12-off",
+        action="store_true",
+        help="Skip TCP TLS phase when --protocol tls12",
+    )
+    g.add_argument(
+        "--tls13-off",
+        action="store_true",
+        help="Skip TCP TLS phase when --protocol tls13",
+    )
+
+
 def add_family_gate_args(parser: argparse.ArgumentParser) -> None:
     """BC2-6: blockcheck2 need_* family gating."""
     g = parser.add_argument_group("family gates")
@@ -302,6 +319,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
     )
 
+    bench = sub.add_parser("bench-settle", help="Benchmark nfqws2 settle × curl timeout (A9)")
+    bench.add_argument("-d", "--domain", default="discord.com")
+    bench.add_argument("-s", "--strategy", default=None, help="Single inline strategy")
+    bench.add_argument(
+        "-M",
+        "--strategy-preset",
+        default="timeout-benchmark",
+        help="Strategy preset (default: timeout-benchmark)",
+    )
+    bench.add_argument(
+        "--settle-times",
+        default="",
+        help="Comma-separated settle max seconds (default: 0.1,0.2,0.5,1,2)",
+    )
+    bench.add_argument(
+        "--curl-timeouts",
+        default="",
+        help="Comma-separated curl timeouts (default: 0.5,1,1.5,2)",
+    )
+    bench.add_argument("--max-strategies", type=int, default=3)
+    bench.add_argument("--no-secure-dns", action="store_true")
+
     return parser
 
 
@@ -353,6 +392,10 @@ def dispatch(args: argparse.Namespace) -> int:
         from blockchecks.checkers.composite_runner import run as run_composite
 
         return asyncio.run(run_composite(args.config, args.domains, args.parallel, args.timeout))
+    if args.command == "bench-settle":
+        from blockchecks.cli.commands.bench_settle import cmd_bench_settle
+
+        return asyncio.run(cmd_bench_settle(args))
 
     build_parser().print_help()
     return 1

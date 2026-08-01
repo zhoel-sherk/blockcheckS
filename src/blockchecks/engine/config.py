@@ -131,6 +131,11 @@ GOOGLEVIDEO_RANGE_SIZE = 17408  # 17KB, bytes=0-17407
 # Forces plaintext SNI in ClientHello — testable by standard DPI strategies
 CURLOPT_ECH = 10325
 
+# ── nfqws2 settle / readiness (Phase 11 B1) ───────
+NFQWS2_SETTLE_MAX = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MAX", "2.0"))
+NFQWS2_SETTLE_POLL = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_POLL", "0.1"))
+NFQWS2_SETTLE_MIN = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MIN", "0.05"))
+
 # ── nfqws2 debug ─────────────────────────────────
 # BLOCKCHECKS_NFQWS2_DEBUG: empty/0=off, 1=file under logs/, syslog, @path, or path
 NFQWS2_DEBUG = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()

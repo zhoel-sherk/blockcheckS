@@ -48,9 +48,32 @@ bs pair -d discord.com --generate --auto-discover 5
 # Archived third-party lists (GhostRooter, etc.) are not used.
 ```
 
+## Smoke presets (Phase 11 A8)
+
+Quick validation without full `coverage.txt` stress:
+
+```bash
+# 6 domains — benchmark preset
+bs scan --preset benchmark -M gp-verified --scan-level fast --max 20
+
+# 4 critical services
+bs scan --preset critical -M gp-verified --scan-level single
+
+# Settle × curl timeout grid (needs sudo + nfqws2)
+sudo bs bench-settle -d discord.com -M timeout-benchmark
+
+# Lean mass run default (13 domains, denylist applied)
+sudo bs full --scan-level fast --max 100 --preset benchmark
+# or explicit:
+sudo bs full --domains-file presets/domains/coverage-tcp.txt --max 100
+```
+
+Presets: `benchmark.txt` (6 dom), `critical.txt` (4 dom), `coverage-tcp.txt` (13 dom),
+`gp-verified.tls` (7 strategies), `timeout-benchmark.tls` (3 strategies for A9).
+
 ## Full mass run (`bs full`)
 
-Runs strategy × every domain in `presets/domains/coverage.txt` (curl_cffi),
+Runs strategy × every domain in `presets/domains/coverage-tcp.txt` by default (curl_cffi),
 then voice discover, optional QUIC/pairs, and exports configs:
 
 ```bash
