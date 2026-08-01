@@ -16,7 +16,7 @@ class CurlProfile:
 
     use_ech: bool
     headers_extra: str  # fragment inside headers dict, e.g. ', "Range": "bytes=0-1"'
-    special: bool  # must run solo (googlevideo until GV-1)
+    special: bool  # must run solo (googlevideo videoplayback curl profile)
 
 
 def curl_profile(domain: str, *, protocol: str = "tls12", disable_ech: bool = False) -> CurlProfile:

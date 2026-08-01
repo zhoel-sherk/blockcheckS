@@ -2,9 +2,10 @@
 # One representative per blocking policy; static YouTube CDN excluded (see denylist.txt).
 # Full 40-domain list: coverage.txt (use --domains-file or --allow-unsafe-domains)
 
-# YouTube / Google (web + app API — orthogonal probes)
+# YouTube / Google (web + app API + CDN videoplayback — GV-1)
 youtube.com
 youtu.be
+googlevideo.com
 googleapis.com
 youtubei.googleapis.com
 play.google.com

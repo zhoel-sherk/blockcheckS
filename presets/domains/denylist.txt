@@ -4,8 +4,7 @@
 # Static YouTube CDN: duplicate SNI signal vs youtube.com (apex TLS ≠ real CDN paths).
 # See docs/todo.md Phase 11 — subagent research 2026-08.
 
-# Wrong apex probe — needs GV-1 videoplayback URL
-googlevideo.com  # videoplayback apex
+# googlevideo.com — enabled in lean coverage (GV-1 videoplayback probe)
 
 # Voice/media CDN — 0% on TLS apex (UDP probe only)
 discord.media  # voice CDN apex

@@ -274,8 +274,8 @@ check_system → check_already → check_prerequisites
 - `checkers/youtube_url.py` — `get_fresh_url()` via `yt-dlp` → signed
   `*.googlevideo.com/videoplayback?…`, кэш `logs/bs_gv_url_cache.json` (3h).
 - `async_runner` для `googlevideo*`: ECH off + `Range: bytes=0-17407` + rate bands
-  для 206 — но curl на **`https://googlevideo.com`**, не на videoplayback URL.
-- `get_fresh_url()` **нигде не вызывается** из `bs tcp` / `pair` / `full`.
+  для 206; curl на **videoplayback URL** (`get_fresh_url()`), не на apex.
+- `get_fresh_url()` вызывается из `_run_tcp_check` и `_run_tcp_check_multi` (GV-1).
 
 Факты Fryazino (без VPN):
 
@@ -293,7 +293,7 @@ hostfakesplit); blockcheckS stress **0 PASS** (TLS на корень домен�
   `googlevideo*` curl на videoplayback URL, не на apex *(= B10)*
 - [ ] **GV-2** Опционально: Playwright intercept как в `dpi-tester/youtube_test.py`
 - [ ] **GV-3** Починить hostfakesplit checker: `Session.request() unexpected keyword 'options'`
-- [ ] **GV-4** После GV-1: убрать `googlevideo.com` из denylist / вернуть в lean coverage
+- [x] **GV-4** После GV-1: убрать `googlevideo.com` из denylist / вернуть в lean coverage
 - [ ] **GV-5** `quic_gv_kyber` blob тесты — после videoplayback probe (см. blob table)
 
 ### Domain denylist / fool filter (2026-07-31) — Phase 11 A1
@@ -310,7 +310,7 @@ SNI-сигнал `youtube.com`; apex TLS на `i.ytimg.com` / `gstatic.com` не
 
 Стартовый denylist (кандидаты):
 
-- `googlevideo.com` — needs videoplayback probe, not apex TLS *(→ GV-1, GV-4)*
+- `googlevideo.com` — videoplayback probe (GV-1), в lean coverage (GV-4) ✅
 - `discord.media` — voice/media CDN, 0% на TLS apex
 - static YouTube CDN: `i.ytimg.com`, `i9.ytimg.com`, `yt3/yt4.ggpht.com`,
   `yt3/yt4.googleusercontent.com`, `gstatic.com`, `gvt1.com`,
@@ -458,7 +458,7 @@ community mass-scan; GP — production orchestrator + import shortlists.
 **B2 риски (2026-08):**
 - **Opt-in:** `--curl-parallel 1` по умолчанию; fan-out только при `N>1` и без family gates.
 - **NFQUEUE:** N параллельных curl через один nfqws2 — нагрузка на очередь; cap `MAX_CURL_PARALLEL=8`.
-- **Смешанные домены:** `googlevideo*` → solo batch (до GV-1); несовместимые curl-профили не смешиваются.
+- **Смешанные домены:** `googlevideo*` → solo batch (videoplayback curl profile); несовместимые curl-профили не смешиваются.
 - **Family gates (BC2-6):** fan-out отключён — need_* цепочка per-domain.
 - **wssize retry:** для FAIL в batch — solo `_run_tcp_check` с `wssize` (дороже, но редко).
 - **Pool:** `--parallel` = concurrent strategies; `--curl-parallel` = domains per strategy session.

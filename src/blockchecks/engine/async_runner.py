@@ -665,8 +665,43 @@ def _run_tcp_check_multi(
     is_http = protocol == "http"
     dport = "80" if is_http else "443"
     tmp_conf = None
-    resolved_ips = resolved_ips or {}
-    prof = curl_profile(domains[0], protocol=protocol, disable_ech=disable_ech)
+    resolved_ips = dict(resolved_ips or {})
+    curl_overrides: dict[str, str] = {}
+    resolve_names: dict[str, str] = {d: d.split("/")[0] for d in domains}
+    gv_fail: dict[str, dict] = {}
+
+    for d in domains:
+        dom = d.lower().split("/")[0]
+        if not is_http and "googlevideo" in dom:
+            from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
+            from blockchecks.checkers.youtube_url import get_fresh_url, videoplayback_host
+
+            gv_url = get_fresh_url()
+            if not gv_url:
+                gv_fail[d] = {
+                    "success": False,
+                    "http_code": 0,
+                    "latency_ms": 0,
+                    "content_len": 0,
+                    "content_ok": False,
+                    "throttled": False,
+                    "read_rate_bps": 0,
+                    "error": "gv_url_unavailable",
+                }
+                continue
+            curl_overrides[d] = gv_url
+            rn = videoplayback_host(gv_url) or dom
+            resolve_names[d] = rn
+            if rn != dom:
+                ips, err, _ = doh_query(rn, pick_working_doh(), timeout=5.0)
+                if ips and not err:
+                    resolved_ips[d] = ips[0]
+
+    domains_active = [d for d in domains if d not in gv_fail]
+    if not domains_active:
+        return gv_fail
+
+    prof = curl_profile(domains_active[0], protocol=protocol, disable_ech=disable_ech)
     headers_extra = prof.headers_extra
     use_ech_int = 1 if prof.use_ech else 0
 
@@ -718,28 +753,34 @@ def _run_tcp_check_multi(
     ech_opt = CURLOPT_ECH
     url_scheme = "http" if is_http else "https"
     resolve_port = 80 if is_http else 443
-    domains_json = json.dumps(domains)
-    resolved_json = json.dumps({d: resolved_ips.get(d) for d in domains})
-    workers = max(1, min(int(curl_parallel), len(domains)))
+    domains_json = json.dumps(domains_active)
+    resolved_json = json.dumps({d: resolved_ips.get(d) for d in domains_active})
+    curl_overrides_json = json.dumps(curl_overrides)
+    resolve_names_json = json.dumps(resolve_names)
+    workers = max(1, min(int(curl_parallel), len(domains_active)))
     repeats = max(1, int(repeats))
 
     check_code = f"""
 import json, time, concurrent.futures
 DOMAINS = {domains_json}
 RESOLVED = {resolved_json}
+CURL_OVERRIDES = {curl_overrides_json}
+RESOLVE_NAMES = {resolve_names_json}
 def check(domain, timeout, resolved_ip):
     try:
         import curl_cffi
         start = time.perf_counter()
         headers = {{"Accept": "text/html"{headers_extra}}}
         resolve_opt = {CURLOPT_RESOLVE}
+        curl_override = CURL_OVERRIDES.get(domain)
+        resolve_name = RESOLVE_NAMES.get(domain, domain.split("/")[0])
         try:
             s = curl_cffi.Session(
                 impersonate="chrome124", http_version=2,
                 headers=headers, allow_redirects=False,
             )
             if resolved_ip:
-                s.curl.setopt(resolve_opt, [domain + ":{resolve_port}:" + resolved_ip])
+                s.curl.setopt(resolve_opt, [resolve_name + ":{resolve_port}:" + resolved_ip])
             if {use_ech_int}:
                 set = False
                 try:
@@ -756,7 +797,8 @@ def check(domain, timeout, resolved_ip):
                                   "content_len": 0, "content_ok": False,
                                   "throttled": False, "read_rate_bps": 0,
                                   "error": "ech_setopt:" + str(e)[:100]}}
-            resp = s.get("{url_scheme}://" + domain, timeout=min(timeout, 1.5))
+            url = curl_override if curl_override else ("{url_scheme}://" + domain)
+            resp = s.get(url, timeout=min(timeout, 1.5))
         except curl_cffi.CurlError as e:
             msg = str(e)
             return {{"success": False, "http_code": 0,
@@ -769,7 +811,7 @@ def check(domain, timeout, resolved_ip):
         clen = len(resp.content)
         rate = clen / elapsed
         loc = resp.headers.get("Location") or resp.headers.get("location") or ""
-        dom = domain.lower().split("/")[0]
+        dom = resolve_name.lower().split("/")[0]
         if resp.status_code in (301, 302, 307, 308) and loc:
             if loc.lower().startswith(("http://", "https://")):
                 redir_host = loc.split("/")[2].split(":")[0].lower()
@@ -836,15 +878,17 @@ print(json.dumps(out))
             ["sudo", "ip", "netns", "exec", ns_name, py, "-c", check_code],
             capture_output=True,
             text=True,
-            timeout=timeout * len(domains) + 15,
+            timeout=timeout * len(domains_active) + 15,
         )
         try:
             raw = json.loads(r.stdout)
             settle_ms = round(settle_elapsed * 1000, 1)
-            return {
+            out = {
                 d: {**raw.get(d, {}), "settle_ms": settle_ms}
-                for d in domains
+                for d in domains_active
             }
+            out.update(gv_fail)
+            return out
         except json.JSONDecodeError:
             err = {
                 "success": False,
@@ -857,7 +901,7 @@ print(json.dumps(out))
                 "error": f"parse: {r.stdout[:100]}",
                 "settle_ms": round(settle_elapsed * 1000, 1),
             }
-            return {d: dict(err) for d in domains}
+            return {d: dict(err) for d in domains_active} | gv_fail
     finally:
         if tmp_conf:
             try:

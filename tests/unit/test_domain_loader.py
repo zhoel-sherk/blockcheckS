@@ -47,19 +47,19 @@ def test_load_domains_from_project_denylist():
 
     result = load_domains(FULL_COVERAGE_FILE, allow_unsafe=False)
     assert "youtube.com" in result.domains
-    assert "googlevideo.com" not in result.domains
+    assert "googlevideo.com" in result.domains  # GV-4: videoplayback probe, not denylisted
     assert "i.ytimg.com" not in result.domains
     assert result.skipped
-    assert any(s.domain == "googlevideo.com" for s in result.skipped)
+    assert not any(s.domain == "googlevideo.com" for s in result.skipped)
 
 
 def test_coverage_tcp_lean_default():
     from blockchecks.engine.domain_loader import DEFAULT_DOMAINS_FILE
 
     result = load_domains(DEFAULT_DOMAINS_FILE)
-    assert 10 <= len(result.domains) <= 16
+    assert 11 <= len(result.domains) <= 17
     assert "youtubei.googleapis.com" in result.domains
-    assert "googlevideo.com" not in result.domains
+    assert "googlevideo.com" in result.domains  # GV-4 lean coverage
     assert not result.skipped
 
 
