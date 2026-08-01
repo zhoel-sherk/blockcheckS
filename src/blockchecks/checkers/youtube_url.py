@@ -52,23 +52,13 @@ def get_fresh_url(
     # Fetch fresh URL
     import shutil
 
-    ytdlp = shutil.which("yt-dlp")
+    from blockchecks.engine.config import PROJECT_DIR, YTDLP_BIN
+
+    ytdlp = YTDLP_BIN or shutil.which("yt-dlp")
     if not ytdlp:
-        # Common venv locations
-        for candidate in [
-            "/home/zhoel/workspace/dpi-tester/.venv/bin/yt-dlp",
-            os.path.join(
-                os.path.dirname(
-                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                ),
-                ".venv",
-                "bin",
-                "yt-dlp",
-            ),
-        ]:
-            if os.path.exists(candidate):
-                ytdlp = candidate
-                break
+        candidate = os.path.join(PROJECT_DIR, ".venv", "bin", "yt-dlp")
+        if os.path.exists(candidate):
+            ytdlp = candidate
     if not ytdlp:
         return None
     cmd = [ytdlp, "-g", "-f", format_code, f"https://www.youtube.com/watch?v={video_id}"]

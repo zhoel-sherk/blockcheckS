@@ -37,6 +37,14 @@ tests/ docs/       # unit/integration + guide/todo/package
 
 Подробный аудит: [docs/package.md](docs/package.md). Roadmap: [docs/todo.md](docs/todo.md).
 
+## For contributors
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, tests, PR flow
+- [docs/architecture.md](docs/architecture.md) — data flow and module map
+- [docs/cookbook/](docs/cookbook/) — add checker / generator / CLI flag
+
+Use **editable install** (`pip install -e .`) so `configs/` resolves from repo root.
+
 ## Быстрый старт
 
 ```bash
@@ -59,7 +67,8 @@ sudo bs composite -c configs/composite_discord.conf
 pytest -m "not integration"
 ```
 
-Подробнее: [docs/guide.md](docs/guide.md). План: [docs/todo.md](docs/todo.md).
+Подробнее: [docs/guide.md](docs/guide.md). Архитектура: [docs/architecture.md](docs/architecture.md).
+Roadmap: [docs/todo.md](docs/todo.md).
 
 ## Status
 

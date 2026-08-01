@@ -66,6 +66,8 @@ attempts without curl_cffi — `bs full` is the curl_cffi replacement at that sc
 
 ## Adding your own
 
+See [docs/cookbook/](../docs/cookbook/) for step-by-step guides.
+
 ```bash
 # Create a file
 echo "discord.com" >> presets/domains/my-service.txt

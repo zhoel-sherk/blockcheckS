@@ -25,6 +25,11 @@ pip install -e ".[dev,discovery]"
 - опционально sing-box + Discord token для full voice discovery
 
 Переменные: `BLOCKCHECKS_NFQWS2`, `BLOCKCHECKS_PYTHON`, `BLOCKCHECKS_SETTINGS`, …
+См. [`settings.example.env`](../settings.example.env).
+
+Документация для разработчиков: [CONTRIBUTING.md](../CONTRIBUTING.md),
+[architecture.md](architecture.md), [database.md](database.md),
+[cookbook/](cookbook/).
 
 ## CLI
 
@@ -80,11 +85,13 @@ sqlite single-connection, UA, stale PASS, package imports.
 | Путь | Роль |
 |------|------|
 | `src/blockchecks/` | единственный source of truth |
+| `src/blockchecks/cli/` | argparse + command handlers |
+| `src/blockchecks/engine/generators/` | strategy matrix generators |
 | `configs/` | в **корне репо** (editable); `CONFIGS_DIR` резолвится от `PROJECT_DIR` |
 | `tests/` | unit + integration |
-| `docs/` | guide / todo / package |
+| `docs/` | guide, architecture, database, cookbook, todo, package |
 
-Полный разбор: [package.md](package.md). Roadmap: [todo.md](todo.md).
+Полный разбор: [architecture.md](architecture.md), [package.md](package.md).
 
 Не запускайте устаревшие копии `engine/` / `checkers/` из корня — их больше
 нет в git; рабочий код только под `src/blockchecks/`.

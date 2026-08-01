@@ -54,23 +54,8 @@ hostfakesplit:tcp_md5:tcp_ts_up:repeats=1
 ```
 
 ## Architecture
-```
-bs.py
-├── scan (async) → pair --tcp-only
-│   ├── matrix_generator.generate_tcp()
-│   ├── async_runner.start() → netns_pool.create_all()
-│   ├── async_runner.test_batch_tcp()
-│   └── async_runner.stop() → netns_pool.destroy_all()
-│
-├── pair (async)
-│   ├── matrix_generator.generate_pairs()
-│   ├── async_runner.test_batch_tcp() — parallel
-│   ├── async_runner.test_pair_matrix() — TCP keep-alive + UDP switch
-│   └── print_matrix() — colorama
-│
-├── tcp (sync, legacy)
-└── udp (sync, legacy)
-```
+
+See [docs/architecture.md](../docs/architecture.md) for data flow, module map, and CLI layout.
 
 ## Timeline
 ```

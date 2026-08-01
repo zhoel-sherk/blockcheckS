@@ -1,0 +1,1 @@
+"""blockcheckS CLI package."""

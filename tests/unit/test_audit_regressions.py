@@ -97,10 +97,14 @@ def test_scan_auto_discover_none_skips():
     assert (5 != None and 5 > 0) is True
 
     # scan path must normalize False → None (never leave False for int())
-    src = Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "bs.py"
-    text = src.read_text(encoding="utf-8")
-    assert "args.auto_discover = False" not in text or "auto_discover = None" in text
-    assert "int(auto_discover) > 0" in text
+    pair_src = (
+        Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "cli" / "commands" / "pair.py"
+    )
+    parser_src = Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "cli" / "parser.py"
+    pair_text = pair_src.read_text(encoding="utf-8")
+    parser_text = parser_src.read_text(encoding="utf-8")
+    assert "args.auto_discover = False" not in parser_text or "auto_discover = None" in parser_text
+    assert "int(auto_discover) > 0" in pair_text
 
 
 @pytest.mark.asyncio
@@ -127,8 +131,10 @@ async def test_protocol_forwarded_to_generate():
 
 
 def test_preset_domains_used():
-    """cmd_scan uses preset_domains when -d omitted."""
-    src = Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "bs.py"
+    """cmd_pair uses preset_domains when -d omitted."""
+    src = (
+        Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "cli" / "commands" / "pair.py"
+    )
     text = src.read_text(encoding="utf-8")
     assert "preset_domains if preset_domains else [args.domain]" in text
     assert "ERROR: --domain or --preset required" in text

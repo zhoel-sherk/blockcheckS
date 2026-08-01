@@ -4,6 +4,7 @@ Uses BLOCKCHECKS_* env vars for portable paths. Falls back to sensible defaults.
 """
 
 import os
+import sys
 import time
 
 # ── Resolvable paths ─────────────────────────────
@@ -41,19 +42,25 @@ SING_BOX_CONFIG = os.environ.get(
     "BLOCKCHECKS_SINGBOX_CONFIG", os.path.expanduser("~/.config/sing-box/config.json")
 )
 
-# Python venv
-PYTHON_BIN = _env_or("BLOCKCHECKS_PYTHON", os.path.join(PROJECT_DIR, ".venv/bin/python"))
-# Fallback if local .venv doesn't exist — use system or dpi-tester venv
-for _path in [
-    PYTHON_BIN,
-    "/home/zhoel/workspace/dpi-tester/.venv/bin/python",
-    os.path.join(PROJECT_DIR, "../dpi-tester/.venv/bin/python"),
-]:
-    if os.path.exists(_path):
-        PYTHON_BIN = _path
-        break
+# Python interpreter for netns subprocess probes
+def _resolve_python() -> str:
+    explicit = os.environ.get("BLOCKCHECKS_PYTHON")
+    if explicit:
+        return explicit
+    for candidate in (
+        os.path.join(PROJECT_DIR, ".venv/bin/python"),
+        os.path.normpath(os.path.join(PROJECT_DIR, "../dpi-tester/.venv/bin/python")),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return sys.executable
 
-# Discord token source
+
+PYTHON_BIN = _resolve_python()
+
+# yt-dlp binary (googlevideo URL fetch — GV-1)
+YTDLP_BIN = _env_or("BLOCKCHECKS_YTDLP", "")
+
 DPI_TESTER_SETTINGS = _env_or(
     "BLOCKCHECKS_SETTINGS", os.path.join(PROJECT_DIR, "../dpi-tester/settings.ini")
 )
@@ -76,6 +83,31 @@ DEFAULT_POOL_SIZE = int(_env_or("BLOCKCHECKS_POOL", "4"))
 
 # Sing-box SOCKS5 proxy
 SOCKS5_PROXY = _env_or("BLOCKCHECKS_PROXY", "socks5://127.0.0.1:11080")
+
+# Secure DNS (Phase 9 SD)
+def _env_bool(key: str, default: bool) -> bool:
+    v = os.environ.get(key)
+    if v is None:
+        return default
+    return v.strip().lower() not in ("0", "false", "off", "no")
+
+
+SECURE_DNS_DEFAULT = _env_bool("BLOCKCHECKS_SECURE_DNS", True)
+DEFAULT_DOH_SERVER = os.environ.get("BLOCKCHECKS_DOH_SERVER", "").strip()
+DNS_CACHE_TTL = float(_env_or("BLOCKCHECKS_DNS_CACHE_TTL", "3600"))
+
+DOH_SERVERS = [
+    ("https://cloudflare-dns.com/dns-query", "Cloudflare"),
+    ("https://dns.google/dns-query", "Google"),
+    ("https://dns.quad9.net/dns-query", "Quad9"),
+    ("https://dns.adguard-dns.com/dns-query", "AdGuard"),
+    ("https://dns.yandex.ru/dns-query", "Yandex"),
+]
+UDP_DNS_SERVERS = [
+    ("8.8.8.8", "Google"),
+    ("1.1.1.1", "Cloudflare"),
+    ("9.9.9.9", "Quad9"),
+]
 
 # Default voice targets (will be overridden by auto-discovery)
 DEFAULT_VOICE_IP = "35.217.5.42"

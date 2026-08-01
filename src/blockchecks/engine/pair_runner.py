@@ -154,17 +154,18 @@ print(json.dumps(result))
 
     def _run_stun_check(self, ip: str, port: int, timeout: float) -> dict:
         """Run dual voice UDP probe via subprocess."""
-        code = f"""
-import json
-from blockchecks.checkers.udp_voice import voice_udp_probe
-ok, lat, detail, method = voice_udp_probe("{ip}", {port}, {timeout})
-print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
-                   "detail": detail, "method": method}}))
-"""
+        cmd = [
+            self._python,
+            "-m",
+            "blockchecks.engine._probe_worker",
+            ip,
+            str(port),
+            str(timeout),
+        ]
         if self.ns_name:
-            cmd = ["sudo", "ip", "netns", "exec", self.ns_name, self._python, "-c", code]
+            cmd = ["sudo", "ip", "netns", "exec", self.ns_name, *cmd]
         else:
-            cmd = ["sudo", self._python, "-c", code]
+            cmd = ["sudo", *cmd]
 
         import subprocess
 

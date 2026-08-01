@@ -27,7 +27,14 @@ class TestSubmoduleImports:
 
     MODULES = [
         "blockchecks.bs",
+        "blockchecks.cli",
+        "blockchecks.cli.parser",
+        "blockchecks.cli.commands.tcp",
+        "blockchecks.cli.commands.udp",
+        "blockchecks.cli.commands.pair",
         "blockchecks.engine",
+        "blockchecks.engine._probe_worker",
+        "blockchecks.engine.generators",
         "blockchecks.engine.config",
         "blockchecks.engine.nfqws2",
         "blockchecks.engine.firewall",
@@ -47,7 +54,7 @@ class TestSubmoduleImports:
         "blockchecks.checkers.udp_voice",
         "blockchecks.checkers.voice_dns",
         "blockchecks.checkers.voice_discovery",
-        "blockchecks.checkers.composite_runner",
+        "blockchecks.checkers.dns_secure",
         "blockchecks.checkers.youtube_url",
     ]
 
@@ -118,6 +125,20 @@ class TestEntryPoint:
         assert hasattr(nf_mod, "main")
         assert hasattr(conf_builder, "build_keenetic_conf")
         assert hasattr(conf_builder, "build_raw_conf")
+
+    def test_engine_public_api(self):
+        from blockchecks.engine import MatrixGenerator, StateDB, StrategyItem, matrix_fingerprint
+
+        assert MatrixGenerator is not None
+        assert StrategyItem is not None
+        assert StateDB is not None
+        assert callable(matrix_fingerprint)
+
+    def test_checkers_public_api(self):
+        from blockchecks.checkers import TlsResult, check_tls
+
+        assert TlsResult is not None
+        assert callable(check_tls)
 
     def test_strategy_item_single_definition(self):
         """StrategyItem lives in matrix_generator; async_runner re-exports it."""

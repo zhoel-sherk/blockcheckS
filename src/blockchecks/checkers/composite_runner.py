@@ -8,10 +8,8 @@ import asyncio
 import json
 import os
 import subprocess as sp
-import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
