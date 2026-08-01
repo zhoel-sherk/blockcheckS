@@ -38,6 +38,20 @@ def add_secure_dns_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Reference unblocked domain (default: iana.org)",
     )
+    g.add_argument("--skip-baseline", action="store_true", help="Skip unblocked baseline check")
+    g.add_argument("--skip-port-block", action="store_true", help="Skip TCP port probes")
+    g.add_argument("--skip-prolog", action="store_true", help="Skip no-bypass prolog curl")
+    g.add_argument(
+        "--force",
+        action="store_true",
+        help="Run strategy tests even if prolog passes",
+    )
+    g.add_argument("--skip-nfqws2-check", action="store_true", help="Skip host nfqws2 detection")
+    g.add_argument(
+        "--abort-on-nfqws2",
+        action="store_true",
+        help="Abort if nfqws2 already running on host",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

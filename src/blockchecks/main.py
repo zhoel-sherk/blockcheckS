@@ -13,7 +13,6 @@ from colorama import Fore, Style
 from colorama import init as colorama_init
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
-from blockchecks.checkers.ip_block import print_ip_block_report, run_ip_block_cross_test
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
     DEFAULT_VOICE_IP,
@@ -24,6 +23,7 @@ from blockchecks.engine.config import (
 )
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
+from blockchecks.engine.preflight import PreflightOptions, run_preflight
 from blockchecks.nfconf import export_configs
 
 colorama_init(autoreset=True)
@@ -77,14 +77,34 @@ async def run_full(args) -> int:
 
     primary = args.domain or domains[0]
 
-    if not getattr(args, "skip_ip_block", False):
-        ip_report = run_ip_block_cross_test(
-            primary,
-            unblocked_domain=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
+    preflight = run_preflight(
+        domains,
+        PreflightOptions(
+            unblocked_dom=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
             timeout=min(args.timeout, 8.0),
+            skip_baseline=getattr(args, "skip_baseline", False),
+            skip_port_block=getattr(args, "skip_port_block", False),
+            skip_prolog=getattr(args, "skip_prolog", False),
+            skip_ip_block=getattr(args, "skip_ip_block", False),
+            skip_nfqws2_check=getattr(args, "skip_nfqws2_check", False),
+            abort_on_nfqws2=getattr(args, "abort_on_nfqws2", False),
+            force=getattr(args, "force", False),
             dns_cache=dns_cache,
-        )
-        print_ip_block_report(ip_report)
+        ),
+    )
+    if preflight.exit_code:
+        print(f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")
+        return preflight.exit_code
+
+    if preflight.skip_domains:
+        skipped = sorted(preflight.skip_domains)
+        print(f"  {YELLOW}Prolog skip: {', '.join(skipped)}{RESET}")
+        domains = [d for d in domains if d not in preflight.skip_domains]
+        if not domains:
+            print(f"{YELLOW}All domains work without bypass — nothing to test{RESET}")
+            return 0
+        if primary in preflight.skip_domains:
+            primary = domains[0]
 
     tcp_sources = [s for s in args.tcp_sources.split(",") if s]
     udp_sources = [s for s in args.udp_sources.split(",") if s]
@@ -355,6 +375,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--unblocked-dom",
         default=None,
         help=f"Reference unblocked domain (default: {UNBLOCKED_DOM})",
+    )
+    g.add_argument("--skip-baseline", action="store_true", help="Skip unblocked baseline check")
+    g.add_argument("--skip-port-block", action="store_true", help="Skip TCP port probes")
+    g.add_argument("--skip-prolog", action="store_true", help="Skip no-bypass prolog curl")
+    g.add_argument(
+        "--force",
+        action="store_true",
+        help="Run strategy tests even if prolog passes (no bypass needed)",
+    )
+    g.add_argument("--skip-nfqws2-check", action="store_true", help="Skip host nfqws2 detection")
+    g.add_argument(
+        "--abort-on-nfqws2",
+        action="store_true",
+        help="Abort if nfqws2 already running on host",
     )
     return p
 

@@ -29,7 +29,7 @@ Lightspeed DPI strategy tester для **zapret2/nfqws2**:
 | **6** | Export keenetic + raw (`bs full` / `bc-nfconf`) | ✅ | P2 | BC2-7 COMMON intersection |
 | **7** | QUIC / HTTP3 first-class | 🔄 stub | P1 | BC2-10, `ipfrag_udp`/`ipfrag_tcp` |
 | **8** | HTTP :80 families | 📋 | P2 | BC2-9, M6 HTTP+TLS dual-fake |
-| **9** | Secure DNS + blockcheck2 preflight | 🔄 partial | **P0** | SD ✅; BC2-1..BC2-5, BC2-11 |
+| **9** | Secure DNS + blockcheck2 preflight | 🔄 partial | **P0** | SD ✅; BC2-1..5,11 ✅; BC2-4..8 |
 | **10** | Matrix coverage & blobs | 🔄 | P1 | M1–M10, ~80% zapret2 / ~95% flowseal |
 | **11** | Speed / throughput | 🔄 | P1 | A1–A10, B1–B11 |
 | **12** | Smart scan (ML / hierarchy / AQ) | 📋 | P3 | ML1–5, H1–10, AQ1–8 |
@@ -81,7 +81,7 @@ B1→B11 → Phase 11 B2 → Phase 10 M* → Phase 7/8 → Phase 12.
 ### P0 — честность тестов (Phase 9)
 
 1. ~~**Secure DNS** — DoH pre-resolve на **все** домены (SD1–SD8).~~ ✅
-2. **Preflight** — IP-block cross-test, unblocked baseline (BC2-1..BC2-3).
+2. ~~**Preflight** — IP-block cross-test, unblocked baseline (BC2-1..BC2-3).~~ ✅ BC2-1..3,5,11
 
 ### P1 — скорость и покрытие (Phase 4, 10, 11)
 
@@ -191,7 +191,7 @@ voice UDP, async parallel, resume/state.db, MatrixGenerator, keenetic export.
 | C1 | DoH pre-resolve на все домены | ✅ DoH + audit | ~~SD1–SD3~~ |
 | C2 | DNS spoof detection | ✅ startup audit | ~~SD1, SD4~~ |
 | C3 | IP-block cross-test | ✅ `ip_block.py` | ~~BC2-1~~ |
-| C4 | UNBLOCKED_DOM baseline | preset only | → **BC2-2** |
+| C4 | UNBLOCKED_DOM baseline | ✅ startup preflight | ~~BC2-2~~ |
 
 #### HIGH
 
@@ -229,16 +229,16 @@ check_system → check_already → check_prerequisites
 ```
 
 - [x] **BC2-1** `checkers/ip_block.py`: cross-test blocked ↔ `UNBLOCKED_DOM` IP
-- [ ] **BC2-2** preflight baseline: auto unblocked check (`--unblocked-dom`)
-- [ ] **BC2-3** port block probe на все resolved IP
+- [x] **BC2-2** preflight baseline: auto unblocked check (`--unblocked-dom`)
+- [x] **BC2-3** port block probe на все resolved IP
 - [ ] **BC2-4** `--repeats N` + `--parallel-repeats`
-- [ ] **BC2-5** prolog curl без nfqws2; skip domain если уже OK (`--force` override)
+- [x] **BC2-5** prolog curl без nfqws2; skip domain если уже OK (`--force` override)
 - [ ] **BC2-6** полная цепочка `need_*` между standard families
 - [ ] **BC2-7** `bs full` export: COMMON strategies (intersection all domains)
 - [ ] **BC2-8** wssize retry в tls12 checker
 - [ ] **BC2-9** HTTP :80 standard generator + фаза в `bs full` *(Phase 8)*
 - [ ] **BC2-10** QUIC: curl HTTP/3 + `--quic-timeout` *(Phase 7)*
-- [ ] **BC2-11** detect running nfqws2 на host, warn/abort
+- [x] **BC2-11** detect running nfqws2 на host, warn/abort
 - [ ] **BC2-12** redirect-to-blockpage detector (curl code 254 pattern)
 
 ---

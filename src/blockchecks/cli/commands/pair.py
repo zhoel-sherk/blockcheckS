@@ -9,7 +9,6 @@ import time
 from colorama import Fore, Style
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
-from blockchecks.checkers.ip_block import print_ip_block_report, run_ip_block_cross_test
 from blockchecks.cli.presets import list_presets
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
@@ -23,6 +22,7 @@ from blockchecks.engine.config import (
 )
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
+from blockchecks.engine.preflight import PreflightOptions, run_preflight
 from blockchecks.engine.strategy_loader import StrategyLoader
 
 CYAN = Fore.CYAN
@@ -79,14 +79,31 @@ async def cmd_pair(args):
     if dns_rc:
         return dns_rc
 
-    if not getattr(args, "skip_ip_block", False) and args.domain:
-        ip_report = run_ip_block_cross_test(
-            args.domain,
-            unblocked_domain=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
+    test_domains = list(
+        dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))
+    )
+    preflight = run_preflight(
+        test_domains,
+        PreflightOptions(
+            unblocked_dom=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
             timeout=min(getattr(args, "timeout", 5.0), 8.0),
+            skip_baseline=getattr(args, "skip_baseline", False),
+            skip_port_block=getattr(args, "skip_port_block", False),
+            skip_prolog=getattr(args, "skip_prolog", False),
+            skip_ip_block=getattr(args, "skip_ip_block", False),
+            skip_nfqws2_check=getattr(args, "skip_nfqws2_check", False),
+            abort_on_nfqws2=getattr(args, "abort_on_nfqws2", False),
+            force=getattr(args, "force", False),
             dns_cache=dns_cache,
-        )
-        print_ip_block_report(ip_report)
+        ),
+    )
+    if preflight.exit_code:
+        print(f"{Fore.RED}ERROR: preflight failed: {preflight.error}{RESET}")
+        return preflight.exit_code
+    if args.domain and args.domain in preflight.skip_domains and not getattr(args, "force", False):
+        print(f"{YELLOW}Prolog: {args.domain} works without bypass — nothing to test{RESET}")
+        print(f"{YELLOW}Use --force to run strategy matrix anyway{RESET}")
+        return 0
 
     runner = AsyncTestRunner(
         pool_size=pool_size,
