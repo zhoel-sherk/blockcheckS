@@ -14,6 +14,7 @@ from blockchecks.cli.commands.tcp import cmd_tcp
 from blockchecks.cli.commands.udp import cmd_udp
 from blockchecks.cli.presets import list_presets
 from blockchecks.engine.config import CONFIGS_DIR, DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+from blockchecks.engine.settle_profile import DEFAULT_PROFILE_PATH
 
 
 def add_curl_repeats_args(parser: argparse.ArgumentParser) -> None:
@@ -340,6 +341,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bench.add_argument("--max-strategies", type=int, default=3)
     bench.add_argument("--no-secure-dns", action="store_true")
+    bench.add_argument(
+        "--write-profile",
+        nargs="?",
+        const=DEFAULT_PROFILE_PATH,
+        default=None,
+        metavar="PATH",
+        help=f"Write settle profile JSON (default: {DEFAULT_PROFILE_PATH})",
+    )
+    bench.add_argument(
+        "--no-write-profile",
+        action="store_true",
+        help="Skip writing settle profile JSON",
+    )
 
     return parser
 

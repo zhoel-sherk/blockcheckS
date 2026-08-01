@@ -37,6 +37,7 @@ from blockchecks.engine.domain_loader import (
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.preflight import PreflightOptions, run_preflight
+from blockchecks.engine.settle_profile import auto_load_profile, load_profile
 from blockchecks.engine.tcp_fanout import fanout_allowed, fanout_batches
 from blockchecks.nfconf import export_configs
 
@@ -239,6 +240,22 @@ async def run_full(args) -> int:
     if use_family_gates:
         print(f"  Family gates: {GREEN}on{RESET} (BC2-6 need_* chain)")
 
+    settle_profile = None
+    if getattr(args, "no_settle_profile", False):
+        settle_profile = None
+    elif getattr(args, "settle_profile", None):
+        settle_profile = load_profile(args.settle_profile)
+    else:
+        settle_profile = auto_load_profile()
+    if settle_profile and settle_profile.source_path:
+        d = settle_profile.defaults
+        hint = (
+            f"settle={d.settle_max}s curl={d.curl_timeout}s"
+            if d
+            else f"{len(settle_profile.strategies)} strategies"
+        )
+        print(f"  {GREEN}Settle profile:{RESET} {settle_profile.source_path} ({hint})")
+
     fp = matrix_fingerprint(
         [i.strategy for i in tcp_items],
         [i.strategy for i in udp_items],
@@ -256,6 +273,7 @@ async def run_full(args) -> int:
         repeats=max(1, getattr(args, "repeats", 1) or 1),
         parallel_repeats=bool(getattr(args, "parallel_repeats", False)),
         try_wssize=getattr(args, "protocol", "tls12") == "tls12",
+        settle_profile=settle_profile,
     )
     stop = asyncio.Event()
 
@@ -654,6 +672,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_CURL_PARALLEL,
         metavar="N",
         help=f"Domains per nfqws2 session (1=off, max {MAX_CURL_PARALLEL}, default 1)",
+    )
+    g = p.add_argument_group("settle profile (B11)")
+    g.add_argument(
+        "--settle-profile",
+        default=None,
+        metavar="PATH",
+        help="Load settle/curl timings from bench-settle JSON (default: logs/settle_profile.json)",
+    )
+    g.add_argument(
+        "--no-settle-profile",
+        action="store_true",
+        help="Ignore settle profile even if logs/settle_profile.json exists",
     )
     return p
 

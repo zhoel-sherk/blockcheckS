@@ -29,6 +29,7 @@ from blockchecks.engine.config import (
 from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.netns_pool import NetNsPool
+from blockchecks.engine.settle_profile import SettleProfile
 from blockchecks.engine.tcp_fanout import curl_profile
 
 GREEN = Fore.GREEN + Style.BRIGHT
@@ -408,8 +409,30 @@ def _run_tcp_check(
     use_ech = not is_http and (disable_ech or is_gv)
     dport = "80" if is_http else "443"
     tmp_conf = None
+    curl_url_override = None
+    resolve_name = domain.split("/")[0]
 
-    # Setup nfqws2
+    if is_gv:
+        from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
+        from blockchecks.checkers.youtube_url import get_fresh_url, videoplayback_host
+
+        curl_url_override = get_fresh_url()
+        if not curl_url_override:
+            return {
+                "success": False,
+                "http_code": 0,
+                "latency_ms": 0,
+                "content_len": 0,
+                "content_ok": False,
+                "throttled": False,
+                "read_rate_bps": 0,
+                "error": "gv_url_unavailable",
+            }
+        resolve_name = videoplayback_host(curl_url_override) or resolve_name
+        if resolve_name and resolve_name != domain.lower().split("/")[0]:
+            ips, err, _ = doh_query(resolve_name, pick_working_doh(), timeout=5.0)
+            if ips and not err:
+                resolved_ip = ips[0]
     if is_config:
         src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
         # Copy user conf — inject daemon/debug without mutating the original
@@ -467,6 +490,8 @@ def _run_tcp_check(
     parallel_int = 1 if parallel_repeats and repeats > 1 else 0
     url_scheme = "http" if is_http else "https"
     resolve_port = 80 if is_http else 443
+    curl_override_lit = json.dumps(curl_url_override)
+    resolve_name_lit = json.dumps(resolve_name)
 
     check_code = f"""
 import json, time
@@ -476,13 +501,15 @@ def check(domain, timeout, resolved_ip):
         start = time.perf_counter()
         headers = {{"Accept": "text/html"{headers_extra}}}
         resolve_opt = {CURLOPT_RESOLVE}
+        curl_override = {curl_override_lit}
+        resolve_name = {resolve_name_lit}
         try:
             s = curl_cffi.Session(
                 impersonate="chrome124", http_version=2,
                 headers=headers, allow_redirects=False,
             )
             if resolved_ip:
-                s.curl.setopt(resolve_opt, [domain + ":{resolve_port}:" + resolved_ip])
+                s.curl.setopt(resolve_opt, [resolve_name + ":{resolve_port}:" + resolved_ip])
             if {use_ech_int}:
                 set = False
                 try:
@@ -499,7 +526,8 @@ def check(domain, timeout, resolved_ip):
                                   "content_len": 0, "content_ok": False,
                                   "throttled": False, "read_rate_bps": 0,
                                   "error": "ech_setopt:" + str(e)[:100]}}
-            resp = s.get("{url_scheme}://" + domain, timeout=min(timeout, 1.5))
+            url = curl_override if curl_override else ("{url_scheme}://" + domain)
+            resp = s.get(url, timeout=min(timeout, 1.5))
         except curl_cffi.CurlError as e:
             msg = str(e)
             return {{"success": False, "http_code": 0,
@@ -512,7 +540,7 @@ def check(domain, timeout, resolved_ip):
         clen = len(resp.content)
         rate = clen / elapsed
         loc = resp.headers.get("Location") or resp.headers.get("location") or ""
-        dom = domain.lower().split("/")[0]
+        dom = resolve_name.lower().split("/")[0]
         if resp.status_code in (301, 302, 307, 308) and loc:
             if loc.lower().startswith(("http://", "https://")):
                 redir_host = loc.split("/")[2].split(":")[0].lower()
@@ -978,6 +1006,7 @@ class AsyncTestRunner:
         repeats: int = 1,
         parallel_repeats: bool = False,
         try_wssize: bool = False,
+        settle_profile: SettleProfile | None = None,
     ):
         self.pool = NetNsPool(size=pool_size)
         self.semaphore = asyncio.Semaphore(pool_size)
@@ -991,6 +1020,17 @@ class AsyncTestRunner:
         self.repeats = max(1, repeats)
         self.parallel_repeats = parallel_repeats
         self.try_wssize = try_wssize
+        self.settle_profile = settle_profile
+
+    def _timing_for(self, item: StrategyItem, timeout: float) -> tuple[float, float | None]:
+        """Return (curl_timeout, settle_max override) from B11 profile if set."""
+        settle_max: float | None = None
+        if self.settle_profile:
+            override = self.settle_profile.lookup(item.strategy)
+            if override:
+                settle_max = override.settle_max
+                timeout = override.curl_timeout
+        return timeout, settle_max
 
     async def start(self):
         """Create netns pool and seed the asyncio Queue on the event loop."""
@@ -1007,6 +1047,7 @@ class AsyncTestRunner:
     ) -> TcpTestResult:
         """Test one TCP strategy in an isolated netns."""
         result = TcpTestResult(item=item, domain=domain)
+        timeout, settle_max = self._timing_for(item, timeout)
 
         async with self.semaphore:
             ns_name = await self.pool.acquire()
@@ -1036,6 +1077,8 @@ class AsyncTestRunner:
                     self.parallel_repeats,
                     "",
                     protocol,
+                    settle_max,
+                    None,
                 )
                 if (
                     not data.get("success")
@@ -1057,6 +1100,8 @@ class AsyncTestRunner:
                         self.parallel_repeats,
                         "wssize:wsize=1:scale=6",
                         protocol,
+                        settle_max,
+                        None,
                     )
                 result.success = data.get("success", False)
                 result.http_code = data.get("http_code", 0)
@@ -1227,6 +1272,7 @@ class AsyncTestRunner:
         if not domains:
             return []
         results: list[TcpTestResult] = []
+        timeout, settle_max = self._timing_for(item, timeout)
         async with self.semaphore:
             ns_name = await self.pool.acquire()
             try:
@@ -1251,6 +1297,7 @@ class AsyncTestRunner:
                     extra_lua_desync="",
                     protocol=protocol,
                     curl_parallel=curl_parallel,
+                    settle_max=settle_max,
                 )
                 for domain in domains:
                     data = data_map.get(domain, {})

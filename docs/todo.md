@@ -289,7 +289,7 @@ hostfakesplit); blockcheckS stress **0 PASS** (TLS на корень домен�
 
 **Задачи:**
 
-- [ ] **GV-1** Wire `get_fresh_url()` в `async_runner` / sync runner: при
+- [x] **GV-1** Wire `get_fresh_url()` в `async_runner` / sync runner: при
   `googlevideo*` curl на videoplayback URL, не на apex *(= B10)*
 - [ ] **GV-2** Опционально: Playwright intercept как в `dpi-tester/youtube_test.py`
 - [ ] **GV-3** Починить hostfakesplit checker: `Session.request() unexpected keyword 'options'`
@@ -450,8 +450,8 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - [ ] **B7** nftables vmap POC — prerequisite parallel > 4
 - [ ] **B8** batch DB writes (~5%)
 - [x] **B9** double Semaphore cleanup в `main.py`
-- [ ] **B10** wire `get_fresh_url()` для googlevideo → **GV-1**
-- [ ] **B11** dynamic per-strategy settle+curl из результатов A9
+- [x] **B10** wire `get_fresh_url()` для googlevideo → **GV-1**
+- [x] **B11** dynamic per-strategy settle+curl из результатов A9
 
 **Порядок:** A1+A2+parallel4 → A5 dpi-tester → A10+A1 CLI → A9→B1→B11 → B2 → B4 → B7.
 

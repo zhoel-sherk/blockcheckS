@@ -104,3 +104,10 @@ def has_fresh_url() -> bool:
         return time.time() - data.get("timestamp", 0) < CACHE_TTL
     except (json.JSONDecodeError, KeyError):
         return False
+
+
+def videoplayback_host(url: str) -> str:
+    """Extract hostname from a signed googlevideo videoplayback URL."""
+    from urllib.parse import urlparse
+
+    return (urlparse(url).hostname or "").lower()

@@ -12,6 +12,11 @@ from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.engine.async_runner import AsyncTestRunner, _run_tcp_check
 from blockchecks.engine.config import PROJECT_DIR, SECURE_DNS_DEFAULT
 from blockchecks.engine.matrix_generator import StrategyItem
+from blockchecks.engine.settle_profile import (
+    DEFAULT_PROFILE_PATH,
+    build_profile_from_rows,
+    save_profile,
+)
 from blockchecks.engine.strategy_loader import StrategyLoader
 
 CYAN = Fore.CYAN
@@ -104,6 +109,7 @@ async def cmd_bench_settle(args) -> int:
                     rows.append(
                         {
                             "strategy": item.label[:28],
+                            "strategy_full": item.strategy,
                             "settle_max": settle_max,
                             "curl_t": curl_t,
                             "settle_ms": data.get("settle_ms", 0),
@@ -127,7 +133,20 @@ async def cmd_bench_settle(args) -> int:
 
     # Recommend minimum settle where PASS rate holds
     pass_settles = sorted({r["settle_max"] for r in rows if r["ok"]})
-    if pass_settles:
+    out_path = None
+    if not getattr(args, "no_write_profile", False):
+        out_path = getattr(args, "write_profile", None) or DEFAULT_PROFILE_PATH
+    if out_path and rows:
+        profile = build_profile_from_rows(rows, domain=domain)
+        saved = save_profile(profile, out_path)
+        print(f"\n  {GREEN}Profile written: {saved}{RESET}")
+        if profile.defaults:
+            print(
+                f"  defaults: settle_max={profile.defaults.settle_max}s "
+                f"curl={profile.defaults.curl_timeout}s "
+                f"({len(profile.strategies)} strategies)"
+            )
+    elif pass_settles:
         print(
             f"\n  {GREEN}Min settle with PASS: {pass_settles[0]:.1f}s "
             f"(use BLOCKCHECKS_NFQWS2_SETTLE_MAX={pass_settles[0]}){RESET}"
