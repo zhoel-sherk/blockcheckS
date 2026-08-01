@@ -35,50 +35,33 @@ class ScanReport:
 
 
 def _check_tls_in_ns(domain: str, timeout: float, resolved_ip: str | None = None) -> dict:
-    """Run curl_cffi check and return result as dict."""
-    resolve_line = ""
-    if resolved_ip:
-        resolve_line = f'''
-    s = curl_cffi.Session(impersonate="chrome124", http_version=2,
-        headers={{"Accept": "text/html"}}, allow_redirects=False)
-    s.curl.setopt(10203, ["{domain}:443:{resolved_ip}"])
-    resp = s.get("https://{domain}", timeout={timeout})
-'''
-    else:
-        resolve_line = f'''
-    resp = curl_cffi.get(
-        "https://{domain}",
-        impersonate="chrome124",
-        http_version=2,
-        timeout={timeout},
-        headers={{"Accept": "text/html"}},
+    """Build curl probe payload for subprocess execution."""
+    from blockchecks.checkers.curl_probe import build_probe_request
+
+    req, err = build_probe_request(
+        domain, timeout=timeout, resolved_ip=resolved_ip, protocol="tls12"
     )
-'''
-    code = f"""
-import json, time, sys
-try:
-    import curl_cffi
-    start = time.perf_counter()
-{resolve_line}
-    result = {{
-        "success": 200 <= resp.status_code < 400,
-        "http_status": resp.status_code,
-        "latency_ms": (time.perf_counter() - start) * 1000,
-        "error": None,
-    }}
-except curl_cffi.CurlError as e:
-    msg = str(e)
-    result = {{
-        "success": False,
-        "http_status": 0,
-        "latency_ms": (time.perf_counter() - start) * 1000,
-        "error": "timeout" if "Timeout" in msg else (msg[:120]),
-    }}
-except Exception as e:
-    result = {{"success": False, "http_status": 0, "latency_ms": 0, "error": str(e)[:120]}}
-print(json.dumps(result))
-"""
-    return {"domain": domain, "code": code}
+    if err:
+        return {"domain": domain, "payload": None, "error_result": err}
+    return {
+        "domain": domain,
+        "payload": {
+            "mode": "single",
+            "request": {
+                "domain": req.domain,
+                "timeout": req.timeout,
+                "resolved_ip": req.resolved_ip,
+                "resolve_name": req.resolve_name,
+                "curl_url": req.curl_url,
+                "disable_ech": req.disable_ech,
+                "googlevideo": req.googlevideo,
+                "protocol": req.protocol,
+            },
+            "repeats": 1,
+            "parallel_repeats": False,
+        },
+        "error_result": None,
+    }
 
 
 class TestRunner:
@@ -95,25 +78,48 @@ class TestRunner:
         self.secure_dns = secure_dns
 
     def _run_check(self, domain: str, timeout: float) -> StrategyResult:
-        """Run curl_cffi check inside namespace (or main ns if no netns)."""
+        """Run curl probe inside namespace (or main ns if no netns)."""
         resolved_ip = None
         if self.secure_dns and self.dns_cache:
             resolved_ip = self.dns_cache.primary_ip(domain)
         info = _check_tls_in_ns(domain, timeout, resolved_ip=resolved_ip)
-        code = info["code"]
+        if info.get("error_result"):
+            data = info["error_result"]
+            result = StrategyResult(strategy="", domain=domain)
+            result.success = data.get("success", False)
+            result.http_status = data.get("http_code", 0)
+            result.latency_ms = data.get("latency_ms", 0)
+            result.error = data.get("error")
+            return result
 
+        payload = json.dumps(info["payload"])
         if self.ns_name:
-            cmd = ["sudo", "ip", "netns", "exec", self.ns_name, self._python, "-c", code]
+            cmd = [
+                "sudo",
+                "ip",
+                "netns",
+                "exec",
+                self.ns_name,
+                self._python,
+                "-m",
+                "blockchecks.engine._curl_probe_worker",
+            ]
         else:
-            cmd = [self._python, "-c", code]
+            cmd = [self._python, "-m", "blockchecks.engine._curl_probe_worker"]
 
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        r = subprocess.run(
+            cmd,
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,
+        )
 
         result = StrategyResult(strategy="", domain=domain)
         try:
             data = json.loads(r.stdout)
             result.success = data.get("success", False)
-            result.http_status = data.get("http_status", 0)
+            result.http_status = data.get("http_code", 0)
             result.latency_ms = data.get("latency_ms", 0)
             result.error = data.get("error")
         except json.JSONDecodeError:

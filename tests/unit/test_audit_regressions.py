@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import inspect
 from pathlib import Path
 
@@ -140,16 +139,17 @@ def test_preset_domains_used():
     assert "ERROR: --domain or --preset required" in text
 
 
-def test_disable_ech_in_check_source():
-    src = Path(ar.__file__).read_text(encoding="utf-8")
+def test_disable_ech_in_curl_probe_source():
+    """GV-3: ECH off via Session.curl.setopt, never options= kwarg."""
+    probe = Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "checkers" / "curl_probe.py"
+    src = probe.read_text(encoding="utf-8")
     assert "CURLOPT_ECH" in src
-    assert "disable_ech" in inspect.signature(ar._run_tcp_check).parameters
     assert "CurlOpt.ECH" in src
-    # Numeric fallback after CurlOpt.ECH failure
-    assert "setopt({ech_opt}" in src or "ech_setopt" in src
-    tree = ast.parse(src)
-    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
-    assert "CURLOPT_ECH" in names
+    assert "_apply_ech_off" in src
+    assert 'kwargs["options"]' not in src
+    runner = Path(ar.__file__).read_text(encoding="utf-8")
+    assert "_curl_probe_worker" in runner
+    assert '["-c", check_code]' not in runner
 
 
 def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
@@ -214,8 +214,11 @@ def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
     assert "stderr=sp.DEVNULL" in src or "stderr=subprocess.DEVNULL" in src
     assert "kill_existing" in inspect.signature(ar._nfqws2_daemon).parameters
     assert "--queue-bypass" in src
-    # 206 is not an unconditional small_body shortcut
-    assert "or (resp.status_code == 206 and clen < 300)" in src
+    probe = (
+        Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "checkers" / "curl_probe.py"
+    ).read_text(encoding="utf-8")
+    # 206 is not an unconditional small_body shortcut (googlevideo ~17KB Range)
+    assert "resp.status_code == 206 and clen < 300" in probe
 
 
 @pytest.mark.asyncio

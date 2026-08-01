@@ -292,7 +292,8 @@ hostfakesplit); blockcheckS stress **0 PASS** (TLS на корень домен�
 - [x] **GV-1** Wire `get_fresh_url()` в `async_runner` / sync runner: при
   `googlevideo*` curl на videoplayback URL, не на apex *(= B10)*
 - [ ] **GV-2** Опционально: Playwright intercept как в `dpi-tester/youtube_test.py`
-- [ ] **GV-3** Починить hostfakesplit checker: `Session.request() unexpected keyword 'options'`
+- [x] **GV-3** Починить hostfakesplit checker: `Session.request() unexpected keyword 'options'`
+  — вынесено в `checkers/curl_probe.py` + `_curl_probe_worker`; ECH только через `setopt`
 - [x] **GV-4** После GV-1: убрать `googlevideo.com` из denylist / вернуть в lean coverage
 - [ ] **GV-5** `quic_gv_kyber` blob тесты — после videoplayback probe (см. blob table)
 

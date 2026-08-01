@@ -15,22 +15,22 @@ from colorama import init as colorama_init
 
 colorama_init(autoreset=True)
 
-from blockchecks.checkers.dns_secure import CURLOPT_RESOLVE, DnsRunCache
+from blockchecks.checkers.curl_probe import (
+    CurlProbeRequest,
+    is_googlevideo_domain,
+    prepare_googlevideo_probe,
+)
+from blockchecks.checkers.dns_secure import DnsRunCache
 from blockchecks.engine.config import (
     BLOB_DIR,
-    CURLOPT_ECH,
-    GOOGLEVIDEO_RANGE_SIZE,
-    MIN_READ_RATE_BPS,
     NFQWS2_BIN,
     PYTHON_BIN,
-    THROTTLED_MAX_BPS,
     nfqws2_debug_conf_line,
 )
 from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.netns_pool import NetNsPool
 from blockchecks.engine.settle_profile import SettleProfile
-from blockchecks.engine.tcp_fanout import curl_profile
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -385,6 +385,52 @@ print(json.dumps({{
                 pass
 
 
+def _probe_request_dict(req: CurlProbeRequest) -> dict:
+    return {
+        "domain": req.domain,
+        "timeout": req.timeout,
+        "resolved_ip": req.resolved_ip,
+        "resolve_name": req.resolve_name,
+        "curl_url": req.curl_url,
+        "disable_ech": req.disable_ech,
+        "googlevideo": req.googlevideo,
+        "protocol": req.protocol,
+    }
+
+
+def _invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: float) -> dict:
+    """Run curl probe subprocess in netns (GV-3 — no inline options= code)."""
+    r = sp.run(
+        [
+            "sudo",
+            "ip",
+            "netns",
+            "exec",
+            ns_name,
+            py,
+            "-m",
+            "blockchecks.engine._curl_probe_worker",
+        ],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=timeout + 15,
+    )
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "http_code": 0,
+            "latency_ms": 0,
+            "content_len": 0,
+            "content_ok": False,
+            "throttled": False,
+            "read_rate_bps": 0,
+            "error": f"parse: {r.stdout[:100]}",
+        }
+
+
 def _run_tcp_check(
     ns_name: str,
     strategy: str,
@@ -405,34 +451,24 @@ def _run_tcp_check(
 
     py = python_bin or PYTHON_BIN
     is_http = protocol == "http"
-    is_gv = not is_http and "googlevideo" in domain.lower()
-    use_ech = not is_http and (disable_ech or is_gv)
+    is_gv = not is_http and is_googlevideo_domain(domain)
     dport = "80" if is_http else "443"
     tmp_conf = None
-    curl_url_override = None
-    resolve_name = domain.split("/")[0]
 
     if is_gv:
-        from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
-        from blockchecks.checkers.youtube_url import get_fresh_url, videoplayback_host
-
-        curl_url_override = get_fresh_url()
-        if not curl_url_override:
-            return {
-                "success": False,
-                "http_code": 0,
-                "latency_ms": 0,
-                "content_len": 0,
-                "content_ok": False,
-                "throttled": False,
-                "read_rate_bps": 0,
-                "error": "gv_url_unavailable",
-            }
-        resolve_name = videoplayback_host(curl_url_override) or resolve_name
-        if resolve_name and resolve_name != domain.lower().split("/")[0]:
-            ips, err, _ = doh_query(resolve_name, pick_working_doh(), timeout=5.0)
-            if ips and not err:
-                resolved_ip = ips[0]
+        probe_req, gv_err = prepare_googlevideo_probe(domain, resolved_ip=resolved_ip)
+        if gv_err:
+            return gv_err
+        resolved_ip = probe_req.resolved_ip
+    else:
+        probe_req = CurlProbeRequest(
+            domain=domain,
+            timeout=timeout,
+            resolved_ip=resolved_ip,
+            resolve_name=domain.split("/")[0],
+            disable_ech=disable_ech,
+            protocol=protocol,
+        )
     if is_config:
         src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
         # Copy user conf — inject daemon/debug without mutating the original
@@ -479,160 +515,17 @@ def _run_tcp_check(
         "--queue-bypass",
     )
 
-    range_end = GOOGLEVIDEO_RANGE_SIZE - 1
-    headers_extra = ""
-    if is_gv:
-        headers_extra = f', "Range": "bytes=0-{range_end}"'
-    use_ech_int = 1 if use_ech else 0
-    ech_opt = CURLOPT_ECH
-    resolved_ip_lit = repr(resolved_ip)
-    repeats = max(1, int(repeats))
-    parallel_int = 1 if parallel_repeats and repeats > 1 else 0
-    url_scheme = "http" if is_http else "https"
-    resolve_port = 80 if is_http else 443
-    curl_override_lit = json.dumps(curl_url_override)
-    resolve_name_lit = json.dumps(resolve_name)
-
-    check_code = f"""
-import json, time
-def check(domain, timeout, resolved_ip):
+    probe_req.timeout = timeout
+    payload = {
+        "mode": "single",
+        "request": _probe_request_dict(probe_req),
+        "repeats": max(1, int(repeats)),
+        "parallel_repeats": bool(parallel_repeats and repeats > 1),
+    }
     try:
-        import curl_cffi
-        start = time.perf_counter()
-        headers = {{"Accept": "text/html"{headers_extra}}}
-        resolve_opt = {CURLOPT_RESOLVE}
-        curl_override = {curl_override_lit}
-        resolve_name = {resolve_name_lit}
-        try:
-            s = curl_cffi.Session(
-                impersonate="chrome124", http_version=2,
-                headers=headers, allow_redirects=False,
-            )
-            if resolved_ip:
-                s.curl.setopt(resolve_opt, [resolve_name + ":{resolve_port}:" + resolved_ip])
-            if {use_ech_int}:
-                set = False
-                try:
-                    s.curl.setopt(curl_cffi.CurlOpt.ECH, "")
-                    set = True
-                except Exception:
-                    pass
-                if not set:
-                    try:
-                        s.curl.setopt({ech_opt}, "")
-                    except Exception as e:
-                        return {{"success": False, "http_code": 0,
-                                  "latency_ms": (time.perf_counter()-start)*1000,
-                                  "content_len": 0, "content_ok": False,
-                                  "throttled": False, "read_rate_bps": 0,
-                                  "error": "ech_setopt:" + str(e)[:100]}}
-            url = curl_override if curl_override else ("{url_scheme}://" + domain)
-            resp = s.get(url, timeout=min(timeout, 1.5))
-        except curl_cffi.CurlError as e:
-            msg = str(e)
-            return {{"success": False, "http_code": 0,
-                      "latency_ms": (time.perf_counter()-start)*1000,
-                      "content_len": 0, "content_ok": False,
-                      "throttled": False, "read_rate_bps": 0,
-                      "error": "timeout" if "Timeout" in msg else msg[:120]}}
-        elapsed = max(time.perf_counter()-start, 0.001)
-        body = resp.content[:4096]
-        clen = len(resp.content)
-        rate = clen / elapsed
-        loc = resp.headers.get("Location") or resp.headers.get("location") or ""
-        dom = resolve_name.lower().split("/")[0]
-        if resp.status_code in (301, 302, 307, 308) and loc:
-            if loc.lower().startswith(("http://", "https://")):
-                redir_host = loc.split("/")[2].split(":")[0].lower()
-                if dom not in redir_host:
-                    return {{"success": False, "http_code": resp.status_code,
-                             "latency_ms": elapsed*1000,
-                             "content_len": clen, "content_ok": False,
-                             "throttled": False, "read_rate_bps": rate,
-                             "error": "suspicious redirect " + str(resp.status_code)
-                                      + " to " + loc[:80]}}
-        if resp.status_code == 400:
-            return {{"success": False, "http_code": 400,
-                     "latency_ms": elapsed*1000,
-                     "content_len": clen, "content_ok": False,
-                     "throttled": False, "read_rate_bps": rate,
-                     "error": "http 400 (likely fake packets received)"}}
-        content_ok = clen >= 300
-        dpi_fake = any(p in body.lower() for p in (b"roskomnadzor",b"rkn.gov.ru",
-                    b"blockpage",b"utmblock"))
-        if dpi_fake:
-            content_ok = False
-        # 206 only counts as "small body OK" when the body is actually small;
-        # googlevideo Range replies are 206 with ~17KB — must apply rate bands.
-        small_codes = (101, 204, 301, 302, 303, 304, 307, 308)
-        small_body_ok = (not dpi_fake) and (
-            resp.status_code in small_codes
-            or (resp.status_code == 206 and clen < 300)
-        )
-        status_ok = (200 <= resp.status_code < 400)
-        throttled = False
-        success = False
-        if status_ok and (content_ok or small_body_ok) and not dpi_fake:
-            if rate < {MIN_READ_RATE_BPS} and not small_body_ok:
-                success = False
-            elif rate < {THROTTLED_MAX_BPS} and not small_body_ok and clen >= 300:
-                success = True
-                throttled = True
-            else:
-                success = True
-        return {{"success": success, "http_code": resp.status_code,
-                 "latency_ms": elapsed*1000,
-                 "content_len": clen, "content_ok": content_ok,
-                 "throttled": throttled, "read_rate_bps": rate, "error": None}}
-    except Exception as e:
-        return {{"success": False, "http_code": 0, "latency_ms": 0,
-                 "content_len": 0, "content_ok": False,
-                 "throttled": False, "read_rate_bps": 0, "error": str(e)[:120]}}
-def run_checks():
-    n = {repeats}
-    if {parallel_int}:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
-            futs = [ex.submit(check, {domain!r}, {timeout}, {resolved_ip_lit}) for _ in range(n)]
-            last = None
-            for fut in concurrent.futures.as_completed(futs):
-                last = fut.result()
-                if last.get("success"):
-                    return last
-            return last or {{"success": False, "http_code": 0, "latency_ms": 0,
-                             "content_len": 0, "content_ok": False,
-                             "throttled": False, "read_rate_bps": 0,
-                             "error": "all parallel repeats failed"}}
-    last = None
-    for _ in range(n):
-        last = check({domain!r}, {timeout}, {resolved_ip_lit})
-        if last.get("success"):
-            return last
-    return last
-print(json.dumps(run_checks()))
-"""
-    try:
-        r = sp.run(
-            ["sudo", "ip", "netns", "exec", ns_name, py, "-c", check_code],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 10,
-        )
-        try:
-            data = json.loads(r.stdout)
-            data["settle_ms"] = round(settle_elapsed * 1000, 1)
-            return data
-        except json.JSONDecodeError:
-            return {
-                "success": False,
-                "http_code": 0,
-                "latency_ms": 0,
-                "content_len": 0,
-                "content_ok": False,
-                "throttled": False,
-                "read_rate_bps": 0,
-                "error": f"parse: {r.stdout[:100]}",
-            }
+        data = _invoke_curl_probe_worker(ns_name, py, payload, timeout)
+        data["settle_ms"] = round(settle_elapsed * 1000, 1)
+        return data
     finally:
         if tmp_conf:
             try:
@@ -666,44 +559,33 @@ def _run_tcp_check_multi(
     dport = "80" if is_http else "443"
     tmp_conf = None
     resolved_ips = dict(resolved_ips or {})
-    curl_overrides: dict[str, str] = {}
-    resolve_names: dict[str, str] = {d: d.split("/")[0] for d in domains}
     gv_fail: dict[str, dict] = {}
+    probe_requests: list[CurlProbeRequest] = []
 
     for d in domains:
-        dom = d.lower().split("/")[0]
-        if not is_http and "googlevideo" in dom:
-            from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
-            from blockchecks.checkers.youtube_url import get_fresh_url, videoplayback_host
-
-            gv_url = get_fresh_url()
-            if not gv_url:
-                gv_fail[d] = {
-                    "success": False,
-                    "http_code": 0,
-                    "latency_ms": 0,
-                    "content_len": 0,
-                    "content_ok": False,
-                    "throttled": False,
-                    "read_rate_bps": 0,
-                    "error": "gv_url_unavailable",
-                }
+        if not is_http and is_googlevideo_domain(d):
+            req, err = prepare_googlevideo_probe(d, resolved_ip=resolved_ips.get(d))
+            if err:
+                gv_fail[d] = err
                 continue
-            curl_overrides[d] = gv_url
-            rn = videoplayback_host(gv_url) or dom
-            resolve_names[d] = rn
-            if rn != dom:
-                ips, err, _ = doh_query(rn, pick_working_doh(), timeout=5.0)
-                if ips and not err:
-                    resolved_ips[d] = ips[0]
+            if req.resolved_ip:
+                resolved_ips[d] = req.resolved_ip
+            probe_requests.append(req)
+        else:
+            probe_requests.append(
+                CurlProbeRequest(
+                    domain=d,
+                    timeout=timeout,
+                    resolved_ip=resolved_ips.get(d),
+                    resolve_name=d.split("/")[0],
+                    disable_ech=disable_ech,
+                    protocol=protocol,
+                )
+            )
 
-    domains_active = [d for d in domains if d not in gv_fail]
+    domains_active = [r.domain for r in probe_requests]
     if not domains_active:
         return gv_fail
-
-    prof = curl_profile(domains_active[0], protocol=protocol, disable_ech=disable_ech)
-    headers_extra = prof.headers_extra
-    use_ech_int = 1 if prof.use_ech else 0
 
     if is_config:
         import shutil
@@ -750,158 +632,26 @@ def _run_tcp_check_multi(
         "--queue-bypass",
     )
 
-    ech_opt = CURLOPT_ECH
-    url_scheme = "http" if is_http else "https"
-    resolve_port = 80 if is_http else 443
-    domains_json = json.dumps(domains_active)
-    resolved_json = json.dumps({d: resolved_ips.get(d) for d in domains_active})
-    curl_overrides_json = json.dumps(curl_overrides)
-    resolve_names_json = json.dumps(resolve_names)
-    workers = max(1, min(int(curl_parallel), len(domains_active)))
-    repeats = max(1, int(repeats))
+    for req in probe_requests:
+        req.timeout = timeout
 
-    check_code = f"""
-import json, time, concurrent.futures
-DOMAINS = {domains_json}
-RESOLVED = {resolved_json}
-CURL_OVERRIDES = {curl_overrides_json}
-RESOLVE_NAMES = {resolve_names_json}
-def check(domain, timeout, resolved_ip):
+    payload = {
+        "mode": "batch",
+        "requests": [_probe_request_dict(r) for r in probe_requests],
+        "curl_parallel": int(curl_parallel),
+        "repeats": max(1, int(repeats)),
+    }
     try:
-        import curl_cffi
-        start = time.perf_counter()
-        headers = {{"Accept": "text/html"{headers_extra}}}
-        resolve_opt = {CURLOPT_RESOLVE}
-        curl_override = CURL_OVERRIDES.get(domain)
-        resolve_name = RESOLVE_NAMES.get(domain, domain.split("/")[0])
-        try:
-            s = curl_cffi.Session(
-                impersonate="chrome124", http_version=2,
-                headers=headers, allow_redirects=False,
-            )
-            if resolved_ip:
-                s.curl.setopt(resolve_opt, [resolve_name + ":{resolve_port}:" + resolved_ip])
-            if {use_ech_int}:
-                set = False
-                try:
-                    s.curl.setopt(curl_cffi.CurlOpt.ECH, "")
-                    set = True
-                except Exception:
-                    pass
-                if not set:
-                    try:
-                        s.curl.setopt({ech_opt}, "")
-                    except Exception as e:
-                        return {{"success": False, "http_code": 0,
-                                  "latency_ms": (time.perf_counter()-start)*1000,
-                                  "content_len": 0, "content_ok": False,
-                                  "throttled": False, "read_rate_bps": 0,
-                                  "error": "ech_setopt:" + str(e)[:100]}}
-            url = curl_override if curl_override else ("{url_scheme}://" + domain)
-            resp = s.get(url, timeout=min(timeout, 1.5))
-        except curl_cffi.CurlError as e:
-            msg = str(e)
-            return {{"success": False, "http_code": 0,
-                      "latency_ms": (time.perf_counter()-start)*1000,
-                      "content_len": 0, "content_ok": False,
-                      "throttled": False, "read_rate_bps": 0,
-                      "error": "timeout" if "Timeout" in msg else msg[:120]}}
-        elapsed = max(time.perf_counter()-start, 0.001)
-        body = resp.content[:4096]
-        clen = len(resp.content)
-        rate = clen / elapsed
-        loc = resp.headers.get("Location") or resp.headers.get("location") or ""
-        dom = resolve_name.lower().split("/")[0]
-        if resp.status_code in (301, 302, 307, 308) and loc:
-            if loc.lower().startswith(("http://", "https://")):
-                redir_host = loc.split("/")[2].split(":")[0].lower()
-                if dom not in redir_host:
-                    return {{"success": False, "http_code": resp.status_code,
-                             "latency_ms": elapsed*1000,
-                             "content_len": clen, "content_ok": False,
-                             "throttled": False, "read_rate_bps": rate,
-                             "error": "suspicious redirect " + str(resp.status_code)
-                                      + " to " + loc[:80]}}
-        if resp.status_code == 400:
-            return {{"success": False, "http_code": 400,
-                     "latency_ms": elapsed*1000,
-                     "content_len": clen, "content_ok": False,
-                     "throttled": False, "read_rate_bps": rate,
-                     "error": "http 400 (likely fake packets received)"}}
-        content_ok = clen >= 300
-        dpi_fake = any(p in body.lower() for p in (b"roskomnadzor",b"rkn.gov.ru",
-                    b"blockpage",b"utmblock"))
-        if dpi_fake:
-            content_ok = False
-        small_codes = (101, 204, 301, 302, 303, 304, 307, 308)
-        small_body_ok = (not dpi_fake) and (
-            resp.status_code in small_codes
-            or (resp.status_code == 206 and clen < 300)
+        raw = _invoke_curl_probe_worker(
+            ns_name, py, payload, timeout * len(domains_active) + 5
         )
-        status_ok = (200 <= resp.status_code < 400)
-        throttled = False
-        success = False
-        if status_ok and (content_ok or small_body_ok) and not dpi_fake:
-            if rate < {MIN_READ_RATE_BPS} and not small_body_ok:
-                success = False
-            elif rate < {THROTTLED_MAX_BPS} and not small_body_ok and clen >= 300:
-                success = True
-                throttled = True
-            else:
-                success = True
-        return {{"success": success, "http_code": resp.status_code,
-                 "latency_ms": elapsed*1000,
-                 "content_len": clen, "content_ok": content_ok,
-                 "throttled": throttled, "read_rate_bps": rate, "error": None}}
-    except Exception as e:
-        return {{"success": False, "http_code": 0, "latency_ms": 0,
-                 "content_len": 0, "content_ok": False,
-                 "throttled": False, "read_rate_bps": 0, "error": str(e)[:120]}}
-def run_one(domain):
-    last = None
-    rip = RESOLVED.get(domain)
-    for _ in range({repeats}):
-        last = check(domain, {timeout}, rip)
-        if last.get("success"):
-            return last
-    return last
-out = {{}}
-with concurrent.futures.ThreadPoolExecutor(max_workers={workers}) as ex:
-    futs = {{ex.submit(run_one, d): d for d in DOMAINS}}
-    for fut in concurrent.futures.as_completed(futs):
-        d = futs[fut]
-        out[d] = fut.result()
-print(json.dumps(out))
-"""
-    try:
-        r = sp.run(
-            ["sudo", "ip", "netns", "exec", ns_name, py, "-c", check_code],
-            capture_output=True,
-            text=True,
-            timeout=timeout * len(domains_active) + 15,
-        )
-        try:
-            raw = json.loads(r.stdout)
-            settle_ms = round(settle_elapsed * 1000, 1)
-            out = {
-                d: {**raw.get(d, {}), "settle_ms": settle_ms}
-                for d in domains_active
-            }
-            out.update(gv_fail)
-            return out
-        except json.JSONDecodeError:
-            err = {
-                "success": False,
-                "http_code": 0,
-                "latency_ms": 0,
-                "content_len": 0,
-                "content_ok": False,
-                "throttled": False,
-                "read_rate_bps": 0,
-                "error": f"parse: {r.stdout[:100]}",
-                "settle_ms": round(settle_elapsed * 1000, 1),
-            }
-            return {d: dict(err) for d in domains_active} | gv_fail
+        settle_ms = round(settle_elapsed * 1000, 1)
+        out = {
+            d: {**raw.get(d, {}), "settle_ms": settle_ms}
+            for d in domains_active
+        }
+        out.update(gv_fail)
+        return out
     finally:
         if tmp_conf:
             try:
