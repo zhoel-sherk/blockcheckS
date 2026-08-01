@@ -21,6 +21,7 @@ from blockchecks.engine.config import (
     UNBLOCKED_DOM,
 )
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
+from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.preflight import PreflightOptions, run_preflight
 from blockchecks.engine.strategy_loader import StrategyLoader
@@ -28,6 +29,8 @@ from blockchecks.engine.strategy_loader import StrategyLoader
 CYAN = Fore.CYAN
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
+
+STANDARD_TCP_SOURCES = ("standard", "fake", "hostfake", "faked", "fake_multi", "fake_faked")
 YELLOW = Fore.YELLOW
 RESET = Style.RESET_ALL
 
@@ -248,6 +251,7 @@ async def cmd_pair(args):
         run_set: set = set()
         tcp_items = []
         udp_items = []
+        tcp_sources_list: list[str] = []
 
         if getattr(args, "config", None):
             tcp_items = [
@@ -277,6 +281,7 @@ async def cmd_pair(args):
                 udp_src = ""
             tcp_sources = [s for s in tcp_src.split(",") if s]
             udp_sources = [s for s in udp_src.split(",") if s]
+            tcp_sources_list = tcp_sources
 
             print(f"\n  {CYAN}Generating strategies...{RESET}")
             if not tcp_items:
@@ -369,12 +374,28 @@ async def cmd_pair(args):
         all_tcp_results = []
         pairs = []
         tcp_passed = 0
+        scan_level = getattr(args, "scan_level", "fast")
+        use_family_gates = (
+            scan_level != "full"
+            and not getattr(args, "no_family_gates", False)
+            and any(s in STANDARD_TCP_SOURCES for s in tcp_sources_list)
+        )
 
         for domain in domains_to_test:
             if stop_event.is_set():
                 return 130
             print(f"\n  {CYAN}[TCP Phase]{RESET} {domain}: {len(tcp_items)} strategies...")
-            tcp_results = await runner.test_batch_tcp(tcp_items, domain, args.timeout)
+            if use_family_gates:
+                tcp_results, _, _, _ = await run_tcp_with_family_gates(
+                    runner,
+                    tcp_items,
+                    domain,
+                    scan_level=scan_level,
+                    timeout=args.timeout,
+                    stop_event=stop_event,
+                )
+            else:
+                tcp_results = await runner.test_batch_tcp(tcp_items, domain, args.timeout)
             all_tcp_results.extend(tcp_results)
             domain_passed = sum(1 for r in tcp_results if r.success)
             tcp_passed += domain_passed

@@ -29,7 +29,7 @@ Lightspeed DPI strategy tester для **zapret2/nfqws2**:
 | **6** | Export keenetic + raw (`bs full` / `bc-nfconf`) | ✅ | P2 | BC2-7 COMMON intersection ✅ |
 | **7** | QUIC / HTTP3 first-class | 🔄 stub | P1 | BC2-10, `ipfrag_udp`/`ipfrag_tcp` |
 | **8** | HTTP :80 families | 📋 | P2 | BC2-9, M6 HTTP+TLS dual-fake |
-| **9** | Secure DNS + blockcheck2 preflight | 🔄 partial | **P0** | SD ✅; BC2-1..5,11 ✅; BC2-4,7,8,12 ✅; BC2-6 |
+| **9** | Secure DNS + blockcheck2 preflight | ✅ | **P0** | SD ✅; BC2-1..8,11,12 ✅ |
 | **10** | Matrix coverage & blobs | 🔄 | P1 | M1–M10, ~80% zapret2 / ~95% flowseal |
 | **11** | Speed / throughput | 🔄 | P1 | A1–A10, B1–B11 |
 | **12** | Smart scan (ML / hierarchy / AQ) | 📋 | P3 | ML1–5, H1–10, AQ1–8 |
@@ -233,7 +233,7 @@ check_system → check_already → check_prerequisites
 - [x] **BC2-3** port block probe на все resolved IP
 - [x] **BC2-4** `--repeats N` + `--parallel-repeats`
 - [x] **BC2-5** prolog curl без nfqws2; skip domain если уже OK (`--force` override)
-- [ ] **BC2-6** полная цепочка `need_*` между standard families
+- [x] **BC2-6** полная цепочка `need_*` между standard families
 - [x] **BC2-7** `bs full` export: COMMON strategies (intersection all domains)
 - [x] **BC2-8** wssize retry в tls12 checker
 - [ ] **BC2-9** HTTP :80 standard generator + фаза в `bs full` *(Phase 8)*
