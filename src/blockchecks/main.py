@@ -612,12 +612,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--parallel", type=int, default=4)
     p.add_argument("--timeout", type=float, default=5.0)
     p.add_argument("--udp-timeout", type=float, default=3.0)
-    p.add_argument(
-        "--quic-timeout",
-        type=float,
-        default=8.0,
-        help="HTTP/3 curl timeout per strategy (BC2-10, default 8s)",
-    )
     p.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"])
     p.add_argument("--resume", action="store_true", help="Skip strategy x domain already in DB")
     p.add_argument("--tcp-only", action="store_true")
