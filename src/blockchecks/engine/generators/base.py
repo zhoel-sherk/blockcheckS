@@ -11,6 +11,7 @@ class StrategyItem:
     label: str
     strategy: str
     is_config: bool = False
+    protocol: str = "tls12"  # tls12 | tls13 | http
 
 
 @dataclass

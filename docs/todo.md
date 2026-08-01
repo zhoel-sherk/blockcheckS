@@ -28,7 +28,7 @@ Lightspeed DPI strategy tester для **zapret2/nfqws2**:
 | **5** | GP / dpi-tester bridge | 📋 partial | P1 | A5 provider_summary, B5 hybrid, GP import |
 | **6** | Export keenetic + raw (`bs full` / `bc-nfconf`) | ✅ | P2 | BC2-7 COMMON intersection ✅ |
 | **7** | QUIC / HTTP3 first-class | 🔄 stub | P1 | BC2-10, `ipfrag_udp`/`ipfrag_tcp` |
-| **8** | HTTP :80 families | 📋 | P2 | BC2-9, M6 HTTP+TLS dual-fake |
+| **8** | HTTP :80 families | 🔄 partial | P2 | BC2-9 ✅; M6 HTTP+TLS dual-fake |
 | **9** | Secure DNS + blockcheck2 preflight | ✅ | **P0** | SD ✅; BC2-1..8,11,12 ✅ |
 | **10** | Matrix coverage & blobs | 🔄 | P1 | M1–M10, ~80% zapret2 / ~95% flowseal |
 | **11** | Speed / throughput | 🔄 | P1 | A1–A10, B1–B11 |
@@ -236,7 +236,7 @@ check_system → check_already → check_prerequisites
 - [x] **BC2-6** полная цепочка `need_*` между standard families
 - [x] **BC2-7** `bs full` export: COMMON strategies (intersection all domains)
 - [x] **BC2-8** wssize retry в tls12 checker
-- [ ] **BC2-9** HTTP :80 standard generator + фаза в `bs full` *(Phase 8)*
+- [x] **BC2-9** HTTP :80 standard generator + фаза в `bs full`
 - [ ] **BC2-10** QUIC: curl HTTP/3 + `--quic-timeout` *(Phase 7)*
 - [x] **BC2-11** detect running nfqws2 на host, warn/abort
 - [x] **BC2-12** redirect-to-blockpage detector (curl code 254 pattern)
@@ -259,7 +259,7 @@ check_system → check_already → check_prerequisites
 Сейчас: `CustomListGenerator` читает `list_http.txt`; только в `bs tcp --protocol http`;
 нет standard HTTP family; `bs full` — только tls12/tls13.
 
-- [ ] **BC2-9** HTTP :80 standard generator + фаза в `bs full`
+- [x] **BC2-9** HTTP :80 standard generator + фаза в `bs full`
 - [ ] **M6** HTTP+TLS dual-fake generator (`fake_default_http` + TLS blob) *(Phase 10)*
 - [ ] **A10** `--http-off` — зеркало GP `ENABLE_HTTP` *(Phase 11)*
 
@@ -443,7 +443,7 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - [ ] **B1** settle 2s → readiness poll (100–300ms); согласовать с A9
 - [ ] **B2** multi-domain fan-out — 1 nfqws2, `asyncio.gather` curl, `--curl-parallel N`
 - [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
-- [ ] **B4** runtime family early-exit в `bs full` на первом PASS *(= BC2-6 частично)*
+- [x] **B4** runtime family early-exit в `bs full` на первом PASS *(= BC2-6)*
 - [ ] **B5** hybrid: BS shortlist export → GP multi-domain на роутере
 - [ ] **B6** blockcheckw (Rust vmap) — fast scan reference, не drop-in voice/pair
 - [ ] **B7** nftables vmap POC — prerequisite parallel > 4

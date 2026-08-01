@@ -186,9 +186,10 @@ class StateDB:
         resolved_ip: str = "",
         dns_verdict: str = "",
         doh_server: str = "",
+        proto: str = "tcp",
     ) -> None:
         async with aiosqlite.connect(self.db_path) as db:
-            sid = await self.ensure_strategy(strategy, "tcp", config_path or strategy, db=db)
+            sid = await self.ensure_strategy(strategy, proto, config_path or strategy, db=db)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
                 """INSERT INTO tcp_results
@@ -334,15 +335,15 @@ class StateDB:
             cols = ["tcp", "udp", "tcp_ms", "gateway_ms", "udp_ms"]
             return [dict(zip(cols, r)) for r in await rows.fetchall()]
 
-    async def has_tcp_result(self, strategy: str, domain: str) -> bool:
+    async def has_tcp_result(self, strategy: str, domain: str, proto: str = "tcp") -> bool:
         """True if any tcp_results row exists for strategy×domain (resume skip)."""
         async with aiosqlite.connect(self.db_path) as db:
             row = await db.execute(
                 """SELECT 1 FROM tcp_results t
                    JOIN strategies s ON t.strategy_id = s.id
-                   WHERE s.name=? AND s.proto='tcp' AND t.domain=?
+                   WHERE s.name=? AND s.proto=? AND t.domain=?
                    LIMIT 1""",
-                (strategy, domain),
+                (strategy, proto, domain),
             )
             return await row.fetchone() is not None
 

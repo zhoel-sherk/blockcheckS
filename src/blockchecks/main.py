@@ -111,22 +111,26 @@ async def run_full(args) -> int:
     tcp_sources = [s for s in args.tcp_sources.split(",") if s]
     udp_sources = [s for s in args.udp_sources.split(",") if s]
     quic_sources = [s for s in args.quic_sources.split(",") if s]
+    http_sources = [s for s in getattr(args, "http_sources", "custom,standard_http").split(",") if s]
 
     max_n = _cap(args.max)
     scan_level = args.scan_level
     parallel = args.parallel
+    steps = 7 if not getattr(args, "no_http", False) else 6
 
     print(f"\n  {CYAN}blockcheckS — FULL run{RESET}")
     print(f"  Domains:    {len(domains)} from {domains_file}")
     print(f"  Primary:    {primary}")
     print(f"  TCP src:    {tcp_sources}  level={scan_level}  max={args.max or 'uncapped'}")
+    if not getattr(args, "no_http", False):
+        print(f"  HTTP src:   {http_sources}")
     print(f"  UDP src:    {udp_sources}")
     print(f"  QUIC src:   {quic_sources}")
     print(f"  Parallel:   {parallel}  resume={bool(args.resume)}")
     print(f"  DB:         {args.db}")
 
     gen = MatrixGenerator()
-    print(f"\n  {CYAN}[1/6] Generating strategies...{RESET}")
+    print(f"\n  {CYAN}[1/{steps}] Generating strategies...{RESET}")
     tcp_items = await gen.generate_tcp(
         sources=tcp_sources,
         domain=primary,
@@ -154,7 +158,20 @@ async def run_full(args) -> int:
             state_db=db,
         )
 
-    print(f"  TCP={len(tcp_items)}  UDP={len(udp_items)}  QUIC={len(quic_items)}")
+    http_items: list[StrategyItem] = []
+    if not getattr(args, "no_http", False):
+        http_items = await gen.generate_http(
+            sources=http_sources,
+            domain=primary,
+            scan_level=scan_level,
+            max_count=max(30, max_n // 20) if max_n else 50,
+            state_db=db,
+        )
+
+    print(
+        f"  TCP={len(tcp_items)}  HTTP={len(http_items)}  "
+        f"UDP={len(udp_items)}  QUIC={len(quic_items)}"
+    )
     if not tcp_items:
         print(f"{RED}ERROR: no TCP strategies generated{RESET}")
         return 1
@@ -204,7 +221,7 @@ async def run_full(args) -> int:
     await runner.start()
     try:
         # ── TCP × coverage ──
-        print(f"\n  {CYAN}[2/6] TCP × coverage ({len(domains)} domains)...{RESET}")
+        print(f"\n  {CYAN}[2/{steps}] TCP × coverage ({len(domains)} domains)...{RESET}")
         done = 0
         skipped = 0
         passed = 0
@@ -284,9 +301,48 @@ async def run_full(args) -> int:
             f"{done - skipped - passed} FAIL/other{RESET}"
         )
 
+        # ── HTTP :80 ──
+        if http_items and not getattr(args, "no_http", False):
+            print(f"\n  {CYAN}[3/{steps}] HTTP :80 ({len(http_items)} strategies)...{RESET}")
+            http_done = http_passed = http_skipped = 0
+            sem_http = asyncio.Semaphore(parallel)
+
+            async def _one_http(item: StrategyItem, domain: str):
+                nonlocal http_done, http_skipped, http_passed
+                if stop.is_set():
+                    return
+                if args.resume and await db.has_tcp_result(item.label, domain, proto="http"):
+                    http_skipped += 1
+                    http_done += 1
+                    return
+                async with sem_http:
+                    if stop.is_set():
+                        return
+                    r = await runner.test_tcp(item, domain, timeout=args.timeout)
+                    http_done += 1
+                    if r.success:
+                        http_passed += 1
+
+            http_tasks = [_one_http(item, d) for item in http_items for d in domains]
+            for i in range(0, len(http_tasks), 200):
+                if stop.is_set():
+                    break
+                await asyncio.gather(*http_tasks[i : i + 200])
+            print(
+                f"  {GREEN}HTTP done: {http_passed} PASS, {http_skipped} skipped, "
+                f"{http_done - http_skipped - http_passed} FAIL/other{RESET}"
+            )
+        elif not getattr(args, "no_http", False):
+            print(f"\n  {CYAN}[3/{steps}] HTTP skipped (no strategies){RESET}")
+
+        voice_step = 4 if steps == 7 else 3
+        quic_step = 5 if steps == 7 else 4
+        pair_step = 6 if steps == 7 else 5
+        export_step = 7 if steps == 7 else 6
+
         voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
         if not args.tcp_only and not args.no_voice:
-            print(f"\n  {CYAN}[3/6] Voice discover-dns...{RESET}")
+            print(f"\n  {CYAN}[{voice_step}/{steps}] Voice discover-dns...{RESET}")
             try:
                 from blockchecks.checkers.voice_dns import discover_dns_alive
 
@@ -306,11 +362,11 @@ async def run_full(args) -> int:
             except Exception as e:
                 print(f"  {YELLOW}discover-dns error: {e}{RESET}")
         else:
-            print(f"\n  {CYAN}[3/6] Voice discover skipped{RESET}")
+            print(f"\n  {CYAN}[{voice_step}/{steps}] Voice discover skipped{RESET}")
 
         # ── QUIC (best-effort UDP/443) ──
         if quic_items and not args.tcp_only and not args.no_quic:
-            print(f"\n  {CYAN}[4/6] QUIC strategies ({len(quic_items)})...{RESET}")
+            print(f"\n  {CYAN}[{quic_step}/{steps}] QUIC strategies ({len(quic_items)})...{RESET}")
             quic_pass = 0
             for item in quic_items:
                 if stop.is_set():
@@ -321,11 +377,11 @@ async def run_full(args) -> int:
                     quic_pass += 1
             print(f"  QUIC PASS={quic_pass}/{len(quic_items)} (export uses defaults if 0)")
         else:
-            print(f"\n  {CYAN}[4/6] QUIC skipped{RESET}")
+            print(f"\n  {CYAN}[{quic_step}/{steps}] QUIC skipped{RESET}")
 
         # ── Pairs ──
         if not args.tcp_only and udp_items:
-            print(f"\n  {CYAN}[5/6] Pair matrix...{RESET}")
+            print(f"\n  {CYAN}[{pair_step}/{steps}] Pair matrix...{RESET}")
             working_names = await db.get_working_tcp(primary)
             # Prefer coverage winners
             covered = await db.get_best_by_coverage(limit=args.pair_max)
@@ -358,10 +414,10 @@ async def run_full(args) -> int:
             else:
                 print(f"  {YELLOW}No working TCP for pairs{RESET}")
         else:
-            print(f"\n  {CYAN}[5/6] Pairs skipped{RESET}")
+            print(f"\n  {CYAN}[{pair_step}/{steps}] Pairs skipped{RESET}")
 
         # ── Export ──
-        print(f"\n  {CYAN}[6/6] Export configs...{RESET}")
+        print(f"\n  {CYAN}[{export_step}/{steps}] Export configs...{RESET}")
         result = await export_configs(
             db_path=args.db,
             domain=primary,
@@ -395,6 +451,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--tcp-sources", default="standard,custom,configs")
     p.add_argument("--udp-sources", default="custom,standard_udp")
     p.add_argument("--quic-sources", default="standard_quic")
+    p.add_argument("--http-sources", default="custom,standard_http")
+    p.add_argument("--no-http", action="store_true", help="Skip HTTP :80 strategy phase")
     p.add_argument("--scan-level", default="full", choices=["single", "fast", "full"])
     p.add_argument("--max", type=int, default=0, help="Cap strategies (0=uncapped)")
     p.add_argument("--parallel", type=int, default=4)

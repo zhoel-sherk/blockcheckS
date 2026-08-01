@@ -305,6 +305,7 @@ TCP_FAMILIES = [
     "multi_fake",
     "fake_hostfake",
 ]
+HTTP_FAMILIES = ["http_simple", "http_fake"]
 UDP_VOICE_FAMILIES = ["udp_discord"]
 UDP_QUIC_FAMILIES = ["udp_quic", "udp_game"]
 
@@ -394,6 +395,19 @@ class StandardGenerator(StrategyGenerator):
             "repeats": [10, 12, 14],
             "out_range": [None, "n1-<n3", "n1-<n4", "n1-<n5"],
         },
+        # 25-fake.sh pktws_check_http — port 80, payload=http_req
+        "http_simple": {
+            "variants": [
+                "http_hostcase",
+                "http_methodeol",
+                "http_hostcase:spell=hoSt",
+            ],
+        },
+        "http_fake": {
+            "blobs": ["fake_default_http", "0x00000000"],
+            "repeats": FAST_REPEATS[:4],
+            "foolings": FAST_FOOLINGS_TCP[:3],
+        },
     }
 
     def __init__(self, strategy_types: list[str] | None = None):
@@ -427,8 +441,10 @@ class StandardGenerator(StrategyGenerator):
             types = [t for t in types if t in UDP_VOICE_FAMILIES]
         elif protocol in ("quic",):
             types = [t for t in types if t in UDP_QUIC_FAMILIES]
+        elif protocol == "http":
+            types = [t for t in types if t in HTTP_FAMILIES]
         else:
-            # tls12/tls13/http — TCP only
+            # tls12/tls13 — TCP TLS only
             types = [t for t in types if t in TCP_FAMILIES]
 
         # Expand axes for full scan
@@ -646,13 +662,38 @@ class StandardGenerator(StrategyGenerator):
                             if scan_level == "single":
                                 return items
 
+        elif stype == "http_simple":
+            for variant in family["variants"]:
+                label = f"std_http_{variant.replace(':', '_')}"
+                self._add(items, seen, label, variant, protocol="http")
+                if scan_level == "single":
+                    return items
+
+        elif stype == "http_fake":
+            for blob_name in family["blobs"]:
+                blob = f":blob={blob_name}"
+                for repeats in family["repeats"]:
+                    for fool in family["foolings"]:
+                        fool_str = f":{fool}" if fool else ""
+                        strat = f"fake{blob}:repeats={repeats}{fool_str}"
+                        label = f"std_http_fake_{blob_name}_r{repeats}_{fool or 'nofool'}"
+                        self._add(items, seen, label, strat, protocol="http")
+                        if scan_level == "single":
+                            return items
+
         return items
 
     @staticmethod
-    def _add(items: list, seen: set, label: str, strategy: str) -> None:
+    def _add(
+        items: list,
+        seen: set,
+        label: str,
+        strategy: str,
+        protocol: str = "tls12",
+    ) -> None:
         """Dedup by strategy string."""
         key = strategy.strip()
         if key not in seen:
             seen.add(key)
-            items.append(StrategyItem(label=label, strategy=strategy))
+            items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
 

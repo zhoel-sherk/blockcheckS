@@ -5,6 +5,7 @@ Facade over engine.generators.*. See docs/architecture.md.
 
 from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.generators import (
+    HTTP_FAMILIES,
     TCP_FAMILIES,
     UDP_QUIC_FAMILIES,
     UDP_VOICE_FAMILIES,
@@ -33,6 +34,7 @@ class MatrixGenerator:
         "standard": lambda: StandardGenerator(strategy_types=list(TCP_FAMILIES)),
         "standard_udp": lambda: StandardGenerator(strategy_types=list(UDP_VOICE_FAMILIES)),
         "standard_quic": lambda: StandardGenerator(strategy_types=list(UDP_QUIC_FAMILIES)),
+        "standard_http": lambda: StandardGenerator(strategy_types=list(HTTP_FAMILIES)),
         "configs": ConfigFileGenerator,
         "fake": FakeTcpGenerator,
         "faked": FakedTcpGenerator,
@@ -96,6 +98,28 @@ class MatrixGenerator:
             seen.add(item.strategy)
             deduped.append(item)
         return deduped[:max_count]
+
+    async def generate_http(
+        self,
+        sources: list[str] | None = None,
+        domain: str = "discord.com",
+        scan_level: str = "fast",
+        max_count: int = 50,
+        state_db: StateDB = None,
+        user_matrix: str = "",
+        run_set: set = None,
+    ) -> list[StrategyItem]:
+        """Generate HTTP :80 strategies (BC2-9)."""
+        return await self.generate_tcp(
+            sources=sources or ["custom", "standard_http"],
+            domain=domain,
+            scan_level=scan_level,
+            max_count=max_count,
+            state_db=state_db,
+            protocol="http",
+            user_matrix=user_matrix,
+            run_set=run_set,
+        )
 
     async def generate_udp(
         self,

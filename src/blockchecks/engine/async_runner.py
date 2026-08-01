@@ -191,6 +191,48 @@ def _split_cli_args(raw_line: str) -> list[str]:
 # ── In-namespace test workers (sync, called via asyncio.to_thread) ──
 
 
+def _build_inline_nfqws_lines(
+    strategy: str, protocol: str, extra_lua_desync: str = ""
+) -> list[str]:
+    """Build nfqws2 config lines for inline lua-desync strategy."""
+    is_http = protocol == "http"
+    if is_http:
+        config_lines = [
+            "--qnum=200",
+            "--filter-tcp=80",
+            "--filter-l3=ipv4",
+            "--filter-l7=http",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+            "--payload=http_req",
+        ]
+    else:
+        config_lines = [
+            "--qnum=200",
+            "--filter-tcp=443",
+            "--filter-l3=ipv4",
+            "--filter-l7=tls",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+            "--payload=tls_client_hello",
+        ]
+    for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
+        if os.path.exists(lua):
+            config_lines.append(f"--lua-init=@{lua}")
+    _add_blobs_from_strategy(config_lines, strategy)
+    for raw_line in strategy.split("\n"):
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        if raw_line.startswith("--"):
+            config_lines.extend(_split_cli_args(raw_line))
+        else:
+            config_lines.append(f"--lua-desync={raw_line}")
+    if extra_lua_desync:
+        config_lines.append(f"--lua-desync={extra_lua_desync}")
+    return config_lines
+
+
 def _run_tcp_check(
     ns_name: str,
     strategy: str,
@@ -203,12 +245,15 @@ def _run_tcp_check(
     repeats: int = 1,
     parallel_repeats: bool = False,
     extra_lua_desync: str = "",
+    protocol: str = "tls12",
 ) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
 
     py = python_bin or PYTHON_BIN
-    is_gv = "googlevideo" in domain.lower()
-    use_ech = disable_ech or is_gv
+    is_http = protocol == "http"
+    is_gv = not is_http and "googlevideo" in domain.lower()
+    use_ech = not is_http and (disable_ech or is_gv)
+    dport = "80" if is_http else "443"
     tmp_conf = None
 
     # Setup nfqws2
@@ -226,29 +271,7 @@ def _run_tcp_check(
                 f.write(f"\n--lua-desync={extra_lua_desync}\n")
         _nfqws2_daemon(ns_name, tmp_conf)
     else:
-        config_lines = [
-            "--qnum=200",
-            "--filter-tcp=443",
-            "--filter-l3=ipv4",
-            "--filter-l7=tls",
-            "--ipcache-lifetime=0",
-            "--bind-fix4",
-            "--payload=tls_client_hello",
-        ]
-        for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
-            if os.path.exists(lua):
-                config_lines.append(f"--lua-init=@{lua}")
-        _add_blobs_from_strategy(config_lines, strategy)
-        for raw_line in strategy.split("\n"):
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            if raw_line.startswith("--"):
-                config_lines.extend(_split_cli_args(raw_line))
-            else:
-                config_lines.append(f"--lua-desync={raw_line}")
-        if extra_lua_desync:
-            config_lines.append(f"--lua-desync={extra_lua_desync}")
+        config_lines = _build_inline_nfqws_lines(strategy, protocol, extra_lua_desync)
         import tempfile as _tf
 
         _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_", suffix=".conf")
@@ -268,7 +291,7 @@ def _run_tcp_check(
         "-p",
         "tcp",
         "--dport",
-        "443",
+        dport,
         "-j",
         "NFQUEUE",
         "--queue-num",
@@ -285,6 +308,8 @@ def _run_tcp_check(
     resolved_ip_lit = repr(resolved_ip)
     repeats = max(1, int(repeats))
     parallel_int = 1 if parallel_repeats and repeats > 1 else 0
+    url_scheme = "http" if is_http else "https"
+    resolve_port = 80 if is_http else 443
 
     check_code = f"""
 import json, time
@@ -300,7 +325,7 @@ def check(domain, timeout, resolved_ip):
                 headers=headers, allow_redirects=False,
             )
             if resolved_ip:
-                s.curl.setopt(resolve_opt, [domain + ":443:" + resolved_ip])
+                s.curl.setopt(resolve_opt, [domain + ":{resolve_port}:" + resolved_ip])
             if {use_ech_int}:
                 set = False
                 try:
@@ -317,7 +342,7 @@ def check(domain, timeout, resolved_ip):
                                   "content_len": 0, "content_ok": False,
                                   "throttled": False, "read_rate_bps": 0,
                                   "error": "ech_setopt:" + str(e)[:100]}}
-            resp = s.get("https://" + domain, timeout=min(timeout, 1.5))
+            resp = s.get("{url_scheme}://" + domain, timeout=min(timeout, 1.5))
         except curl_cffi.CurlError as e:
             msg = str(e)
             return {{"success": False, "http_code": 0,
@@ -611,6 +636,8 @@ class AsyncTestRunner:
                     if audit:
                         dns_verdict = audit.verdict
                         doh_server = audit.doh_server or self.dns_cache.doh_server
+                protocol = getattr(item, "protocol", "tls12") or "tls12"
+                proto_db = "http" if protocol == "http" else "tcp"
                 data = await asyncio.to_thread(
                     _run_tcp_check,
                     ns_name,
@@ -623,10 +650,13 @@ class AsyncTestRunner:
                     resolved_ip,
                     self.repeats,
                     self.parallel_repeats,
+                    "",
+                    protocol,
                 )
                 if (
                     not data.get("success")
                     and self.try_wssize
+                    and protocol == "tls12"
                     and "wssize" not in item.strategy
                 ):
                     data = await asyncio.to_thread(
@@ -642,6 +672,7 @@ class AsyncTestRunner:
                         self.repeats,
                         self.parallel_repeats,
                         "wssize:wsize=1:scale=6",
+                        protocol,
                     )
                 result.success = data.get("success", False)
                 result.http_code = data.get("http_code", 0)
@@ -672,6 +703,7 @@ class AsyncTestRunner:
                         resolved_ip=resolved_ip or "",
                         dns_verdict=dns_verdict,
                         doh_server=doh_server,
+                        proto=proto_db,
                     )
             except Exception as e:
                 result.error = str(e)[:200]

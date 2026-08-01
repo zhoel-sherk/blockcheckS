@@ -8,6 +8,7 @@ from blockchecks.engine.generators.custom import (
 )
 from blockchecks.engine.generators.flowseal import FlowsealGenerator
 from blockchecks.engine.generators.standard import (
+    HTTP_FAMILIES,
     TCP_FAMILIES,
     UDP_QUIC_FAMILIES,
     UDP_VOICE_FAMILIES,
@@ -33,6 +34,7 @@ __all__ = [
     "FakeMultiGenerator",
     "FakeSplitComboGenerator",
     "StandardGenerator",
+    "HTTP_FAMILIES",
     "TCP_FAMILIES",
     "UDP_VOICE_FAMILIES",
     "UDP_QUIC_FAMILIES",
