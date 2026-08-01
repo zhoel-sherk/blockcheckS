@@ -38,6 +38,16 @@ def add_curl_repeats_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_domain_filter_args(parser: argparse.ArgumentParser) -> None:
+    """Phase 11 A1: denylist filter for domain presets."""
+    g = parser.add_argument_group("domain filter")
+    g.add_argument(
+        "--allow-unsafe-domains",
+        action="store_true",
+        help="Do not apply presets/domains/denylist.txt to --preset loads",
+    )
+
+
 def add_family_gate_args(parser: argparse.ArgumentParser) -> None:
     """BC2-6: blockcheck2 need_* family gating."""
     g = parser.add_argument_group("family gates")
@@ -191,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_secure_dns_args(scan)
     add_curl_repeats_args(scan)
     add_family_gate_args(scan)
+    add_domain_filter_args(scan)
     scan.add_argument("--tcp-sources", default="")
     scan.add_argument("--ip", default="35.217.5.42", help=argparse.SUPPRESS)
     scan.add_argument("--port", type=int, default=50006, help=argparse.SUPPRESS)
@@ -281,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_secure_dns_args(pair)
     add_curl_repeats_args(pair)
     add_family_gate_args(pair)
+    add_domain_filter_args(pair)
     pair.add_argument("--ns")
     pair.add_argument(
         "--nfqws2-debug",

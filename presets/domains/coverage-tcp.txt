@@ -1,0 +1,22 @@
+# Lean TCP coverage preset (~15 domains) — default for bs full (Phase 11 A1c)
+# One representative per blocking policy; static YouTube CDN excluded (see denylist.txt).
+# Full 40-domain list: coverage.txt (use --domains-file or --allow-unsafe-domains)
+
+# YouTube / Google (web + app API — orthogonal probes)
+youtube.com
+youtu.be
+googleapis.com
+youtubei.googleapis.com
+play.google.com
+
+# Discord (core + CDN)
+discord.com
+discord.gg
+discordapp.com
+discordapp.net
+discordcdn.com
+
+# Diagnostics / reference
+speedtest.net
+cloudflare-ech.com
+signal.org

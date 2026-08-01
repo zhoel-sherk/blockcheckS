@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import signal
 import sys
 import time
@@ -19,11 +18,16 @@ from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
     DEFAULT_VOICE_IP,
     DEFAULT_VOICE_PORT,
-    PROJECT_DIR,
     SECURE_DNS_DEFAULT,
     UNBLOCKED_DOM,
 )
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
+from blockchecks.engine.domain_loader import (
+    DEFAULT_DOMAINS_FILE,
+    format_skip_summary,
+    load_domains,
+    warn_zero_pass_domains,
+)
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.preflight import PreflightOptions, run_preflight
@@ -37,16 +41,6 @@ RED = Fore.RED + Style.BRIGHT
 RESET = Style.RESET_ALL
 
 
-def _load_domains(path: str) -> list[str]:
-    out = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                out.append(line)
-    return out
-
-
 def _cap(n: int) -> int:
     """0 / negative → uncapped sentinel for MatrixGenerator slicing."""
     return 999_999 if n <= 0 else n
@@ -56,16 +50,24 @@ async def run_full(args) -> int:
     db = StateDB(args.db)
     await db.init()
 
-    domains_file = args.domains_file
-    if not domains_file:
-        domains_file = os.path.join(PROJECT_DIR, "presets", "domains", "coverage.txt")
-    if not os.path.exists(domains_file):
+    domains_file = args.domains_file or DEFAULT_DOMAINS_FILE
+    try:
+        loaded = load_domains(
+            domains_file,
+            allow_unsafe=getattr(args, "allow_unsafe_domains", False),
+        )
+    except FileNotFoundError:
         print(f"{RED}ERROR: domains file not found: {domains_file}{RESET}")
         return 1
-    domains = _load_domains(domains_file)
+    domains = loaded.domains
     if not domains:
-        print(f"{RED}ERROR: empty domains file{RESET}")
+        print(
+            f"{RED}ERROR: no domains left after denylist filter "
+            f"(use --allow-unsafe-domains){RESET}"
+        )
         return 1
+    if loaded.skipped:
+        print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
 
     secure_dns = SECURE_DNS_DEFAULT and not getattr(args, "no_secure_dns", False)
     dns_cache, dns_audits, dns_rc = prepare_dns_for_run(
@@ -306,6 +308,16 @@ async def run_full(args) -> int:
             f"  {GREEN}TCP done: {passed} PASS, {skipped} skipped, "
             f"{done - skipped - passed} FAIL/other{RESET}"
         )
+        zero_warn = getattr(args, "zero_pass_warn", 10)
+        if zero_warn > 0:
+            zero_domains = await warn_zero_pass_domains(
+                db, domains, min_results=zero_warn, protos=("tcp",)
+            )
+            if zero_domains:
+                print(
+                    f"  {YELLOW}WARN: 0% PASS after {zero_warn}+ runs: "
+                    f"{', '.join(zero_domains)}{RESET}"
+                )
 
         # ── HTTP :80 ──
         if http_items and not getattr(args, "no_http", False):
@@ -481,7 +493,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-d", "--domain", default=None, help="Primary domain (default: first in domains file)"
     )
-    p.add_argument("--domains-file", default=None, help="Default: presets/domains/coverage.txt")
+    p.add_argument(
+        "--domains-file",
+        default=None,
+        help="Default: presets/domains/coverage-tcp.txt (lean)",
+    )
+    g = p.add_argument_group("domain filter")
+    g.add_argument(
+        "--allow-unsafe-domains",
+        action="store_true",
+        help="Do not apply presets/domains/denylist.txt",
+    )
+    g.add_argument(
+        "--zero-pass-warn",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Warn if domain has 0%% PASS after N DB results (0=off, default 10)",
+    )
     p.add_argument("--tcp-sources", default="standard,custom,configs")
     p.add_argument("--udp-sources", default="custom,standard_udp")
     p.add_argument("--quic-sources", default="standard_quic")

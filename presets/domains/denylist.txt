@@ -1,0 +1,44 @@
+# blockcheckS domain denylist — excluded from default mass scans (Phase 11 A1)
+# Applied unless --allow-unsafe-domains. Format: domain  # category
+#
+# Static YouTube CDN: duplicate SNI signal vs youtube.com (apex TLS ≠ real CDN paths).
+# See docs/todo.md Phase 11 — subagent research 2026-08.
+
+# Wrong apex probe — needs GV-1 videoplayback URL
+googlevideo.com  # videoplayback apex
+
+# Voice/media CDN — 0% on TLS apex (UDP probe only)
+discord.media  # voice CDN apex
+
+# Static YouTube thumbnail/asset CDN (duplicate youtube.com DPI category)
+i.ytimg.com  # static CDN
+i9.ytimg.com  # static CDN
+yt3.ggpht.com  # static CDN
+yt4.ggpht.com  # static CDN
+yt3.googleusercontent.com  # static CDN
+yt4.googleusercontent.com  # static CDN
+ytimg.l.google.com  # LB hostname
+ytstatic.l.google.com  # LB hostname
+youtube-ui.l.google.com  # LB hostname
+
+# Shared Google infra — not YouTube-specific block targets
+gstatic.com  # shared Google static
+gvt1.com  # Google video tooling CDN
+
+# Discord marketing / mirror TLDs — redundant with discord.com + discord.gg
+discord.co  # marketing mirror
+discord.design  # marketing mirror
+discord.dev  # marketing mirror
+discord.gift  # marketing mirror
+discord.gifts  # marketing mirror
+discord.new  # marketing mirror
+discord.store  # marketing mirror
+discord.tools  # marketing mirror
+discordmerch.com  # marketing mirror
+discordpartygames.com  # marketing mirror
+discord-activities.com  # marketing mirror
+discordactivities.com  # marketing mirror
+discordsays.com  # marketing mirror
+discordstatus.com  # status page
+dis.gd  # short link
+discord-attachments-uploads-prd.storage.googleapis.com  # GCS bucket host

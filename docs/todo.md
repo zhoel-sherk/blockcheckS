@@ -301,9 +301,10 @@ hostfakesplit); blockcheckS stress **0 PASS** (TLS на корень домен�
 Stress `coverage.txt` (40 dom) × full matrix ≈ 312k jobs; часть доменов даёт
 **0% PASS** или дублирует сигнал (apex TLS ≠ реальный трафик).
 
-**Файл:** `presets/domains/denylist.txt` — FQDN + optional `# category` comment.
-Загрузка в `_load_domains()`: по умолчанию **выкидывать** совпадения, печатать
-summary `skipped N: googlevideo.com (videoplayback), …`.
+**Решение (2026-08):** static YouTube CDN **исключать** из дефолтного mass-scan — дублируют
+SNI-сигнал `youtube.com`; apex TLS на `i.ytimg.com` / `gstatic.com` не отражает реальный
+трафик. Оставить в lean coverage: `youtube.com`, `youtu.be`, `googleapis.com`,
+`youtubei.googleapis.com`. Полный список — `coverage.txt` + `--allow-unsafe-domains`.
 
 **Флаг:** `--allow-unsafe-domains` — не фильтровать (осознанный mass-run / GP parity).
 
@@ -321,10 +322,10 @@ summary `skipped N: googlevideo.com (videoplayback), …`.
 `coverage.txt` — только с `--allow-unsafe-domains`. Почистить `benchmark.txt`
 (сейчас там `googlevideo` + `discord.media`).
 
-- [ ] **A1a** `presets/domains/denylist.txt` + loader filter *(= A1)*
-- [ ] **A1b** CLI `--allow-unsafe-domains` на `bs full` / `scan` / `pair`
-- [ ] **A1c** `coverage-tcp.txt` lean preset (~15 dom)
-- [ ] **A1d** WARN при 0% PASS в DB после N runs (опционально)
+- [x] **A1a** `presets/domains/denylist.txt` + loader filter *(= A1)*
+- [x] **A1b** CLI `--allow-unsafe-domains` на `bs full` / `scan` / `pair`
+- [x] **A1c** `coverage-tcp.txt` lean preset (~15 dom)
+- [x] **A1d** WARN при 0% PASS в DB после N runs (опционально)
 
 ### Исследование вариативности blobs (2026-07-31)
 
@@ -427,7 +428,7 @@ community mass-scan; GP — production orchestrator + import shortlists.
 
 ### Часть A — внедрять / использовать сейчас
 
-- [ ] **A1** denylist + lean `coverage-tcp.txt` — 40→~15 dom, −62% jobs → A1a–A1d
+- [x] **A1** denylist + lean `coverage-tcp.txt` — 40→~15 dom, −62% jobs → A1a–A1d
 - [x] **A2** `scan_level=fast` — пропуск TTL/autottl expansions
 - [x] **A3** `--resume` — skip записанных (strategy, domain) в DB
 - [ ] **A4** GP multi-domain + `curl_parallelism` 4–10 — один nfqws2, parallel curl *(GP-side; BS = B2)*

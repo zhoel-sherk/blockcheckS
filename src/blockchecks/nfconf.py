@@ -14,18 +14,9 @@ from blockchecks.engine.conf_builder import (
     build_raw_conf,
     write_user_list,
 )
-from blockchecks.engine.config import BLOB_DIR, PROJECT_DIR
+from blockchecks.engine.config import BLOB_DIR
 from blockchecks.engine.db_logger import StateDB
-
-
-def _load_domains(path: str) -> list[str]:
-    domains = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                domains.append(line)
-    return domains
+from blockchecks.engine.domain_loader import DEFAULT_DOMAINS_FILE, read_domain_lines
 
 
 async def collect_export_strategies(
@@ -105,10 +96,11 @@ async def export_configs(
     await db.init()
 
     if domains_file and os.path.exists(domains_file):
-        domains = _load_domains(domains_file)
+        domains = read_domain_lines(domains_file)
+    elif os.path.exists(DEFAULT_DOMAINS_FILE):
+        domains = read_domain_lines(DEFAULT_DOMAINS_FILE)
     else:
-        cov = os.path.join(PROJECT_DIR, "presets", "domains", "coverage.txt")
-        domains = _load_domains(cov) if os.path.exists(cov) else [domain]
+        domains = [domain]
 
     tcp_s, udp_s, quic_s = await collect_export_strategies(
         db, domain=domain, limit=limit, domains=domains, common_only=common_only

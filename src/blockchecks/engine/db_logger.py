@@ -310,6 +310,28 @@ class StateDB:
                 udp_label=r[6],
             )
 
+    async def domain_pass_stats(
+        self,
+        domain: str,
+        *,
+        protos: tuple[str, ...] = ("tcp",),
+    ) -> dict[str, int]:
+        """Count tcp_results rows for domain (all strategies, given protos)."""
+        if not protos:
+            return {"total": 0, "passed": 0}
+        placeholders = ",".join("?" * len(protos))
+        async with aiosqlite.connect(self.db_path) as db:
+            row = await db.execute(
+                f"""SELECT COUNT(*),
+                           SUM(CASE WHEN t.status='PASS' THEN 1 ELSE 0 END)
+                    FROM tcp_results t
+                    JOIN strategies s ON t.strategy_id = s.id
+                    WHERE t.domain=? AND s.proto IN ({placeholders})""",
+                (domain, *protos),
+            )
+            r = await row.fetchone()
+            return {"total": int(r[0] or 0), "passed": int(r[1] or 0)}
+
     async def get_working_tcp(self, domain: str) -> list[str]:
         """Names whose *latest* result for domain is PASS (proto=tcp)."""
         return await self.get_working_proto(domain, "tcp")

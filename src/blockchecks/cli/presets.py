@@ -6,6 +6,7 @@ import os
 from colorama import Fore, Style
 
 from blockchecks.engine.config import PROJECT_DIR
+from blockchecks.engine.domain_loader import RESERVED_DOMAIN_FILES
 
 RESET = Style.RESET_ALL
 
@@ -14,6 +15,8 @@ def list_presets() -> None:
     """Print available domain and strategy presets."""
     print(f"{Fore.CYAN}Domain presets (presets/domains/):{RESET}")
     for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/domains", "*.txt"))):
+        if os.path.basename(f) in RESERVED_DOMAIN_FILES:
+            continue
         name = os.path.basename(f).replace(".txt", "")
         with open(f) as pf:
             count = sum(1 for line in pf if line.strip() and not line.startswith("#"))

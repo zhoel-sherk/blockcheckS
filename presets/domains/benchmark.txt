@@ -1,9 +1,7 @@
-# blockcheckS benchmark domain set — lightweight, 5-6 domains
+# blockcheckS benchmark domain set — lightweight smoke (6 domains)
 discord.com
 discord.gg
-discord.media
 youtube.com
-googlevideo.com
 speedtest.net
 cloudflare-ech.com
-web.telegram.org
+signal.org

@@ -21,6 +21,12 @@ from blockchecks.engine.config import (
     UNBLOCKED_DOM,
 )
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
+from blockchecks.engine.domain_loader import (
+    RESERVED_DOMAIN_FILES,
+    format_skip_summary,
+    load_preset,
+    preset_path,
+)
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.preflight import PreflightOptions, run_preflight
@@ -47,16 +53,33 @@ async def cmd_pair(args):
     preset_domains = []
     preset_name = getattr(args, "preset", None)
     if preset_name:
-        preset_path = os.path.join(PROJECT_DIR, "presets", "domains", f"{preset_name}.txt")
-        if os.path.exists(preset_path):
-            with open(preset_path) as pf:
-                preset_domains = [
-                    line.strip() for line in pf if line.strip() and not line.startswith("#")
-                ]
-            print(f"  {Fore.CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}")
+        pp = preset_path(preset_name)
+        if os.path.exists(pp) and os.path.basename(pp) not in RESERVED_DOMAIN_FILES:
+            try:
+                loaded = load_preset(
+                    preset_name,
+                    allow_unsafe=getattr(args, "allow_unsafe_domains", False),
+                )
+            except FileNotFoundError:
+                print(f"  {Fore.RED}Preset '{preset_name}' not found{RESET}")
+                return 1
+            preset_domains = loaded.domains
+            print(
+                f"  {Fore.CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}"
+            )
+            if loaded.skipped:
+                print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
+            if not preset_domains:
+                print(
+                    f"  {Fore.RED}ERROR: preset empty after denylist "
+                    f"(use --allow-unsafe-domains){RESET}"
+                )
+                return 1
         else:
             print(f"  {Fore.YELLOW}Preset '{preset_name}' not found. Available:{RESET}")
             for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/domains", "*.txt"))):
+                if os.path.basename(f) in RESERVED_DOMAIN_FILES:
+                    continue
                 print(f"    {os.path.basename(f).replace('.txt', '')}")
             return 1
 

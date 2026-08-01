@@ -1,6 +1,6 @@
 # GP Control Plane CRITICAL_DOMAINS — always tested first
-# 4 most important services
+# googlevideo.com removed: apex TLS probe misleading until GV-1 videoplayback
 youtube.com
-googlevideo.com
 discord.com
 discordcdn.com
+signal.org
