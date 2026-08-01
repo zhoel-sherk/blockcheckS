@@ -112,6 +112,9 @@ async def cmd_pair(args):
         secure_dns=secure_dns,
         dns_cache=dns_cache,
         dns_audit={r.domain: r for r in dns_audits},
+        repeats=max(1, getattr(args, "repeats", 1) or 1),
+        parallel_repeats=bool(getattr(args, "parallel_repeats", False)),
+        try_wssize=getattr(args, "protocol", "tls12") == "tls12",
     )
     stop_event = asyncio.Event()
 

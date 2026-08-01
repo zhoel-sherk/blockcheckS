@@ -100,8 +100,59 @@ async def test_db_best_and_coverage(tmp_path):
     assert ranked[0]["strategy"] == "s1"
     assert ranked[0]["domains_passed"] == 2
 
+    common = await db.get_common_tcp(["discord.com", "youtube.com"], limit=5)
+    assert [c["strategy"] for c in common] == ["s1"]
+    assert common[0]["domains_passed"] == 2
+
     cfg = await db.get_strategy_config("s1", "tcp")
     assert "stun" in cfg
+
+
+@pytest.mark.asyncio
+async def test_export_common_intersection(tmp_path):
+    db_path = str(tmp_path / "state.db")
+    db = StateDB(db_path)
+    await db.init()
+    await db.log_tcp(
+        "common",
+        "discord.com",
+        "PASS",
+        90.0,
+        200,
+        config_path="fake:blob=stun:repeats=6",
+    )
+    await db.log_tcp(
+        "common",
+        "youtube.com",
+        "PASS",
+        95.0,
+        200,
+        config_path="fake:blob=stun:repeats=6",
+    )
+    await db.log_tcp(
+        "discord_only",
+        "discord.com",
+        "PASS",
+        50.0,
+        200,
+        config_path="fake:blob=max_ru:repeats=6",
+    )
+
+    domains = tmp_path / "domains.txt"
+    domains.write_text("discord.com\nyoutube.com\n", encoding="utf-8")
+    out = tmp_path / "output"
+
+    result = await export_configs(
+        db_path=db_path,
+        domain="discord.com",
+        limit=3,
+        out_dir=str(out),
+        domains_file=str(domains),
+        timestamp="common",
+        common_only=True,
+    )
+    assert len(result["tcp"]) == 1
+    assert "stun" in result["tcp"][0]
 
 
 @pytest.mark.asyncio

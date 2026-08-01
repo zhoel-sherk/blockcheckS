@@ -200,6 +200,9 @@ def _run_tcp_check(
     python_bin: str = None,
     disable_ech: bool = False,
     resolved_ip: str | None = None,
+    repeats: int = 1,
+    parallel_repeats: bool = False,
+    extra_lua_desync: str = "",
 ) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
 
@@ -218,6 +221,9 @@ def _run_tcp_check(
         _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_", suffix=".conf")
         os.close(_tf_fd)
         shutil.copy2(src, tmp_conf)
+        if extra_lua_desync:
+            with open(tmp_conf, "a", encoding="utf-8") as f:
+                f.write(f"\n--lua-desync={extra_lua_desync}\n")
         _nfqws2_daemon(ns_name, tmp_conf)
     else:
         config_lines = [
@@ -241,6 +247,8 @@ def _run_tcp_check(
                 config_lines.extend(_split_cli_args(raw_line))
             else:
                 config_lines.append(f"--lua-desync={raw_line}")
+        if extra_lua_desync:
+            config_lines.append(f"--lua-desync={extra_lua_desync}")
         import tempfile as _tf
 
         _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_", suffix=".conf")
@@ -275,6 +283,8 @@ def _run_tcp_check(
     use_ech_int = 1 if use_ech else 0
     ech_opt = CURLOPT_ECH
     resolved_ip_lit = repr(resolved_ip)
+    repeats = max(1, int(repeats))
+    parallel_int = 1 if parallel_repeats and repeats > 1 else 0
 
     check_code = f"""
 import json, time
@@ -319,6 +329,24 @@ def check(domain, timeout, resolved_ip):
         body = resp.content[:4096]
         clen = len(resp.content)
         rate = clen / elapsed
+        loc = resp.headers.get("Location") or resp.headers.get("location") or ""
+        dom = domain.lower().split("/")[0]
+        if resp.status_code in (301, 302, 307, 308) and loc:
+            if loc.lower().startswith(("http://", "https://")):
+                redir_host = loc.split("/")[2].split(":")[0].lower()
+                if dom not in redir_host:
+                    return {{"success": False, "http_code": resp.status_code,
+                             "latency_ms": elapsed*1000,
+                             "content_len": clen, "content_ok": False,
+                             "throttled": False, "read_rate_bps": rate,
+                             "error": "suspicious redirect " + str(resp.status_code)
+                                      + " to " + loc[:80]}}
+        if resp.status_code == 400:
+            return {{"success": False, "http_code": 400,
+                     "latency_ms": elapsed*1000,
+                     "content_len": clen, "content_ok": False,
+                     "throttled": False, "read_rate_bps": rate,
+                     "error": "http 400 (likely fake packets received)"}}
         content_ok = clen >= 300
         dpi_fake = any(p in body.lower() for p in (b"roskomnadzor",b"rkn.gov.ru",
                     b"blockpage",b"utmblock"))
@@ -350,7 +378,28 @@ def check(domain, timeout, resolved_ip):
         return {{"success": False, "http_code": 0, "latency_ms": 0,
                  "content_len": 0, "content_ok": False,
                  "throttled": False, "read_rate_bps": 0, "error": str(e)[:120]}}
-print(json.dumps(check({domain!r}, {timeout}, {resolved_ip_lit})))
+def run_checks():
+    n = {repeats}
+    if {parallel_int}:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
+            futs = [ex.submit(check, {domain!r}, {timeout}, {resolved_ip_lit}) for _ in range(n)]
+            last = None
+            for fut in concurrent.futures.as_completed(futs):
+                last = fut.result()
+                if last.get("success"):
+                    return last
+            return last or {{"success": False, "http_code": 0, "latency_ms": 0,
+                             "content_len": 0, "content_ok": False,
+                             "throttled": False, "read_rate_bps": 0,
+                             "error": "all parallel repeats failed"}}
+    last = None
+    for _ in range(n):
+        last = check({domain!r}, {timeout}, {resolved_ip_lit})
+        if last.get("success"):
+            return last
+    return last
+print(json.dumps(run_checks()))
 """
     try:
         r = sp.run(
@@ -517,6 +566,9 @@ class AsyncTestRunner:
         secure_dns: bool = True,
         dns_cache: DnsRunCache | None = None,
         dns_audit: dict | None = None,
+        repeats: int = 1,
+        parallel_repeats: bool = False,
+        try_wssize: bool = False,
     ):
         self.pool = NetNsPool(size=pool_size)
         self.semaphore = asyncio.Semaphore(pool_size)
@@ -527,6 +579,9 @@ class AsyncTestRunner:
         self.secure_dns = secure_dns
         self.dns_cache = dns_cache
         self.dns_audit = dns_audit or {}
+        self.repeats = max(1, repeats)
+        self.parallel_repeats = parallel_repeats
+        self.try_wssize = try_wssize
 
     async def start(self):
         """Create netns pool and seed the asyncio Queue on the event loop."""
@@ -566,7 +621,28 @@ class AsyncTestRunner:
                     self.python,
                     self.disable_ech,
                     resolved_ip,
+                    self.repeats,
+                    self.parallel_repeats,
                 )
+                if (
+                    not data.get("success")
+                    and self.try_wssize
+                    and "wssize" not in item.strategy
+                ):
+                    data = await asyncio.to_thread(
+                        _run_tcp_check,
+                        ns_name,
+                        item.strategy,
+                        domain,
+                        timeout,
+                        item.is_config,
+                        self.python,
+                        self.disable_ech,
+                        resolved_ip,
+                        self.repeats,
+                        self.parallel_repeats,
+                        "wssize:wsize=1:scale=6",
+                    )
                 result.success = data.get("success", False)
                 result.http_code = data.get("http_code", 0)
                 result.latency_ms = data.get("latency_ms", 0)

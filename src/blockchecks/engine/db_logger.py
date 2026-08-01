@@ -450,6 +450,37 @@ class StateDB:
         scored.sort(key=lambda x: (-x["domains_passed"], x["avg_latency_ms"]))
         return scored[:limit]
 
+    async def get_common_tcp(self, domains: list[str], *, limit: int = 5) -> list[dict]:
+        """TCP strategies whose latest result is PASS on every domain (BC2-7)."""
+        if len(domains) < 2:
+            return []
+        common: set[str] | None = None
+        for domain in domains:
+            working = set(await self.get_working_tcp(domain))
+            common = working if common is None else common & working
+        if not common:
+            return []
+        scored: list[dict] = []
+        for name in common:
+            total_ms = 0.0
+            found = 0
+            for domain in domains:
+                for row in await self.get_best_tcp(domain, limit=200):
+                    if row["strategy"] == name:
+                        total_ms += row["latency_ms"]
+                        found += 1
+                        break
+            if found == len(domains):
+                scored.append(
+                    {
+                        "strategy": name,
+                        "avg_latency_ms": round(total_ms / found, 1),
+                        "domains_passed": len(domains),
+                    }
+                )
+        scored.sort(key=lambda x: x["avg_latency_ms"])
+        return scored[:limit]
+
     async def get_strategy_config(self, name: str, proto: str = "tcp") -> str | None:
         """Return stored config_path/strategy string for name."""
         async with aiosqlite.connect(self.db_path) as db:

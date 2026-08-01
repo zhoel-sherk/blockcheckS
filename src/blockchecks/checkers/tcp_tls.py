@@ -34,6 +34,31 @@ DPI_FAKE_PATTERNS = [
     b"utmblock",
 ]
 
+# blockcheck2 curl exit 254 — suspicious redirect / blockpage
+REDIRECT_BLOCK_STATUSES = frozenset({301, 302, 307, 308})
+
+
+def is_suspicious_redirect(domain: str, status: int, location: str) -> bool:
+    """Detect DPI blockpage redirects (BC2-12, blockcheck2 curl_test_http)."""
+    if status not in REDIRECT_BLOCK_STATUSES:
+        return False
+    if not location:
+        return False
+    loc = location.strip().lower()
+    dom = domain.lower().split("/")[0]
+    if loc.startswith("http://") or loc.startswith("https://"):
+        return dom not in loc.split("/")[2].split(":")[0]
+    return False
+
+
+def classify_http_status(domain: str, status: int, location: str = "") -> str | None:
+    """Return error string for suspicious HTTP codes, else None."""
+    if is_suspicious_redirect(domain, status, location):
+        return f"suspicious redirect {status} to {location[:80]}"
+    if status == 400:
+        return "http 400 (likely fake packets received)"
+    return None
+
 
 @dataclass
 class TlsResult:
@@ -130,7 +155,12 @@ def check_tls(
         result.read_rate_bps = result.content_length / max(read_elapsed, 0.001)
         result.protocol = str(getattr(resp, "http_version", "?")).replace("_", "/")
 
-        if verify_content:
+        loc = resp.headers.get("Location") or resp.headers.get("location") or ""
+        redirect_err = classify_http_status(domain, resp.status_code, loc)
+        if redirect_err:
+            result.error = redirect_err
+            result.success = False
+        elif verify_content:
             result.warnings = _validate_content(resp.content, read_elapsed, resp.status_code)
             result.success = (200 <= resp.status_code < 400) and not result.warnings
         else:

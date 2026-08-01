@@ -13,6 +13,7 @@ from colorama import Fore, Style
 from colorama import init as colorama_init
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
+from blockchecks.cli.parser import add_curl_repeats_args
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
     DEFAULT_VOICE_IP,
@@ -175,6 +176,9 @@ async def run_full(args) -> int:
         secure_dns=secure_dns,
         dns_cache=dns_cache,
         dns_audit={r.domain: r for r in dns_audits},
+        repeats=max(1, getattr(args, "repeats", 1) or 1),
+        parallel_repeats=bool(getattr(args, "parallel_repeats", False)),
+        try_wssize=getattr(args, "protocol", "tls12") == "tls12",
     )
     stop = asyncio.Event()
 
@@ -323,6 +327,7 @@ async def run_full(args) -> int:
             prefix=args.prefix,
             mode=args.mode,
             domains_file=domains_file,
+            common_only=not getattr(args, "no_common_only", False),
         )
         print(f"  {GREEN}{result['keenetic']}{RESET}")
         print(f"  {GREEN}{result['raw']}{RESET}")
@@ -360,6 +365,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--discover-dns-no-bootstrap", action="store_true")
     p.add_argument("--pair-max", type=int, default=200)
     p.add_argument("--export-limit", type=int, default=3)
+    p.add_argument(
+        "--no-common-only",
+        action="store_true",
+        help="Export best per-domain strategies instead of COMMON intersection",
+    )
     p.add_argument("--out-dir", default="output")
     p.add_argument("--isp-interface", default="eth3")
     p.add_argument("--prefix", default="/opt/etc/nfqws2")
@@ -390,6 +400,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Abort if nfqws2 already running on host",
     )
+    add_curl_repeats_args(p)
     return p
 
 

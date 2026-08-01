@@ -16,6 +16,22 @@ from blockchecks.cli.presets import list_presets
 from blockchecks.engine.config import CONFIGS_DIR, DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
 
 
+def add_curl_repeats_args(parser: argparse.ArgumentParser) -> None:
+    """BC2-4: blockcheck2-style curl repeats per strategy."""
+    g = parser.add_argument_group("curl repeats")
+    g.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="curl attempts per strategy (blockcheck2 REPEATS, default 1)",
+    )
+    g.add_argument(
+        "--parallel-repeats",
+        action="store_true",
+        help="Run repeats in parallel (blockcheck2 PARALLEL)",
+    )
+
+
 def add_secure_dns_args(parser: argparse.ArgumentParser) -> None:
     """CLI flags for Phase 9 secure DNS (SD5)."""
     g = parser.add_argument_group("secure DNS")
@@ -157,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--db", default="state.db")
     scan.add_argument("--resume", action="store_true")
     add_secure_dns_args(scan)
+    add_curl_repeats_args(scan)
     scan.add_argument("--tcp-sources", default="")
     scan.add_argument("--ip", default="35.217.5.42", help=argparse.SUPPRESS)
     scan.add_argument("--port", type=int, default=50006, help=argparse.SUPPRESS)
@@ -245,6 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     pair.add_argument("--db", default="state.db")
     pair.add_argument("--resume", action="store_true")
     add_secure_dns_args(pair)
+    add_curl_repeats_args(pair)
     pair.add_argument("--ns")
     pair.add_argument(
         "--nfqws2-debug",

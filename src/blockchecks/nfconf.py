@@ -33,23 +33,30 @@ async def collect_export_strategies(
     *,
     domain: str,
     limit: int,
+    domains: list[str] | None = None,
+    common_only: bool = True,
 ) -> tuple[list[str], list[str], list[str]]:
     """Pick TCP/UDP/QUIC strategy strings for export."""
     tcp_strats: list[str] = []
-    covered = await db.get_best_by_coverage(limit=limit)
-    if covered:
-        for row in covered:
-            cfg = await db.get_strategy_config(row["strategy"], "tcp")
-            tcp_strats.append(cfg or row["strategy"])
-    else:
-        for row in await db.get_best_tcp(domain, limit=limit):
+    if common_only and domains and len(domains) > 1:
+        for row in await db.get_common_tcp(domains, limit=limit):
             cfg = await db.get_strategy_config(row["strategy"], "tcp")
             tcp_strats.append(cfg or row["strategy"])
     if not tcp_strats:
-        working = await db.get_working_tcp(domain)
-        for name in working[:limit]:
-            cfg = await db.get_strategy_config(name, "tcp")
-            tcp_strats.append(cfg or name)
+        covered = await db.get_best_by_coverage(limit=limit)
+        if covered:
+            for row in covered:
+                cfg = await db.get_strategy_config(row["strategy"], "tcp")
+                tcp_strats.append(cfg or row["strategy"])
+        else:
+            for row in await db.get_best_tcp(domain, limit=limit):
+                cfg = await db.get_strategy_config(row["strategy"], "tcp")
+                tcp_strats.append(cfg or row["strategy"])
+        if not tcp_strats:
+            working = await db.get_working_tcp(domain)
+            for name in working[:limit]:
+                cfg = await db.get_strategy_config(name, "tcp")
+                tcp_strats.append(cfg or name)
 
     udp_strats: list[str] = []
     pairs = await db.get_best_pairs(domain, limit=limit * 2)
@@ -86,6 +93,7 @@ async def export_configs(
     mode: str = "auto",
     domains_file: str | None = None,
     timestamp: str | None = None,
+    common_only: bool = True,
 ) -> dict:
     """Write keenetic + raw conf (+ user.list). Returns paths dict."""
     db = StateDB(db_path)
@@ -97,7 +105,9 @@ async def export_configs(
         cov = os.path.join(PROJECT_DIR, "presets", "domains", "coverage.txt")
         domains = _load_domains(cov) if os.path.exists(cov) else [domain]
 
-    tcp_s, udp_s, quic_s = await collect_export_strategies(db, domain=domain, limit=limit)
+    tcp_s, udp_s, quic_s = await collect_export_strategies(
+        db, domain=domain, limit=limit, domains=domains, common_only=common_only
+    )
 
     ts = timestamp or time.strftime("%Y%m%d_%H%M%S")
     os.makedirs(out_dir, exist_ok=True)
@@ -164,6 +174,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Domain list for user.list / hostlist (default: coverage.txt)",
     )
+    p.add_argument(
+        "--no-common-only",
+        action="store_true",
+        help="Export best per-domain strategies instead of COMMON intersection",
+    )
     args = p.parse_args(argv)
 
     result = asyncio.run(
@@ -176,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             prefix=args.prefix,
             mode=args.mode,
             domains_file=args.domains_file,
+            common_only=not args.no_common_only,
         )
     )
     print(f"  keenetic: {result['keenetic']}")
