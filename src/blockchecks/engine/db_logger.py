@@ -128,6 +128,14 @@ class StateDB:
             if "read_rate_bps" not in col_names:
                 await db.execute("ALTER TABLE tcp_results ADD COLUMN read_rate_bps REAL DEFAULT 0")
                 await db.commit()
+            for col, typedef in (
+                ("resolved_ip", "TEXT DEFAULT ''"),
+                ("dns_verdict", "TEXT DEFAULT ''"),
+                ("doh_server", "TEXT DEFAULT ''"),
+            ):
+                if col not in col_names:
+                    await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")
+            await db.commit()
             await db.execute("PRAGMA journal_mode=WAL")
             await db.execute("PRAGMA busy_timeout=5000")
 
@@ -175,6 +183,9 @@ class StateDB:
         error: str = "",
         read_rate_bps: float = 0.0,
         config_path: str = "",
+        resolved_ip: str = "",
+        dns_verdict: str = "",
+        doh_server: str = "",
     ) -> None:
         async with aiosqlite.connect(self.db_path) as db:
             sid = await self.ensure_strategy(strategy, "tcp", config_path or strategy, db=db)
@@ -182,8 +193,9 @@ class StateDB:
             await db.execute(
                 """INSERT INTO tcp_results
                    (strategy_id,domain,status,http_code,latency_ms,
-                    gateway_ws_ms,content_valid,error,timestamp,read_rate_bps)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
+                    resolved_ip,dns_verdict,doh_server)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     sid,
                     domain,
@@ -195,6 +207,9 @@ class StateDB:
                     error,
                     ts,
                     float(read_rate_bps or 0.0),
+                    resolved_ip or "",
+                    dns_verdict or "",
+                    doh_server or "",
                 ),
             )
             await db.commit()

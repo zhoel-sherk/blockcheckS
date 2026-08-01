@@ -34,13 +34,18 @@ class ScanReport:
         return sum(1 for r in self.results if r.success)
 
 
-def _check_tls_in_ns(domain: str, timeout: float) -> dict:
+def _check_tls_in_ns(domain: str, timeout: float, resolved_ip: str | None = None) -> dict:
     """Run curl_cffi check and return result as dict."""
-    code = f"""
-import json, time, sys
-try:
-    import curl_cffi
-    start = time.perf_counter()
+    resolve_line = ""
+    if resolved_ip:
+        resolve_line = f'''
+    s = curl_cffi.Session(impersonate="chrome124", http_version=2,
+        headers={{"Accept": "text/html"}}, allow_redirects=False)
+    s.curl.setopt(10203, ["{domain}:443:{resolved_ip}"])
+    resp = s.get("https://{domain}", timeout={timeout})
+'''
+    else:
+        resolve_line = f'''
     resp = curl_cffi.get(
         "https://{domain}",
         impersonate="chrome124",
@@ -48,6 +53,13 @@ try:
         timeout={timeout},
         headers={{"Accept": "text/html"}},
     )
+'''
+    code = f"""
+import json, time, sys
+try:
+    import curl_cffi
+    start = time.perf_counter()
+{resolve_line}
     result = {{
         "success": 200 <= resp.status_code < 400,
         "http_status": resp.status_code,
@@ -76,13 +88,18 @@ class TestRunner:
     Phase 2: Parallel — multiple strategies via asyncio.
     """
 
-    def __init__(self, ns_name: str | None = None):
+    def __init__(self, ns_name: str | None = None, dns_cache=None, secure_dns: bool = True):
         self.ns_name = ns_name
         self._python = sys.executable  # use same Python that runs the tester
+        self.dns_cache = dns_cache
+        self.secure_dns = secure_dns
 
     def _run_check(self, domain: str, timeout: float) -> StrategyResult:
         """Run curl_cffi check inside namespace (or main ns if no netns)."""
-        info = _check_tls_in_ns(domain, timeout)
+        resolved_ip = None
+        if self.secure_dns and self.dns_cache:
+            resolved_ip = self.dns_cache.primary_ip(domain)
+        info = _check_tls_in_ns(domain, timeout, resolved_ip=resolved_ip)
         code = info["code"]
 
         if self.ns_name:
@@ -215,18 +232,16 @@ class TestRunner:
 
     def _run_stun_check(self, ip: str, port: int, timeout: float) -> dict:
         """Run dual voice UDP probe via subprocess (inside namespace if configured)."""
-        code = f"""
-import sys, json
-sys.path.insert(0, "{os.path.dirname(os.path.dirname(__file__))}")
-from blockchecks.checkers.udp_voice import voice_udp_probe
-ok, lat, detail, method = voice_udp_probe("{ip}", {port}, {timeout})
-print(json.dumps({{"success": ok, "latency_ms": round(lat, 1),
-                   "detail": detail, "method": method}}))
-"""
+        cmd = [
+            self._python,
+            "-m",
+            "blockchecks.engine._probe_worker",
+            ip,
+            str(port),
+            str(timeout),
+        ]
         if self.ns_name:
-            cmd = ["sudo", "ip", "netns", "exec", self.ns_name, self._python, "-c", code]
-        else:
-            cmd = [self._python, "-c", code]
+            cmd = ["sudo", "ip", "netns", "exec", self.ns_name, *cmd]
 
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
         try:

@@ -16,6 +16,7 @@ from colorama import init as colorama_init
 
 colorama_init(autoreset=True)
 
+from blockchecks.checkers.dns_secure import CURLOPT_RESOLVE, DnsRunCache
 from blockchecks.engine.config import (
     BLOB_DIR,
     CURLOPT_ECH,
@@ -198,6 +199,7 @@ def _run_tcp_check(
     is_config: bool = False,
     python_bin: str = None,
     disable_ech: bool = False,
+    resolved_ip: str | None = None,
 ) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
 
@@ -271,22 +273,25 @@ def _run_tcp_check(
     if is_gv:
         headers_extra = f', "Range": "bytes=0-{range_end}"'
     use_ech_int = 1 if use_ech else 0
-    # CURLOPT_ECH numeric fallback when CurlOpt.ECH is missing
     ech_opt = CURLOPT_ECH
+    resolved_ip_lit = repr(resolved_ip)
 
     check_code = f"""
 import json, time
-def check(domain, timeout):
+def check(domain, timeout, resolved_ip):
     try:
         import curl_cffi
         start = time.perf_counter()
         headers = {{"Accept": "text/html"{headers_extra}}}
+        resolve_opt = {CURLOPT_RESOLVE}
         try:
+            s = curl_cffi.Session(
+                impersonate="chrome124", http_version=2,
+                headers=headers, allow_redirects=False,
+            )
+            if resolved_ip:
+                s.curl.setopt(resolve_opt, [domain + ":443:" + resolved_ip])
             if {use_ech_int}:
-                s = curl_cffi.Session(
-                    impersonate="chrome124", http_version=2,
-                    headers=headers, allow_redirects=False,
-                )
                 set = False
                 try:
                     s.curl.setopt(curl_cffi.CurlOpt.ECH, "")
@@ -302,14 +307,7 @@ def check(domain, timeout):
                                   "content_len": 0, "content_ok": False,
                                   "throttled": False, "read_rate_bps": 0,
                                   "error": "ech_setopt:" + str(e)[:100]}}
-                resp = s.get("https://" + domain, timeout=min(timeout, 1.5))
-            else:
-                resp = curl_cffi.get(
-                    "https://" + domain,
-                    impersonate="chrome124", http_version=2,
-                    timeout=min(timeout, 1.5), headers=headers,
-                    allow_redirects=False,
-                )
+            resp = s.get("https://" + domain, timeout=min(timeout, 1.5))
         except curl_cffi.CurlError as e:
             msg = str(e)
             return {{"success": False, "http_code": 0,
@@ -352,7 +350,7 @@ def check(domain, timeout):
         return {{"success": False, "http_code": 0, "latency_ms": 0,
                  "content_len": 0, "content_ok": False,
                  "throttled": False, "read_rate_bps": 0, "error": str(e)[:120]}}
-print(json.dumps(check({domain!r}, {timeout})))
+print(json.dumps(check({domain!r}, {timeout}, {resolved_ip_lit})))
 """
     try:
         r = sp.run(
@@ -516,6 +514,9 @@ class AsyncTestRunner:
         db: StateDB = None,
         python_path: str = None,
         disable_ech: bool = False,
+        secure_dns: bool = True,
+        dns_cache: DnsRunCache | None = None,
+        dns_audit: dict | None = None,
     ):
         self.pool = NetNsPool(size=pool_size)
         self.semaphore = asyncio.Semaphore(pool_size)
@@ -523,6 +524,9 @@ class AsyncTestRunner:
         self.python = python_path or PYTHON_BIN
         self.matrix_fingerprint: str = ""
         self.disable_ech = disable_ech
+        self.secure_dns = secure_dns
+        self.dns_cache = dns_cache
+        self.dns_audit = dns_audit or {}
 
     async def start(self):
         """Create netns pool and seed the asyncio Queue on the event loop."""
@@ -543,6 +547,15 @@ class AsyncTestRunner:
         async with self.semaphore:
             ns_name = await self.pool.acquire()
             try:
+                resolved_ip = None
+                dns_verdict = ""
+                doh_server = ""
+                if self.secure_dns and self.dns_cache:
+                    resolved_ip = self.dns_cache.primary_ip(domain)
+                    audit = self.dns_audit.get(domain)
+                    if audit:
+                        dns_verdict = audit.verdict
+                        doh_server = audit.doh_server or self.dns_cache.doh_server
                 data = await asyncio.to_thread(
                     _run_tcp_check,
                     ns_name,
@@ -552,6 +565,7 @@ class AsyncTestRunner:
                     item.is_config,
                     self.python,
                     self.disable_ech,
+                    resolved_ip,
                 )
                 result.success = data.get("success", False)
                 result.http_code = data.get("http_code", 0)
@@ -579,6 +593,9 @@ class AsyncTestRunner:
                         error=result.error,
                         read_rate_bps=result.read_rate_bps,
                         config_path=item.strategy,
+                        resolved_ip=resolved_ip or "",
+                        dns_verdict=dns_verdict,
+                        doh_server=doh_server,
                     )
             except Exception as e:
                 result.error = str(e)[:200]

@@ -15,18 +15,51 @@ Lightspeed DPI strategy tester для **zapret2/nfqws2**:
 - mass `bs full` (strategy × coverage) + dual nfqws2 conf export;
 - unit/integration, которые ловят регрессии контрактов.
 
-## Статус фаз (факт 2026-07)
+---
 
-| Phase | Тема | Статус |
-|-------|------|--------|
-| 1 | Single TCP (`bs tcp`, configs, content check) | ✅ |
-| 2 | UDP voice STUN / dual nfqws2 | ✅ |
-| 3 | Pair matrix + checkpoint/resume + discover | ✅ |
-| 4 | Parallel asyncio + NetNsPool | ✅ |
-| 5 | GP JSON/DB bridge | 📋 partial (`state.db`; GP import later) |
-| 6 | Export keenetic + raw (`bs full` / `bc-nfconf`) | ✅ |
-| 7 | QUIC/HTTP3 first-class | 🔄 generate + full stub; curl_http3 later |
-| 8 | HTTP :80 families | 📋 |
+## Статус фаз (факт 2026-08)
+
+| Phase | Тема | Статус | Приоритет | Ключевой бэклог |
+|-------|------|--------|-----------|----------------|
+| **1** | Single TCP (`bs tcp`, configs, content check) | ✅ | — | — |
+| **2** | UDP voice STUN / dual nfqws2 | ✅ | P2 | multi-endpoint pair (все discover EP) |
+| **3** | Pair matrix + checkpoint/resume + discover | ✅ | P2 | `--full-voice` gateway WS probe |
+| **4** | Parallel asyncio + NetNsPool | ✅ | P1 | B1 settle poll, B2 fan-out, B7 vmap |
+| **5** | GP / dpi-tester bridge | 📋 partial | P1 | A5 provider_summary, B5 hybrid, GP import |
+| **6** | Export keenetic + raw (`bs full` / `bc-nfconf`) | ✅ | P2 | BC2-7 COMMON intersection |
+| **7** | QUIC / HTTP3 first-class | 🔄 stub | P1 | BC2-10, `ipfrag_udp`/`ipfrag_tcp` |
+| **8** | HTTP :80 families | 📋 | P2 | BC2-9, M6 HTTP+TLS dual-fake |
+| **9** | Secure DNS + blockcheck2 preflight | 🔄 partial | **P0** | SD ✅; BC2-1..BC2-5, BC2-11 |
+| **10** | Matrix coverage & blobs | 🔄 | P1 | M1–M10, ~80% zapret2 / ~95% flowseal |
+| **11** | Speed / throughput | 🔄 | P1 | A1–A10, B1–B11 |
+| **12** | Smart scan (ML / hierarchy / AQ) | 📋 | P3 | ML1–5, H1–10, AQ1–8 |
+| **13** | Developer onboarding (docs, hygiene, modularity) | ✅ | P1 | ONB-1..ONB-13 |
+
+**Легенда приоритетов:** P0 = без этого mass-scan ненадёжен; P1 = production
+parity / скорость; P2 = полнота протоколов и export; P3 = оптимизация после
+базового покрытия.
+
+**Порядок внедрения (сквозной):** Phase 9 (SD) → Phase 11 A1 → Phase 11
+B1→B11 → Phase 11 B2 → Phase 10 M* → Phase 7/8 → Phase 12.
+**Phase 13** (onboarding) — параллельно Phase 9, не блокирует SD.
+
+### Дубликаты (одна задача — несколько ID)
+
+| Задача | Канонический ID | Также упоминается как |
+|--------|-----------------|------------------------|
+| DoH pre-resolve на все домены | **SD1–SD3** | BC2 C1, BC2 C2 |
+| Denylist + lean coverage | **A1** | Domain denylist section |
+| Wire googlevideo videoplayback | **GV-1** | B10 |
+| Multi-domain curl fan-out | **B2** | A4 (GP mirror), AQ5 |
+| HTTP :80 фаза | **BC2-9** | Phase 8 |
+| QUIC HTTP/3 curl | **BC2-10** | Phase 7 |
+| Family early-exit | **B4** | BC2-6, A6 (GP), AQ (online) |
+| Orchestrator protocol flags | **A10** | BC2-9/10 enable_* mirror |
+| Provider profiling | **A5** | H8, dpi-tester (не BS runtime) |
+| Blob manifest sync | **BLOB-1** | `presets/blobs/` wheel vs symlink |
+| configs/ wheel policy | **ONB-7** | editable install; ≠ BLOB-1 |
+
+---
 
 ## CLI сейчас
 
@@ -41,17 +74,200 @@ Lightspeed DPI strategy tester для **zapret2/nfqws2**:
 ~515k success links / ~968k raw attempts — `bs full` целится в тот же
 масштаб, но с curl_cffi + content + UDP/voice.
 
-## Ближайший бэклог
+---
 
-1. **~80% сценариев bol-van/zapret2** в matrix + checkers.
-2. **~95% flowseal-like** (перевод + пересечения zapret2 ∩ flowseal).
-3. ~~nfqws2-keenetic export~~ ✅ (`conf_builder` / `bc-nfconf`).
-4. **[unblock-pro](https://github.com/by-sonic/unblock-pro)** — переносимые эвристики.
+## Ближайший бэклог (сводка по важности)
+
+### P0 — честность тестов (Phase 9)
+
+1. ~~**Secure DNS** — DoH pre-resolve на **все** домены (SD1–SD8).~~ ✅
+2. **Preflight** — IP-block cross-test, unblocked baseline (BC2-1..BC2-3).
+
+### P1 — скорость и покрытие (Phase 4, 10, 11)
+
+3. **~80% сценариев bol-van/zapret2** в matrix + checkers (Phase 10).
+4. **~95% flowseal-like** (перевод + пересечения zapret2 ∩ flowseal).
 5. **matrix_generator** — registries, dedup, PASS priority, стабильный fingerprint.
-6. **multi-endpoint** pair matrix по всем discover EP.
-7. **package-data**: явная политика `configs/` (repo root vs wheel).
+6. **Speed** — A1 denylist, B1 settle poll, B2 multi-domain fan-out.
+7. **googlevideo** — videoplayback probe (GV-1), не apex TLS.
+8. **[unblock-pro](https://github.com/by-sonic/unblock-pro)** — переносимые эвристики.
 
-### googlevideo CDN probe (2026-07-30)
+### P2 — протоколы и интеграция (Phase 5–8)
+
+9. ~~nfqws2-keenetic export~~ ✅ (`conf_builder` / `bc-nfconf`).
+10. **multi-endpoint** pair matrix по всем discover EP (Phase 2).
+11. **QUIC/HTTP3** + **HTTP :80** first-class (BC2-9, BC2-10).
+12. **GP hybrid** — BS shortlist → GP multi-domain (B5).
+
+### P3 — smart scan (Phase 12)
+
+13. **ML ranker** (ML1–5), **hierarchical cloud** (H1–10), **adaptive queue** (AQ1–8).
+
+### Инфраструктура
+
+14. ~~**configs/** package policy (editable install) → **ONB-7** (≠ BLOB-1 blobs).~~ ✅
+
+---
+
+# Phase 9 — Secure DNS + blockcheck2 preflight (P0)
+
+> Критично для **любого** провайдера: hijack-картина разная; DoH — на все домены.
+
+### Secure DNS: DoH/DoT (SD)
+
+**Проблема:** `NetNsPool` пишет `nameserver 8.8.8.8` в
+`/etc/netns/{name}/resolv.conf`; `async_runner` вызывает
+`curl_cffi.get("https://" + domain)` — DNS внутри netns идёт **UDP к
+публичному DNS**, без DoH. На Fryazino провайдер **перехватывает UDP-запросы
+к 8.8.8.8/1.1.1.1** (transparent DNS proxy), отдавая подменённые A-записи.
+`blockcheck2.sh` это знает: `check_dns_` → `DNS_IS_SPOOFED` → auto `SECURE_DNS=1`
+→ `doh_find_working` → `mdig_resolve` + `curl_with_subst_ip`. **SD1–SD8 ✅**
+(2026-08-01): `dns_secure.py`, DoH pre-resolve + `CURLOPT_RESOLVE`, startup
+audit, CLI flags, `state.db` metrics. Проверено на Fryazino: `cloudflare-ech.com`
+/ `signal.org` sinkhole `8.47.x` → abort; `--allow-dns-hijack` → curl на DoH IP.
+
+**Живой замер (2026-08-01, Xeon / Fryazino, dpi-tester `dns_checker.py`):**
+
+| Домен (coverage) | UDP @8.8.8.8 | DoH | Вердикт |
+|------------------|--------------|-----|---------|
+| discord.com | 162.159.x (CF) | 162.159.x | ✅ OK |
+| speedtest.net | 151.101.x | 151.101.x | ✅ OK |
+| rutracker.org | 104.21.x / 172.67.x | совпадает | ✅ OK |
+| youtube.com | 142.251.x | 64.233.x | ⚠️ другой Google anycast |
+| googlevideo.com | 142.251.x | 173.194.x | ⚠️ другой Google anycast |
+| google.com | 142.251.x | 192.178.x | ⚠️ другой Google anycast |
+| cloudflare-ech.com | **8.47.69.6** (sinkhole) | 104.18.x | ❌ **явный hijack** |
+
+Дополнительно: `signal.org` — UDP sinkhole `8.47.x`, DoH `104.18.x` (не в
+coverage, но тот же паттерн).
+
+**Насколько влияет (любой провайдер):**
+
+| Сценарий | Эффект |
+|----------|--------|
+| UDP=DoH (честный резолв) | Тест валиден — curl идёт на реальный CDN |
+| Разные IP, оба CDN (Google anycast) | Стратегия может работать/не работать на другом POP — непредсказуемо |
+| Sinkhole IP (`8.47.x` и аналоги) | **Критический** — curl на заглушку → ложные FAIL |
+| Сравнение с GP/blockcheck2 | Они при hijack → DoH; BS без DoH → **несопоставимы** |
+| Voice discover (`getaddrinfo` на host) | host resolver ≠ netns 8.8.8.8 — отдельный риск |
+
+**Эталон (blockcheck2):** `DOH_SERVERS` (CF, Google, Quad9, AdGuard, Yandex) →
+auto-pick → `mdig` + `curl --connect-to ::host:ip:` (SNI сохраняется).
+Переменные: `SECURE_DNS=0|1`, `DOH_SERVER`, `CURL_MAX_TIME_DOH`.
+
+**dpi-tester:** `src/dns_checker.py` — UDP vs DoH cross-check; режим `--dns-check`
+в `start.sh`. Роль: **provider profiling** (A5), не runtime BS.
+
+**Целевой дизайн:**
+
+```text
+bs full startup
+  → dns_audit(all_domains_in_run)   # UDP vs DoH per domain
+  → doh = pick_working(DOH_SERVERS) # default on (--secure-dns)
+  → per job (every domain):
+       ip = doh_resolve(domain)
+       curl: CURLOPT_RESOLVE host:443:ip  (SNI = hostname)
+```
+
+- [x] **SD1** `checkers/dns_secure.py` — порт `dpi-tester/dns_checker.py`
+- [x] **SD2** `doh_resolve(domain) -> list[ip]` — curl_cffi DoH JSON + binary wire fallback
+- [x] **SD3** `async_runner` / `test_runner`: pre-resolve + `CURLOPT_RESOLVE`; SNI = hostname
+- [x] **SD4** startup audit в `bs full` / `bs scan`: таблица tampered; abort без `--allow-dns-hijack`
+- [x] **SD5** CLI: `--secure-dns` (default on), `--doh-server URL`, `--skip-dns-audit`
+- [x] **SD6** кэш DoH на batch run (`DNSCACHE_*` как blockcheck2)
+- [x] **SD7** netns: pre-resolve достаточно (DoH stub в netns — optional/heavy)
+- [x] **SD8** метрики в `state.db`: `dns_verdict`, `resolved_ip`, `doh_server`
+
+### blockcheck2 parity (BC2)
+
+Аудит `/opt/zapret2/blockcheck2.sh` + `blockcheck2.d/` vs blockcheckS
+(2026-08-01). **Где BS сильнее:** curl_cffi/JA4, netns pool, content/throttle,
+voice UDP, async parallel, resume/state.db, MatrixGenerator, keenetic export.
+
+#### CRITICAL
+
+| # | BC2 feature | BS сейчас | Задача |
+|---|-------------|-----------|--------|
+| C1 | DoH pre-resolve на все домены | ✅ DoH + audit | ~~SD1–SD3~~ |
+| C2 | DNS spoof detection | ✅ startup audit | ~~SD1, SD4~~ |
+| C3 | IP-block cross-test | нет | → **BC2-1** |
+| C4 | UNBLOCKED_DOM baseline | preset only | → **BC2-2** |
+
+#### HIGH
+
+| # | BC2 feature | Задача |
+|---|-------------|--------|
+| H1 | Port block pre-check (`nc -z`) | **BC2-3** |
+| H2 | REPEATS (N curl на стратегию) | **BC2-4** |
+| H3 | Prolog без bypass | **BC2-5** |
+| H4 | SCANLEVEL + need_* chain | **BC2-6** (= B4 частично) |
+| H5 | COMMON intersection | **BC2-7** |
+| H6 | wssize fallback TLS1.2 | **BC2-8** |
+| H7 | HTTP :80 фаза | **BC2-9** → Phase 8 |
+| H8 | QUIC/HTTP3 curl | **BC2-10** → Phase 7 |
+| H9 | zapret already running warn | **BC2-11** |
+| H10 | HTTP redirect detection | **BC2-12** |
+
+#### MEDIUM / LOW
+
+- **BC2-M1** `PKTWS_EXTRA_PRE/POST` — глобальные доп.параметры
+- **BC2-M2** IPv6 dual-stack (`IPVS=4|6|46`)
+- **BC2-M3** VM/NAT warning (`check_virt`)
+- **BC2-M4** `SIMULATE=1` для отладки без curl
+- **BC2-M5** Standard families: oob, syndata, http-basic — gaps в generator
+- **BC2-L1** Кроссплатформенность (FreeBSD/Win) — не цель BS
+
+#### Main flow BC2 (эталон)
+
+```text
+check_system → check_already → check_prerequisites
+  → check_dns (spoof? → SECURE_DNS=1 → doh_find_working)
+  → for each domain:
+      port block nc → prolog (no bypass) → IP-block cross-test
+      → pktws + test_runner(standard|custom)
+  → SUMMARY + COMMON intersection
+```
+
+- [ ] **BC2-1** `checkers/ip_block.py`: cross-test blocked ↔ `UNBLOCKED_DOM` IP
+- [ ] **BC2-2** preflight baseline: auto unblocked check (`--unblocked-dom`)
+- [ ] **BC2-3** port block probe на все resolved IP
+- [ ] **BC2-4** `--repeats N` + `--parallel-repeats`
+- [ ] **BC2-5** prolog curl без nfqws2; skip domain если уже OK (`--force` override)
+- [ ] **BC2-6** полная цепочка `need_*` между standard families
+- [ ] **BC2-7** `bs full` export: COMMON strategies (intersection all domains)
+- [ ] **BC2-8** wssize retry в tls12 checker
+- [ ] **BC2-9** HTTP :80 standard generator + фаза в `bs full` *(Phase 8)*
+- [ ] **BC2-10** QUIC: curl HTTP/3 + `--quic-timeout` *(Phase 7)*
+- [ ] **BC2-11** detect running nfqws2 на host, warn/abort
+- [ ] **BC2-12** redirect-to-blockpage detector (curl code 254 pattern)
+
+---
+
+# Phase 7 — QUIC / HTTP3 (P1)
+
+Сейчас: генерация `standard_quic` в matrix; в `bs full` — **UDP probe на :443**,
+не HTTP/3 curl; export подставляет дефолт `fake:blob=quic_initial:repeats=11` при 0 PASS.
+
+- [ ] **BC2-10** curl HTTP/3 + `--quic-timeout` (канон; ≠ `--udp-timeout`)
+- [ ] `ipfrag_udp` / `ipfrag_tcp` (`send:` dual-call) — generator gap
+- [ ] **M7** UDP multi-blob (discord L7: quic_dbank на stun+discord) *(Phase 10)*
+
+---
+
+# Phase 8 — HTTP :80 families (P2)
+
+Сейчас: `CustomListGenerator` читает `list_http.txt`; только в `bs tcp --protocol http`;
+нет standard HTTP family; `bs full` — только tls12/tls13.
+
+- [ ] **BC2-9** HTTP :80 standard generator + фаза в `bs full`
+- [ ] **M6** HTTP+TLS dual-fake generator (`fake_default_http` + TLS blob) *(Phase 10)*
+- [ ] **A10** `--http-off` — зеркало GP `ENABLE_HTTP` *(Phase 11)*
+
+---
+
+# Phase 10 — Matrix coverage & blobs (P1)
+
+### googlevideo CDN probe (2026-07-30) — Phase 7/10
 
 Модуль есть, в stress-test **не используется**:
 
@@ -63,33 +279,37 @@ Lightspeed DPI strategy tester для **zapret2/nfqws2**:
 
 Факты Fryazino (без VPN):
 
-- `yt-dlp` URL — **OK** (~15s, youtube metadata).
-- curl на корень / videoplayback **без nfqws2** — timeout (DPI).
-- Chunk probe **реален без VPN**, но **нужен nfqws2** + YouTube-стратегия
-  (ориентир: `hostfakesplit:disorder_after:…`, dpi-tester 27–37 chunks).
+- [x] `yt-dlp` URL — **OK** (~15s, youtube metadata) *(проверено)*
+- [x] curl на корень / videoplayback **без nfqws2** — timeout (DPI) *(проверено)*
+- [x] Chunk probe **реален без VPN**, но **нужен nfqws2** + YouTube-стратегия
+  (ориентир: `hostfakesplit:disorder_after:…`, dpi-tester 27–37 chunks) *(проверено)*
 
 GP vs blockcheckS на `googlevideo.com`: GP **12** success links (`http_req` +
 hostfakesplit); blockcheckS stress **0 PASS** (TLS на корень домена).
 
-- [ ] **Wire `get_fresh_url()`** в `async_runner` / sync runner: при
-  `googlevideo*` curl на videoplayback URL, не на apex.
-- [ ] Опционально: Playwright intercept как в `dpi-tester/youtube_test.py`.
-- [ ] Починить hostfakesplit checker: `Session.request() unexpected keyword 'options'`.
+**Задачи:**
 
-### Domain denylist / fool filter (2026-07-31)
+- [ ] **GV-1** Wire `get_fresh_url()` в `async_runner` / sync runner: при
+  `googlevideo*` curl на videoplayback URL, не на apex *(= B10)*
+- [ ] **GV-2** Опционально: Playwright intercept как в `dpi-tester/youtube_test.py`
+- [ ] **GV-3** Починить hostfakesplit checker: `Session.request() unexpected keyword 'options'`
+- [ ] **GV-4** После GV-1: убрать `googlevideo.com` из denylist / вернуть в lean coverage
+- [ ] **GV-5** `quic_gv_kyber` blob тесты — после videoplayback probe (см. blob table)
+
+### Domain denylist / fool filter (2026-07-31) — Phase 11 A1
 
 Stress `coverage.txt` (40 dom) × full matrix ≈ 312k jobs; часть доменов даёт
 **0% PASS** или дублирует сигнал (apex TLS ≠ реальный трафик).
 
 **Файл:** `presets/domains/denylist.txt` — FQDN + optional `# category` comment.
-Загрузка в `_load_domains()` (`main.py`, `bs.py` preset path): по умолчанию
-**выкидывать** совпадения, печатать summary `skipped N: googlevideo.com (videoplayback), …`.
+Загрузка в `_load_domains()`: по умолчанию **выкидывать** совпадения, печатать
+summary `skipped N: googlevideo.com (videoplayback), …`.
 
 **Флаг:** `--allow-unsafe-domains` — не фильтровать (осознанный mass-run / GP parity).
 
 Стартовый denylist (кандидаты):
 
-- `googlevideo.com` — needs videoplayback probe, not apex TLS
+- `googlevideo.com` — needs videoplayback probe, not apex TLS *(→ GV-1, GV-4)*
 - `discord.media` — voice/media CDN, 0% на TLS apex
 - static YouTube CDN: `i.ytimg.com`, `i9.ytimg.com`, `yt3/yt4.ggpht.com`,
   `yt3/yt4.googleusercontent.com`, `gstatic.com`, `gvt1.com`,
@@ -101,48 +321,10 @@ Stress `coverage.txt` (40 dom) × full matrix ≈ 312k jobs; часть доме
 `coverage.txt` — только с `--allow-unsafe-domains`. Почистить `benchmark.txt`
 (сейчас там `googlevideo` + `discord.media`).
 
-- [ ] `presets/domains/denylist.txt` + loader filter
-- [ ] CLI `--allow-unsafe-domains` на `bs full` / `scan` / `pair` (`--preset`)
-- [ ] WARN при 0% PASS в DB после N runs (опционально)
-
-### Speed: GP vs BS optimization (2026-07-31)
-
-Bottleneck BS: `async_runner._nfqws2_daemon` sleep 2s + nfqws2 restart/job (~1.35 job/s
-на stress 312k). GP: 100ms minsleep, multi-domain fan-out.
-
-**Роли:** dpi-tester — provider profiling (Fryazino, custom lists, что вкл/выкл);
-blockcheckS — community mass-scan; GP — production orchestrator + import shortlists.
-
-#### Часть A — внедрять / использовать сейчас
-
-- [ ] **A1** denylist + lean `coverage-tcp.txt` — 40→~15 dom, −62% jobs (см. denylist выше)
-- [x] **A2** `scan_level=fast` — пропуск TTL/autottl expansions (уже в CLI)
-- [x] **A3** `--resume` — skip записанных (strategy, domain) в DB
-- [ ] **A4** GP multi-domain + `curl_parallelism` 4–10 — один nfqws2, parallel curl (не standard-discovery)
-- [ ] **A5** *(dpi-tester)* `provider_summary.json` — custom lists, `TEST=custom`, сводка конфигов для GP/Keenetic; BS только shortlist import
-- [x] **A6** GP `SCANLEVEL=quick|standard` — early-exit (уже в GP)
-- [x] **A7** `--parallel 4` — **потолок**, не рычаг: iptables/NFQUEUE задыхается при 6–8 netns; масштабировать через B2, не ↑parallel; B7 prerequisite для >4
-- [ ] **A8** короткие presets: `critical.txt`, `benchmark.txt`, `gp-verified.tls` для smoke
-- [ ] **A9** timeout benchmark matrix — settle+curl на **0.5/1/1.5/2s**; preset `timeout-benchmark.tls`; families: `repeats=N`, `tcp_ts`, `disorder_after`, `ip_autottl`, `dupfake`, `discord_udp r6/r12` → таблица family→timeout → B11
-- [ ] **A10** orchestrator flags: `--tls12-off`, `--tls13-off`, `--http3-off` (алиас `--no-quic`), `--http-off` — зеркало GP enable_*; фильтр фаз в `bs full`/`scan`/`pair`
-
-#### Часть B — benchmark до production
-
-- [ ] **B1** settle 2s → readiness poll (100–300ms), приоритет #1; согласовать с A9
-- [ ] **B2** multi-domain fan-out — 1 nfqws2, `asyncio.gather` curl, `--curl-parallel N`; приоритет #2 (замена A7↑parallel)
-- [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
-- [ ] **B4** runtime family early-exit в `bs full` на первом PASS
-- [ ] **B5** hybrid: BS shortlist export → GP multi-domain на роутере
-- [ ] **B6** blockcheckw (Rust vmap) — fast scan reference, не drop-in voice/pair
-- [ ] **B7** nftables vmap POC (GP/blockcheckw) — prerequisite parallel > 4
-- [ ] **B8** batch DB writes (~5%)
-- [ ] **B9** double Semaphore cleanup в `main.py`
-- [ ] **B10** wire `get_fresh_url()` для googlevideo (см. googlevideo section)
-- [ ] **B11** dynamic per-strategy settle+curl из результатов A9
-
-**Порядок:** A1+A2+parallel4 → A5 dpi-tester → A10+A1 CLI → A9→B1→B11 → B2 → B4 → B7.
-
-**Цель после B1+B2+A1 @ parallel=4:** ~6–12 job/s (7–14h на 312k), не через ↑parallel.
+- [ ] **A1a** `presets/domains/denylist.txt` + loader filter *(= A1)*
+- [ ] **A1b** CLI `--allow-unsafe-domains` на `bs full` / `scan` / `pair`
+- [ ] **A1c** `coverage-tcp.txt` lean preset (~15 dom)
+- [ ] **A1d** WARN при 0% PASS в DB после N runs (опционально)
 
 ### Исследование вариативности blobs (2026-07-31)
 
@@ -182,15 +364,15 @@ Telegram — blob вторичен (IP-block); built-in `fake_default_tls/http/q
 | `tls_vk` | `tls_clienthello_vk_com.bin` | в `files/fake` | ★★ | VK / RU whitelist TLS | **да** |
 | `quic_vk` | `quic_initial_vk_com.bin` | в `files/fake` | ★★ | VK QUIC | **да** |
 | `discord_ipdisc` | `discord-ip-discovery-with-port.bin` | в `files/fake` | ★★ | Official zapret 74B voice alt | сравнить |
-| `quic_gv_kyber` | `quic_initial_*_googlevideo_com_kyber_*.bin` | в `files/fake` | ★ | YouTube CDN QUIC (не apex TLS) | после B10 |
+| `quic_gv_kyber` | `quic_initial_*_googlevideo_com_kyber_*.bin` | в `files/fake` | ★ | YouTube CDN QUIC (не apex TLS) | после GV-1 |
 | `wireguard_init` | `wireguard_initiation.bin` | в `files/fake` | ★ | WG / hysteria-adjacent UDP | low |
 | `http_iana` | `http_iana_org.bin` | в `files/fake` | ★ | HTTP fake desync | low |
 | `blob_zero` | `0x00000000` hex inline | — | ★★ | UDP fallback, multisplit | hex в matrix |
 
-- [ ] Синхронизировать `presets/blobs/` manifest: что в wheel vs symlink на `/opt/zapret2/blobs/`
-- [ ] Скопировать tier-1 gaps: `game_udp`, `tls_vk`, `quic_vk` из Flowseal/bol-van
-- [ ] Matrix generator: alias map `google`→`tls_clienthello_www_google_com.bin` (уже в nfqws2 conf)
-- [ ] Документировать built-in vs file blobs в `presets/README.md`
+- [ ] **BLOB-1** Синхронизировать `presets/blobs/` manifest: wheel vs symlink `/opt/zapret2/blobs/`
+- [ ] **BLOB-2** Скопировать tier-1 gaps: `game_udp`, `tls_vk`, `quic_vk` из Flowseal/bol-van
+- [ ] **BLOB-3** Matrix generator: alias map `google`→`tls_clienthello_www_google_com.bin`
+- [ ] **BLOB-4** Документировать built-in vs file blobs в `presets/README.md`
 
 ### Multi-blob chains (ТСПУ) — покрытие blockcheckS (2026-07-31)
 
@@ -202,7 +384,7 @@ Community: цепочки разных blobs подряд = несколько `
 |---|---|:---:|---|
 | Dual fake `stun→max_ru` (+repeats, tcp_ts) | Flowseal ALT2 | ✅ | `StandardGenerator.multi_fake`, `--generate fake_multi`, `flowseal` |
 | Dual fake пары (stun/google/max_ru/4pda) | Flowseal | ✅ | 4 ordered pairs; **нет reverse** (max_ru→stun) |
-| `fake` + `multisplit` + `seqovl_pattern=blob` | ALT11, PR #10293 | ⚠️ | `configs/alt11*`; `fake_faked` только seqovl=1; **нет** fake blob ≠ seqovl blob в standard |
+| `fake` + `multisplit` + `seqovl_pattern=blob` | ALT11, PR #10293 | ⚠️ | `configs/alt11*`; `fake_faked` только seqovl=1; **нет** fake blob ≠ seqovl blob |
 | Triple: fake + multisplit + hostfakesplit | ALT12 | ⚠️ | `configs/alt12*` only; **не в matrix generator** |
 | `fake` + `hostfakesplit` | fake_hostfake | ✅ | `StandardGenerator.fake_hostfake` |
 | `multisplit` seqovl 568–681 + blob | Flowseal FAKE TLS AUTO | ✅ | `multisplit` family, `FlowsealGenerator` |
@@ -210,28 +392,73 @@ Community: цепочки разных blobs подряд = несколько `
 | `fakedsplit` / `fakeddisorder` | sonicdpi #4 | ❌ | `FakedTcpGenerator` = multisplit seqovl=1, **не fakedsplit** |
 | `dupfake` (multi-blob один вызов) | GP/Keenetic custom Lua | ❌ | **нет** в matrix / presets |
 | 3+ blobs в цепочке | редко | ❌ | только пары |
-| HTTP fake + TLS fake (один профиль) | Flowseal `--fake-http`+`--fake-tls` | ❌ | **нет** generator |
-| UDP dual-blob (quic_dbank на discord+stun L7) | Flowseal UDP profile | ❌ | UDP = single `discord_udp` / `quic_*` |
+| HTTP fake + TLS fake (один профиль) | Flowseal `--fake-http`+`--fake-tls` | ❌ | **нет** generator → M6 |
+| UDP dual-blob (quic_dbank на discord+stun L7) | Flowseal UDP profile | ❌ | UDP = single blob → M7 |
 | `circular` rotate strategies | zapret2-auto | ⚠️ | export [`conf_builder`](src/blockchecks/engine/conf_builder.py); **не scan** |
 | `tls_fake_flood` | keenetic discussion #82 | ❌ | **нет** |
 | `flowseal` source в `bs full` default | — | ⚠️ | default `standard,custom,configs`; flowseal — явный `--tcp-sources` |
 | Порядок blobs A→B vs B→A | эмпирика ТСПУ | ⚠️ | fixed pairs; **benchmark order matrix отсутствует** |
 | Per-blob разный `repeats` | часть Flowseal bats | ❌ | multi_fake: одинаковый repeats на оба blob |
 
-**Итог:** ядро ТСПУ-паттерна (dual fake stun+max_ru) **покрыто**. Пробелы — комбо-desync
-(multidisorder/fakedsplit/dupfake), полные Flowseal triple chains, HTTP+TLS dual fake, UDP
-multi-blob, order sensitivity.
+**Итог:** ядро ТСПУ (dual fake stun+max_ru) **покрыто**. Пробелы — комбо-desync,
+multidisorder/fakedsplit/dupfake, triple chains, HTTP+TLS dual fake, UDP multi-blob.
 
-- [ ] **M1** `fake_multisplit` family: `fake:blob=X` + `multisplit:seqovl=664:seqovl_pattern=Y` (X≠Y), как ALT11
-- [ ] **M2** `fake_multisplit_hostfake` triple chain (ALT12 pattern) в StandardGenerator
+- [ ] **M1** `fake_multisplit` family: `fake:blob=X` + `multisplit:seqovl=664:seqovl_pattern=Y` (X≠Y)
+- [ ] **M2** `fake_multisplit_hostfake` triple chain (ALT12) в StandardGenerator
 - [ ] **M3** `multidisorder` + `fakedsplit`/`fakeddisorder` families (sonicdpi tier-1)
 - [ ] **M4** `dupfake` preset / GP custom list import
 - [ ] **M5** blob order matrix: reverse pairs + 3-blob permutations subset
-- [ ] **M6** HTTP+TLS dual-fake generator (`fake_default_http` + TLS blob)
-- [ ] **M7** UDP multi-blob (discord L7: quic_dbank на stun+discord)
+- [ ] **M6** HTTP+TLS dual-fake generator → Phase 8
+- [ ] **M7** UDP multi-blob (discord L7: quic_dbank на stun+discord) → Phase 7
 - [ ] **M8** `flowseal` в default `bs full --tcp-sources` или merge combos в `standard`
 - [ ] **M9** rename/fix `FakedTcpGenerator` → real `fakedsplit` или deprecate
 - [ ] **M10** `circular` в optional scan mode (rotate blob combos on fail)
+- [ ] TTL > 255, `repeats=4` generator — matrix gap
+
+---
+
+# Phase 11 — Speed / throughput (P1)
+
+Bottleneck BS: `async_runner._nfqws2_daemon` sleep 2s + nfqws2 restart/job (~1.35 job/s
+на stress 312k). GP: 100ms minsleep, multi-domain fan-out.
+
+**Роли:** dpi-tester — provider profiling (Fryazino, custom lists); blockcheckS —
+community mass-scan; GP — production orchestrator + import shortlists.
+
+### Часть A — внедрять / использовать сейчас
+
+- [ ] **A1** denylist + lean `coverage-tcp.txt` — 40→~15 dom, −62% jobs → A1a–A1d
+- [x] **A2** `scan_level=fast` — пропуск TTL/autottl expansions
+- [x] **A3** `--resume` — skip записанных (strategy, domain) в DB
+- [ ] **A4** GP multi-domain + `curl_parallelism` 4–10 — один nfqws2, parallel curl *(GP-side; BS = B2)*
+- [ ] **A5** *(dpi-tester)* `provider_summary.json` — custom lists, `TEST=custom`; BS shortlist import
+- [x] **A6** GP `SCANLEVEL=quick|standard` — early-exit (уже в GP; BS = B4, BC2-6)
+- [x] **A7** `--parallel 4` — **потолок**; масштабировать через B2, не ↑parallel; B7 для >4
+- [ ] **A8** короткие presets: `critical.txt`, `benchmark.txt`, `gp-verified.tls` для smoke
+- [ ] **A9** timeout benchmark matrix — settle+curl на **0.5/1/1.5/2s**; preset `timeout-benchmark.tls`
+- [ ] **A10** orchestrator flags: `--tls12-off`, `--tls13-off`, `--http3-off`, `--http-off`
+
+### Часть B — benchmark до production
+
+- [ ] **B1** settle 2s → readiness poll (100–300ms); согласовать с A9
+- [ ] **B2** multi-domain fan-out — 1 nfqws2, `asyncio.gather` curl, `--curl-parallel N`
+- [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
+- [ ] **B4** runtime family early-exit в `bs full` на первом PASS *(= BC2-6 частично)*
+- [ ] **B5** hybrid: BS shortlist export → GP multi-domain на роутере
+- [ ] **B6** blockcheckw (Rust vmap) — fast scan reference, не drop-in voice/pair
+- [ ] **B7** nftables vmap POC — prerequisite parallel > 4
+- [ ] **B8** batch DB writes (~5%)
+- [ ] **B9** double Semaphore cleanup в `main.py`
+- [ ] **B10** wire `get_fresh_url()` для googlevideo → **GV-1**
+- [ ] **B11** dynamic per-strategy settle+curl из результатов A9
+
+**Порядок:** A1+A2+parallel4 → A5 dpi-tester → A10+A1 CLI → A9→B1→B11 → B2 → B4 → B7.
+
+**Цель после B1+B2+A1 @ parallel=4:** ~6–12 job/s (7–14h на 312k).
+
+---
+
+# Phase 12 — Smart scan: ML / hierarchy / AQ (P3)
 
 ### ML: sklearn Random Forest ranker (Breiman / scikit-learn)
 
@@ -241,115 +468,118 @@ Offline ranker поверх `state.db` / GP SQLite — **не замена curl 
 inference: rank top-20 → BS verify. Train только на BS curl_cffi labels.
 
 **sklearn:** `RandomForestClassifier(n_estimators=200, max_features="sqrt", class_weight="balanced", oob_score=True)`.
-Валидация: `GroupKFold` по domain (anti-leakage). Метрика: **Recall@K**, не accuracy.
-
-Альтернатива на больших данных: `HistGradientBoostingClassifier` (быстрее tabular).
+Валидация: `GroupKFold` по domain. Метрика: **Recall@K**.
 
 - [ ] **ML1** optional-dep `scikit-learn` в `[project.optional-dependencies] ml`
 - [ ] **ML2** `scripts/train_strategy_ranker.py` — export `state.db` → parquet → fit → `model.pkl`
-- [ ] **ML3** feature parser: domain (TLD, cdn_class) + strategy (family/blob/repeats/fooling из `strategy_safety`-подобного парсера)
-- [ ] **ML4** BS integration: `--ranker model.pkl` → top-K candidates вместо full matrix
-- [ ] **ML5** retrain policy: после mass scan / drift (blob burn) / provider change
+- [ ] **ML3** feature parser: domain (TLD, cdn_class) + strategy (family/blob/repeats/fooling)
+- [ ] **ML4** BS integration: `--ranker model.pkl` → top-K candidates
+- [ ] **ML5** retrain policy: после mass scan / drift / provider change
 
 **Риски:** label noise GP≠BS, нестационарность ТСПУ, cold start → fallback brute-force.
 
 ### ML: иерархическое облако параметров (progressive drill-down)
 
-Альтернатива full matrix: **дерево осей** вместо декартова произведения. Домен проходит
-уровни — на каждом добавляется один слой параметров; при PASS на уровне N можно углубляться
-или остановиться (early-exit).
+Альтернатива full matrix: **дерево осей** вместо декартова произведения.
 
 ```text
 L0: desync=fake                    → FAIL
 L1: + ip_autottl=-2                → FAIL
-L2: + blob=tls_clienthello_max_ru  → PASS  → stop / optional L3 (repeats, tcp_ts, …)
+L2: + blob=tls_clienthello_max_ru  → PASS  → stop / optional L3
 ```
 
-Похоже на GP `SCANLEVEL=standard` (break family), но **внутри одной ветки** — наращивание
-параметров, а не перебор готовых строк из `list_https_tls12.txt`.
+| | Full matrix | Hierarchical | RF ranker | Adaptive queue |
+|---|---|---|---|---|
+| Тестов/домен | тысячи | десятки–сотни | K verify | перестановка очереди |
+| Combo fake+blob+tcp_ts | ✅ | ⚠️ greedy miss | ✅ если в train | ✅ fan-out |
+| Скорость | медленно | быстро | быстрый inference | **с первого PASS** |
 
-| | Full matrix (сейчас) | Hierarchical cloud | RF ranker |
-|---|---|---|---|
-| Тестов/домен | тысячи | десятки–сотни | K verify после rank |
-| Ловит combo fake+blob+tcp_ts | ✅ | ⚠️ если порядок осей верный | ✅ если в train |
-| Скорость | медленно | **быстро** при удачном дереве | быстрый inference |
-| Риск | нет | **greedy miss** — combo без промежуточных уровней | stale model |
-
-**ML для иерархии (не RF напрямую):**
-- **Learned policy tree** — какую ось раскрывать следующей (contextual bandit / small RL)
-- **Provider template** — dpi-tester отдаёт порядок осей для Fryazino: fake → blob → repeats → tcp_ts
-- **Beam search** — держать top-B частичных конфигов, не одну greedy-ветку
-- **Monotonic priors** — blob почти всегда после fake; autottl — optional branch
-
-**Связь с RF:** RF ранжирует *готовые* стратегии; hierarchy *строит* стратегию по слоям.
-Гибрид: hierarchy для cold start → RF для уточнения blob/fooling на известном family.
+**Связь:** RF ранжирует готовые стратегии; hierarchy строит по слоям; AQ — online.
+Гибрид: provider template (A5) → AQ + B2 → RF → hierarchy (H*).
 
 - [ ] **H1** спецификация «облака параметров»: оси (desync, blob, fooling, ttl, repeats, split…)
 - [ ] **H2** `ProgressiveStrategyBuilder` — API: `add_axis()` → partial conf → test → branch
-- [ ] **H3** default tree order из GP `family_rank` + Fryazino facts (fake→blob→repeats=6→tcp_ts)
-- [ ] **H4** beam width B=3 — не только greedy, чтобы не пропустить fake+blob без autottl
+- [ ] **H3** default tree order из GP `family_rank` + Fryazino facts
+- [ ] **H4** beam width B=3 — не только greedy
 - [ ] **H5** интеграция в `bs scan --progressive` / `scan_level=progressive`
-- [ ] **H6** лог partial results в DB (`partial_results`: level, axis, status) для ML train
-- [ ] **H7** learned axis order: contextual bandit или RF на «какая ось дала gain на этом domain_class»
-- [ ] **H8** provider template export из dpi-tester (`provider_summary.json` → axis order)
-- [ ] **H9** benchmark vs full matrix на 10 доменах: tests count, Recall(best strategy found)
-- [ ] **H10** fallback: если progressive 0 PASS → expand beam / RF top-K / full family scan
+- [ ] **H6** лог partial results в DB (`partial_results`) для ML train
+- [ ] **H7** learned axis order: contextual bandit / RF на domain_class
+- [ ] **H8** provider template export из dpi-tester → A5
+- [ ] **H9** benchmark vs full matrix на 10 доменах: Recall(best strategy found)
+- [ ] **H10** fallback: progressive 0 PASS → expand beam / RF top-K / full family scan
 
 ### Adaptive queue: cross-domain fan-out + online family boost (AQ)
 
-Online scheduler во время `bs full` / `bs scan` — **не offline ML**, а priority queue с обучением
-на лету. Первый PASS → немедленный fan-out той же стратегии на sibling-домены; каждый PASS
-по family поднимает вес остальных стратегий этой family в очереди (**boost, не prune**).
+Online scheduler во время `bs full` / `bs scan` — priority queue с обучением на лету.
 
 ```text
 PASS discord.com + fake+multisplit(seqovl=664)
-  → enqueue (same strategy × discord.gg, discordapp.com, …)  # fan-out
-  → w_family[fake+multisplit] += 1                          # boost siblings
-  → остальные fake+multisplit в очереди +N priority points
+  → enqueue (same strategy × discord.gg, discordapp.com, …)
+  → w_family[fake+multisplit] += 1
 ```
 
-**Гипотеза:** на одном провайдере ~90% рабочих стратегий обнаруживаются в первой половине
-jobs, если очередь рандомизирована + веса по family/blob обновляются после каждого PASS.
-Проверить SQL по `state.db`: time-to-first-PASS per family vs total scan.
+**Гипотеза:** ~90% рабочих стратегий в первой половине jobs при shuffle + family weights.
+Проверить SQL по `state.db`.
 
-**Priority (черновик):**
-```text
-priority = base_shuffle_order
-         + w_family[family] * 10
-         + w_blob[blob] * 5
-         + fanout_bonus(sibling_domain_already_PASS) * 50
-         + uniform_random() * epsilon   # ε≈5–10% exploration
-```
-FAIL: `w_family -= 0.1` (floor 0). Никогда не удалять jobs из matrix — только переставлять.
+- [ ] **AQ1** `AdaptiveJobQueue`: priority heap + ε-random
+- [ ] **AQ2** fan-out on PASS: `(strategy, domain)` → sibling domains
+- [ ] **AQ3** domain clusters: `discord*`, `google*`, `youtube*`, `general`
+- [ ] **AQ4** family/blob weight table + persist в `state.db` (`scan_weights`)
+- [ ] **AQ5** интеграция с B2: одна стратегия → `asyncio.gather` curl
+- [ ] **AQ6** CLI `bs full --adaptive` / `--fan-out`
+- [ ] **AQ7** метрики: `time_to_first_pass`, `pass_found_before_50pct_jobs`
+- [ ] **AQ8** SQL benchmark на stress: validate «90% в первой половине»
 
-| | Full matrix | RF ranker | Adaptive queue (AQ) |
-|---|---|---|---|
-| Сигнал | нет до конца | offline train | **с первого PASS** |
-| Cross-domain | нет | если в train | **сразу fan-out** |
-| Риск | медленно | stale model | ложный fan-out → cluster limits |
+---
 
-**Гибрид (целевой):** provider template (dpi-tester) → adaptive queue + B2 multi-domain curl
-→ RF подкрутка начальных весов из `state.db` → hierarchy (H*) для cold axes.
+# Phase 13 — Developer onboarding (ONB)
 
-- [ ] **AQ1** `AdaptiveJobQueue` в `main.py` / `async_runner`: priority heap + ε-random
-- [ ] **AQ2** fan-out on PASS: `(strategy, domain)` → enqueue `(strategy, sibling_domains[])`
-- [ ] **AQ3** domain clusters: `discord*`, `google*`, `youtube*`, `general` — не fan-out на все 40
-- [ ] **AQ4** family/blob weight table в памяти + persist в `state.db` (`scan_weights` table)
-- [ ] **AQ5** интеграция с B2: одна стратегия → `asyncio.gather` curl по fan-out list
-- [ ] **AQ6** CLI `bs full --adaptive` / `--fan-out`; anchor domains first (discord, youtube)
-- [ ] **AQ7** метрики: `time_to_first_pass`, `pass_found_before_50pct_jobs`, fan-out hit rate
-- [ ] **AQ8** SQL benchmark на текущем stress: validate «90% в первой половине» hypothesis
+Параллельно Phase 9; не заменяет SD/GV. См. [CONTRIBUTING.md](../CONTRIBUTING.md),
+[architecture.md](architecture.md).
 
-- [ ] `ipfrag_udp` / `ipfrag_tcp` (`send:` dual-call)
-- [ ] TTL > 255, `repeats=4` generator
+- [x] **ONB-1** CONTRIBUTING.md
+- [x] **ONB-2** docs/architecture.md (main + discover-dns/auto-discover + googlevideo)
+- [x] **ONB-3** docs/database.md
+- [x] **ONB-4** docs/glossary.md + docs/cookbook/
+- [x] **ONB-5** README, guide, package.md, docs map; fix BLOB-1≠configs
+- [x] **ONB-6** settings.example.env; убрать machine paths
+- [x] **ONB-7** configs/ package-data политика (editable install)
+- [x] **ONB-8** убрать sys.path.insert
+- [x] **ONB-9** engine/checkers `__init__` re-exports
+- [x] **ONB-10** split `cli/` из bs.py
+- [x] **ONB-11** split `engine/generators/`
+- [x] **ONB-12** test_package_structure + smoke
+- [x] **ONB-13** GitHub Actions CI + PR template
 
-### Packaging tech debt (закрыто)
+---
+
+# Phase 2–6 — доп. бэклог (P2)
+
+### Phase 2 — Voice
+
+- [ ] **V2-1** multi-endpoint pair matrix по всем discover EP (сейчас только `eps[0]`)
+- [ ] **V2-2** `--full-voice` gateway WS probe (сейчас discovery+STUN only)
+
+### Phase 5 — GP bridge
+
+- [ ] **A5** dpi-tester `provider_summary.json` → GP/Keenetic; BS shortlist import
+- [ ] **B5** hybrid: BS shortlist export → GP multi-domain discovery
+- [ ] **P5-1** GP JSON import в `state.db` (partial сейчас)
+
+### Phase 6 — Export
+
+- [ ] **BC2-7** COMMON strategies intersection в export
+
+---
+
+# Закрыто (Packaging tech debt)
 
 - [x] scan `--auto-discover` semantics
 - [x] untrack `state.db`
 - [x] nfqws2 DEVNULL stderr; pair coexist; queue-bypass; THROTTLED; ECH
 - [x] UserMatrix UDP skip on TCP; protocol/preset/`-M`; blob/seqovl runner
 - [x] Matrix protocol-gate + `scan_level=single`
+- [x] nfqws2-keenetic export (`conf_builder` / `bc-nfconf`)
 
 ---
 
@@ -366,8 +596,6 @@ FAIL: `w_family -= 0.1` (floor 0). Никогда не удалять jobs из 
 | 5 firewall backends | избыток для Linux-only |
 
 Главный выигрыш blockcheckS: **netns pool + parallel** и **браузерный TLS**.
-Идеал research (reconfigure без restart) частично вытеснен моделью
-«свой nfqws2 на netns» — проще изоляция, тот же порядок ускорения.
 
 ### Сравнение
 
@@ -380,6 +608,8 @@ FAIL: `w_family -= 0.1` (floor 0). Никогда не удалять jobs из 
 | Flowseal blobs | ❌ | ❌ | ✅ |
 | Conf export | text | JSON | keenetic + raw nfqws2 |
 | GP | custom TEST | ❌ | `state.db` (+ future import) |
+| Secure DNS / DoH | ✅ auto | — | 📋 Phase 9 (SD) |
+| IP-block preflight | ✅ | — | 📋 Phase 9 (BC2) |
 
 ### Ключевые решения (актуальные)
 
@@ -389,6 +619,8 @@ FAIL: `w_family -= 0.1` (floor 0). Никогда не удалять jobs из 
 4. SQLite checkpoints / resume; fingerprint на pair matrix.
 5. Discover: DNS finland* + Maks list + dual STUN probe; concurrency=4.
 6. Export: coverage_score → `:strategy=1..N` в dual conf.
+7. Secure DNS: DoH pre-resolve на **все** домены + CURLOPT_RESOLVE (как blockcheck2); Phase 9.
+8. Preflight pipeline: DNS audit → IP-block → port block → strategy matrix (BC2 flow).
 
 ### Устаревший layout из research (не использовать)
 
@@ -401,9 +633,14 @@ FAIL: `w_family -= 0.1` (floor 0). Никогда не удалять jobs из 
 
 | Файл | Роль |
 |------|------|
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | Setup, PR checks, where to change what |
 | [guide.md](guide.md) | Установка и CLI |
+| [architecture.md](architecture.md) | Data flow, voice/googlevideo diagrams |
+| [database.md](database.md) | state.db schema + SQL examples |
+| [glossary.md](glossary.md) | Термины |
+| [cookbook/](cookbook/) | How-to: checker, generator, CLI flag |
 | [package.md](package.md) | Структура пакета / аудит |
-| [todo.md](todo.md) | Этот roadmap |
+| [todo.md](todo.md) | Roadmap (Phases 1–13) |
 | `presets/README.md` | Domains / strategies / `bs full` |
 | Root `README.md` | Quick start |
-| Root `research.md`, `GOALS.md` | stubs → сюда |
+| Root `research.md`, `GOALS.md` | stubs → todo.md |

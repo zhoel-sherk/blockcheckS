@@ -12,8 +12,14 @@ import time
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
+from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.engine.async_runner import AsyncTestRunner
-from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT, PROJECT_DIR
+from blockchecks.engine.config import (
+    DEFAULT_VOICE_IP,
+    DEFAULT_VOICE_PORT,
+    PROJECT_DIR,
+    SECURE_DNS_DEFAULT,
+)
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.nfconf import export_configs
@@ -55,6 +61,17 @@ async def run_full(args) -> int:
     if not domains:
         print(f"{RED}ERROR: empty domains file{RESET}")
         return 1
+
+    secure_dns = SECURE_DNS_DEFAULT and not getattr(args, "no_secure_dns", False)
+    dns_cache, dns_audits, dns_rc = prepare_dns_for_run(
+        domains,
+        secure_dns=secure_dns,
+        skip_audit=getattr(args, "skip_dns_audit", False),
+        allow_hijack=getattr(args, "allow_dns_hijack", False),
+        doh_server=getattr(args, "doh_server", None) or None,
+    )
+    if dns_rc:
+        return dns_rc
 
     primary = args.domain or domains[0]
     tcp_sources = [s for s in args.tcp_sources.split(",") if s]
@@ -120,7 +137,13 @@ async def run_full(args) -> int:
     )
     print(f"  Fingerprint:{fp}")
 
-    runner = AsyncTestRunner(pool_size=parallel, db=db)
+    runner = AsyncTestRunner(
+        pool_size=parallel,
+        db=db,
+        secure_dns=secure_dns,
+        dns_cache=dns_cache,
+        dns_audit={r.domain: r for r in dns_audits},
+    )
     stop = asyncio.Event()
 
     def _stop(*_a):
@@ -309,6 +332,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--isp-interface", default="eth3")
     p.add_argument("--prefix", default="/opt/etc/nfqws2")
     p.add_argument("--mode", default="auto", choices=["auto", "list", "all"])
+    g = p.add_argument_group("secure DNS")
+    g.add_argument("--no-secure-dns", action="store_true", help="Disable DoH pre-resolve")
+    g.add_argument("--doh-server", default=None, help="Fixed DoH server URL")
+    g.add_argument("--skip-dns-audit", action="store_true")
+    g.add_argument("--allow-dns-hijack", action="store_true")
     return p
 
 

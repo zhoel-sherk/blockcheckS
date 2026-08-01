@@ -102,20 +102,28 @@ def check_tls(
     # Omit User-Agent so curl_cffi impersonation supplies a real browser UA
     headers = {"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9"}
 
-    if pre_resolved_ip:
-        target = pre_resolved_ip
-        headers["Host"] = domain
-
     try:
         read_start = time.perf_counter()
-        resp = curl_cffi.get(
-            f"https://{target}",
-            impersonate=impersonate,
-            http_version=http_version,
-            timeout=timeout,
-            headers=headers,
-            allow_redirects=False,
-        )
+        if pre_resolved_ip:
+            session = curl_cffi.Session(
+                impersonate=impersonate,
+                http_version=http_version,
+                headers=headers,
+                allow_redirects=False,
+            )
+            from blockchecks.checkers.dns_secure import apply_curl_resolve
+
+            apply_curl_resolve(session, domain, pre_resolved_ip)
+            resp = session.get(f"https://{domain}", timeout=timeout)
+        else:
+            resp = curl_cffi.get(
+                f"https://{target}",
+                impersonate=impersonate,
+                http_version=http_version,
+                timeout=timeout,
+                headers=headers,
+                allow_redirects=False,
+            )
         read_elapsed = time.perf_counter() - read_start
         result.http_status = resp.status_code
         result.content_length = len(resp.content)
