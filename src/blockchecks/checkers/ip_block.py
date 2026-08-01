@@ -1,0 +1,145 @@
+"""IP-block cross-test — blockcheck2 ``check_dpi_ip_block`` parity (BC2-1).
+
+Detects SNI-based vs IP-based blocking by swapping domains and connect IPs:
+  1. Baseline: unblocked domain on its own IP (e.g. iana.org)
+  2. Blocked SNI → unblocked IP
+  3. Unblocked SNI → each blocked-domain IP
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from blockchecks.checkers.dns_secure import DnsRunCache, pick_working_doh
+from blockchecks.checkers.tcp_tls import TlsResult, check_tls
+from blockchecks.engine.config import UNBLOCKED_DOM
+
+
+@dataclass
+class IpBlockProbe:
+    label: str
+    sni_domain: str
+    connect_ip: str
+    result: TlsResult
+
+
+@dataclass
+class IpBlockReport:
+    blocked_domain: str
+    unblocked_domain: str
+    baseline_ok: bool = False
+    unblocked_ip: str = ""
+    blocked_ips: list[str] = field(default_factory=list)
+    probes: list[IpBlockProbe] = field(default_factory=list)
+    sni_block_likely: bool = False
+    ip_block_on: list[str] = field(default_factory=list)
+    skipped: bool = False
+    skip_reason: str = ""
+
+
+def _probe(
+    label: str,
+    sni_domain: str,
+    connect_ip: str,
+    timeout: float,
+) -> IpBlockProbe:
+    r = check_tls(
+        sni_domain,
+        timeout=timeout,
+        pre_resolved_ip=connect_ip,
+        verify_content=False,
+    )
+    return IpBlockProbe(label=label, sni_domain=sni_domain, connect_ip=connect_ip, result=r)
+
+
+def run_ip_block_cross_test(
+    blocked_domain: str,
+    unblocked_domain: str | None = None,
+    timeout: float = 5.0,
+    dns_cache: DnsRunCache | None = None,
+) -> IpBlockReport:
+    """Run IP-block cross-test for one blocked domain."""
+    unblocked = unblocked_domain or UNBLOCKED_DOM
+    report = IpBlockReport(blocked_domain=blocked_domain, unblocked_domain=unblocked)
+
+    baseline = check_tls(unblocked, timeout=timeout, verify_content=False)
+    report.baseline_ok = baseline.success
+    if not baseline.success:
+        report.skipped = True
+        report.skip_reason = f"{unblocked} baseline failed: {baseline.error or baseline.http_status}"
+        return report
+
+    cache = dns_cache or DnsRunCache(doh_server=pick_working_doh(timeout=timeout))
+    report.unblocked_ip = cache.primary_ip(unblocked) or ""
+    report.blocked_ips = cache.resolve(blocked_domain, timeout=timeout)
+
+    if not report.unblocked_ip:
+        report.skipped = True
+        report.skip_reason = f"{unblocked} does not resolve via DoH"
+        return report
+
+    report.probes.append(
+        _probe(
+            f"{blocked_domain} SNI @ {unblocked} IP",
+            blocked_domain,
+            report.unblocked_ip,
+            timeout,
+        )
+    )
+    if report.probes[-1].result.success:
+        report.sni_block_likely = True
+
+    for ip in report.blocked_ips[:5]:
+        p = _probe(
+            f"{unblocked} SNI @ {blocked_domain} IP {ip}",
+            unblocked,
+            ip,
+            timeout,
+        )
+        report.probes.append(p)
+        if not p.result.success:
+            report.ip_block_on.append(ip)
+
+    return report
+
+
+def print_ip_block_report(report: IpBlockReport) -> None:
+    """Human-readable summary."""
+    print(f"\n  IP-block cross-test: {report.blocked_domain} (ref {report.unblocked_domain})")
+    if report.skipped:
+        print(f"  SKIP: {report.skip_reason}")
+        return
+    print(f"  Baseline {report.unblocked_domain}: OK")
+    print(f"  Unblocked IP: {report.unblocked_ip}")
+    print(f"  Blocked IPs:  {', '.join(report.blocked_ips[:5]) or '—'}")
+    for p in report.probes:
+        tag = "OK" if p.result.success else "FAIL"
+        st = p.result.http_status or p.result.error or "?"
+        print(f"    [{tag}] {p.label} → HTTP {st}")
+    if report.sni_block_likely:
+        print("  → SNI-based block likely (blocked host works on clean IP)")
+    if report.ip_block_on:
+        print(f"  → IP block likely on: {', '.join(report.ip_block_on)}")
+
+
+def run_ip_block_preflight(
+    domains: list[str],
+    unblocked_domain: str | None = None,
+    timeout: float = 5.0,
+    dns_cache: DnsRunCache | None = None,
+) -> list[IpBlockReport]:
+    """Run cross-test for each domain (skip unblocked ref domain)."""
+    ref = unblocked_domain or UNBLOCKED_DOM
+    reports = []
+    for domain in domains:
+        if domain.rstrip(".") == ref.rstrip("."):
+            continue
+        reports.append(
+            run_ip_block_cross_test(
+                domain,
+                unblocked_domain=ref,
+                timeout=timeout,
+                dns_cache=dns_cache,
+            )
+        )
+    return reports

@@ -190,7 +190,7 @@ voice UDP, async parallel, resume/state.db, MatrixGenerator, keenetic export.
 |---|-------------|-----------|--------|
 | C1 | DoH pre-resolve на все домены | ✅ DoH + audit | ~~SD1–SD3~~ |
 | C2 | DNS spoof detection | ✅ startup audit | ~~SD1, SD4~~ |
-| C3 | IP-block cross-test | нет | → **BC2-1** |
+| C3 | IP-block cross-test | ✅ `ip_block.py` | ~~BC2-1~~ |
 | C4 | UNBLOCKED_DOM baseline | preset only | → **BC2-2** |
 
 #### HIGH
@@ -228,7 +228,7 @@ check_system → check_already → check_prerequisites
   → SUMMARY + COMMON intersection
 ```
 
-- [ ] **BC2-1** `checkers/ip_block.py`: cross-test blocked ↔ `UNBLOCKED_DOM` IP
+- [x] **BC2-1** `checkers/ip_block.py`: cross-test blocked ↔ `UNBLOCKED_DOM` IP
 - [ ] **BC2-2** preflight baseline: auto unblocked check (`--unblocked-dom`)
 - [ ] **BC2-3** port block probe на все resolved IP
 - [ ] **BC2-4** `--repeats N` + `--parallel-repeats`

@@ -113,6 +113,9 @@ UDP_DNS_SERVERS = [
 DEFAULT_VOICE_IP = "35.217.5.42"
 DEFAULT_VOICE_PORT = 50006
 
+# IP-block cross-test reference host (blockcheck2 UNBLOCKED_DOM)
+UNBLOCKED_DOM = _env_or("BLOCKCHECKS_UNBLOCKED_DOM", "iana.org")
+
 # Content validation thresholds
 MIN_CONTENT_LENGTH = 300  # bytes — minimum for a real web page (aligned with tcp_tls)
 MIN_READ_RATE_BPS = 500.0  # bytes/sec — below this = TCP window clamp (FAIL)

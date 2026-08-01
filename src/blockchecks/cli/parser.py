@@ -31,6 +31,13 @@ def add_secure_dns_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Continue when DNS hijack detected",
     )
+    g = parser.add_argument_group("preflight")
+    g.add_argument("--skip-ip-block", action="store_true", help="Skip IP-block cross-test")
+    g.add_argument(
+        "--unblocked-dom",
+        default=None,
+        help="Reference unblocked domain (default: iana.org)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

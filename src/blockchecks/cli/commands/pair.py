@@ -9,6 +9,7 @@ import time
 from colorama import Fore, Style
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
+from blockchecks.checkers.ip_block import print_ip_block_report, run_ip_block_cross_test
 from blockchecks.cli.presets import list_presets
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
@@ -18,6 +19,7 @@ from blockchecks.engine.config import (
     DPI_TESTER_SETTINGS,
     PROJECT_DIR,
     SECURE_DNS_DEFAULT,
+    UNBLOCKED_DOM,
 )
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
@@ -76,6 +78,15 @@ async def cmd_pair(args):
     )
     if dns_rc:
         return dns_rc
+
+    if not getattr(args, "skip_ip_block", False) and args.domain:
+        ip_report = run_ip_block_cross_test(
+            args.domain,
+            unblocked_domain=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
+            timeout=min(getattr(args, "timeout", 5.0), 8.0),
+            dns_cache=dns_cache,
+        )
+        print_ip_block_report(ip_report)
 
     runner = AsyncTestRunner(
         pool_size=pool_size,

@@ -13,12 +13,14 @@ from colorama import Fore, Style
 from colorama import init as colorama_init
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
+from blockchecks.checkers.ip_block import print_ip_block_report, run_ip_block_cross_test
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
     DEFAULT_VOICE_IP,
     DEFAULT_VOICE_PORT,
     PROJECT_DIR,
     SECURE_DNS_DEFAULT,
+    UNBLOCKED_DOM,
 )
 from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
@@ -74,6 +76,16 @@ async def run_full(args) -> int:
         return dns_rc
 
     primary = args.domain or domains[0]
+
+    if not getattr(args, "skip_ip_block", False):
+        ip_report = run_ip_block_cross_test(
+            primary,
+            unblocked_domain=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
+            timeout=min(args.timeout, 8.0),
+            dns_cache=dns_cache,
+        )
+        print_ip_block_report(ip_report)
+
     tcp_sources = [s for s in args.tcp_sources.split(",") if s]
     udp_sources = [s for s in args.udp_sources.split(",") if s]
     quic_sources = [s for s in args.quic_sources.split(",") if s]
@@ -337,6 +349,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     g.add_argument("--doh-server", default=None, help="Fixed DoH server URL")
     g.add_argument("--skip-dns-audit", action="store_true")
     g.add_argument("--allow-dns-hijack", action="store_true")
+    g = p.add_argument_group("preflight")
+    g.add_argument("--skip-ip-block", action="store_true", help="Skip IP-block cross-test")
+    g.add_argument(
+        "--unblocked-dom",
+        default=None,
+        help=f"Reference unblocked domain (default: {UNBLOCKED_DOM})",
+    )
     return p
 
 
