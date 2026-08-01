@@ -78,7 +78,8 @@ then voice discover, optional QUIC/pairs, and exports configs:
 
 ```bash
 sudo bs full                    # uncapped matrix × coverage + export
-sudo bs full --parallel 2 --resume
+sudo bs full --parallel 4 --curl-parallel 4 --scan-level fast --max 500
+# curl-parallel=1 (default) — one domain per nfqws2 restart (safest)
 sudo bs full --max 500          # shrink matrix
 bc-nfconf --db state.db --limit 3 --out-dir output
 ```

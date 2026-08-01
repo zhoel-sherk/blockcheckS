@@ -20,8 +20,10 @@ from blockchecks.cli.parser import (
 )
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
+    DEFAULT_CURL_PARALLEL,
     DEFAULT_VOICE_IP,
     DEFAULT_VOICE_PORT,
+    MAX_CURL_PARALLEL,
     SECURE_DNS_DEFAULT,
     UNBLOCKED_DOM,
 )
@@ -35,6 +37,7 @@ from blockchecks.engine.domain_loader import (
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.preflight import PreflightOptions, run_preflight
+from blockchecks.engine.tcp_fanout import fanout_allowed, fanout_batches
 from blockchecks.nfconf import export_configs
 
 colorama_init(autoreset=True)
@@ -218,6 +221,21 @@ async def run_full(args) -> int:
         and not getattr(args, "no_family_gates", False)
         and any(s in ("standard", "fake", "hostfake", "faked", "fake_multi", "fake_faked") for s in tcp_sources)
     )
+    curl_parallel = max(1, min(getattr(args, "curl_parallel", DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL))
+    fanout_ok, fanout_note = fanout_allowed(
+        curl_parallel=curl_parallel,
+        use_family_gates=use_family_gates,
+        domains=domains,
+        protocol=args.protocol,
+    )
+    use_fanout = fanout_ok and curl_parallel > 1
+    if curl_parallel > 1 and not fanout_ok and fanout_note.startswith("family"):
+        print(f"  {YELLOW}curl-parallel disabled: {fanout_note}{RESET}")
+        curl_parallel = 1
+    elif use_fanout:
+        print(f"  {GREEN}curl-parallel: {curl_parallel}{RESET} (B2 fan-out)")
+        if fanout_note:
+            print(f"  {YELLOW}{fanout_note}{RESET}")
     if use_family_gates:
         print(f"  Family gates: {GREEN}on{RESET} (BC2-6 need_* chain)")
 
@@ -302,6 +320,45 @@ async def run_full(args) -> int:
                         print(f"  {YELLOW}Stopped by signal{RESET}")
                         break
                     await _run_domain(domain)
+            elif use_fanout:
+
+                async def _one_strategy(item: StrategyItem):
+                    nonlocal done, skipped, passed
+                    if stop.is_set():
+                        return
+                    pending = [
+                        d
+                        for d in domains
+                        if not (args.resume and await db.has_tcp_result(item.label, d))
+                    ]
+                    skipped += len(domains) - len(pending)
+                    done += len(domains) - len(pending)
+                    if not pending:
+                        return
+                    batches = fanout_batches(
+                        pending,
+                        protocol=args.protocol,
+                        curl_parallel=curl_parallel,
+                    )
+                    for batch in batches:
+                        if stop.is_set():
+                            return
+                        batch_results = await runner.test_tcp_domains(
+                            item, batch, timeout=args.timeout, curl_parallel=len(batch)
+                        )
+                        for r in batch_results:
+                            done += 1
+                            if r.success:
+                                passed += 1
+                        _progress(done, skipped, passed)
+
+                tasks = [_one_strategy(item) for item in tcp_items]
+                chunk = max(1, parallel)
+                for i in range(0, len(tasks), chunk):
+                    if stop.is_set():
+                        print(f"  {YELLOW}Stopped by signal{RESET}")
+                        break
+                    await asyncio.gather(*tasks[i : i + chunk])
             else:
 
                 async def _one(item: StrategyItem, domain: str):
@@ -590,6 +647,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     add_curl_repeats_args(p)
     add_family_gate_args(p)
     add_protocol_phase_args(p)
+    g = p.add_argument_group("curl fan-out (B2)")
+    g.add_argument(
+        "--curl-parallel",
+        type=int,
+        default=DEFAULT_CURL_PARALLEL,
+        metavar="N",
+        help=f"Domains per nfqws2 session (1=off, max {MAX_CURL_PARALLEL}, default 1)",
+    )
     return p
 
 

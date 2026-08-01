@@ -29,6 +29,7 @@ from blockchecks.engine.config import (
 from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.netns_pool import NetNsPool
+from blockchecks.engine.tcp_fanout import curl_profile
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -612,6 +613,231 @@ print(json.dumps(run_checks()))
                 pass
 
 
+def _run_tcp_check_multi(
+    ns_name: str,
+    strategy: str,
+    domains: list[str],
+    timeout: float,
+    *,
+    is_config: bool = False,
+    python_bin: str | None = None,
+    disable_ech: bool = False,
+    resolved_ips: dict[str, str | None] | None = None,
+    repeats: int = 1,
+    extra_lua_desync: str = "",
+    protocol: str = "tls12",
+    curl_parallel: int = 4,
+    settle_max: float | None = None,
+    settle_poll: float | None = None,
+) -> dict[str, dict]:
+    """One nfqws2 session, parallel curl across domains (B2)."""
+    if not domains:
+        return {}
+    py = python_bin or PYTHON_BIN
+    is_http = protocol == "http"
+    dport = "80" if is_http else "443"
+    tmp_conf = None
+    resolved_ips = resolved_ips or {}
+    prof = curl_profile(domains[0], protocol=protocol, disable_ech=disable_ech)
+    headers_extra = prof.headers_extra
+    use_ech_int = 1 if prof.use_ech else 0
+
+    if is_config:
+        import shutil
+        import tempfile as _tf
+
+        src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
+        _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_multi_", suffix=".conf")
+        os.close(_tf_fd)
+        shutil.copy2(src, tmp_conf)
+        if extra_lua_desync:
+            with open(tmp_conf, "a", encoding="utf-8") as f:
+                f.write(f"\n--lua-desync={extra_lua_desync}\n")
+        settle_elapsed = _nfqws2_daemon(
+            ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
+        )
+    else:
+        import tempfile as _tf
+
+        config_lines = _build_inline_nfqws_lines(strategy, protocol, extra_lua_desync)
+        _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_multi_", suffix=".conf")
+        os.close(_tf_fd)
+        with open(tmp_conf, "w") as f:
+            f.write("\n".join(config_lines))
+        settle_elapsed = _nfqws2_daemon(
+            ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
+        )
+
+    _sudo(
+        "ip",
+        "netns",
+        "exec",
+        ns_name,
+        "iptables",
+        "-A",
+        "OUTPUT",
+        "-p",
+        "tcp",
+        "--dport",
+        dport,
+        "-j",
+        "NFQUEUE",
+        "--queue-num",
+        "200",
+        "--queue-bypass",
+    )
+
+    ech_opt = CURLOPT_ECH
+    url_scheme = "http" if is_http else "https"
+    resolve_port = 80 if is_http else 443
+    domains_json = json.dumps(domains)
+    resolved_json = json.dumps({d: resolved_ips.get(d) for d in domains})
+    workers = max(1, min(int(curl_parallel), len(domains)))
+    repeats = max(1, int(repeats))
+
+    check_code = f"""
+import json, time, concurrent.futures
+DOMAINS = {domains_json}
+RESOLVED = {resolved_json}
+def check(domain, timeout, resolved_ip):
+    try:
+        import curl_cffi
+        start = time.perf_counter()
+        headers = {{"Accept": "text/html"{headers_extra}}}
+        resolve_opt = {CURLOPT_RESOLVE}
+        try:
+            s = curl_cffi.Session(
+                impersonate="chrome124", http_version=2,
+                headers=headers, allow_redirects=False,
+            )
+            if resolved_ip:
+                s.curl.setopt(resolve_opt, [domain + ":{resolve_port}:" + resolved_ip])
+            if {use_ech_int}:
+                set = False
+                try:
+                    s.curl.setopt(curl_cffi.CurlOpt.ECH, "")
+                    set = True
+                except Exception:
+                    pass
+                if not set:
+                    try:
+                        s.curl.setopt({ech_opt}, "")
+                    except Exception as e:
+                        return {{"success": False, "http_code": 0,
+                                  "latency_ms": (time.perf_counter()-start)*1000,
+                                  "content_len": 0, "content_ok": False,
+                                  "throttled": False, "read_rate_bps": 0,
+                                  "error": "ech_setopt:" + str(e)[:100]}}
+            resp = s.get("{url_scheme}://" + domain, timeout=min(timeout, 1.5))
+        except curl_cffi.CurlError as e:
+            msg = str(e)
+            return {{"success": False, "http_code": 0,
+                      "latency_ms": (time.perf_counter()-start)*1000,
+                      "content_len": 0, "content_ok": False,
+                      "throttled": False, "read_rate_bps": 0,
+                      "error": "timeout" if "Timeout" in msg else msg[:120]}}
+        elapsed = max(time.perf_counter()-start, 0.001)
+        body = resp.content[:4096]
+        clen = len(resp.content)
+        rate = clen / elapsed
+        loc = resp.headers.get("Location") or resp.headers.get("location") or ""
+        dom = domain.lower().split("/")[0]
+        if resp.status_code in (301, 302, 307, 308) and loc:
+            if loc.lower().startswith(("http://", "https://")):
+                redir_host = loc.split("/")[2].split(":")[0].lower()
+                if dom not in redir_host:
+                    return {{"success": False, "http_code": resp.status_code,
+                             "latency_ms": elapsed*1000,
+                             "content_len": clen, "content_ok": False,
+                             "throttled": False, "read_rate_bps": rate,
+                             "error": "suspicious redirect " + str(resp.status_code)
+                                      + " to " + loc[:80]}}
+        if resp.status_code == 400:
+            return {{"success": False, "http_code": 400,
+                     "latency_ms": elapsed*1000,
+                     "content_len": clen, "content_ok": False,
+                     "throttled": False, "read_rate_bps": rate,
+                     "error": "http 400 (likely fake packets received)"}}
+        content_ok = clen >= 300
+        dpi_fake = any(p in body.lower() for p in (b"roskomnadzor",b"rkn.gov.ru",
+                    b"blockpage",b"utmblock"))
+        if dpi_fake:
+            content_ok = False
+        small_codes = (101, 204, 301, 302, 303, 304, 307, 308)
+        small_body_ok = (not dpi_fake) and (
+            resp.status_code in small_codes
+            or (resp.status_code == 206 and clen < 300)
+        )
+        status_ok = (200 <= resp.status_code < 400)
+        throttled = False
+        success = False
+        if status_ok and (content_ok or small_body_ok) and not dpi_fake:
+            if rate < {MIN_READ_RATE_BPS} and not small_body_ok:
+                success = False
+            elif rate < {THROTTLED_MAX_BPS} and not small_body_ok and clen >= 300:
+                success = True
+                throttled = True
+            else:
+                success = True
+        return {{"success": success, "http_code": resp.status_code,
+                 "latency_ms": elapsed*1000,
+                 "content_len": clen, "content_ok": content_ok,
+                 "throttled": throttled, "read_rate_bps": rate, "error": None}}
+    except Exception as e:
+        return {{"success": False, "http_code": 0, "latency_ms": 0,
+                 "content_len": 0, "content_ok": False,
+                 "throttled": False, "read_rate_bps": 0, "error": str(e)[:120]}}
+def run_one(domain):
+    last = None
+    rip = RESOLVED.get(domain)
+    for _ in range({repeats}):
+        last = check(domain, {timeout}, rip)
+        if last.get("success"):
+            return last
+    return last
+out = {{}}
+with concurrent.futures.ThreadPoolExecutor(max_workers={workers}) as ex:
+    futs = {{ex.submit(run_one, d): d for d in DOMAINS}}
+    for fut in concurrent.futures.as_completed(futs):
+        d = futs[fut]
+        out[d] = fut.result()
+print(json.dumps(out))
+"""
+    try:
+        r = sp.run(
+            ["sudo", "ip", "netns", "exec", ns_name, py, "-c", check_code],
+            capture_output=True,
+            text=True,
+            timeout=timeout * len(domains) + 15,
+        )
+        try:
+            raw = json.loads(r.stdout)
+            settle_ms = round(settle_elapsed * 1000, 1)
+            return {
+                d: {**raw.get(d, {}), "settle_ms": settle_ms}
+                for d in domains
+            }
+        except json.JSONDecodeError:
+            err = {
+                "success": False,
+                "http_code": 0,
+                "latency_ms": 0,
+                "content_len": 0,
+                "content_ok": False,
+                "throttled": False,
+                "read_rate_bps": 0,
+                "error": f"parse: {r.stdout[:100]}",
+                "settle_ms": round(settle_elapsed * 1000, 1),
+            }
+            return {d: dict(err) for d in domains}
+    finally:
+        if tmp_conf:
+            try:
+                os.unlink(tmp_conf)
+            except OSError:
+                pass
+
+
 def _run_udp_check(
     ns_name: str,
     strategy: str,
@@ -926,6 +1152,144 @@ class AsyncTestRunner:
                 await self.pool.release(ns_name)
 
         return result
+
+    async def _resolve_domain_dns(self, domain: str) -> tuple[str | None, str, str]:
+        resolved_ip = None
+        dns_verdict = ""
+        doh_server = ""
+        if self.secure_dns and self.dns_cache:
+            resolved_ip = self.dns_cache.primary_ip(domain)
+            audit = self.dns_audit.get(domain)
+            if audit:
+                dns_verdict = audit.verdict
+                doh_server = audit.doh_server or self.dns_cache.doh_server
+        return resolved_ip, dns_verdict, doh_server
+
+    def _tcp_result_from_data(
+        self, item: StrategyItem, domain: str, data: dict
+    ) -> TcpTestResult:
+        result = TcpTestResult(item=item, domain=domain)
+        result.success = data.get("success", False)
+        result.http_code = data.get("http_code", 0)
+        result.latency_ms = data.get("latency_ms", 0)
+        result.content_length = data.get("content_len", 0)
+        result.content_valid = data.get("content_ok", True)
+        result.throttled = data.get("throttled", False)
+        result.read_rate_bps = data.get("read_rate_bps", 0)
+        result.error = data.get("error", "") or ""
+        return result
+
+    async def _log_tcp_result(
+        self,
+        item: StrategyItem,
+        domain: str,
+        result: TcpTestResult,
+        *,
+        resolved_ip: str | None,
+        dns_verdict: str,
+        doh_server: str,
+    ) -> None:
+        if not self.db:
+            return
+        protocol = getattr(item, "protocol", "tls12") or "tls12"
+        proto_db = "http" if protocol == "http" else "tcp"
+        if result.throttled:
+            status = "THROTTLED"
+        elif result.success:
+            status = "PASS"
+        else:
+            status = "FAIL"
+        await self.db.log_tcp(
+            item.label,
+            domain,
+            status,
+            result.latency_ms,
+            result.http_code,
+            content_valid=result.content_valid,
+            error=result.error,
+            read_rate_bps=result.read_rate_bps,
+            config_path=item.strategy,
+            resolved_ip=resolved_ip or "",
+            dns_verdict=dns_verdict,
+            doh_server=doh_server,
+            proto=proto_db,
+        )
+
+    async def test_tcp_domains(
+        self,
+        item: StrategyItem,
+        domains: list[str],
+        timeout: float = 5.0,
+        *,
+        curl_parallel: int = 4,
+    ) -> list[TcpTestResult]:
+        """B2: one nfqws2 session, parallel curl for multiple domains."""
+        if not domains:
+            return []
+        results: list[TcpTestResult] = []
+        async with self.semaphore:
+            ns_name = await self.pool.acquire()
+            try:
+                resolved_ips: dict[str, str | None] = {}
+                dns_meta: dict[str, tuple[str, str]] = {}
+                for domain in domains:
+                    rip, dv, ds = await self._resolve_domain_dns(domain)
+                    resolved_ips[domain] = rip
+                    dns_meta[domain] = (dv, ds)
+                protocol = getattr(item, "protocol", "tls12") or "tls12"
+                data_map = await asyncio.to_thread(
+                    _run_tcp_check_multi,
+                    ns_name,
+                    item.strategy,
+                    domains,
+                    timeout,
+                    is_config=item.is_config,
+                    python_bin=self.python,
+                    disable_ech=self.disable_ech,
+                    resolved_ips=resolved_ips,
+                    repeats=self.repeats,
+                    extra_lua_desync="",
+                    protocol=protocol,
+                    curl_parallel=curl_parallel,
+                )
+                for domain in domains:
+                    data = data_map.get(domain, {})
+                    if (
+                        not data.get("success")
+                        and self.try_wssize
+                        and protocol == "tls12"
+                        and "wssize" not in item.strategy
+                    ):
+                        data = await asyncio.to_thread(
+                            _run_tcp_check,
+                            ns_name,
+                            item.strategy,
+                            domain,
+                            timeout,
+                            item.is_config,
+                            self.python,
+                            self.disable_ech,
+                            resolved_ips.get(domain),
+                            self.repeats,
+                            self.parallel_repeats,
+                            "wssize:wsize=1:scale=6",
+                            protocol,
+                        )
+                    result = self._tcp_result_from_data(item, domain, data)
+                    rip = resolved_ips.get(domain)
+                    dv, ds = dns_meta.get(domain, ("", ""))
+                    await self._log_tcp_result(
+                        item, domain, result, resolved_ip=rip, dns_verdict=dv, doh_server=ds
+                    )
+                    results.append(result)
+            except Exception as e:
+                for domain in domains:
+                    if not any(r.domain == domain for r in results):
+                        err = TcpTestResult(item=item, domain=domain, error=str(e)[:200])
+                        results.append(err)
+            finally:
+                await self.pool.release(ns_name)
+        return results
 
     async def test_udp(
         self, item: StrategyItem, ip: str, port: int, timeout: float = 3.0

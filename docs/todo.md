@@ -442,7 +442,7 @@ community mass-scan; GP — production orchestrator + import shortlists.
 ### Часть B — benchmark до production
 
 - [x] **B1** settle 2s → readiness poll (100–300ms); согласовать с A9
-- [ ] **B2** multi-domain fan-out — 1 nfqws2, `asyncio.gather` curl, `--curl-parallel N`
+- [x] **B2** multi-domain fan-out — 1 nfqws2, `asyncio.gather` curl, `--curl-parallel N`
 - [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
 - [x] **B4** runtime family early-exit в `bs full` на первом PASS *(= BC2-6)*
 - [ ] **B5** hybrid: BS shortlist export → GP multi-domain на роутере
@@ -454,6 +454,14 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - [ ] **B11** dynamic per-strategy settle+curl из результатов A9
 
 **Порядок:** A1+A2+parallel4 → A5 dpi-tester → A10+A1 CLI → A9→B1→B11 → B2 → B4 → B7.
+
+**B2 риски (2026-08):**
+- **Opt-in:** `--curl-parallel 1` по умолчанию; fan-out только при `N>1` и без family gates.
+- **NFQUEUE:** N параллельных curl через один nfqws2 — нагрузка на очередь; cap `MAX_CURL_PARALLEL=8`.
+- **Смешанные домены:** `googlevideo*` → solo batch (до GV-1); несовместимые curl-профили не смешиваются.
+- **Family gates (BC2-6):** fan-out отключён — need_* цепочка per-domain.
+- **wssize retry:** для FAIL в batch — solo `_run_tcp_check` с `wssize` (дороже, но редко).
+- **Pool:** `--parallel` = concurrent strategies; `--curl-parallel` = domains per strategy session.
 
 **Цель после B1+B2+A1 @ parallel=4:** ~6–12 job/s (7–14h на 312k).
 

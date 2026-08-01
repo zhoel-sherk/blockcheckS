@@ -136,6 +136,10 @@ NFQWS2_SETTLE_MAX = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MAX", "2.0"))
 NFQWS2_SETTLE_POLL = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_POLL", "0.1"))
 NFQWS2_SETTLE_MIN = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MIN", "0.05"))
 
+# ── multi-domain curl fan-out (Phase 11 B2) ───────
+DEFAULT_CURL_PARALLEL = int(_env_or("BLOCKCHECKS_CURL_PARALLEL", "1"))
+MAX_CURL_PARALLEL = int(_env_or("BLOCKCHECKS_CURL_PARALLEL_MAX", "8"))
+
 # ── nfqws2 debug ─────────────────────────────────
 # BLOCKCHECKS_NFQWS2_DEBUG: empty/0=off, 1=file under logs/, syslog, @path, or path
 NFQWS2_DEBUG = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
