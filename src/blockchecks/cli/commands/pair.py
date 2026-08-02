@@ -28,7 +28,6 @@ from blockchecks.engine.config import (
     SECURE_DNS_DEFAULT,
     UNBLOCKED_DOM,
 )
-from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.domain_loader import (
     RESERVED_DOMAIN_FILES,
     format_skip_summary,
@@ -45,6 +44,7 @@ from blockchecks.engine.run_finalize import (
     run_exit_code,
     write_run_summary,
 )
+from blockchecks.engine.store import matrix_fingerprint, open_run_store
 from blockchecks.engine.strategy_loader import StrategyLoader
 
 CYAN = Fore.CYAN
@@ -62,7 +62,7 @@ async def cmd_pair(args):
         list_presets()
         return 0
 
-    db = StateDB(args.db, batch_size=getattr(args, "db_batch", 0) or 0)
+    db = open_run_store(args.db, batch_size=getattr(args, "db_batch", 0) or 0)
     await db.init()
 
     preset_domains = []

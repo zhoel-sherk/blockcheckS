@@ -22,11 +22,18 @@ For `bs full`, also add to [`main.py`](../src/blockchecks/main.py) parser if not
 
 Use `getattr(args, "my_flag", False)` for optional flags on shared parsers.
 
-## 3. Environment alternative
+## 3. Paths and user config
 
-For machine-specific paths, prefer `BLOCKCHECKS_*` in
-[`engine/config.py`](../src/blockchecks/engine/config.py) over new flags.
-Document in [`settings.example.env`](../../settings.example.env).
+Path defaults come from [`engine/paths.py`](../src/blockchecks/engine/paths.py)
+(XDG layout). Shared store flags: `add_store_args()` in `parser.py`.
+
+User overrides: `~/.config/blockcheckS/config.toml` via
+[`cli/user_config.py`](../src/blockchecks/cli/user_config.py) — loaded in
+`parser.main()` before `parse_args`.
+
+For machine-specific tool paths, prefer `BLOCKCHECKS_*` in
+[`engine/config.py`](../src/blockchecks/engine/config.py) or `[tools]` in
+`config.toml`. Document in [`settings.example.toml`](../../settings.example.toml).
 
 ## 4. Tests
 

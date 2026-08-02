@@ -13,8 +13,10 @@ import time
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
+from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS
 from blockchecks.engine.async_runner import AsyncTestRunner, StrategyItem, TcpTestResult
 from blockchecks.engine.async_runner import _nfqws2_daemon as start_nfqws2
+from blockchecks.engine.config import PYTHON_BIN as PYTHON
 
 colorama_init(autoreset=True)
 
@@ -31,9 +33,6 @@ DOMAINS = [
     "discordcdn.com",
     "gateway.discord.gg",
 ]
-
-from blockchecks.engine.config import PYTHON_BIN as PYTHON
-from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS
 
 # Inject DPI_FAKE_PATTERNS into the subprocess code template
 _DPI_PATTERNS_LITERAL = repr(DPI_FAKE_PATTERNS)

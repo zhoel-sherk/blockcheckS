@@ -28,7 +28,7 @@ Lightspeed DPI strategy tester для **zapret2/nfqws2**:
 | **5** | GP / dpi-tester bridge | 📋 partial | P1 | A5 provider_summary, B5 hybrid, GP import |
 | **6** | Export keenetic + raw (`bs full` / `bc-nfconf`) | ✅ | P2 | BC2-7 COMMON intersection ✅ |
 | **7** | QUIC / HTTP3 first-class | 🔄 partial | P1 | BC2-10 ✅; `ipfrag_udp`/`ipfrag_tcp` |
-| **8** | HTTP :80 families | 🔄 partial | P2 | BC2-9 ✅; M6 HTTP+TLS dual-fake |
+| **8** | HTTP :80 families | 🔄 partial | P2 | BC2-9 ✅; M6 `http_tls_dual` ✅ |
 | **9** | Secure DNS + blockcheck2 preflight | ✅ | **P0** | SD ✅; BC2-1..8,11,12 ✅ |
 | **10** | Matrix coverage & blobs | 🔄 | P1 | M1–M10, ~80% zapret2 / ~95% flowseal |
 | **11** | Speed / throughput | 🔄 | P1 | A1–A10, B1–B11 |
@@ -250,7 +250,7 @@ check_system → check_already → check_prerequisites
 
 - [x] **BC2-10** curl HTTP/3 + `--quic-timeout` (канон; ≠ `--udp-timeout`)
 - [ ] `ipfrag_udp` / `ipfrag_tcp` (`send:` dual-call) — generator gap
-- [ ] **M7** UDP multi-blob (discord L7: quic_dbank на stun+discord) *(Phase 10)*
+- [x] **M7** UDP multi-blob — `udp_multiblob` family *(см. Phase 10)*
 
 ---
 
@@ -260,7 +260,7 @@ check_system → check_already → check_prerequisites
 нет standard HTTP family; `bs full` — только tls12/tls13.
 
 - [x] **BC2-9** HTTP :80 standard generator + фаза в `bs full`
-- [ ] **M6** HTTP+TLS dual-fake generator (`fake_default_http` + TLS blob) *(Phase 10)*
+- [x] **M6** HTTP+TLS dual-fake — `http_tls_dual` family *(см. Phase 10)*
 - [ ] **A10** `--http-off` — зеркало GP `ENABLE_HTTP` *(Phase 11)* ✅
 
 ---
@@ -416,8 +416,8 @@ Community: цепочки разных blobs подряд = несколько `
 | `fakedsplit` / `fakeddisorder` | sonicdpi #4 | ✅ | `fakedsplit`, `fakeddisorder`, `fake_fakedsplit` (M3) |
 | `dupfake` (multi-blob один вызов) | GP/Keenetic custom Lua | ⚠️ | `gp-custom-dupfake.tls`; BS fallback = dual fake |
 | Triple: fake + multisplit + hostfakesplit | ALT12 | ✅ | `fake_multisplit_hostfake` family (M2) |
-| HTTP fake + TLS fake (один профиль) | Flowseal `--fake-http`+`--fake-tls` | ❌ | **нет** generator → M6 |
-| UDP dual-blob (quic_dbank на discord+stun L7) | Flowseal UDP profile | ❌ | UDP = single blob → M7 |
+| HTTP fake + TLS fake (один профиль) | Flowseal `--fake-http`+`--fake-tls` | ✅ | `http_tls_dual` family (M6) |
+| UDP dual-blob (quic_dbank на discord+stun L7) | Flowseal UDP profile | ✅ | `udp_multiblob` family (M7) |
 | `circular` rotate strategies | zapret2-auto | ⚠️ | export [`conf_builder`](src/blockchecks/engine/conf_builder.py); **не scan** |
 | `tls_fake_flood` | keenetic discussion #82 | ❌ | **нет** |
 | `flowseal` source в `bs full` default | — | ⚠️ | default `standard,custom,configs`; flowseal — явный `--tcp-sources` |
@@ -425,7 +425,7 @@ Community: цепочки разных blobs подряд = несколько `
 | Per-blob разный `repeats` | часть Flowseal bats | ❌ | multi_fake: одинаковый repeats на оба blob |
 
 **Итог:** ядро ТСПУ (dual fake stun+max_ru) **покрыто**. Пробелы — комбо-desync,
-multidisorder/fakedsplit/dupfake, triple chains, HTTP+TLS dual fake, UDP multi-blob.
+multidisorder/fakedsplit/dupfake, triple chains, `ipfrag_*`, circular scan.
 
 - [x] **M1** `fake_multisplit` family: `fake:blob=X` + `multisplit:seqovl=664:seqovl_pattern=Y` (X≠Y)
 - [x] **M2** `fake_multisplit_hostfake` triple chain (ALT12) в StandardGenerator
@@ -468,7 +468,7 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - [x] **B2** multi-domain fan-out — 1 nfqws2, `asyncio.gather` curl, `--curl-parallel N`
 - [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
 - [x] **B4** runtime family early-exit в `bs full` на первом PASS *(= BC2-6)*
-- [ ] **B5** hybrid: BS shortlist export → GP multi-domain на роутере — `scripts/export_shortlist.sh` + `nfconf` module
+- [x] **B5** hybrid: BS shortlist export → GP multi-domain — cookbook + `release_smoke.sh` + local `shortlist_import` round-trip; GP на роутере — manual
 - [ ] **B6** blockcheckw (Rust vmap) — fast scan reference, не drop-in voice/pair
 - [ ] **B7** nftables vmap POC — prerequisite parallel > 4
 - [x] **B8** batch DB writes — `StateDB(batch_size)` + `--db-batch`
@@ -575,13 +575,29 @@ PASS discord.com + fake+multisplit(seqovl=664)
 
 ---
 
-## 1.0.0 release criteria (2026-08)
+## XDG + DAO (2026-08)
+
+- [x] `engine/paths.py` — XDG config/data/cache layout
+- [x] `cli/user_config.py` + `settings.example.toml`
+- [x] `engine/store/` — `RunStateStore` / `SqliteRunStore` DAO
+- [x] `add_store_args()` in CLI; defaults `~/.local/share/blockcheckS/state.db`
+- [x] Caches: gv/voice/settle/blob → `~/.cache/blockcheckS/`
+- [x] `db_logger.py` deprecation shim
+
+---
+
 
 **Входит в 1.0.0:**
 - BC2/GP curl repeats parity (`--repeats`, `--parallel-repeats`, `--repeats-mode fast|stable`)
 - AQ + time limit + B2 fan-out + SD/preflight + keenetic export
 - M5/M6/M7 matrix gaps closed; Fryazino integration smoke scripts
 - Docs: glossary repeats, GP bridge cookbook, changelog
+- deepseekv4pro audit fixes (CRITICAL + HIGH) — см. `changelog.md`
+
+**Release gate (manual):**
+- [x] `scripts/release_smoke.sh` выполнен на Fryazino (2026-08-02, `logs/release_smoke_20260802_132958/`) — 34 TCP PASS, shortlist 10, B5 round-trip OK
+- [x] `ruff check src tests` clean; 237 unit tests pass
+- [x] B5 local round-trip (`shortlist_export` → `shortlist_import`) в release_smoke
 
 **Post-1.0.0:** ML/Hierarchy (Phase 12), B3/B6/B7, V2 multi-endpoint voice, `ipfrag_*`, M10 circular scan
 
@@ -614,11 +630,12 @@ PASS discord.com + fake+multisplit(seqovl=664)
 
 - [ ] **V2-1** multi-endpoint pair matrix по всем discover EP (сейчас только `eps[0]`)
 - [ ] **V2-2** `--full-voice` gateway WS probe (сейчас discovery+STUN only)
+- [ ] **V2-3** `scripts/voice_smoke.sh` — отложено post-1.0.0 (есть `gv_e2e_smoke.sh`, `gv1_smoke.sh`)
 
 ### Phase 5 — GP bridge
 
 - [x] **A5** dpi-tester `provider_summary.json` → GP/Keenetic; BS shortlist import (`provider_import.py`)
-- [ ] **B5** hybrid: BS shortlist export → GP multi-domain — cookbook [`docs/cookbook/gp-bridge.md`](cookbook/gp-bridge.md) + `scripts/release_smoke.sh`
+- [x] **B5** hybrid: BS shortlist export → GP multi-domain — [`docs/cookbook/gp-bridge.md`](cookbook/gp-bridge.md) + `scripts/release_smoke.sh` + local shortlist_import round-trip
 - [ ] **P5-1** GP JSON import в `state.db` (partial сейчас)
 
 ### Phase 6 — Export

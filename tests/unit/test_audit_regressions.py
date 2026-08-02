@@ -10,19 +10,19 @@ import pytest
 
 from blockchecks.engine import async_runner as ar
 from blockchecks.engine.async_runner import _add_blobs_from_strategy, _run_udp_check
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.matrix_generator import (
     TCP_FAMILIES,
     UDP_VOICE_FAMILIES,
     MatrixGenerator,
     StandardGenerator,
 )
+from blockchecks.engine.store import SqliteRunStore, open_run_store
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
-async def test_log_tcp_read_rate_not_latency(temp_db: StateDB):
+async def test_log_tcp_read_rate_not_latency(temp_db: SqliteRunStore):
     await temp_db.log_tcp(
         "s1",
         "discord.com",
@@ -79,7 +79,7 @@ async def test_db_migrates_read_rate_column(tmp_path):
         )
         await db.commit()
 
-    state = StateDB(str(db_path))
+    state = open_run_store(db_path)
     await state.init()
     async with aiosqlite.connect(db_path) as db:
         cols = await db.execute("PRAGMA table_info(tcp_results)")
@@ -428,7 +428,7 @@ async def test_udp_multiblob_m7():
 
 
 @pytest.mark.asyncio
-async def test_db_batch_flush(temp_db: StateDB):
+async def test_db_batch_flush(temp_db: SqliteRunStore):
     temp_db.batch_size = 3
     for i in range(5):
         await temp_db.log_tcp(f"s{i}", "discord.com", "PASS", float(i), 200)

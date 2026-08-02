@@ -12,8 +12,8 @@ from blockchecks.engine.adaptive_queue import (
     AdaptiveMetrics,
     ScanWeights,
 )
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.generators.base import StrategyItem
+from blockchecks.engine.store import RunStateStore
 
 ProgressCb = Callable[[int, int, int], None]
 ResumeCb = Callable[[AdaptiveJob], Awaitable[bool]]
@@ -31,7 +31,7 @@ class AdaptiveRunResult:
 async def build_adaptive_queue(
     items: list[StrategyItem],
     domains: list[str],
-    db: StateDB | None,
+    db: RunStateStore | None,
     *,
     epsilon: float = 0.1,
     load_weights: bool = True,
@@ -110,7 +110,7 @@ async def run_adaptive_tcp(
     )
 
 
-async def persist_adaptive_weights(db: StateDB, weights: ScanWeights) -> None:
+async def persist_adaptive_weights(db: RunStateStore, weights: ScanWeights) -> None:
     rows = weights.to_rows()
     if rows:
         await db.save_scan_weights(rows)

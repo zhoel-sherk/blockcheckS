@@ -37,9 +37,7 @@ def supports_http3() -> bool:
         msg = str(exc).lower()
         if "unknown" in msg and "http" in msg:
             return False
-        if "not supported" in msg or "unrecognized" in msg:
-            return False
-        return True
+        return "not supported" not in msg and "unrecognized" not in msg
 
 
 def check_http3(

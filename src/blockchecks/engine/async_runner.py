@@ -27,10 +27,10 @@ from blockchecks.engine.config import (
     PYTHON_BIN,
     nfqws2_debug_conf_line,
 )
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.netns_pool import NetNsPool
 from blockchecks.engine.settle_profile import SettleProfile
+from blockchecks.engine.store import RunStateStore
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -795,7 +795,7 @@ class AsyncTestRunner:
     def __init__(
         self,
         pool_size: int = 4,
-        db: StateDB = None,
+        db: RunStateStore = None,
         python_path: str = None,
         disable_ech: bool = False,
         secure_dns: bool = True,
@@ -1242,7 +1242,7 @@ class AsyncTestRunner:
         TCP nfqws2 started once per pair, UDP nfqws2 per strategy.
         DB writes serialized via asyncio.Lock.
         """
-        from blockchecks.engine.db_logger import Checkpoint
+        from blockchecks.engine.store.models import Checkpoint
 
         pairs: list[PairResult] = []
         db_lock = asyncio.Lock()

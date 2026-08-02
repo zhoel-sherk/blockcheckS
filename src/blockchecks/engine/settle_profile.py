@@ -7,10 +7,11 @@ import os
 import time
 from dataclasses import dataclass, field
 
-from blockchecks.engine.config import LOGS_DIR, PROJECT_DIR
+from blockchecks.engine.config import PROJECT_DIR
+from blockchecks.engine.paths import SETTLE_PROFILE_FILE
 
 PROFILE_VERSION = 1
-DEFAULT_PROFILE_PATH = os.path.join(LOGS_DIR, "settle_profile.json")
+DEFAULT_PROFILE_PATH = str(SETTLE_PROFILE_FILE)
 
 
 @dataclass

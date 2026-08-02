@@ -1,7 +1,7 @@
 """YouTube googlevideo.com URL fetcher via yt-dlp.
 
 Fetches fresh, signed googlevideo.com URLs for CDN testing.
-Cache: 3-hour TTL in PROJECT_DIR/logs/bs_gv_url_cache.json
+Cache: 3-hour TTL in XDG cache (bs_gv_url_cache.json)
 """
 
 import json
@@ -9,7 +9,8 @@ import os
 import subprocess
 import time
 
-CACHE_FILE = "bs_gv_url_cache.json"
+from blockchecks.engine.paths import GV_URL_CACHE_FILE
+
 CACHE_TTL = 3 * 3600  # 3 hours (googlevideo URLs expire in ~6 hours)
 
 
@@ -30,16 +31,12 @@ def _cache_entry_valid(data: dict) -> bool:
     if time.time() - data.get("timestamp", 0) >= CACHE_TTL:
         return False
     # Signed URLs bind to client IP; IPv6-bound URLs 403 on IPv4-only egress.
-    if _signed_url_ip_family(url) == "v6":
-        return False
-    return True
+    return _signed_url_ip_family(url) != "v6"
 
 
 def _cache_path() -> str:
-    from blockchecks.engine.config import PROJECT_DIR
-
-    os.makedirs(os.path.join(PROJECT_DIR, "logs"), exist_ok=True)
-    return os.path.join(PROJECT_DIR, "logs", CACHE_FILE)
+    GV_URL_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    return str(GV_URL_CACHE_FILE)
 
 
 def get_fresh_url(

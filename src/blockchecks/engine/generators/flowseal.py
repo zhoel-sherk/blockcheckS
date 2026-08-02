@@ -1,7 +1,7 @@
 """Flowseal ALT2 strategy generator."""
 
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
+from blockchecks.engine.store import RunStateStore
 
 
 class FlowsealGenerator(StrategyGenerator):
@@ -18,7 +18,7 @@ class FlowsealGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,

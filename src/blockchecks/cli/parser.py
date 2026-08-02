@@ -14,7 +14,23 @@ from blockchecks.cli.commands.tcp import cmd_tcp
 from blockchecks.cli.commands.udp import cmd_udp
 from blockchecks.cli.presets import list_presets
 from blockchecks.engine.config import CONFIGS_DIR, DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR
 from blockchecks.engine.settle_profile import DEFAULT_PROFILE_PATH
+
+
+def add_store_args(parser: argparse.ArgumentParser, *, include_out_dir: bool = True) -> None:
+    """Shared --db / --out-dir (XDG defaults applied post-parse)."""
+    parser.add_argument(
+        "--db",
+        default=None,
+        help=f"State DB (default: {DEFAULT_DB_PATH})",
+    )
+    if include_out_dir:
+        parser.add_argument(
+            "--out-dir",
+            default=None,
+            help=f"Export nfconf on finish (default for full: {DEFAULT_OUT_DIR})",
+        )
 
 
 def add_adaptive_args(parser: argparse.ArgumentParser) -> None:
@@ -270,7 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max", type=int, default=100)
     scan.add_argument("--timeout", type=float, default=5.0)
     scan.add_argument("--user-matrix", default="")
-    scan.add_argument("--db", default="state.db")
+    add_store_args(scan)
     scan.add_argument(
         "--db-batch",
         type=int,
@@ -286,7 +302,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_adaptive_args(scan)
     add_curl_fanout_args(scan)
     add_time_limit_args(scan, include_export=True)
-    scan.add_argument("--out-dir", default=None, help="Export nfconf on finish (optional)")
     scan.add_argument("--export-limit", type=int, default=3)
     scan.add_argument(
         "--no-common-only",
@@ -378,7 +393,7 @@ def build_parser() -> argparse.ArgumentParser:
     pair.add_argument("--full-voice", action="store_true")
     pair.add_argument("--udp-bypass", action="store_true")
     pair.add_argument("--user-matrix", default="", help="Path to custom strategy list file")
-    pair.add_argument("--db", default="state.db")
+    add_store_args(pair)
     pair.add_argument(
         "--db-batch",
         type=int,
@@ -394,7 +409,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_adaptive_args(pair)
     add_curl_fanout_args(pair)
     add_time_limit_args(pair, include_export=True)
-    pair.add_argument("--out-dir", default=None, help="Export nfconf on finish (optional)")
     pair.add_argument("--export-limit", type=int, default=3)
     pair.add_argument(
         "--no-common-only",
@@ -506,24 +520,38 @@ def dispatch(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from blockchecks.cli.user_config import (
+        apply_parser_defaults,
+        finalize_store_args,
+        load_user_config,
+    )
+    from blockchecks.engine.paths import apply_pycache_prefix, ensure_dirs
+
+    apply_pycache_prefix()
+    ensure_dirs()
+    user_cfg = load_user_config()
+
     if argv is None:
         argv = sys.argv[1:]
     if len(argv) > 0 and argv[0] == "full":
         from blockchecks.main import main as full_main
 
-        return full_main(argv[1:])
+        return full_main(argv[1:], user_config=user_cfg)
 
+    parser = build_parser()
+    apply_parser_defaults(parser, user_cfg)
     old_argv = sys.argv
     try:
         sys.argv = ["bs", *argv]
-        args = build_parser().parse_args(argv)
+        args = parser.parse_args(argv)
     finally:
         sys.argv = old_argv
 
     if args.command is None:
-        build_parser().print_help()
+        parser.print_help()
         return 1
+    finalize_store_args(args, user_cfg)
     from blockchecks.engine.run_deadline import validate_time_limit_args
 
-    validate_time_limit_args(build_parser(), args)
+    validate_time_limit_args(parser, args)
     return dispatch(args)

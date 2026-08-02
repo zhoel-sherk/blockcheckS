@@ -38,6 +38,8 @@ class TestSubmoduleImports:
         "blockchecks.engine.config",
         "blockchecks.engine.nfqws2",
         "blockchecks.engine.firewall",
+        "blockchecks.engine.paths",
+        "blockchecks.engine.store",
         "blockchecks.engine.db_logger",
         "blockchecks.engine.strategy_loader",
         "blockchecks.engine.test_runner",
@@ -127,11 +129,16 @@ class TestEntryPoint:
         assert hasattr(conf_builder, "build_raw_conf")
 
     def test_engine_public_api(self):
-        from blockchecks.engine import MatrixGenerator, StateDB, StrategyItem, matrix_fingerprint
+        from blockchecks.engine import (
+            MatrixGenerator,
+            RunStateStore,
+            StrategyItem,
+            matrix_fingerprint,
+        )
 
         assert MatrixGenerator is not None
         assert StrategyItem is not None
-        assert StateDB is not None
+        assert RunStateStore is not None
         assert callable(matrix_fingerprint)
 
     def test_checkers_public_api(self):

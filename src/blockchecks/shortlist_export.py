@@ -9,15 +9,16 @@ import sys
 import time
 from typing import Any
 
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.domain_loader import DEFAULT_DOMAINS_FILE, read_domain_lines
+from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_SHORTLIST_DIR, expand_path
+from blockchecks.engine.store import RunStateStore, open_run_store
 from blockchecks.nfconf import collect_export_strategies
 
 SCHEMA = "blockchecks.shortlist/v1"
 
 
 async def build_shortlist_entries(
-    db: StateDB,
+    db: RunStateStore,
     *,
     domains: list[str],
     limit: int = 10,
@@ -99,7 +100,7 @@ async def build_shortlist_entries(
     return {
         "schema": SCHEMA,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "source_db": os.path.basename(db.db_path),
+        "source_db": db.path.name,
         "domains": domains,
         "tcp": tcp_rows,
         "udp": udp_rows,
@@ -110,15 +111,19 @@ async def build_shortlist_entries(
 
 async def export_shortlist_json(
     *,
-    db_path: str = "state.db",
+    db_path: str | None = None,
     domains_file: str | None = None,
     domain: str = "discord.com",
     limit: int = 10,
-    output: str = "logs/shortlist.json",
+    output: str | None = None,
     include_common: bool = False,
 ) -> dict[str, Any]:
-    db = StateDB(db_path)
+    db = open_run_store(db_path)
     await db.init()
+    out_path = expand_path(
+        output,
+        default=DEFAULT_SHORTLIST_DIR / "shortlist.json",
+    )
 
     if domains_file and os.path.exists(domains_file):
         domains = read_domain_lines(domains_file)
@@ -130,8 +135,8 @@ async def export_shortlist_json(
     payload = await build_shortlist_entries(
         db, domains=domains, limit=limit, include_common=include_common
     )
-    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
-    with open(output, "w", encoding="utf-8") as f:
+    os.makedirs(out_path.parent, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
         f.write("\n")
     return payload
@@ -139,7 +144,7 @@ async def export_shortlist_json(
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Export blockchecks.shortlist/v1 JSON")
-    p.add_argument("--db", default="state.db")
+    p.add_argument("--db", default=None, help=f"State DB (default: {DEFAULT_DB_PATH})")
     p.add_argument("--domains-file", default=None)
     p.add_argument("-d", "--domain", default="discord.com")
     p.add_argument("--limit", type=int, default=10)
@@ -148,22 +153,29 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Include common_tcp intersection (slow on large DB)",
     )
-    p.add_argument("-o", "--output", default="logs/shortlist.json")
+    p.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help=f"Output JSON (default: {DEFAULT_SHORTLIST_DIR}/shortlist.json)",
+    )
     args = p.parse_args(argv)
 
     import asyncio
 
+    out_default = str(DEFAULT_SHORTLIST_DIR / "shortlist.json")
+    output = args.output or out_default
     payload = asyncio.run(
         export_shortlist_json(
             db_path=args.db,
             domains_file=args.domains_file,
             domain=args.domain,
             limit=args.limit,
-            output=args.output,
+            output=output,
             include_common=args.common,
         )
     )
-    print(f"Wrote {args.output} ({len(payload.get('tcp', []))} tcp, schema={payload['schema']})")
+    print(f"Wrote {output} ({len(payload.get('tcp', []))} tcp, schema={payload['schema']})")
     return 0
 
 

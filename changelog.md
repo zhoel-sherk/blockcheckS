@@ -18,7 +18,9 @@
 - `bs tcp` supports `--repeats`, `--parallel-repeats`, `--repeats-mode`, `--max-timem`
 
 ### Quality
-- 237 unit tests passing
+- 237 unit tests passing; `ruff check src tests` clean
+- Includes deepseekv4pro audit fixes (CRITICAL + HIGH) — see section below
+- Fryazino release smoke: `logs/release_smoke_20260802_132958/` — 34 TCP PASS, AQ 61.8% first-pass-before-50%, shortlist + B5 round-trip OK
 
 ## 2026-07-29 — Hygiene: ruff + docs merge + package audit
 

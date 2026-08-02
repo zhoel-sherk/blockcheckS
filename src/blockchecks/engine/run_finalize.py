@@ -8,24 +8,10 @@ import time
 from typing import Any
 
 from blockchecks.engine.adaptive_runner import persist_adaptive_weights
-from blockchecks.engine.db_logger import StateDB
+from blockchecks.engine.paths import RUNTIME_LOGS_DIR
 from blockchecks.engine.run_deadline import RunDeadline
+from blockchecks.engine.store import RunStateStore
 from blockchecks.nfconf import export_configs
-
-
-async def count_tcp_passes(db: StateDB, domain: str | None = None) -> int:
-    if domain:
-        stats = await db.domain_pass_stats(domain, protos=("tcp",))
-        return int(stats.get("passed", 0))
-    async with __import__("aiosqlite").connect(db.db_path) as conn:
-        row = await (
-            await conn.execute(
-                """SELECT COUNT(*) FROM tcp_results t
-                   JOIN strategies s ON t.strategy_id=s.id
-                   WHERE t.status='PASS' AND s.proto='tcp'"""
-            )
-        ).fetchone()
-    return int(row[0] or 0)
 
 
 def should_export(
@@ -39,13 +25,11 @@ def should_export(
         return False
     if not getattr(args, "out_dir", None):
         return False
-    if stop_set and pass_count <= 0:
-        return False
-    return True
+    return not (stop_set and pass_count <= 0)
 
 
 async def maybe_export_configs(
-    db: StateDB,
+    store: RunStateStore,
     args,
     *,
     primary: str,
@@ -53,11 +37,11 @@ async def maybe_export_configs(
     stop_set: bool,
     deadline: RunDeadline | None,
 ) -> dict[str, Any] | None:
-    passes = await count_tcp_passes(db)
+    passes = await store.count_tcp_passes()
     if not should_export(args, stop_set=stop_set, deadline=deadline, pass_count=passes):
         return None
     return await export_configs(
-        db_path=db.db_path,
+        db_path=str(store.path),
         domain=primary,
         limit=getattr(args, "export_limit", 3),
         out_dir=args.out_dir,
@@ -73,9 +57,10 @@ def write_run_summary(
     out_dir: str,
     payload: dict[str, Any],
 ) -> str:
-    os.makedirs(out_dir, exist_ok=True)
+    base = out_dir or str(RUNTIME_LOGS_DIR)
+    os.makedirs(base, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(out_dir, f"run_summary_{ts}.json")
+    path = os.path.join(base, f"run_summary_{ts}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
         f.write("\n")
@@ -83,14 +68,14 @@ def write_run_summary(
 
 
 async def finalize_db_and_weights(
-    db: StateDB,
+    store: RunStateStore,
     *,
     aq_weights=None,
     save_weights: bool = True,
 ) -> None:
-    await db.flush()
+    await store.flush()
     if save_weights and aq_weights is not None:
-        await persist_adaptive_weights(db, aq_weights)
+        await persist_adaptive_weights(store, aq_weights)
 
 
 def run_exit_code(stop_set: bool, deadline: RunDeadline | None, signal_hit: bool) -> int:

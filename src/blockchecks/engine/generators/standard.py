@@ -1,8 +1,8 @@
 """Standard hardcoded generators (blockcheck2.d/standard replicas)."""
 
 from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
+from blockchecks.engine.store import RunStateStore
 
 # Fooling options mapped from def.inc
 FOOLINGS_TCP = [
@@ -41,7 +41,7 @@ class FakeTcpGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,
@@ -98,7 +98,7 @@ class HostfakeTcpGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,
@@ -156,7 +156,7 @@ class FakedTcpGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,
@@ -184,7 +184,7 @@ class FakeMultiGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,
@@ -225,7 +225,7 @@ class FakeSplitComboGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,
@@ -578,7 +578,7 @@ class StandardGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 500,

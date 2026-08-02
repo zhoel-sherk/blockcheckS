@@ -14,14 +14,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from blockchecks.engine.async_runner import AsyncTestRunner
-from blockchecks.engine.db_logger import StateDB
+from blockchecks.engine.store import open_run_store
 
 
 @pytest.fixture
 def temp_db(tmp_path):
     """Fresh SQLite DB under pytest tmp_path."""
     db_path = tmp_path / "state.db"
-    db = StateDB(str(db_path))
+    db = open_run_store(db_path)
     asyncio.run(db.init())
     return db
 

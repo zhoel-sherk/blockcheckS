@@ -14,12 +14,6 @@ from dataclasses import dataclass, field
 import curl_cffi
 
 from blockchecks.checkers.dns_secure import CURLOPT_RESOLVE
-
-try:
-    CURLOPT_IPRESOLVE = curl_cffi.CurlOpt.IPRESOLVE
-except AttributeError:
-    CURLOPT_IPRESOLVE = 113
-_CURL_IPRESOLVE_V4 = 1
 from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS, classify_http_status
 from blockchecks.engine.config import (
     CURLOPT_ECH,
@@ -27,6 +21,12 @@ from blockchecks.engine.config import (
     MIN_READ_RATE_BPS,
     THROTTLED_MAX_BPS,
 )
+
+try:
+    CURLOPT_IPRESOLVE = curl_cffi.CurlOpt.IPRESOLVE
+except AttributeError:
+    CURLOPT_IPRESOLVE = 113
+_CURL_IPRESOLVE_V4 = 1
 
 _SMALL_BODY_STATUSES = frozenset({101, 204, 301, 302, 303, 304, 307, 308})
 

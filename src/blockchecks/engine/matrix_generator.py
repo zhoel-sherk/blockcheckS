@@ -3,7 +3,6 @@
 Facade over engine.generators.*. See docs/architecture.md.
 """
 
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.generators import (
     HTTP_FAMILIES,
     QUIC_HTTP3_FAMILIES,
@@ -23,6 +22,7 @@ from blockchecks.engine.generators import (
     StrategyPair,
     UserMatrixGenerator,
 )
+from blockchecks.engine.store import RunStateStore
 
 
 class MatrixGenerator:
@@ -60,7 +60,7 @@ class MatrixGenerator:
         domain: str = "discord.com",
         scan_level: str = "fast",
         max_count: int = 100,
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         protocol: str = "tls12",
         user_matrix: str = "",
         run_set: set = None,
@@ -105,7 +105,7 @@ class MatrixGenerator:
         domain: str = "discord.com",
         scan_level: str = "fast",
         max_count: int = 50,
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         user_matrix: str = "",
         run_set: set = None,
     ) -> list[StrategyItem]:
@@ -127,7 +127,7 @@ class MatrixGenerator:
         domain: str = "discord.com",
         scan_level: str = "fast",
         max_count: int = 50,
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         user_matrix: str = "",
     ) -> list[StrategyItem]:
         """Generate UDP strategies."""
@@ -173,7 +173,7 @@ class MatrixGenerator:
         domain: str = "discord.com",
         scan_level: str = "fast",
         max_count: int = 50,
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         user_matrix: str = "",
         run_set: set = None,
     ) -> list[StrategyItem]:
@@ -220,7 +220,7 @@ class MatrixGenerator:
         scan_level: str = "fast",
         max_tcp: int = 100,
         max_udp: int = 50,
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         user_matrix: str = "",
     ) -> list[StrategyPair]:
         """Generate TCP×UDP strategy pairs with prioritization.

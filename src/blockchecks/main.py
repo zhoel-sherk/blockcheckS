@@ -20,6 +20,7 @@ from blockchecks.cli.parser import (
     add_curl_repeats_args,
     add_family_gate_args,
     add_protocol_phase_args,
+    add_store_args,
     add_time_limit_args,
 )
 from blockchecks.engine.adaptive_runner import (
@@ -36,7 +37,6 @@ from blockchecks.engine.config import (
     SECURE_DNS_DEFAULT,
     UNBLOCKED_DOM,
 )
-from blockchecks.engine.db_logger import StateDB, matrix_fingerprint
 from blockchecks.engine.domain_loader import (
     DEFAULT_DOMAINS_FILE,
     format_skip_summary,
@@ -53,6 +53,7 @@ from blockchecks.engine.run_finalize import (
     write_run_summary,
 )
 from blockchecks.engine.settle_profile import auto_load_profile, load_profile
+from blockchecks.engine.store import matrix_fingerprint, open_run_store
 from blockchecks.engine.tcp_fanout import fanout_allowed, fanout_batches
 
 colorama_init(autoreset=True)
@@ -89,7 +90,7 @@ def _exit_code(stop_set: bool, deadline: RunDeadline | None, signal_hit: bool) -
 
 
 async def run_full(args) -> int:
-    db = StateDB(args.db, batch_size=getattr(args, "db_batch", 0) or 0)
+    db = open_run_store(args.db, batch_size=getattr(args, "db_batch", 0) or 0)
     await db.init()
 
     domains_file = args.domains_file or DEFAULT_DOMAINS_FILE
@@ -715,12 +716,16 @@ async def run_full(args) -> int:
     return _exit_code(stop.is_set(), deadline, signal_interrupted)
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
+def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser:
+    from blockchecks.cli.user_config import apply_parser_defaults
+
     p = argparse.ArgumentParser(
         prog="bs full",
         description="Mass strategy x coverage test + nfqws2 conf export",
     )
-    p.add_argument("--db", default="state.db")
+    add_store_args(p)
+    if user_config:
+        apply_parser_defaults(p, user_config)
     p.add_argument(
         "--db-batch",
         type=int,
@@ -773,7 +778,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Export best per-domain strategies instead of COMMON intersection",
     )
-    p.add_argument("--out-dir", default="output")
     p.add_argument("--isp-interface", default="eth3")
     p.add_argument("--prefix", default="/opt/etc/nfqws2")
     p.add_argument("--mode", default="auto", choices=["auto", "list", "all"])
@@ -824,9 +828,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
-    p = build_arg_parser()
+def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
+    from blockchecks.cli.user_config import finalize_store_args, load_user_config
+    from blockchecks.engine.paths import DEFAULT_OUT_DIR, apply_pycache_prefix, ensure_dirs
+
+    apply_pycache_prefix()
+    ensure_dirs()
+    cfg = user_config if user_config is not None else load_user_config()
+    p = build_arg_parser(cfg)
     args = p.parse_args(argv)
+    finalize_store_args(args, cfg)
+    if args.out_dir is None:
+        args.out_dir = str(DEFAULT_OUT_DIR)
     validate_time_limit_args(p, args)
     return asyncio.run(run_full(args))
 

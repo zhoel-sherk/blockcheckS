@@ -16,6 +16,8 @@ blockcheckS/
 │   ├── main.py                # bs full orchestrator
 │   ├── nfconf.py
 │   ├── engine/
+│   │   ├── paths.py           # XDG dirs (config/data/cache)
+│   │   ├── store/             # RunStateStore DAO (sqlite)
 │   │   ├── config.py
 │   │   ├── generators/        # StrategyItem + Standard/Flowseal/Custom
 │   │   ├── matrix_generator.py  # facade: generate_tcp/udp
@@ -39,9 +41,18 @@ Entry points: `bs` → `blockchecks.bs:main`, `bc-main`, `bc-nfconf`.
 
 `PROJECT_DIR` in `config.py` resolves repo root (parent of `src/`). Runtime paths:
 
-- `configs/*.conf` — repo root only
-- `presets/` — repo root
-- `state.db`, `output/` — CWD
+- `configs/*.conf` — repo root only (`PROJECT_DIR`)
+- `presets/` — repo root (shipped catalog)
+- **Runtime data (XDG):**
+  - `~/.config/blockcheckS/config.toml` — user defaults
+  - `~/.local/share/blockcheckS/state.db` — run state DB (default `--db`)
+  - `~/.local/share/blockcheckS/export/` — nfconf export (default `--out-dir` for `bs full`)
+  - `~/.cache/blockcheckS/` — gv/voice/settle caches, blob-cache, isolated `pycache/`
+
+Override: CLI args > `BLOCKCHECKS_*` env > `config.toml` > XDG defaults.
+See [`engine/paths.py`](../src/blockchecks/engine/paths.py) and [`settings.example.toml`](../settings.example.toml).
+
+Legacy CWD-relative `--db state.db` still works when passed explicitly.
 
 `MANIFEST.in` includes `configs/*.conf` in **sdist** for source distributions.
 Plain `pip install` wheel without checkout may not find configs — use editable

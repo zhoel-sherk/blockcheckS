@@ -5,7 +5,7 @@ set -euo pipefail
 
 BLOBS="${BLOCKCHECKS_BLOBS:-/opt/zapret2/blobs}"
 FAKE="${BLOCKCHECKS_FAKE_FILES:-/opt/zapret2/files/fake}"
-CACHE="${BLOCKCHECKS_BLOB_CACHE:-/tmp/blockchecks-blob-cache}"
+CACHE="${BLOCKCHECKS_BLOB_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/blockcheckS/blob-cache}"
 FLOWSEAL_BASE="${FLOWSEAL_BLOB_URL:-https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/bin}"
 
 mkdir -p "$CACHE"

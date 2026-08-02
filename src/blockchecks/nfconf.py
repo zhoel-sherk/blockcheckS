@@ -15,12 +15,13 @@ from blockchecks.engine.conf_builder import (
     write_user_list,
 )
 from blockchecks.engine.config import BLOB_DIR
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.domain_loader import DEFAULT_DOMAINS_FILE, read_domain_lines
+from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR, expand_path
+from blockchecks.engine.store import RunStateStore, open_run_store
 
 
 async def collect_export_strategies(
-    db: StateDB,
+    db: RunStateStore,
     *,
     domain: str,
     limit: int,
@@ -80,10 +81,10 @@ async def collect_export_strategies(
 
 async def export_configs(
     *,
-    db_path: str = "state.db",
+    db_path: str | None = None,
     domain: str = "discord.com",
     limit: int = 3,
-    out_dir: str = "output",
+    out_dir: str | None = None,
     isp_interface: str = "eth3",
     prefix: str = DEFAULT_KEENETIC_PREFIX,
     mode: str = "auto",
@@ -92,8 +93,9 @@ async def export_configs(
     common_only: bool = True,
 ) -> dict:
     """Write keenetic + raw conf (+ user.list). Returns paths dict."""
-    db = StateDB(db_path)
+    db = open_run_store(db_path)
     await db.init()
+    out_dir = str(expand_path(out_dir, default=DEFAULT_OUT_DIR))
 
     if domains_file and os.path.exists(domains_file):
         domains = read_domain_lines(domains_file)
@@ -153,12 +155,12 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description="Export best strategies from state.db to nfqws2 conf files"
     )
-    p.add_argument("--db", default="state.db")
+    p.add_argument("--db", default=None, help=f"State DB (default: {DEFAULT_DB_PATH})")
     p.add_argument(
         "-d", "--domain", default="discord.com", help="Primary domain for ranking fallback"
     )
     p.add_argument("--limit", type=int, default=3)
-    p.add_argument("--out-dir", default="output")
+    p.add_argument("--out-dir", default=None, help=f"Export directory (default: {DEFAULT_OUT_DIR})")
     p.add_argument("--isp-interface", default="eth3")
     p.add_argument(
         "--prefix",

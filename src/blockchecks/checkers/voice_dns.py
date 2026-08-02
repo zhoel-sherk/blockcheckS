@@ -9,7 +9,7 @@ and filters with STUN liveness via discover_dns_alive().
 Range: N=14000-14147 → ~148 unique IPs, all GCP Hamina.
 Ports: UDP 50000-50006 confirmed open on all GCP backends.
 
-Cache: <project>/logs/bs_voice_cache.json, rotated after 1-2 hours.
+Cache: XDG cache bs_voice_cache.json, rotated after 1-2 hours.
 """
 
 import asyncio
@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 from contextlib import contextmanager
 
-from blockchecks.engine.config import PROJECT_DIR
+from blockchecks.engine.paths import VOICE_DNS_CACHE_FILE
 
 # DNS range for finland region (the only active one)
 DNS_RANGE = (14000, 14148)
@@ -38,10 +38,16 @@ MAKS_IP_LIST_URL = (
     "/regions/{region}/{region}-voice-ip-list.txt"
 )
 
-# Cache settings — under project logs/
-CACHE_DIR = os.path.join(PROJECT_DIR, "logs")
-CACHE_FILE = "bs_voice_cache.json"
+# Cache settings — XDG cache
 CACHE_TTL_SECONDS = 90 * 60  # 90 minutes
+
+
+def _cache_file_path() -> str:
+    return str(VOICE_DNS_CACHE_FILE)
+
+
+def _ensure_cache_dir() -> None:
+    VOICE_DNS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 # Parallel probes through host NFQUEUE+bootstrap; >4 tends to queue-bypass
 # drop replies (remote Fryazino: 8→0/64 alive, 4→3/4 ip_discovery).
@@ -49,13 +55,13 @@ STUN_PROBE_CONCURRENCY = 4
 
 
 def _cache_file() -> str:
-    return os.path.join(CACHE_DIR, CACHE_FILE)
+    return _cache_file_path()
 
 
 def _load_cache() -> dict | None:
     """Load cached voice endpoints if not expired."""
     cache_file = _cache_file()
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    _ensure_cache_dir()
     if not os.path.exists(cache_file):
         return None
     try:
@@ -75,7 +81,7 @@ def _load_cache() -> dict | None:
 
 def _save_cache(endpoints: list[dict]) -> None:
     """Save voice endpoints to cache."""
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    _ensure_cache_dir()
     data = {"timestamp": time.time(), "endpoints": endpoints}
     with open(_cache_file(), "w") as f:
         json.dump(data, f)

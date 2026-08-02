@@ -7,6 +7,11 @@ import argparse
 import asyncio
 import sys
 
+# Allow running from repo without install
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
+
+from blockchecks.engine.paths import DEFAULT_DB_PATH
+
 import aiosqlite
 
 
@@ -60,7 +65,7 @@ async def analyze(db_path: str, domain: str | None) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="AQ8: PASS discovery before 50% jobs benchmark")
-    p.add_argument("--db", default="state.db")
+    p.add_argument("--db", default=str(DEFAULT_DB_PATH))
     p.add_argument("-d", "--domain", default=None, help="Filter to one domain")
     p.add_argument(
         "--target",

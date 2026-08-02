@@ -2,8 +2,8 @@
 
 import os
 
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
+from blockchecks.engine.store import RunStateStore
 
 
 class CustomListGenerator(StrategyGenerator):
@@ -23,7 +23,7 @@ class CustomListGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,
@@ -63,7 +63,7 @@ class ConfigFileGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,
@@ -99,7 +99,7 @@ class UserMatrixGenerator(StrategyGenerator):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: StateDB = None,
+        state_db: RunStateStore = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,

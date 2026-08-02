@@ -27,8 +27,8 @@ from colorama import init as colorama_init
 
 colorama_init(autoreset=True)
 
-from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.pair_manager import DualNfqws2Manager
+from blockchecks.engine.store import open_run_store
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -87,10 +87,16 @@ class PairReport:
 class PairTestRunner:
     """Run TCP×UDP pair matrix testing."""
 
-    def __init__(self, ns_name: str | None = None, db_path: str = "state.db"):
+    def __init__(self, ns_name: str | None = None, db_path: str | None = None):
         self.ns_name = ns_name
-        self.db = StateDB(db_path)
+        self.db = open_run_store(db_path)
+        self._db_ready = False
         self._python = sys.executable
+
+    async def _ensure_db(self) -> None:
+        if not self._db_ready:
+            await self.db.init()
+            self._db_ready = True
 
     def _run_curl_check(self, domain: str, timeout: float, check_gateway: bool = False) -> dict:
         """Run curl_cffi TLS check via subprocess."""
@@ -179,6 +185,7 @@ print(json.dumps(result))
         self, tcp_configs: list[str], domain: str, timeout: float = 5.0
     ) -> list[TcpTestResult]:
         """Test each TCP config against domain. Returns results."""
+        await self._ensure_db()
         results = []
         for config in tcp_configs:
             name = os.path.basename(config).replace(".conf", "")
@@ -238,6 +245,7 @@ print(json.dumps(result))
           For each UDP config: switch UDP nfqws2, probe
            Save checkpoint after each pair.
         """
+        await self._ensure_db()
         t0_f = time.perf_counter()
         report = PairReport(
             domain=domain, tcp_results=tcp_results, voice_info={"ip": voice_ip, "port": voice_port}

@@ -143,7 +143,10 @@ MAX_CURL_PARALLEL = int(_env_or("BLOCKCHECKS_CURL_PARALLEL_MAX", "8"))
 # ── nfqws2 debug ─────────────────────────────────
 # BLOCKCHECKS_NFQWS2_DEBUG: empty/0=off, 1=file under logs/, syslog, @path, or path
 NFQWS2_DEBUG = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
-LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
+
+from blockchecks.engine.paths import RUNTIME_LOGS_DIR  # noqa: E402
+
+LOGS_DIR = str(RUNTIME_LOGS_DIR)
 
 
 def nfqws2_debug_conf_line(tag: str = "") -> tuple[str | None, str | None]:

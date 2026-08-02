@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from blockchecks.engine.db_logger import StateDB
+from blockchecks.engine.store import open_run_store
 from blockchecks.provider_import import DEFAULT_PRESETS_DIR, write_shortlist_presets
 
 SCHEMA = "blockchecks.shortlist/v1"
@@ -70,7 +70,7 @@ async def seed_state_db(
     """Seed strategies + optional PASS rows for resume."""
     if not mark_pass:
         return 0
-    db = StateDB(db_path)
+    db = open_run_store(db_path)
     await db.init()
     count = 0
     domains = shortlist.get("domains") or ["discord.com"]
