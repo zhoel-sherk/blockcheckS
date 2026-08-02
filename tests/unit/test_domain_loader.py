@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from blockchecks.engine.db_logger import StateDB
+from blockchecks.engine.store import StateDB
 from blockchecks.engine.domain_loader import (
     DenylistEntry,
     apply_denylist,

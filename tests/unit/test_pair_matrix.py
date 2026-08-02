@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from blockchecks.engine.async_runner import StrategyItem, TcpTestResult
-from blockchecks.engine.db_logger import Checkpoint
+from blockchecks.engine.store import Checkpoint
 
 pytestmark = pytest.mark.unit
 

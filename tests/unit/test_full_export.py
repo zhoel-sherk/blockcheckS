@@ -10,7 +10,7 @@ from blockchecks.engine.conf_builder import (
     build_raw_conf,
     extract_blob_names,
 )
-from blockchecks.engine.db_logger import StateDB
+from blockchecks.engine.store import StateDB
 from blockchecks.nfconf import export_configs
 
 

@@ -82,6 +82,9 @@ __all__ = [
     "Checkpoint",
     "RunStateStore",
     "SqliteRunStore",
+    "StateDB",
     "matrix_fingerprint",
     "open_run_store",
 ]
+
+StateDB: type[SqliteRunStore] = SqliteRunStore  # backward compat alias

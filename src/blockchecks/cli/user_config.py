@@ -7,7 +7,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-import tomllib
+try:
+    import tomllib
+except ImportError:  # Python < 3.11
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from blockchecks.engine.paths import CONFIG_FILE, DEFAULT_DB_PATH, DEFAULT_OUT_DIR, expand_path
 

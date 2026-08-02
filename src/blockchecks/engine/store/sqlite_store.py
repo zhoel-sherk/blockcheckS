@@ -57,7 +57,7 @@ class SqliteRunStore:
     ) -> int:
         """Insert or get strategy ID. Reuses open `db` when provided."""
 
-        async def _body(conn):
+        async def _body(conn, commit: bool):
             row = await conn.execute(
                 "SELECT id FROM strategies WHERE name=? AND proto=?",
                 (name, proto),
@@ -69,20 +69,22 @@ class SqliteRunStore:
                         "UPDATE strategies SET config_path=? WHERE id=?",
                         (config_path, existing[0]),
                     )
-                    await conn.commit()
+                    if commit:
+                        await conn.commit()
                 return existing[0]
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             cur = await conn.execute(
                 "INSERT INTO strategies(name,proto,config_path,first_seen) VALUES(?,?,?,?)",
                 (name, proto, config_path, ts),
             )
-            await conn.commit()
+            if commit:
+                await conn.commit()
             return cur.lastrowid
 
         if db is not None:
-            return await _body(db)
+            return await _body(db, commit=False)
         async with aiosqlite.connect(self._path) as conn:
-            return await _body(conn)
+            return await _body(conn, commit=True)
 
     async def flush(self) -> None:
         """Flush buffered log_tcp/log_udp rows (B8 batch mode)."""

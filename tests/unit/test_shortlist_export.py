@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from blockchecks.engine.db_logger import StateDB
+from blockchecks.engine.store import StateDB
 from blockchecks.shortlist_export import SCHEMA, build_shortlist_entries, export_shortlist_json
 from blockchecks.shortlist_import import (
     import_shortlist,

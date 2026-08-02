@@ -1,4 +1,19 @@
-"""XDG Base Directory paths for blockcheckS runtime data."""
+"""XDG Base Directory paths for blockcheckS runtime data.
+
+Implements XDG Base Directory Specification v0.8 (May 2021):
+    https://specifications.freedesktop.org/basedir-spec/latest/
+
+Per-spec requirements:
+- All env-var paths must be absolute; relative paths are ignored.
+- Empty string env-var values fall back to the spec default.
+- ``$XDG_STATE_HOME`` (default ``~/.local/state``) holds state databases.
+- ``$XDG_DATA_HOME`` (default ``~/.local/share``) holds data files.
+- ``$XDG_CONFIG_HOME`` (default ``~/.config``) holds config.
+- ``$XDG_CACHE_HOME`` (default ``~/.cache``) holds cache.
+
+Project-specific overrides (``BLOCKCHECKS_*_HOME``) take priority
+over the standard XDG vars when present and non-empty.
+"""
 
 from __future__ import annotations
 
@@ -7,42 +22,64 @@ import sys
 from pathlib import Path
 
 
+def _resolve_xdg(
+    primary_key: str,
+    fallback_key: str,
+    default: Path,
+) -> Path:
+    """Return *default* unless *primary_key* or *fallback_key* is a
+    non-empty absolute path in the environment (spec §3)."""
+    for key in (primary_key, fallback_key):
+        val = os.environ.get(key, "")
+        if val:
+            p = Path(val)
+            if not p.is_absolute():
+                continue
+            return p
+    return default
+
+
 def _xdg_config_home() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return _resolve_xdg("BLOCKCHECKS_CONFIG_HOME", "XDG_CONFIG_HOME",
+                        Path.home() / ".config")
 
 
 def _xdg_data_home() -> Path:
-    override = os.environ.get("BLOCKCHECKS_DATA_HOME") or os.environ.get("XDG_DATA_HOME")
-    if override:
-        return Path(override)
-    return Path.home() / ".local" / "share"
+    return _resolve_xdg("BLOCKCHECKS_DATA_HOME", "XDG_DATA_HOME",
+                        Path.home() / ".local" / "share")
+
+
+def _xdg_state_home() -> Path:
+    return _resolve_xdg("BLOCKCHECKS_STATE_HOME", "XDG_STATE_HOME",
+                        Path.home() / ".local" / "state")
 
 
 def _xdg_cache_home() -> Path:
-    override = os.environ.get("BLOCKCHECKS_CACHE_HOME") or os.environ.get("XDG_CACHE_HOME")
-    if override:
-        return Path(override)
-    return Path.home() / ".cache"
+    return _resolve_xdg("BLOCKCHECKS_CACHE_HOME", "XDG_CACHE_HOME",
+                        Path.home() / ".cache")
 
 
-CONFIG_DIR = Path(os.environ.get("BLOCKCHECKS_CONFIG_HOME", _xdg_config_home() / "blockcheckS"))
-CONFIG_FILE = CONFIG_DIR / "config.toml"
+# ── module-level constants ────────────────────────────────────────────
+
+CONFIG_DIR      = _xdg_config_home() / "blockcheckS"
+CONFIG_FILE     = CONFIG_DIR / "config.toml"
 USER_PRESETS_DIR = CONFIG_DIR / "presets"
 
-DATA_DIR = Path(_xdg_data_home()) / "blockcheckS"
-CACHE_DIR = Path(_xdg_cache_home()) / "blockcheckS"
+STATE_DIR       = _xdg_state_home() / "blockcheckS"
+DATA_DIR        = _xdg_data_home()   / "blockcheckS"
+CACHE_DIR       = _xdg_cache_home()  / "blockcheckS"
 
-DEFAULT_DB_PATH = DATA_DIR / "state.db"
-DEFAULT_OUT_DIR = DATA_DIR / "export"
-DEFAULT_SHORTLIST_DIR = DATA_DIR / "shortlists"
-RUNTIME_LOGS_DIR = DATA_DIR / "logs"
-USER_DATA_PRESETS_DIR = DATA_DIR / "presets"
+DEFAULT_DB_PATH         = STATE_DIR / "state.db"
+DEFAULT_OUT_DIR         = STATE_DIR / "export"
+DEFAULT_SHORTLIST_DIR   = STATE_DIR / "shortlists"
+RUNTIME_LOGS_DIR        = STATE_DIR / "logs"
+USER_DATA_PRESETS_DIR   = STATE_DIR / "presets"
 
-BLOB_CACHE_DIR = CACHE_DIR / "blob-cache"
-PYCACHE_DIR = CACHE_DIR / "pycache"
-GV_URL_CACHE_FILE = CACHE_DIR / "bs_gv_url_cache.json"
-VOICE_DNS_CACHE_FILE = CACHE_DIR / "bs_voice_cache.json"
-SETTLE_PROFILE_FILE = CACHE_DIR / "settle_profile.json"
+BLOB_CACHE_DIR          = CACHE_DIR / "blob-cache"
+PYCACHE_DIR             = CACHE_DIR / "pycache"
+GV_URL_CACHE_FILE       = CACHE_DIR / "bs_gv_url_cache.json"
+VOICE_DNS_CACHE_FILE    = CACHE_DIR / "bs_voice_cache.json"
+SETTLE_PROFILE_FILE     = CACHE_DIR / "settle_profile.json"
 
 
 def expand_path(value: str | Path | None, *, default: Path) -> Path:
@@ -57,6 +94,7 @@ def ensure_dirs() -> None:
     for path in (
         CONFIG_DIR,
         USER_PRESETS_DIR,
+        STATE_DIR,
         DATA_DIR,
         DEFAULT_OUT_DIR,
         DEFAULT_SHORTLIST_DIR,
@@ -84,6 +122,5 @@ def subprocess_env(base: dict[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     if base:
         env.update(base)
-    env.setdefault("PYTHONPYCACHEPREFIX", str(PYCACHE_DIR))
     env["PYTHONPYCACHEPREFIX"] = str(PYCACHE_DIR)
     return env
