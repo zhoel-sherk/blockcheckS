@@ -95,6 +95,8 @@ class TestRunner:
 
     def _run_check(self, domain: str, timeout: float) -> StrategyResult:
         """Run curl probe inside namespace (or main ns if no netns)."""
+        from blockchecks.checkers.curl_probe import worker_wall_timeout
+
         resolved_ip = None
         if self.secure_dns and self.dns_cache:
             resolved_ip = self.dns_cache.primary_ip(domain)
@@ -129,12 +131,20 @@ class TestRunner:
         else:
             cmd = [self._python, "-m", "blockchecks.engine._curl_probe_worker"]
 
+        wall = worker_wall_timeout(
+            timeout,
+            self.repeats,
+            n_domains=1,
+            curl_parallel=1,
+            parallel_repeats=self.parallel_repeats,
+            settle_slack=5.0,
+        )
         r = subprocess.run(
             cmd,
             input=payload,
             capture_output=True,
             text=True,
-            timeout=timeout + 5,
+            timeout=wall,
         )
 
         result = StrategyResult(strategy="", domain=domain)

@@ -1,5 +1,19 @@
 # blockcheckS Changelog
 
+## Unreleased — audit fixes (post-1.0.0)
+
+### Fixed
+- `bs pair --adaptive`: run UDP pair matrix after AQ TCP (was TCP-only)
+- Curl worker wall timeout scales with `--repeats` (`worker_wall_timeout`)
+- AQ `pop_batch` solos googlevideo (match B2 `fanout_batches`)
+- Pair resume: completed-set from DB + checkpoint `(tcp_idx, udp_idx)` (not lexicographic labels)
+- `bs full` pair phase passes `--resume` checkpoint + fingerprint
+- `family_needs.finish_family` clears needs for `fakedsplit` / `fakeddisorder`
+- THROTTLED counts as working for export / coverage / pair selection
+- Removed orphan `pair_runner` / `pair_manager`; composite uses JSON curl worker
+- Netns base allowlist; resolv.conf via `tee` (no `bash -c`)
+- `ensure_strategy` sets `busy_timeout`; GV tiny 206 no longer auto-PASS
+
 ## 1.0.0 — 2026-08-02
 
 Первый production-ready релиз: mass-scan DPI-стратегий для zapret2/nfqws2 с curl_cffi,

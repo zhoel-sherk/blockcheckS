@@ -311,8 +311,11 @@ class AdaptiveJobQueue:
             return []
         if max_size <= 1:
             return [first]
-        batch = [first]
         prof = curl_profile(first.domain, protocol=protocol, disable_ech=disable_ech)
+        # Mirror fanout_batches: googlevideo / special domains always solo
+        if prof.special:
+            return [first]
+        batch = [first]
         for dom in self.pending_domains_for_strategy(first.item.label):
             if len(batch) >= max_size:
                 break

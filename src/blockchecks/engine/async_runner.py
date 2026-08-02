@@ -19,6 +19,7 @@ from blockchecks.checkers.curl_probe import (
     CurlProbeRequest,
     is_googlevideo_domain,
     prepare_googlevideo_probe,
+    worker_wall_timeout,
 )
 from blockchecks.checkers.dns_secure import DnsRunCache
 from blockchecks.engine.config import (
@@ -408,7 +409,7 @@ def _invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: flo
         input=json.dumps(payload),
         capture_output=True,
         text=True,
-        timeout=timeout + 15,
+        timeout=timeout,
     )
     try:
         return json.loads(r.stdout)
@@ -521,7 +522,14 @@ def _run_tcp_check(
         "quick_break": bool(quick_break),
     }
     try:
-        data = _invoke_curl_probe_worker(ns_name, py, payload, timeout)
+        wall = worker_wall_timeout(
+            timeout,
+            repeats,
+            n_domains=1,
+            curl_parallel=1,
+            parallel_repeats=parallel_repeats,
+        )
+        data = _invoke_curl_probe_worker(ns_name, py, payload, wall)
         data["settle_ms"] = round(settle_elapsed * 1000, 1)
         return data
     finally:
@@ -646,9 +654,14 @@ def _run_tcp_check_multi(
         "quick_break": bool(quick_break),
     }
     try:
-        raw = _invoke_curl_probe_worker(
-            ns_name, py, payload, timeout * len(domains_active) + 5
+        wall = worker_wall_timeout(
+            timeout,
+            repeats,
+            n_domains=len(domains_active),
+            curl_parallel=int(curl_parallel),
+            parallel_repeats=parallel_repeats,
         )
+        raw = _invoke_curl_probe_worker(ns_name, py, payload, wall)
         settle_ms = round(settle_elapsed * 1000, 1)
         out = {
             d: {**raw.get(d, {}), "settle_ms": settle_ms}
@@ -1260,28 +1273,42 @@ class AsyncTestRunner:
 
         total = len(working) * len(udp_strategies)
 
-        # Resume: skip completed pairs based on checkpoint labels
-        resume_tcp_label = None
-        resume_udp_label = None
+        # Resume: completed-set from DB + checkpoint (tcp_idx, udp_idx) order
+        completed: set[tuple[str, str]] = set()
+        resume_tcp_idx = None
+        resume_udp_idx = None
+        if self.db:
+            try:
+                completed = await self.db.get_completed_pair_keys(domain)
+            except Exception:
+                completed = set()
         if isinstance(resume_from, Checkpoint):
-            resume_tcp_label = resume_from.tcp_label or None
-            resume_udp_label = resume_from.udp_label or None
-        elif resume_from is not None and hasattr(resume_from, "tcp_label"):
-            resume_tcp_label = getattr(resume_from, "tcp_label", None) or None
-            resume_udp_label = getattr(resume_from, "udp_label", None) or None
-        if resume_tcp_label:
-            print(f"  {YELLOW}Resuming after {resume_tcp_label}+{resume_udp_label}{RESET}")
+            resume_tcp_idx = resume_from.tcp_idx
+            resume_udp_idx = resume_from.udp_idx
+            if resume_from.tcp_label:
+                print(
+                    f"  {YELLOW}Resuming after "
+                    f"{resume_from.tcp_label}+{resume_from.udp_label} "
+                    f"(idx {resume_tcp_idx},{resume_udp_idx}; "
+                    f"{len(completed)} pairs in DB){RESET}"
+                )
+        elif resume_from is not None and hasattr(resume_from, "tcp_idx"):
+            resume_tcp_idx = getattr(resume_from, "tcp_idx", None)
+            resume_udp_idx = getattr(resume_from, "udp_idx", None)
         print(
             f"  {CYAN}Pair matrix: {len(working)} TCP × {len(udp_strategies)} UDP "
             f"= {total} pairs, {self.pool.size} parallel{RESET}"
         )
 
         async def run_pair(tcp_i: int, tcp_r: TcpTestResult, udp_s: StrategyItem, pair_idx: int):
-            # Resume skip — inclusive of last completed pair
-            if resume_tcp_label and resume_udp_label:
-                if tcp_r.item.label < resume_tcp_label:
+            key = (tcp_r.item.label, udp_s.label)
+            if key in completed:
+                return
+            # Checkpoint idx: skip pairs at or before last completed (tcp_i, udp order)
+            if resume_tcp_idx is not None and resume_udp_idx is not None:
+                if tcp_i < resume_tcp_idx:
                     return
-                if tcp_r.item.label == resume_tcp_label and udp_s.label <= resume_udp_label:
+                if tcp_i == resume_tcp_idx and pair_idx <= resume_udp_idx:
                     return
             async with pair_sem:
                 ns_name = await self.pool.acquire()
@@ -1368,11 +1395,9 @@ class AsyncTestRunner:
                     await self.pool.release(ns_name)
 
         tasks = []
-        pair_idx = 0
         for tcp_i, tcp_r in working:
-            for udp_s in udp_strategies:
-                pair_idx += 1
-                tasks.append(asyncio.create_task(run_pair(tcp_i, tcp_r, udp_s, pair_idx - 1)))
+            for udp_ord, udp_s in enumerate(udp_strategies):
+                tasks.append(asyncio.create_task(run_pair(tcp_i, tcp_r, udp_s, udp_ord)))
 
         await asyncio.gather(*tasks, return_exceptions=True)
         return pairs

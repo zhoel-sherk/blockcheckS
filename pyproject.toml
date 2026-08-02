@@ -77,7 +77,6 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "src/blockchecks/cli/parser.py" = ["E402"]
 "src/blockchecks/engine/async_runner.py" = ["E402"]
-"src/blockchecks/engine/pair_runner.py" = ["E402"]
 "src/blockchecks/checkers/composite_runner.py" = ["E402"]
 "tests/conftest.py" = ["E402"]
 

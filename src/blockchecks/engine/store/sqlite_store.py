@@ -26,6 +26,9 @@ def matrix_fingerprint(
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+_WORKING_STATUSES = "('PASS','THROTTLED')"
+
+
 class SqliteRunStore:
     """Closed DAO for blockcheckS run state (SQLite backend)."""
 
@@ -84,6 +87,7 @@ class SqliteRunStore:
         if db is not None:
             return await _body(db, commit=False)
         async with aiosqlite.connect(self._path) as conn:
+            await conn.execute("PRAGMA busy_timeout = 5000")
             return await _body(conn, commit=True)
 
     async def flush(self) -> None:
@@ -340,7 +344,7 @@ class SqliteRunStore:
             await db.execute("PRAGMA busy_timeout = 5000")
             row = await db.execute(
                 f"""SELECT COUNT(*),
-                           SUM(CASE WHEN t.status='PASS' THEN 1 ELSE 0 END)
+                           SUM(CASE WHEN t.status IN {_WORKING_STATUSES} THEN 1 ELSE 0 END)
                     FROM tcp_results t
                     JOIN strategies s ON t.strategy_id = s.id
                     WHERE t.domain=? AND s.proto IN ({placeholders})""",
@@ -360,33 +364,43 @@ class SqliteRunStore:
                 await db.execute(
                     """SELECT COUNT(*) FROM tcp_results t
                        JOIN strategies s ON t.strategy_id=s.id
-                       WHERE t.status='PASS' AND s.proto='tcp'"""
+                       WHERE t.status IN ('PASS','THROTTLED') AND s.proto='tcp'"""
                 )
             ).fetchone()
         return int(row[0] or 0)
 
     async def get_working_tcp(self, domain: str) -> list[str]:
-        """Names whose *latest* result for domain is PASS (proto=tcp)."""
+        """Names whose *latest* result for domain is PASS or THROTTLED (proto=tcp)."""
         return await self.get_working_proto(domain, "tcp")
 
     async def get_working_quic(self, domain: str) -> list[str]:
-        """Names whose latest QUIC result for domain is PASS."""
+        """Names whose latest QUIC result for domain is PASS or THROTTLED."""
         return await self.get_working_proto(domain, "quic")
 
     async def get_working_proto(self, domain: str, proto: str) -> list[str]:
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
             rows = await db.execute(
-                """SELECT s.name FROM strategies s
+                f"""SELECT s.name FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.proto=? AND t.domain=? AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain=?
                        ORDER BY t2.id DESC LIMIT 1
-                   ) AND t.status='PASS'""",
+                   ) AND t.status IN {_WORKING_STATUSES}""",
                 (proto, domain, domain),
             )
             return [r[0] for r in await rows.fetchall()]
+
+    async def get_completed_pair_keys(self, domain: str) -> set[tuple[str, str]]:
+        """All (tcp, udp) pairs already logged for domain (any overall) — resume skip."""
+        async with aiosqlite.connect(self._path) as db:
+            await db.execute("PRAGMA busy_timeout = 5000")
+            rows = await db.execute(
+                "SELECT DISTINCT tcp_strategy, udp_strategy FROM pair_results WHERE domain=?",
+                (domain,),
+            )
+            return {(r[0], r[1]) for r in await rows.fetchall()}
 
     async def get_passing_pairs(self, domain: str) -> list[dict]:
         async with aiosqlite.connect(self._path) as db:
@@ -413,14 +427,14 @@ class SqliteRunStore:
             return await row.fetchone() is not None
 
     async def get_best_tcp(self, domain: str, *, limit: int = 5) -> list[dict]:
-        """Latest PASS per strategy for domain, ordered by latency_ms ASC."""
+        """Latest PASS/THROTTLED per strategy for domain, ordered by latency_ms ASC."""
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
             rows = await db.execute(
-                """SELECT s.name, t.latency_ms, t.http_code, t.timestamp
+                f"""SELECT s.name, t.latency_ms, t.http_code, t.timestamp
                    FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
-                   WHERE s.proto='tcp' AND t.domain=? AND t.status='PASS'
+                   WHERE s.proto='tcp' AND t.domain=? AND t.status IN {_WORKING_STATUSES}
                      AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain=?
@@ -434,14 +448,14 @@ class SqliteRunStore:
             return [dict(zip(cols, r)) for r in await rows.fetchall()]
 
     async def get_best_quic(self, domain: str, *, limit: int = 5) -> list[dict]:
-        """Latest PASS per QUIC strategy for domain, ordered by latency_ms ASC."""
+        """Latest PASS/THROTTLED per QUIC strategy for domain, ordered by latency_ms ASC."""
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
             rows = await db.execute(
-                """SELECT s.name, t.latency_ms, t.http_code, t.timestamp
+                f"""SELECT s.name, t.latency_ms, t.http_code, t.timestamp
                    FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
-                   WHERE s.proto='quic' AND t.domain=? AND t.status='PASS'
+                   WHERE s.proto='quic' AND t.domain=? AND t.status IN {_WORKING_STATUSES}
                      AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain=?
@@ -495,9 +509,9 @@ class SqliteRunStore:
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
             rows = await db.execute(
-                """SELECT t.domain, t.latency_ms FROM strategies s
+                f"""SELECT t.domain, t.latency_ms FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
-                   WHERE s.name=? AND s.proto='tcp' AND t.status='PASS'
+                   WHERE s.name=? AND s.proto='tcp' AND t.status IN {_WORKING_STATUSES}
                      AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain = t.domain
@@ -528,9 +542,9 @@ class SqliteRunStore:
             await db.execute("PRAGMA busy_timeout = 5000")
             # Distinct strategy names that have at least one PASS
             rows = await db.execute(
-                """SELECT DISTINCT s.name FROM strategies s
+                f"""SELECT DISTINCT s.name FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
-                   WHERE s.proto='tcp' AND t.status='PASS'"""
+                   WHERE s.proto='tcp' AND t.status IN {_WORKING_STATUSES}"""
             )
             names = [r[0] for r in await rows.fetchall()]
 

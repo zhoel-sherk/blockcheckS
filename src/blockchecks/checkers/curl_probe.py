@@ -272,9 +272,10 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     if dpi_fake:
         content_ok = False
 
+    # Tiny 206 is OK for ordinary sites; googlevideo Range must meet size budget
+    small_206 = resp.status_code == 206 and clen < 300 and not req.googlevideo
     small_body_ok = (not dpi_fake) and (
-        resp.status_code in _SMALL_BODY_STATUSES
-        or (resp.status_code == 206 and clen < 300)
+        resp.status_code in _SMALL_BODY_STATUSES or small_206
     )
     status_ok = 200 <= resp.status_code < 400
     throttled = False
@@ -306,6 +307,30 @@ MAX_CURL_REPEATS = 10  # GP DiscoveryOptions cap
 def clamp_repeats(n: int) -> int:
     """Bound curl repeats to GP/blockcheck2 practical range (1..10)."""
     return max(1, min(MAX_CURL_REPEATS, int(n)))
+
+
+def worker_wall_timeout(
+    probe_timeout: float,
+    repeats: int = 1,
+    *,
+    n_domains: int = 1,
+    curl_parallel: int = 1,
+    parallel_repeats: bool = False,
+    settle_slack: float = 15.0,
+) -> float:
+    """Subprocess wall-clock budget for curl probe worker (repeats-aware).
+
+    sequential repeats need ~repeats × timeout per domain wave;
+    parallel_repeats collapses repeats into one wave (~1× timeout).
+    """
+    import math
+
+    r = max(1, int(repeats))
+    n = max(1, int(n_domains))
+    par = max(1, int(curl_parallel))
+    waves = math.ceil(n / par)
+    per_wave = float(probe_timeout) if parallel_repeats and r > 1 else float(probe_timeout) * r
+    return per_wave * waves + max(5.0, float(settle_slack))
 
 
 def run_curl_probe_with_repeats(

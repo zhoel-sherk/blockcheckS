@@ -640,6 +640,15 @@ async def run_full(args) -> int:
                 tr = TcpTestResult(item=item, domain=primary, success=True)
                 tcp_results.append(tr)
             if tcp_results:
+                resume_from = None
+                if args.resume:
+                    resume_from = await db.latest_checkpoint()
+                    if resume_from and resume_from.fingerprint and resume_from.fingerprint != fp:
+                        print(
+                            f"  {YELLOW}Pair checkpoint fp mismatch "
+                            f"({resume_from.fingerprint}≠{fp}) — full pair re-run{RESET}"
+                        )
+                        resume_from = None
                 pairs = await runner.test_pair_matrix(
                     tcp_results,
                     udp_items[: max(1, args.pair_max // 2)],
@@ -648,6 +657,7 @@ async def run_full(args) -> int:
                     voice_port,
                     udp_timeout=args.udp_timeout,
                     udp_bypass=True,
+                    resume_from=resume_from,
                     fingerprint=fp,
                 )
                 n_pass = sum(1 for p in pairs if p.overall == "PASS")

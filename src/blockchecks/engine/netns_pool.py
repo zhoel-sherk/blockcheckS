@@ -9,15 +9,21 @@ on the event loop thread.
 """
 
 import asyncio
+import re
 import subprocess
 import threading
 import time
 
 BASE_CIDR = 20  # networks: 10.200.<n>.0/30 for pool member n
+_NETNS_BASE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class NetNsPool:
     def __init__(self, size: int = 4, base: str = "bs-p"):
+        if not _NETNS_BASE_RE.match(base):
+            raise ValueError(
+                f"invalid netns base {base!r}: must match ^[A-Za-z0-9_-]+$"
+            )
         self.size = size
         self.base = base
         self._queue: asyncio.Queue | None = None
@@ -104,10 +110,19 @@ class NetNsPool:
             "MASQUERADE",
         )
 
-        # DNS
+        # DNS — argv-only write (no bash -c)
         dns_dir = f"/etc/netns/{name}"
         self._run("mkdir", "-p", dns_dir)
-        self._run("bash", "-c", f"echo 'nameserver 8.8.8.8' > {dns_dir}/resolv.conf")
+        resolv = f"{dns_dir}/resolv.conf"
+        r = subprocess.run(
+            ["sudo", "tee", resolv],
+            input="nameserver 8.8.8.8\n",
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(f"tee resolv.conf failed: {r.stderr[:200]}")
 
         self._names.append(name)
         return name

@@ -84,7 +84,7 @@ class FamilyNeedTracker:
         elif family == "multisplit":
             self.need_multisplit = val
             self.need_multidisorder = val
-        elif family == "faked":
+        elif family in ("faked", "fakedsplit", "fakeddisorder"):
             self.need_fakedsplit = val
             self.need_fakeddisorder = val
 

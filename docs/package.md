@@ -70,12 +70,13 @@ async_runner ──► _probe_worker / checkers + netns_pool + nfqws2
 matrix_generator ──► generators/* (facade)
 ```
 
-Canonical pair path: `bs pair` → `async_runner` (not `pair_runner`).
+Canonical pair path: `bs pair` → `async_runner`.
 
 ## Public API
 
 Re-exported from `blockchecks.engine` and `blockchecks.checkers` — see
-[architecture.md](architecture.md).
+[architecture.md](architecture.md). Persistence: **`engine/store/`**
+(`RunStateStore` / `SqliteRunStore`). `db_logger.py` is a deprecation shim only.
 
 ## Quality
 
@@ -88,5 +89,5 @@ pytest -m "not integration"
 ## Deprecated
 
 - `tmp-scripts/README.md` architecture section → use [architecture.md](architecture.md)
-- `pair_runner.py` — legacy; do not extend
 - `engine/db_logger.py` — re-export shim; use `engine/store/`
+- ~~`pair_runner.py` / `pair_manager.py`~~ — **removed** (post-1.0.0 audit)

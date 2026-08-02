@@ -4,17 +4,25 @@ Uses ONE netns + ONE nfqws2 for all domains — the config already
 profiles traffic by hostlist, so one instance handles everything.
 """
 
+from __future__ import annotations
+
 import asyncio
-import json
 import os
+import re
 import subprocess as sp
 import time
 
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
-from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS
-from blockchecks.engine.async_runner import AsyncTestRunner, StrategyItem, TcpTestResult
+from blockchecks.checkers.curl_probe import CurlProbeRequest, worker_wall_timeout
+from blockchecks.engine.async_runner import (
+    AsyncTestRunner,
+    StrategyItem,
+    TcpTestResult,
+    _invoke_curl_probe_worker,
+    _probe_request_dict,
+)
 from blockchecks.engine.async_runner import _nfqws2_daemon as start_nfqws2
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
 
@@ -34,44 +42,11 @@ DOMAINS = [
     "gateway.discord.gg",
 ]
 
-# Inject DPI_FAKE_PATTERNS into the subprocess code template
-_DPI_PATTERNS_LITERAL = repr(DPI_FAKE_PATTERNS)
-_CHECK_BODY = f"""
-    body = resp.content[:4096]
-    clen = len(resp.content)
-    content_ok = clen >= 300
-    dpi_fake = any(p in body.lower() for p in {_DPI_PATTERNS_LITERAL})"""
+_FQDN_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
 
-CHECK_CODE = """
-import json, time
-try:
-    import curl_cffi
-    start = time.perf_counter()
-    resp = curl_cffi.get(
-        "https://{domain}", impersonate="chrome124", http_version=2,
-        timeout={timeout}, headers={{"Accept":"text/html"}},
-        allow_redirects=False,
-    )
-""" + _CHECK_BODY + """
-    if dpi_fake: content_ok = False
-    # Do not treat 301/302 as success when DPI fake page is present
-    small_body_ok = (not dpi_fake) and resp.status_code in (
-        101, 204, 301, 302, 303, 304, 307, 308, 206)
-    success = (200<=resp.status_code<400) and (content_ok or small_body_ok) and not dpi_fake
-    result = dict(success=success, http_code=resp.status_code,
-                  latency_ms=(time.perf_counter()-start)*1000,
-                  content_len=clen, content_ok=content_ok, error=None)
-except curl_cffi.CurlError as e:
-    msg = str(e)
-    result = dict(success=False, http_code=0,
-                  latency_ms=(time.perf_counter()-start)*1000,
-                  content_len=0, content_ok=False,
-                  error="timeout" if "Timeout" in msg else msg[:120])
-except Exception as e:
-    result = dict(success=False, http_code=0, latency_ms=0,
-                  content_len=0, content_ok=False, error=str(e)[:120])
-print(json.dumps(result))
-"""
+
+def _valid_domain(domain: str) -> bool:
+    return bool(domain) and len(domain) < 253 and _FQDN_RE.match(domain) is not None
 
 
 async def run(config_path: str, domains: list[str] = None, parallel: int = 2, timeout: float = 5.0):
@@ -148,24 +123,33 @@ async def run(config_path: str, domains: list[str] = None, parallel: int = 2, ti
             timeout=5,
         )
 
-        # Test all domains sequentially (sharing one nfqws2)
+        # Test all domains sequentially (sharing one nfqws2) via JSON worker
         for domain in domains:
-            code = CHECK_CODE.replace("{domain}", domain).replace("{timeout}", str(timeout))
-            r = sp.run(
-                ["sudo", "ip", "netns", "exec", ns_name, PYTHON, "-c", code],
-                capture_output=True,
-                text=True,
-                timeout=timeout + 10,
+            if not _valid_domain(domain):
+                results.append(
+                    TcpTestResult(
+                        item=item,
+                        domain=domain,
+                        success=False,
+                        error="invalid domain",
+                    )
+                )
+                print(f"  {RED}FAIL{RESET}  {domain}  — invalid domain")
+                continue
+            payload = {
+                "mode": "single",
+                "request": _probe_request_dict(
+                    CurlProbeRequest(domain=domain, timeout=timeout)
+                ),
+                "repeats": 1,
+                "parallel_repeats": False,
+                "repeats_mode": "fast",
+                "quick_break": False,
+            }
+            wall = worker_wall_timeout(timeout, 1, settle_slack=10.0)
+            data = await asyncio.to_thread(
+                _invoke_curl_probe_worker, ns_name, PYTHON, payload, wall
             )
-            try:
-                data = json.loads(r.stdout)
-            except json.JSONDecodeError:
-                data = {
-                    "success": False,
-                    "http_code": 0,
-                    "latency_ms": 0,
-                    "error": f"parse: {r.stdout[:100]}",
-                }
 
             result = TcpTestResult(item=item, domain=domain)
             result.success = data.get("success", False)
@@ -178,16 +162,13 @@ async def run(config_path: str, domains: list[str] = None, parallel: int = 2, ti
             lat = f"{result.latency_ms:.0f}ms" if result.latency_ms else ""
             code_str = f"HTTP {result.http_code}" if result.http_code else ""
             err = f" — {result.error[:50]}" if result.error else ""
-            print(f"  [{tag}] {lat:>7s}  {code_str:>9s}  {domain}{err}")
+            print(f"  {tag}  {domain:30s}  {lat:>8s}  {code_str}{err}")
 
     finally:
         await runner.pool.release(ns_name)
-        try:
-            await runner.stop()
-        except Exception:
-            pass
+        await runner.stop()
 
-    passed = sum(1 for r in results if r.success)
     elapsed = time.perf_counter() - t0
-    print(f"\n  {GREEN}{passed}/{len(results)} PASS{RESET} in {elapsed:.0f}s")
+    passed = sum(1 for r in results if r.success)
+    print(f"\n  {passed}/{len(results)} passed in {elapsed:.1f}s")
     return 0 if passed > 0 else 1

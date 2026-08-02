@@ -46,8 +46,7 @@ class TestSubmoduleImports:
         "blockchecks.engine.async_runner",
         "blockchecks.engine.matrix_generator",
         "blockchecks.engine.netns_pool",
-        "blockchecks.engine.pair_manager",
-        "blockchecks.engine.pair_runner",
+        "blockchecks.engine.adaptive_queue",
         "blockchecks.engine.conf_builder",
         "blockchecks.main",
         "blockchecks.nfconf",
@@ -58,6 +57,8 @@ class TestSubmoduleImports:
         "blockchecks.checkers.voice_discovery",
         "blockchecks.checkers.dns_secure",
         "blockchecks.checkers.youtube_url",
+        "blockchecks.checkers.curl_probe",
+        "blockchecks.checkers.composite_runner",
     ]
 
     @pytest.mark.parametrize("module_name", MODULES)

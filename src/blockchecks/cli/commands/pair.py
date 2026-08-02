@@ -16,7 +16,7 @@ from blockchecks.engine.adaptive_runner import (
     persist_adaptive_weights,
     run_adaptive_tcp,
 )
-from blockchecks.engine.async_runner import AsyncTestRunner
+from blockchecks.engine.async_runner import AsyncTestRunner, TcpTestResult
 from blockchecks.engine.config import (
     CONFIGS_DIR,
     DEFAULT_CURL_PARALLEL,
@@ -481,6 +481,33 @@ async def cmd_pair(args):
                     f"  AQ first PASS: {m.time_to_first_pass:.1f}s  "
                     f"fan-out enqueued: {m.fanout_enqueued}"
                 )
+            # Adaptive path previously stopped after TCP — still run UDP pairs
+            if not args.tcp_only and udp_items and not stop_event.is_set():
+                primary = domains_to_test[0]
+                working_names = await db.get_working_tcp(primary)
+                by_label = {i.label: i for i in tcp_items}
+                tcp_results = [
+                    TcpTestResult(item=by_label[name], domain=primary, success=True)
+                    for name in working_names
+                    if name in by_label
+                ]
+                if tcp_results:
+                    print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
+                    pairs = await runner.test_pair_matrix(
+                        tcp_results,
+                        udp_items,
+                        primary,
+                        voice_ip,
+                        voice_port,
+                        udp_timeout=args.udp_timeout,
+                        udp_bypass=args.udp_bypass,
+                        resume_from=resume_from,
+                        full_voice=full_voice,
+                        fingerprint=fp,
+                    )
+                    AsyncTestRunner.print_matrix(pairs)
+                else:
+                    print(f"  {YELLOW}No working TCP for pairs after AQ{RESET}")
         else:
             for domain in domains_to_test:
                 if stop_event.is_set():
