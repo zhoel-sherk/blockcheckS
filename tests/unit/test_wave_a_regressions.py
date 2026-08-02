@@ -16,8 +16,8 @@ from blockchecks.engine.async_runner import (
     _run_tcp_check,
 )
 from blockchecks.engine.config import PYTHON_BIN
-from blockchecks.engine.store import Checkpoint, StateDB, matrix_fingerprint
 from blockchecks.engine.matrix_generator import MatrixGenerator
+from blockchecks.engine.store import Checkpoint, StateDB, matrix_fingerprint
 
 pytestmark = pytest.mark.unit
 

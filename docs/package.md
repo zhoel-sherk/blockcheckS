@@ -45,9 +45,11 @@ Entry points: `bs` → `blockchecks.bs:main`, `bc-main`, `bc-nfconf`.
 - `presets/` — repo root (shipped catalog)
 - **Runtime data (XDG):**
   - `~/.config/blockcheckS/config.toml` — user defaults
-  - `~/.local/share/blockcheckS/state.db` — run state DB (default `--db`)
-  - `~/.local/share/blockcheckS/export/` — nfconf export (default `--out-dir` for `bs full`)
+  - `~/.local/state/blockcheckS/state.db` — run state DB (default `--db`)
+  - `~/.local/state/blockcheckS/export/` — nfconf export (default `--out-dir` for `bs full`)
+  - `~/.local/state/blockcheckS/logs/`, `shortlists/`, `presets/` — runtime artifacts
   - `~/.cache/blockcheckS/` — gv/voice/settle caches, blob-cache, isolated `pycache/`
+  - `~/.local/share/blockcheckS/` — reserved (`DATA_DIR`; created by `ensure_dirs()`)
 
 Override: CLI args > `BLOCKCHECKS_*` env > `config.toml` > XDG defaults.
 See [`engine/paths.py`](../src/blockchecks/engine/paths.py) and [`settings.example.toml`](../settings.example.toml).
@@ -86,5 +88,5 @@ pytest -m "not integration"
 ## Deprecated
 
 - `tmp-scripts/README.md` architecture section → use [architecture.md](architecture.md)
-- Root `research.md`, `GOALS.md` → [todo.md](todo.md)
 - `pair_runner.py` — legacy; do not extend
+- `engine/db_logger.py` — re-export shim; use `engine/store/`

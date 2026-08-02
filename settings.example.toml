@@ -3,8 +3,8 @@
 # Priority: CLI args > BLOCKCHECKS_* env > this file > XDG defaults
 
 [paths]
-db = "~/.local/share/blockcheckS/state.db"
-out_dir = "~/.local/share/blockcheckS/export"
+db = "~/.local/state/blockcheckS/state.db"
+out_dir = "~/.local/state/blockcheckS/export"
 
 [run]
 parallel = 4

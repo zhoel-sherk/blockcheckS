@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from blockchecks.engine.store import StateDB
 from blockchecks.engine.domain_loader import (
     DenylistEntry,
     apply_denylist,
@@ -13,6 +12,7 @@ from blockchecks.engine.domain_loader import (
     read_domain_lines,
     warn_zero_pass_domains,
 )
+from blockchecks.engine.store import StateDB
 
 
 def test_read_domain_lines_strips_comments(tmp_path: Path):
