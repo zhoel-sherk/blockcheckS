@@ -1,0 +1,7 @@
+# GV-5 QUIC smoke — googlevideo CDN kyber blobs (HTTP/3 over UDP/443)
+# Run: scripts/gv5_quic_smoke.sh
+
+fake:blob=quic_gv_kyber_1:repeats=6
+fake:blob=quic_gv_kyber_2:repeats=6
+fake:blob=quic_google:repeats=6
+fake:blob=fake_default_quic:repeats=11

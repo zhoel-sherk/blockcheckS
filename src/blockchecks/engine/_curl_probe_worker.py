@@ -33,13 +33,22 @@ def run_payload(payload: dict) -> dict:
             requests=[_request_from_dict(r) for r in payload.get("requests", [])],
             curl_parallel=int(payload.get("curl_parallel", 4)),
             repeats=int(payload.get("repeats", 1)),
+            parallel_repeats=bool(payload.get("parallel_repeats", False)),
+            repeats_mode=str(payload.get("repeats_mode", "fast")),
+            quick_break=bool(payload.get("quick_break", False)),
         )
         return run_curl_probe_batch(batch)
 
     req = _request_from_dict(payload["request"])
     repeats = int(payload.get("repeats", 1))
     parallel = bool(payload.get("parallel_repeats", False))
-    return run_curl_probe_with_repeats(req, repeats=repeats, parallel_repeats=parallel)
+    return run_curl_probe_with_repeats(
+        req,
+        repeats=repeats,
+        parallel_repeats=parallel,
+        repeats_mode=str(payload.get("repeats_mode", "fast")),
+        quick_break=bool(payload.get("quick_break", False)),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

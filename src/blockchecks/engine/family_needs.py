@@ -18,8 +18,15 @@ LABEL_PREFIXES: dict[str, tuple[str, ...]] = {
     "syndata": ("std_syndata_",),
     "tcpseg": ("std_tcpseg_",),
     "oob": ("std_oob_",),
-    "multi_fake": ("std_multi_fake_", "fake_multi_"),
-    "fake_hostfake": ("std_fake_hostfake_", "fake_hostfake_"),
+    "multi_fake": ("std_multi_fake_", "std_multi_", "fake_multi_"),
+    "fake_multisplit": ("std_fms_", "fake_multisplit_"),
+    "fake_multisplit_hostfake": ("std_fmsh_", "fake_multisplit_hostfake_"),
+    "fake_multidisorder": ("std_fmd_", "fake_multidisorder_"),
+    "multidisorder": ("std_mdis_", "multidisorder_"),
+    "fakedsplit": ("std_fds_", "fakedsplit_"),
+    "fakeddisorder": ("std_fdd_", "fakeddisorder_"),
+    "fake_fakedsplit": ("std_ffds_", "fake_fakedsplit_"),
+    "fake_hostfake": ("std_fake_hostfake_", "std_fh_", "fake_hostfake_"),
 }
 
 

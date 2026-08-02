@@ -1,21 +1,30 @@
+# Python
 __pycache__/
-*.pyc
-.venv/
-logs/
-reports/
-output/
-state.db
+*.py[cod]
+dist/
+build/
 *.egg-info/
-src/*.egg-info/
+*.so
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
 .cursor-audit/
+
+# Project
 state.db
 state.db-journal
 state.db-wal
-*.egg-info/
-logs/*.json
-logs/*.log
-__pycache__/
-*.pyc
+logs/
+output/
+.env
+reports/
+tmp-scripts/
+
+# pytest / lint
 .pytest_cache/
 .ruff_cache/
 
+# venv
+.venv/

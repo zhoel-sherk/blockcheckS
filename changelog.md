@@ -1,5 +1,25 @@
 # blockcheckS Changelog
 
+## 1.0.0 — 2026-08-02
+
+### Added
+- **AQ + time limit:** `--adaptive`, `--fan-out`, `--max-timeh` / `--max-timem`, graceful export on stop
+- **BC2/GP curl repeats parity:** `--repeats` (1–10), `--parallel-repeats`, `--repeats-mode fast|stable`
+- **B2 multi-domain fan-out:** `--curl-parallel` with googlevideo solo batches
+- **Secure DNS + preflight:** DoH pre-resolve, DNS audit, IP-block cross-test (Phase 9)
+- **Export:** keenetic + raw nfconf via `bs full` / `bc-nfconf`
+- **Matrix M5–M7:** reverse/triple fake pairs, `http_tls_dual`, `udp_multiblob`
+- **Docs:** `docs/cookbook/gp-bridge.md`, repeats glossary, `scripts/release_smoke.sh`
+- **CI:** optional `workflow_dispatch` integration job placeholder
+
+### Changed
+- Version `0.3.0` → `1.0.0`
+- `bs scan` supports adaptive queue + time limit + optional `--out-dir` export
+- `bs tcp` supports `--repeats`, `--parallel-repeats`, `--repeats-mode`, `--max-timem`
+
+### Quality
+- 237 unit tests passing
+
 ## 2026-07-29 — Hygiene: ruff + docs merge + package audit
 
 ### Added
@@ -83,3 +103,49 @@
 - `nfqws2.py` + `firewall.py` destructive cleanup (by design in netns context)
 - `pair_manager.py`: pgrep cannot distinguish TCP/UDP instances
 - `db_logger.py`: gateway_ok always False (placeholder for future gateway WS test)
+
+---
+
+## deepseekv4pro_audit — 2026-08-02
+
+Четырёхсторонний аудит (engine, checkers, CLI/presets, DB/docs) с последующей починкой.
+
+### Fixed (CRITICAL)
+
+| # | Файл | Правка |
+|---|------|--------|
+| C1 | `tcp_tls.py` | `is_suspicious_redirect()` substring match → suffix match (`loc_host.endswith("." + dom)`) |
+| C2 | `curl_probe.py` | Хардкод `min(timeout, 1.5)` → `req.timeout` (кап убран) |
+| C3 | `http3.py` | `supports_http3()` probe на `cloudflare.com` вместо `127.0.0.1:65535`, честная классификация ошибок |
+| C4 | `ip_block.py` | CDN-детект (Cloudflare IP-диапазоны) + warning при IP-block вердикте |
+| C5 | `tcp_tls.py` | `read_start` таймер теперь после Session.create (не включает connect/TLS время) |
+| E1 | `async_runner.py` | `repr(None)` → `"None"` literal в QUIC check_code |
+| E2 | `async_runner.py` | Уже было починено через `wait_nfqws2_ready()` (B1 settle) |
+| D1 | `db_logger.py` | `busy_timeout=5000` прагма после каждого `aiosqlite.connect()` (~21 соединение) |
+| P1 | `MANIFEST.in` | Добавлены `presets/strategies/*.tls`, `presets/domains/*.txt`, `presets/voice/`, `presets/blobs/` |
+
+### Fixed (HIGH)
+
+| # | Файл | Правка |
+|---|------|--------|
+| H1 | `matrix_generator.py` | Дефолтные TCP sources: `["custom","configs","standard"]` |
+| H5 | `voice_dns.py` | `asyncio.Semaphore(32)` лимит на конкурентный DNS |
+| H7 | 3 файла | DPI_FAKE_PATTERNS — один источник (`tcp_tls.py`), импорт в `curl_probe.py` + `composite_runner.py` |
+| H9 | `fryazino-tls12.tls` | Убраны 2 дубликата стратегий |
+| H10 | `discord.txt`, `coverage.txt` | Заголовки приведены к реальному количеству доменов |
+| H11 | `README.md` | Версия `0.3.0` → `1.0.0` |
+
+### Documented (1.1.0 backlog)
+
+- H2: `run_finalize.py` — `count_tcp_passes` открывает свежий коннект к БД
+- H3: `adaptive_queue.py` — sequential await'ы в `filter_resume`
+- H4: `preflight.py` — prolog-проверка только TLS (не контент)
+- H6: `dns_secure.py` — `DnsRunCache` не ротирует DoH-сервер
+- H8: `voice_discovery.py` — глобальный `_singbox_proc` не concurrent-safe
+- E3: два competing nfqws2 lifecycle-подхода (daemon vs foreground)
+
+### Cleaned up (MEDIUM)
+
+- `.gitignore`: удалены дубликаты, добавлены `dist/`, `build/`, `*.so`, `.DS_Store`
+- `composite_runner.py` unused `parallel` param (документирован)
+- `db_logger.py` `scan_weights` migration gap (документирован)

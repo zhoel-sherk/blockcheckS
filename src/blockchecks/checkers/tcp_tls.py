@@ -47,7 +47,8 @@ def is_suspicious_redirect(domain: str, status: int, location: str) -> bool:
     loc = location.strip().lower()
     dom = domain.lower().split("/")[0]
     if loc.startswith("http://") or loc.startswith("https://"):
-        return dom not in loc.split("/")[2].split(":")[0]
+        loc_host = loc.split("/")[2].split(":")[0]
+        return not (loc_host == dom or loc_host.endswith("." + dom))
     return False
 
 
@@ -128,7 +129,6 @@ def check_tls(
     headers = {"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9"}
 
     try:
-        read_start = time.perf_counter()
         if pre_resolved_ip:
             session = curl_cffi.Session(
                 impersonate=impersonate,
@@ -139,8 +139,10 @@ def check_tls(
             from blockchecks.checkers.dns_secure import apply_curl_resolve
 
             apply_curl_resolve(session, domain, pre_resolved_ip)
+            read_start = time.perf_counter()
             resp = session.get(f"https://{domain}", timeout=timeout)
         else:
+            read_start = time.perf_counter()
             resp = curl_cffi.get(
                 f"https://{target}",
                 impersonate=impersonate,

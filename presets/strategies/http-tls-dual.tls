@@ -1,0 +1,4 @@
+# M6 HTTP+TLS dual-fake — TLS :443 side (composite with http-tls-dual.http)
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=max_ru:repeats=6:tcp_ts=-1000
+fake:blob=google:repeats=6:tcp_ts=-1000

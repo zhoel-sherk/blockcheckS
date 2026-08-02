@@ -11,12 +11,21 @@ import time
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
+from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.checkers.http3 import supports_http3
 from blockchecks.cli.parser import (
+    add_adaptive_args,
+    add_curl_fanout_args,
     add_curl_repeats_args,
     add_family_gate_args,
     add_protocol_phase_args,
+    add_time_limit_args,
+)
+from blockchecks.engine.adaptive_runner import (
+    build_adaptive_queue,
+    persist_adaptive_weights,
+    run_adaptive_tcp,
 )
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
@@ -37,9 +46,14 @@ from blockchecks.engine.domain_loader import (
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.preflight import PreflightOptions, run_preflight
+from blockchecks.engine.run_deadline import RunDeadline, validate_time_limit_args
+from blockchecks.engine.run_finalize import (
+    finalize_db_and_weights,
+    maybe_export_configs,
+    write_run_summary,
+)
 from blockchecks.engine.settle_profile import auto_load_profile, load_profile
 from blockchecks.engine.tcp_fanout import fanout_allowed, fanout_batches
-from blockchecks.nfconf import export_configs
 
 colorama_init(autoreset=True)
 CYAN = Fore.CYAN
@@ -68,8 +82,14 @@ def _apply_gp_protocol_flags(args) -> bool:
     return skip_tcp
 
 
+def _exit_code(stop_set: bool, deadline: RunDeadline | None, signal_hit: bool) -> int:
+    from blockchecks.engine.run_finalize import run_exit_code
+
+    return run_exit_code(stop_set, deadline, signal_hit)
+
+
 async def run_full(args) -> int:
-    db = StateDB(args.db)
+    db = StateDB(args.db, batch_size=getattr(args, "db_batch", 0) or 0)
     await db.init()
 
     domains_file = args.domains_file or DEFAULT_DOMAINS_FILE
@@ -217,19 +237,23 @@ async def run_full(args) -> int:
         eta_sec = total_tcp_jobs * 3.0 / max(parallel, 1)
         print(f"  TCP jobs:   {total_tcp_jobs}  (~ETA {eta_sec / 3600:.1f}h @ ~3s/job)")
 
+    use_adaptive = bool(getattr(args, "adaptive", False) or getattr(args, "fan_out", False))
+    curl_parallel = max(1, min(getattr(args, "curl_parallel", DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL))
+    if getattr(args, "fan_out", False) and curl_parallel <= 1:
+        curl_parallel = min(max(4, DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
     use_family_gates = (
         scan_level != "full"
         and not getattr(args, "no_family_gates", False)
+        and not use_adaptive
         and any(s in ("standard", "fake", "hostfake", "faked", "fake_multi", "fake_faked") for s in tcp_sources)
     )
-    curl_parallel = max(1, min(getattr(args, "curl_parallel", DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL))
     fanout_ok, fanout_note = fanout_allowed(
         curl_parallel=curl_parallel,
         use_family_gates=use_family_gates,
         domains=domains,
         protocol=args.protocol,
     )
-    use_fanout = fanout_ok and curl_parallel > 1
+    use_fanout = fanout_ok and curl_parallel > 1 and not use_adaptive
     if curl_parallel > 1 and not fanout_ok and fanout_note.startswith("family"):
         print(f"  {YELLOW}curl-parallel disabled: {fanout_note}{RESET}")
         curl_parallel = 1
@@ -237,6 +261,12 @@ async def run_full(args) -> int:
         print(f"  {GREEN}curl-parallel: {curl_parallel}{RESET} (B2 fan-out)")
         if fanout_note:
             print(f"  {YELLOW}{fanout_note}{RESET}")
+    if use_adaptive:
+        eps = getattr(args, "adaptive_epsilon", 0.1)
+        print(
+            f"  {GREEN}Adaptive queue:{RESET} ε={eps}"
+            + (f", curl-parallel={curl_parallel} (AQ5+B2)" if curl_parallel > 1 else "")
+        )
     if use_family_gates:
         print(f"  Family gates: {GREEN}on{RESET} (BC2-6 need_* chain)")
 
@@ -264,20 +294,31 @@ async def run_full(args) -> int:
     )
     print(f"  Fingerprint:{fp}")
 
+    repeats, parallel_repeats, repeats_mode, quick_break = repeats_from_args(args)
+
     runner = AsyncTestRunner(
         pool_size=parallel,
         db=db,
         secure_dns=secure_dns,
         dns_cache=dns_cache,
         dns_audit={r.domain: r for r in dns_audits},
-        repeats=max(1, getattr(args, "repeats", 1) or 1),
-        parallel_repeats=bool(getattr(args, "parallel_repeats", False)),
+        repeats=repeats,
+        parallel_repeats=parallel_repeats,
+        repeats_mode=repeats_mode,
+        quick_break=quick_break,
         try_wssize=getattr(args, "protocol", "tls12") == "tls12",
         settle_profile=settle_profile,
     )
     stop = asyncio.Event()
+    deadline = RunDeadline.from_args(stop, args)
+    signal_interrupted = False
+    aq_result = None
 
     def _stop(*_a):
+        nonlocal signal_interrupted
+        signal_interrupted = True
+        if deadline and not deadline.triggered:
+            deadline.reason = "signal"
         stop.set()
 
     try:
@@ -286,6 +327,11 @@ async def run_full(args) -> int:
         loop.add_signal_handler(signal.SIGTERM, _stop)
     except (NotImplementedError, RuntimeError):
         signal.signal(signal.SIGINT, lambda *_: _stop())
+
+    if deadline:
+        deadline.arm()
+        await deadline.start_background()
+        print(f"  Time limit: {deadline.budget_label()}")
 
     await runner.start()
     try:
@@ -309,7 +355,50 @@ async def run_full(args) -> int:
                         f"{rate:.2f}/s ETA {left / 60:.0f}m"
                     )
 
-            if use_family_gates:
+            if use_adaptive:
+
+                async def _resume_job(job):
+                    return bool(args.resume and await db.has_tcp_result(job.item.label, job.domain))
+
+                queue, skipped = await build_adaptive_queue(
+                    tcp_items,
+                    domains,
+                    db,
+                    epsilon=getattr(args, "adaptive_epsilon", 0.1),
+                    load_weights=not getattr(args, "no_adaptive_weights", False),
+                    resume_check=_resume_job if args.resume else None,
+                )
+                done = skipped
+                _progress(done, skipped, passed)
+                print(f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
+
+                aq_result = await run_adaptive_tcp(
+                    runner,
+                    queue,
+                    timeout=args.timeout,
+                    curl_parallel=curl_parallel,
+                    protocol=args.protocol,
+                    disable_ech=bool(getattr(args, "disable_ech", False)),
+                    stop_event=stop,
+                    on_progress=_progress,
+                )
+                done = skipped + aq_result.done
+                passed = aq_result.passed
+                if not getattr(args, "no_adaptive_weights", False):
+                    await persist_adaptive_weights(db, aq_result.weights)
+                m = aq_result.metrics
+                if m.time_to_first_pass is not None:
+                    print(
+                        f"  AQ first PASS: {m.time_to_first_pass:.1f}s  "
+                        f"fan-out enqueued: {m.fanout_enqueued}"
+                    )
+                if m.half_mark_jobs and aq_result.passed:
+                    pct = 100.0 * m.passes_before_half / aq_result.passed
+                    print(
+                        f"  AQ passes before 50% jobs: {m.passes_before_half} "
+                        f"({pct:.0f}% of {aq_result.passed} total passes)"
+                    )
+            elif use_family_gates:
 
                 async def _run_domain(domain: str):
                     nonlocal done, skipped, passed
@@ -418,8 +507,17 @@ async def run_full(args) -> int:
         else:
             print(f"\n  {CYAN}[2/{steps}] TCP × coverage skipped{RESET}")
 
+        if stop.is_set():
+            if deadline and deadline.triggered:
+                print(
+                    f"\n  {YELLOW}TIME LIMIT reached ({deadline.budget_label()})"
+                    f" — skipping optional phases{RESET}"
+                )
+            elif signal_interrupted:
+                print(f"\n  {YELLOW}Stopped — skipping optional phases{RESET}")
+
         # ── HTTP :80 ──
-        if http_items and not getattr(args, "no_http", False):
+        if not stop.is_set() and http_items and not getattr(args, "no_http", False):
             print(f"\n  {CYAN}[3/{steps}] HTTP :80 ({len(http_items)} strategies)...{RESET}")
             http_done = http_passed = http_skipped = 0
 
@@ -445,16 +543,15 @@ async def run_full(args) -> int:
                 f"  {GREEN}HTTP done: {http_passed} PASS, {http_skipped} skipped, "
                 f"{http_done - http_skipped - http_passed} FAIL/other{RESET}"
             )
-        elif not getattr(args, "no_http", False):
+        elif not stop.is_set() and not getattr(args, "no_http", False):
             print(f"\n  {CYAN}[3/{steps}] HTTP skipped (no strategies){RESET}")
 
         voice_step = 4 if steps == 7 else 3
         quic_step = 5 if steps == 7 else 4
         pair_step = 6 if steps == 7 else 5
-        export_step = 7 if steps == 7 else 6
 
         voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
-        if not args.tcp_only and not args.no_voice:
+        if not stop.is_set() and not args.tcp_only and not args.no_voice:
             print(f"\n  {CYAN}[{voice_step}/{steps}] Voice discover-dns...{RESET}")
             try:
                 from blockchecks.checkers.voice_dns import discover_dns_alive
@@ -475,10 +572,16 @@ async def run_full(args) -> int:
             except Exception as e:
                 print(f"  {YELLOW}discover-dns error: {e}{RESET}")
         else:
-            print(f"\n  {CYAN}[{voice_step}/{steps}] Voice discover skipped{RESET}")
+            if not stop.is_set():
+                print(f"\n  {CYAN}[{voice_step}/{steps}] Voice discover skipped{RESET}")
 
         # ── QUIC HTTP/3 (UDP/443) ──
-        if quic_items and not args.tcp_only and not args.no_quic:
+        if (
+            not stop.is_set()
+            and quic_items
+            and not args.tcp_only
+            and not args.no_quic
+        ):
             quic_timeout = getattr(args, "quic_timeout", args.timeout)
             print(
                 f"\n  {CYAN}[{quic_step}/{steps}] HTTP/3 QUIC "
@@ -513,11 +616,11 @@ async def run_full(args) -> int:
                     f"  {GREEN}QUIC done: {quic_passed} PASS, {quic_skipped} skipped, "
                     f"{quic_done - quic_skipped - quic_passed} FAIL/other{RESET}"
                 )
-        else:
+        elif not stop.is_set():
             print(f"\n  {CYAN}[{quic_step}/{steps}] QUIC skipped{RESET}")
 
         # ── Pairs ──
-        if not args.tcp_only and udp_items:
+        if not stop.is_set() and not args.tcp_only and udp_items:
             print(f"\n  {CYAN}[{pair_step}/{steps}] Pair matrix...{RESET}")
             working_names = await db.get_working_tcp(primary)
             # Prefer coverage winners
@@ -550,29 +653,66 @@ async def run_full(args) -> int:
                 print(f"  Pairs PASS={n_pass}/{len(pairs)}")
             else:
                 print(f"  {YELLOW}No working TCP for pairs{RESET}")
-        else:
+        elif not stop.is_set():
             print(f"\n  {CYAN}[{pair_step}/{steps}] Pairs skipped{RESET}")
 
-        # ── Export ──
-        print(f"\n  {CYAN}[{export_step}/{steps}] Export configs...{RESET}")
-        result = await export_configs(
-            db_path=args.db,
-            domain=primary,
-            limit=args.export_limit,
-            out_dir=args.out_dir,
-            isp_interface=args.isp_interface,
-            prefix=args.prefix,
-            mode=args.mode,
-            domains_file=domains_file,
-            common_only=not getattr(args, "no_common_only", False),
-        )
-        print(f"  {GREEN}{result['keenetic']}{RESET}")
-        print(f"  {GREEN}{result['raw']}{RESET}")
-        print(f"  {GREEN}{result['user_list']}{RESET}")
     finally:
+        if deadline:
+            await deadline.cancel()
+        await finalize_db_and_weights(db, save_weights=False)
         await runner.stop()
 
-    return 0 if not stop.is_set() else 130
+    export_result = await maybe_export_configs(
+        db,
+        args,
+        primary=primary,
+        domains_file=domains_file,
+        stop_set=stop.is_set(),
+        deadline=deadline,
+    )
+    if export_result:
+        print(f"\n  {CYAN}Export configs...{RESET}")
+        print(f"  {GREEN}{export_result['keenetic']}{RESET}")
+        print(f"  {GREEN}{export_result['raw']}{RESET}")
+        print(f"  {GREEN}{export_result['user_list']}{RESET}")
+
+    if aq_result:
+        m = aq_result.metrics
+        if stop.is_set() and m.time_to_first_pass is not None:
+            print(f"  AQ first PASS: {m.time_to_first_pass:.1f}s")
+        if stop.is_set() and m.half_mark_jobs and aq_result.passed:
+            pct = 100.0 * m.passes_before_half / aq_result.passed
+            print(
+                f"  AQ passes before 50% jobs: {m.passes_before_half} "
+                f"({pct:.0f}% of {aq_result.passed} total passes)"
+            )
+
+    summary_payload: dict = {
+        "command": "full",
+        "deadline_sec": deadline.budget_sec if deadline else None,
+        "stopped_reason": (
+            deadline.reason
+            if deadline and deadline.triggered
+            else ("signal" if signal_interrupted else None)
+        ),
+        "db_path": args.db,
+        "export_paths": export_result,
+        "domains_file": domains_file,
+        "primary": primary,
+    }
+    if aq_result:
+        summary_payload["jobs_done"] = aq_result.done
+        summary_payload["passed"] = aq_result.passed
+        summary_payload["aq_metrics"] = {
+            "time_to_first_pass": aq_result.metrics.time_to_first_pass,
+            "fanout_enqueued": aq_result.metrics.fanout_enqueued,
+            "passes_before_half": aq_result.metrics.passes_before_half,
+            "half_mark_jobs": aq_result.metrics.half_mark_jobs,
+        }
+    summary_path = write_run_summary(getattr(args, "out_dir", None) or "logs", summary_payload)
+    print(f"  Run summary: {summary_path}")
+
+    return _exit_code(stop.is_set(), deadline, signal_interrupted)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -581,6 +721,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Mass strategy x coverage test + nfqws2 conf export",
     )
     p.add_argument("--db", default="state.db")
+    p.add_argument(
+        "--db-batch",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Buffer N DB writes before flush (0=immediate, default)",
+    )
     p.add_argument(
         "-d", "--domain", default=None, help="Primary domain (default: first in domains file)"
     )
@@ -659,14 +806,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     add_curl_repeats_args(p)
     add_family_gate_args(p)
     add_protocol_phase_args(p)
-    g = p.add_argument_group("curl fan-out (B2)")
-    g.add_argument(
-        "--curl-parallel",
-        type=int,
-        default=DEFAULT_CURL_PARALLEL,
-        metavar="N",
-        help=f"Domains per nfqws2 session (1=off, max {MAX_CURL_PARALLEL}, default 1)",
-    )
+    add_curl_fanout_args(p)
     g = p.add_argument_group("settle profile (B11)")
     g.add_argument(
         "--settle-profile",
@@ -679,11 +819,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ignore settle profile even if logs/settle_profile.json exists",
     )
+    add_adaptive_args(p)
+    add_time_limit_args(p, include_export=True)
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_arg_parser().parse_args(argv)
+    p = build_arg_parser()
+    args = p.parse_args(argv)
+    validate_time_limit_args(p, args)
     return asyncio.run(run_full(args))
 
 

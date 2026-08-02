@@ -17,6 +17,53 @@ from blockchecks.engine.config import CONFIGS_DIR, DEFAULT_VOICE_IP, DEFAULT_VOI
 from blockchecks.engine.settle_profile import DEFAULT_PROFILE_PATH
 
 
+def add_adaptive_args(parser: argparse.ArgumentParser) -> None:
+    """AQ flags (full + scan/pair)."""
+    g = parser.add_argument_group("adaptive queue (AQ)")
+    g.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="Online priority queue with cross-domain fan-out on PASS",
+    )
+    g.add_argument(
+        "--fan-out",
+        action="store_true",
+        help="Shorthand: --adaptive with curl-parallel≥4 (AQ2+AQ5)",
+    )
+    g.add_argument(
+        "--adaptive-epsilon",
+        type=float,
+        default=0.1,
+        metavar="E",
+        help="ε-greedy exploration rate (default 0.1)",
+    )
+    g.add_argument(
+        "--no-adaptive-weights",
+        action="store_true",
+        help="Do not load/save scan_weights in state.db",
+    )
+
+
+def add_time_limit_args(parser: argparse.ArgumentParser, *, include_export: bool = False) -> None:
+    """Register --max-timeh / --max-timem."""
+    from blockchecks.engine.run_deadline import add_time_limit_args as _add
+
+    _add(parser, include_export=include_export)
+
+
+def add_curl_fanout_args(parser: argparse.ArgumentParser) -> None:
+    from blockchecks.engine.config import DEFAULT_CURL_PARALLEL, MAX_CURL_PARALLEL
+
+    g = parser.add_argument_group("curl fan-out (B2)")
+    g.add_argument(
+        "--curl-parallel",
+        type=int,
+        default=DEFAULT_CURL_PARALLEL,
+        metavar="N",
+        help=f"Domains per nfqws2 session (1=off, max {MAX_CURL_PARALLEL})",
+    )
+
+
 def add_curl_repeats_args(parser: argparse.ArgumentParser) -> None:
     """BC2-4: blockcheck2-style curl repeats per strategy."""
     g = parser.add_argument_group("curl repeats")
@@ -24,12 +71,19 @@ def add_curl_repeats_args(parser: argparse.ArgumentParser) -> None:
         "--repeats",
         type=int,
         default=1,
-        help="curl attempts per strategy (blockcheck2 REPEATS, default 1)",
+        metavar="N",
+        help="curl attempts per strategy (blockcheck2 REPEATS, 1-10, default 1)",
     )
     g.add_argument(
         "--parallel-repeats",
         action="store_true",
-        help="Run repeats in parallel (blockcheck2 PARALLEL)",
+        help="Run repeats in parallel (blockcheck2 PARALLEL / GP repeat_parallel)",
+    )
+    g.add_argument(
+        "--repeats-mode",
+        choices=["fast", "stable"],
+        default="fast",
+        help="fast=stop on first PASS; stable=run all N like blockcheck2 (PASS if any)",
     )
     g.add_argument(
         "--quic-timeout",
@@ -139,6 +193,8 @@ def build_parser() -> argparse.ArgumentParser:
     tcp.add_argument("--qnum", type=int, default=200)
     tcp.add_argument("--ns")
     add_secure_dns_args(tcp)
+    add_time_limit_args(tcp)
+    add_curl_repeats_args(tcp)
     tcp.add_argument(
         "--nfqws2-debug",
         nargs="?",
@@ -215,11 +271,28 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--timeout", type=float, default=5.0)
     scan.add_argument("--user-matrix", default="")
     scan.add_argument("--db", default="state.db")
+    scan.add_argument(
+        "--db-batch",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Buffer N DB writes before flush (0=immediate, default)",
+    )
     scan.add_argument("--resume", action="store_true")
     add_secure_dns_args(scan)
     add_curl_repeats_args(scan)
     add_family_gate_args(scan)
     add_domain_filter_args(scan)
+    add_adaptive_args(scan)
+    add_curl_fanout_args(scan)
+    add_time_limit_args(scan, include_export=True)
+    scan.add_argument("--out-dir", default=None, help="Export nfconf on finish (optional)")
+    scan.add_argument("--export-limit", type=int, default=3)
+    scan.add_argument(
+        "--no-common-only",
+        action="store_true",
+        help="Export best per-domain instead of COMMON intersection",
+    )
     scan.add_argument("--tcp-sources", default="")
     scan.add_argument("--ip", default="35.217.5.42", help=argparse.SUPPRESS)
     scan.add_argument("--port", type=int, default=50006, help=argparse.SUPPRESS)
@@ -251,7 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
     pair.add_argument(
         "--tcp-sources",
         default="custom,configs",
-        help="TCP sources: custom,configs,fake,faked,hostfake,fake_multi,fake_faked",
+        help="TCP sources: custom,configs,fake,faked (fakedsplit),hostfake,fake_multi,fake_faked (fake+fakedsplit)",
     )
     pair.add_argument("--udp-sources", default="custom", help="UDP sources: custom,configs")
     pair.add_argument("--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)")
@@ -306,11 +379,28 @@ def build_parser() -> argparse.ArgumentParser:
     pair.add_argument("--udp-bypass", action="store_true")
     pair.add_argument("--user-matrix", default="", help="Path to custom strategy list file")
     pair.add_argument("--db", default="state.db")
+    pair.add_argument(
+        "--db-batch",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Buffer N DB writes before flush (0=immediate, default)",
+    )
     pair.add_argument("--resume", action="store_true")
     add_secure_dns_args(pair)
     add_curl_repeats_args(pair)
     add_family_gate_args(pair)
     add_domain_filter_args(pair)
+    add_adaptive_args(pair)
+    add_curl_fanout_args(pair)
+    add_time_limit_args(pair, include_export=True)
+    pair.add_argument("--out-dir", default=None, help="Export nfconf on finish (optional)")
+    pair.add_argument("--export-limit", type=int, default=3)
+    pair.add_argument(
+        "--no-common-only",
+        action="store_true",
+        help="Export best per-domain instead of COMMON intersection",
+    )
     pair.add_argument("--ns")
     pair.add_argument(
         "--nfqws2-debug",
@@ -433,4 +523,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         build_parser().print_help()
         return 1
+    from blockchecks.engine.run_deadline import validate_time_limit_args
+
+    validate_time_limit_args(build_parser(), args)
     return dispatch(args)

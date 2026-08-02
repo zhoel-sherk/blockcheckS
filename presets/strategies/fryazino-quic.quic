@@ -1,0 +1,8 @@
+# Imported from provider_summary (auto-192.168.1.132)
+# generated_at: 2026-08-01T22:42:30.592714+00:00
+
+fake:blob=fake_default_quic:repeats=11
+fake:blob=fake_default_quic:repeats=6
+fake:blob=fake_default_quic:repeats=6:badsum
+send:ipfrag --lua-desync=drop
+fake:blob=quic_google:repeats=6

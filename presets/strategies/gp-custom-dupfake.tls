@@ -1,0 +1,12 @@
+# M4 / GP Keenetic dupfake strategies — requires dupfake.lua on nfqws2 host
+# BS equivalent (dual fake) listed as comments for Fryazino testing without custom Lua.
+#
+# Keenetic production (dupfake core):
+# dupfake:blob=stun+max_ru:repeats=6:tcp_ts=-1000
+# dupfake:blob=tls_clienthello:repeats=6:tcp_ts=-1000
+#
+# BS fallback (multi-line, same blobs):
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=max_ru:repeats=6:tcp_ts=-1000
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=google:repeats=6:tcp_ts=-1000

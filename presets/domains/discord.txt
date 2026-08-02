@@ -1,4 +1,4 @@
-# GP DISCORD_DOMAINS — 21 Discord domains
+# GP DISCORD_DOMAINS — 22 Discord domains
 discord.com
 discord.gg
 discordapp.com

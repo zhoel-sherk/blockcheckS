@@ -111,29 +111,19 @@ class Nfqws2Manager:
         blob_names: list[str] = list(blobs or [])
         import re
 
-        for m in re.finditer(r"blob=(\w+)", strategy):
+        from blockchecks.engine.blob_aliases import resolve_blob_path
+
+        for m in re.finditer(r"(?:blob|pattern|seqovl_pattern)=(\w+)", strategy):
             if m.group(1) not in blob_names:
                 blob_names.append(m.group(1))
-        for m in re.finditer(r"seqovl_pattern=(\w+)", strategy):
-            if m.group(1) not in blob_names:
-                blob_names.append(m.group(1))
-        if os.path.isdir(BLOB_DIR):
-            known = sorted(f for f in os.listdir(BLOB_DIR) if f.endswith(".bin"))
-            for blob_name in blob_names:
-                if blob_name == "0x00000000":
-                    continue
-                if any(line.startswith(f"--blob={blob_name}:@") for line in lines):
-                    continue
-                candidates = [f for f in known if blob_name in f and "quic_initial" not in f]
-                if not candidates:
-                    candidates = [f for f in known if blob_name in f]
-                if candidates:
-                    lines.append(f"--blob={blob_name}:@{BLOB_DIR}/{candidates[0]}")
-                else:
-                    # Exact legacy path fallback
-                    blob_path = os.path.join(BLOB_DIR, f"{blob_name}.bin")
-                    if os.path.exists(blob_path):
-                        lines.append(f"--blob={blob_name}:@{blob_path}")
+        for blob_name in blob_names:
+            if blob_name == "0x00000000":
+                continue
+            if any(line.startswith(f"--blob={blob_name}:@") for line in lines):
+                continue
+            blob_path = resolve_blob_path(blob_name, BLOB_DIR)
+            if blob_path:
+                lines.append(f"--blob={blob_name}:@{blob_path}")
 
         if hostlist:
             fd, hostlist_path = tempfile.mkstemp(prefix="bs_hostlist_", suffix=".txt")

@@ -24,6 +24,8 @@ BlockcheckS user-matrix format (one strategy per line, `#` comments).
 
 ```bash
 bs scan -d discord.com -M gp-verified          # GP top-10 strategies
+bs scan -d discord.com -M flowseal-fast        # curated Flowseal ALT2 (M8)
+bs scan -d discord.com -M http-tls-dual.tls     # M6 TLS side (pair with .http)
 bs scan -d discord.com -M gp-verified.tls      # same (extension stripped)
 bs scan -d discord.com -M gp-custom-tls12      # GP custom TLS 1.2 test
 bs scan -d discord.com -M gp-custom-tls13      # GP custom TLS 1.3 test
@@ -84,6 +86,24 @@ sudo bs full --max 500          # shrink matrix
 bc-nfconf --db state.db --limit 3 --out-dir output
 ```
 
+## AQ time-boxed runs (`--max-timeh` / `--max-timem`)
+
+Graceful shutdown: flush DB, export conf (unless `--no-export-on-stop`), write `run_summary_*.json`.
+
+```bash
+# ~2h budget, adaptive + B2, benchmark domains
+sudo bs full --fan-out --allow-dns-hijack \
+  --domains-file presets/domains/benchmark.txt \
+  --max-timeh 2 --db logs/my_run.db --out-dir logs/my_export
+
+# 90 min scan with AQ
+sudo bs scan -d discord.com --generate fake,multi_fake \
+  --adaptive --max-timem 90 --db state.db --out-dir logs/scan_export
+
+# Sync tcp with time limit
+sudo bs tcp -d discord.com --strategy "fake:blob=stun:repeats=6" --max-timem 15
+```
+
 Writes `output/nfqws2_<timestamp>.conf` (keenetic) + `nfqws2_raw_<timestamp>.conf`
 + `user.list`. GP historically logged ~515k success links / ~968k raw curl
 attempts without curl_cffi — `bs full` is the curl_cffi replacement at that scale.
@@ -116,3 +136,41 @@ discord.gg
 fake:blob=stun:repeats=6:tcp_ts=-1000
 hostfakesplit:nofake2:tcp_md5:repeats=1
 ```
+
+## Built-in vs file blobs (BLOB-4)
+
+Strategy strings use **short aliases** (`stun`, `google`, `quic_gv_kyber_1`, …). Resolution order:
+
+| Kind | Examples | Source |
+|------|----------|--------|
+| **Built-in** | `fake_default_tls`, `fake_default_http`, `fake_default_quic` | nfqws2 internal (no `.bin` file) |
+| **File aliases** | `stun`, `max_ru`, `google`, `discord_udp`, `quic_dbank` | `/opt/zapret2/blobs/` or `files/fake/` |
+
+Canonical alias map: `src/blockchecks/engine/blob_aliases.py` (`BLOB_ALIAS_MAP`).
+
+```bash
+# Install / refresh blobs from Flowseal + zapret2 stock
+scripts/install_blobs.sh
+
+# Verify all 22 aliases resolve
+python3 scripts/verify_blobs.py
+
+# Per-blob docs
+cat presets/blobs/README.md
+```
+
+Built-in blobs need no install step. File blobs must exist before scan; missing blobs fail at nfqws2 start with a clear path error.
+
+## GP shortlist export (P5-1)
+
+Export winners for GP orchestrator (replaces blockcheck2 stdout parsing):
+
+```bash
+python3 -m blockchecks.shortlist_export --db state.db -o logs/shortlist.json
+scripts/export_shortlist_json.sh state.db logs/shortlist.json
+
+# Import back into presets / seed state.db
+python3 -m blockchecks.shortlist_import -i logs/shortlist.json --seed-db --db state.db
+```
+
+Schema: `blockchecks.shortlist/v1` — see `logs/shortlist.json` example after export.

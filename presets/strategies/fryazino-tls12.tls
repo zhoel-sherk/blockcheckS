@@ -1,0 +1,15 @@
+# Imported from provider_summary (auto-192.168.1.132)
+# generated_at: 2026-08-01T22:42:30.592714+00:00
+
+fake:blob=fake_default_tls:repeats=6:tcp_ts=-1000
+fake:blob=fake_default_tls:repeats=6:tcp_ts=-1000:ip_autottl=-1,3-20
+fake:blob=fake_default_tls:repeats=3:tcp_ts=-1000
+hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up:repeats=1
+hostfakesplit:nofake2:tcp_ts=-1000:repeats=1
+hostfakesplit:nofake2:tcp_ts=-1000:ip_autottl=-1,3-20:repeats=1
+hostfakesplit:nofake2:tcp_md5:repeats=1
+syndata --lua-desync=hostfakesplit:nofake2:tcp_ts=-1000:repeats=1
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=max_ru:repeats=6:tcp_ts=-1000
+fake:blob=google:repeats=6:tcp_ts=-1000
+syndata

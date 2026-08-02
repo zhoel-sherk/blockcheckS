@@ -8,14 +8,22 @@ import time
 
 from colorama import Fore, Style
 
+from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.cli.presets import list_presets
+from blockchecks.engine.adaptive_runner import (
+    build_adaptive_queue,
+    persist_adaptive_weights,
+    run_adaptive_tcp,
+)
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import (
     CONFIGS_DIR,
+    DEFAULT_CURL_PARALLEL,
     DEFAULT_VOICE_IP,
     DEFAULT_VOICE_PORT,
     DPI_TESTER_SETTINGS,
+    MAX_CURL_PARALLEL,
     PROJECT_DIR,
     SECURE_DNS_DEFAULT,
     UNBLOCKED_DOM,
@@ -30,6 +38,13 @@ from blockchecks.engine.domain_loader import (
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.preflight import PreflightOptions, run_preflight
+from blockchecks.engine.run_deadline import RunDeadline
+from blockchecks.engine.run_finalize import (
+    finalize_db_and_weights,
+    maybe_export_configs,
+    run_exit_code,
+    write_run_summary,
+)
 from blockchecks.engine.strategy_loader import StrategyLoader
 
 CYAN = Fore.CYAN
@@ -47,7 +62,7 @@ async def cmd_pair(args):
         list_presets()
         return 0
 
-    db = StateDB(args.db)
+    db = StateDB(args.db, batch_size=getattr(args, "db_batch", 0) or 0)
     await db.init()
 
     preset_domains = []
@@ -131,6 +146,8 @@ async def cmd_pair(args):
         print(f"{YELLOW}Use --force to run strategy matrix anyway{RESET}")
         return 0
 
+    repeats, parallel_repeats, repeats_mode, quick_break = repeats_from_args(args)
+
     runner = AsyncTestRunner(
         pool_size=pool_size,
         db=db,
@@ -138,15 +155,26 @@ async def cmd_pair(args):
         secure_dns=secure_dns,
         dns_cache=dns_cache,
         dns_audit={r.domain: r for r in dns_audits},
-        repeats=max(1, getattr(args, "repeats", 1) or 1),
-        parallel_repeats=bool(getattr(args, "parallel_repeats", False)),
+        repeats=repeats,
+        parallel_repeats=parallel_repeats,
+        repeats_mode=repeats_mode,
+        quick_break=quick_break,
         try_wssize=getattr(args, "protocol", "tls12") == "tls12",
     )
     stop_event = asyncio.Event()
+    deadline = RunDeadline.from_args(stop_event, args)
+    signal_interrupted = False
+    aq_result = None
+    tcp_passed = 0
+    pairs = []
 
     loop = asyncio.get_running_loop()
 
     def _request_stop():
+        nonlocal signal_interrupted
+        signal_interrupted = True
+        if deadline and not deadline.triggered:
+            deadline.reason = "signal"
         stop_event.set()
 
     try:
@@ -155,6 +183,11 @@ async def cmd_pair(args):
     except (NotImplementedError, RuntimeError):
         signal.signal(signal.SIGINT, lambda *a: _request_stop())
         signal.signal(signal.SIGTERM, lambda *a: _request_stop())
+
+    if deadline:
+        deadline.arm()
+        await deadline.start_background()
+        print(f"  Time limit: {deadline.budget_label()}")
 
     try:
         await runner.start()
@@ -391,68 +424,158 @@ async def cmd_pair(args):
                 print(f"  {YELLOW}No checkpoint found — starting fresh{RESET}")
 
         if stop_event.is_set():
-            return 130
+            return run_exit_code(True, deadline, signal_interrupted)
 
         t0 = time.perf_counter()
         all_tcp_results = []
         pairs = []
         tcp_passed = 0
         scan_level = getattr(args, "scan_level", "fast")
+        use_adaptive = bool(getattr(args, "adaptive", False) or getattr(args, "fan_out", False))
+        curl_parallel = max(
+            1, min(getattr(args, "curl_parallel", DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
+        )
+        if getattr(args, "fan_out", False) and curl_parallel <= 1:
+            curl_parallel = min(max(4, DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
         use_family_gates = (
             scan_level != "full"
             and not getattr(args, "no_family_gates", False)
+            and not use_adaptive
             and any(s in STANDARD_TCP_SOURCES for s in tcp_sources_list)
         )
+        if use_adaptive:
+            eps = getattr(args, "adaptive_epsilon", 0.1)
+            print(
+                f"  {GREEN}Adaptive queue:{RESET} ε={eps}"
+                + (f", curl-parallel={curl_parallel}" if curl_parallel > 1 else "")
+            )
 
-        for domain in domains_to_test:
-            if stop_event.is_set():
-                return 130
-            print(f"\n  {CYAN}[TCP Phase]{RESET} {domain}: {len(tcp_items)} strategies...")
-            if use_family_gates:
-                tcp_results, _, _, _ = await run_tcp_with_family_gates(
-                    runner,
-                    tcp_items,
-                    domain,
-                    scan_level=scan_level,
-                    timeout=args.timeout,
-                    stop_event=stop_event,
+        if use_adaptive:
+
+            async def _resume_job(job):
+                return bool(args.resume and await db.has_tcp_result(job.item.label, job.domain))
+
+            queue, skipped = await build_adaptive_queue(
+                tcp_items,
+                domains_to_test,
+                db,
+                epsilon=getattr(args, "adaptive_epsilon", 0.1),
+                load_weights=not getattr(args, "no_adaptive_weights", False),
+                resume_check=_resume_job if args.resume else None,
+            )
+            print(f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
+            aq_result = await run_adaptive_tcp(
+                runner,
+                queue,
+                timeout=args.timeout,
+                curl_parallel=curl_parallel,
+                protocol=protocol,
+                stop_event=stop_event,
+            )
+            tcp_passed = aq_result.passed
+            if not getattr(args, "no_adaptive_weights", False):
+                await persist_adaptive_weights(db, aq_result.weights)
+            m = aq_result.metrics
+            if m.time_to_first_pass is not None:
+                print(
+                    f"  AQ first PASS: {m.time_to_first_pass:.1f}s  "
+                    f"fan-out enqueued: {m.fanout_enqueued}"
                 )
-            else:
-                tcp_results = await runner.test_batch_tcp(tcp_items, domain, args.timeout)
-            all_tcp_results.extend(tcp_results)
-            domain_passed = sum(1 for r in tcp_results if r.success)
-            tcp_passed += domain_passed
-            print(f"\n  TCP {domain}: {GREEN}{domain_passed}{RESET}/{len(tcp_results)} passed")
-
-            for r in tcp_results:
-                if r.success:
-                    run_set.add(r.item.label)
-
-            if not args.tcp_only and udp_items and domain == domains_to_test[0]:
+        else:
+            for domain in domains_to_test:
                 if stop_event.is_set():
-                    return 130
-                print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
-                pairs = await runner.test_pair_matrix(
-                    tcp_results,
-                    udp_items,
-                    domain,
-                    voice_ip,
-                    voice_port,
-                    udp_timeout=args.udp_timeout,
-                    udp_bypass=args.udp_bypass,
-                    resume_from=resume_from,
-                    full_voice=full_voice,
-                    fingerprint=fp,
+                    break
+                print(f"\n  {CYAN}[TCP Phase]{RESET} {domain}: {len(tcp_items)} strategies...")
+                if use_family_gates:
+                    tcp_results, _, _, _ = await run_tcp_with_family_gates(
+                        runner,
+                        tcp_items,
+                        domain,
+                        scan_level=scan_level,
+                        timeout=args.timeout,
+                        stop_event=stop_event,
+                    )
+                else:
+                    tcp_results = await runner.test_batch_tcp(tcp_items, domain, args.timeout)
+                all_tcp_results.extend(tcp_results)
+                domain_passed = sum(1 for r in tcp_results if r.success)
+                tcp_passed += domain_passed
+                print(
+                    f"\n  TCP {domain}: {GREEN}{domain_passed}{RESET}/{len(tcp_results)} passed"
                 )
-                AsyncTestRunner.print_matrix(pairs)
+
+                for r in tcp_results:
+                    if r.success:
+                        run_set.add(r.item.label)
+
+                if not args.tcp_only and udp_items and domain == domains_to_test[0]:
+                    if stop_event.is_set():
+                        break
+                    print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
+                    pairs = await runner.test_pair_matrix(
+                        tcp_results,
+                        udp_items,
+                        domain,
+                        voice_ip,
+                        voice_port,
+                        udp_timeout=args.udp_timeout,
+                        udp_bypass=args.udp_bypass,
+                        resume_from=resume_from,
+                        full_voice=full_voice,
+                        fingerprint=fp,
+                    )
+                    AsyncTestRunner.print_matrix(pairs)
+
+        if stop_event.is_set() and deadline and deadline.triggered:
+            print(
+                f"\n  {YELLOW}TIME LIMIT reached ({deadline.budget_label()})"
+                f" — skipping optional phases{RESET}"
+            )
 
         elapsed = time.perf_counter() - t0
         print(f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
-        if tcp_passed <= 0:
-            return 1
-        if pairs and not any(p.overall == "PASS" for p in pairs) and not args.tcp_only:
-            return 1
-        return 0
 
     finally:
+        if deadline:
+            await deadline.cancel()
+        await finalize_db_and_weights(db, save_weights=False)
         await runner.stop()
+
+    export_result = None
+    if getattr(args, "out_dir", None):
+        export_result = await maybe_export_configs(
+            db,
+            args,
+            primary=args.domain,
+            domains_file=None,
+            stop_set=stop_event.is_set(),
+            deadline=deadline,
+        )
+        if export_result:
+            print(f"\n  {CYAN}Export configs...{RESET}")
+            print(f"  {GREEN}{export_result['keenetic']}{RESET}")
+            print(f"  {GREEN}{export_result['raw']}{RESET}")
+            print(f"  {GREEN}{export_result['user_list']}{RESET}")
+
+    summary_payload = {
+        "command": "scan" if getattr(args, "tcp_only", False) else "pair",
+        "deadline_sec": deadline.budget_sec if deadline else None,
+        "stopped_reason": (
+            deadline.reason
+            if deadline and deadline.triggered
+            else ("signal" if signal_interrupted else None)
+        ),
+        "db_path": args.db,
+        "export_paths": export_result,
+        "domain": args.domain,
+    }
+    if aq_result:
+        summary_payload["jobs_done"] = aq_result.done
+        summary_payload["passed"] = aq_result.passed
+    write_run_summary(getattr(args, "out_dir", None) or "logs", summary_payload)
+
+    if tcp_passed <= 0:
+        return 1
+    if pairs and not any(p.overall == "PASS" for p in pairs) and not args.tcp_only:
+        return 1
+    return run_exit_code(stop_event.is_set(), deadline, signal_interrupted)

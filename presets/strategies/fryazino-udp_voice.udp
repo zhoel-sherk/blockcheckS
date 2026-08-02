@@ -1,0 +1,8 @@
+# Imported from provider_summary (auto-192.168.1.132)
+# generated_at: 2026-08-01T22:42:30.592714+00:00
+
+fake:blob=discord_udp:repeats=6
+fake:blob=discord_udp:repeats=3:ip_ttl=5
+fake:blob=discord_udp:repeats=12
+fake:blob=discord_udp:repeats=6:ip_autottl=-2,3-20
+fake:blob=stun:repeats=6

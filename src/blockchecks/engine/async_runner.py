@@ -167,24 +167,18 @@ def _add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
     """Parse strategy for blob=NAME and seqovl_pattern=NAME; add --blob lines."""
     import re
 
-    if not os.path.isdir(BLOB_DIR):
-        return
-    known = sorted(f for f in os.listdir(BLOB_DIR) if f.endswith(".bin"))
+    from blockchecks.engine.blob_aliases import resolve_blob_path
 
     def _append_blob(name: str) -> None:
         if name == "0x00000000":
             return
         if any(line.startswith(f"--blob={name}:@") for line in lines):
             return
-        candidates = [f for f in known if name in f and "quic_initial" not in f]
-        if not candidates:
-            candidates = [f for f in known if name in f]
-        if candidates:
-            lines.append(f"--blob={name}:@{BLOB_DIR}/{candidates[0]}")
+        path = resolve_blob_path(name, BLOB_DIR)
+        if path:
+            lines.append(f"--blob={name}:@{path}")
 
-    for m in re.finditer(r"blob=(\w+)", strategy):
-        _append_blob(m.group(1))
-    for m in re.finditer(r"seqovl_pattern=(\w+)", strategy):
+    for m in re.finditer(r"(?:blob|pattern|seqovl_pattern)=(\w+)", strategy):
         _append_blob(m.group(1))
 
 
@@ -340,7 +334,7 @@ def _run_quic_check(
         "--queue-bypass",
     )
 
-    resolved_ip_lit = repr(resolved_ip)
+    resolved_ip_lit = repr(resolved_ip) if resolved_ip else "None"
     check_code = f"""
 import json
 from blockchecks.checkers.http3 import check_http3
@@ -446,6 +440,8 @@ def _run_tcp_check(
     protocol: str = "tls12",
     settle_max: float | None = None,
     settle_poll: float | None = None,
+    repeats_mode: str = "fast",
+    quick_break: bool = False,
 ) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
 
@@ -521,6 +517,8 @@ def _run_tcp_check(
         "request": _probe_request_dict(probe_req),
         "repeats": max(1, int(repeats)),
         "parallel_repeats": bool(parallel_repeats and repeats > 1),
+        "repeats_mode": repeats_mode,
+        "quick_break": bool(quick_break),
     }
     try:
         data = _invoke_curl_probe_worker(ns_name, py, payload, timeout)
@@ -550,6 +548,9 @@ def _run_tcp_check_multi(
     curl_parallel: int = 4,
     settle_max: float | None = None,
     settle_poll: float | None = None,
+    parallel_repeats: bool = False,
+    repeats_mode: str = "fast",
+    quick_break: bool = False,
 ) -> dict[str, dict]:
     """One nfqws2 session, parallel curl across domains (B2)."""
     if not domains:
@@ -640,6 +641,9 @@ def _run_tcp_check_multi(
         "requests": [_probe_request_dict(r) for r in probe_requests],
         "curl_parallel": int(curl_parallel),
         "repeats": max(1, int(repeats)),
+        "parallel_repeats": bool(parallel_repeats and repeats > 1),
+        "repeats_mode": repeats_mode,
+        "quick_break": bool(quick_break),
     }
     try:
         raw = _invoke_curl_probe_worker(
@@ -799,6 +803,8 @@ class AsyncTestRunner:
         dns_audit: dict | None = None,
         repeats: int = 1,
         parallel_repeats: bool = False,
+        repeats_mode: str = "fast",
+        quick_break: bool = False,
         try_wssize: bool = False,
         settle_profile: SettleProfile | None = None,
     ):
@@ -811,8 +817,12 @@ class AsyncTestRunner:
         self.secure_dns = secure_dns
         self.dns_cache = dns_cache
         self.dns_audit = dns_audit or {}
-        self.repeats = max(1, repeats)
+        from blockchecks.checkers.curl_probe import clamp_repeats
+
+        self.repeats = clamp_repeats(repeats)
         self.parallel_repeats = parallel_repeats
+        self.repeats_mode = repeats_mode or "fast"
+        self.quick_break = quick_break
         self.try_wssize = try_wssize
         self.settle_profile = settle_profile
 
@@ -873,6 +883,8 @@ class AsyncTestRunner:
                     protocol,
                     settle_max,
                     None,
+                    self.repeats_mode,
+                    self.quick_break,
                 )
                 if (
                     not data.get("success")
@@ -896,6 +908,8 @@ class AsyncTestRunner:
                         protocol,
                         settle_max,
                         None,
+                        self.repeats_mode,
+                        self.quick_break,
                     )
                 result.success = data.get("success", False)
                 result.http_code = data.get("http_code", 0)
@@ -1092,6 +1106,9 @@ class AsyncTestRunner:
                     protocol=protocol,
                     curl_parallel=curl_parallel,
                     settle_max=settle_max,
+                    parallel_repeats=self.parallel_repeats,
+                    repeats_mode=self.repeats_mode,
+                    quick_break=self.quick_break,
                 )
                 for domain in domains:
                     data = data_map.get(domain, {})
@@ -1115,6 +1132,10 @@ class AsyncTestRunner:
                             self.parallel_repeats,
                             "wssize:wsize=1:scale=6",
                             protocol,
+                            settle_max,
+                            None,
+                            self.repeats_mode,
+                            self.quick_break,
                         )
                     result = self._tcp_result_from_data(item, domain, data)
                     rip = resolved_ips.get(domain)

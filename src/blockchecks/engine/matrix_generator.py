@@ -67,7 +67,7 @@ class MatrixGenerator:
     ) -> list[StrategyItem]:
         """Generate TCP strategies from specified sources."""
         if not sources:
-            sources = ["custom", "configs"]
+            sources = ["custom", "configs", "standard"]
 
         if user_matrix:
             self.register("user", UserMatrixGenerator(user_matrix))

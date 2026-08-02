@@ -1,4 +1,4 @@
-# GP COVERAGE_DOMAINS — full service coverage (37 domains)
+# GP COVERAGE_DOMAINS — full service coverage (40 domains)
 youtube.com
 googlevideo.com
 youtu.be

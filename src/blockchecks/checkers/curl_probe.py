@@ -14,19 +14,18 @@ from dataclasses import dataclass, field
 import curl_cffi
 
 from blockchecks.checkers.dns_secure import CURLOPT_RESOLVE
-from blockchecks.checkers.tcp_tls import classify_http_status
+
+try:
+    CURLOPT_IPRESOLVE = curl_cffi.CurlOpt.IPRESOLVE
+except AttributeError:
+    CURLOPT_IPRESOLVE = 113
+_CURL_IPRESOLVE_V4 = 1
+from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS, classify_http_status
 from blockchecks.engine.config import (
     CURLOPT_ECH,
     GOOGLEVIDEO_RANGE_SIZE,
     MIN_READ_RATE_BPS,
     THROTTLED_MAX_BPS,
-)
-
-_DPI_FAKE_PATTERNS = (
-    b"roskomnadzor",
-    b"rkn.gov.ru",
-    b"blockpage",
-    b"utmblock",
 )
 
 _SMALL_BODY_STATUSES = frozenset({101, 204, 301, 302, 303, 304, 307, 308})
@@ -79,6 +78,8 @@ def googlevideo_range_header() -> str:
 def prepare_googlevideo_probe(
     domain: str,
     resolved_ip: str | None = None,
+    *,
+    timeout: float = 5.0,
 ) -> tuple[CurlProbeRequest, dict | None]:
     """Build probe request for videoplayback URL or return error dict."""
     from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
@@ -107,6 +108,7 @@ def prepare_googlevideo_probe(
     return (
         CurlProbeRequest(
             domain=domain,
+            timeout=timeout,
             resolved_ip=resolved_ip,
             resolve_name=resolve_name,
             curl_url=curl_url,
@@ -127,7 +129,7 @@ def build_probe_request(
 ) -> tuple[CurlProbeRequest, dict | None]:
     """Resolve googlevideo-specific fields when needed."""
     if protocol != "http" and is_googlevideo_domain(domain):
-        return prepare_googlevideo_probe(domain, resolved_ip=resolved_ip)
+        return prepare_googlevideo_probe(domain, resolved_ip=resolved_ip, timeout=timeout)
     use_ech_off = disable_ech
     return (
         CurlProbeRequest(
@@ -156,7 +158,29 @@ def _apply_ech_off(session: curl_cffi.Session) -> str | None:
         return f"ech_setopt:{e!s}"[:100]
 
 
-def run_curl_probe(req: CurlProbeRequest) -> CurlProbeResult:
+def _googlevideo_follow_request(req: CurlProbeRequest, location: str) -> CurlProbeRequest | None:
+    """Build a one-hop follow-up request for CDN redirects between googlevideo hosts."""
+    from urllib.parse import urlparse
+
+    if not location or "googlevideo.com" not in location.lower():
+        return None
+    target = location if location.startswith("http") else f"https://{location}"
+    host = (urlparse(target).hostname or "").lower()
+    if "googlevideo" not in host:
+        return None
+    return CurlProbeRequest(
+        domain=req.domain,
+        timeout=req.timeout,
+        resolved_ip=None,
+        resolve_name=host,
+        curl_url=target,
+        disable_ech=req.disable_ech,
+        googlevideo=True,
+        protocol=req.protocol,
+    )
+
+
+def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResult:
     """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
     import time
 
@@ -170,6 +194,8 @@ def run_curl_probe(req: CurlProbeRequest) -> CurlProbeResult:
     headers: dict[str, str] = {"Accept": "text/html"}
     if req.googlevideo:
         headers["Range"] = googlevideo_range_header()
+        headers["Referer"] = "https://www.youtube.com/"
+        headers["Origin"] = "https://www.youtube.com"
 
     start = time.perf_counter()
     try:
@@ -179,6 +205,8 @@ def run_curl_probe(req: CurlProbeRequest) -> CurlProbeResult:
             headers=headers,
             allow_redirects=False,
         )
+        if req.googlevideo:
+            session.curl.setopt(CURLOPT_IPRESOLVE, _CURL_IPRESOLVE_V4)
         if req.resolved_ip:
             session.curl.setopt(
                 CURLOPT_RESOLVE,
@@ -192,7 +220,8 @@ def run_curl_probe(req: CurlProbeRequest) -> CurlProbeResult:
                     error=ech_err,
                 )
         url = req.curl_url if req.curl_url else f"{url_scheme}://{req.domain}"
-        resp = session.get(url, timeout=min(req.timeout, 1.5))
+        curl_timeout = min(req.timeout, 8.0) if req.googlevideo else req.timeout
+        resp = session.get(url, timeout=curl_timeout)
     except curl_cffi.CurlError as e:
         msg = str(e)
         return CurlProbeResult(
@@ -208,7 +237,17 @@ def run_curl_probe(req: CurlProbeRequest) -> CurlProbeResult:
     rate = clen / elapsed
     loc = resp.headers.get("Location") or resp.headers.get("location") or ""
 
-    redirect_err = classify_http_status(dom, resp.status_code, loc)
+    redirect_domain = "googlevideo.com" if req.googlevideo else dom
+    redirect_err = classify_http_status(redirect_domain, resp.status_code, loc)
+    if (
+        req.googlevideo
+        and _gv_hop == 0
+        and resp.status_code in {301, 302, 303, 307, 308}
+        and not redirect_err
+    ):
+        follow = _googlevideo_follow_request(req, loc)
+        if follow:
+            return run_curl_probe(follow, _gv_hop=1)
     if redirect_err:
         return CurlProbeResult(
             success=False,
@@ -229,7 +268,7 @@ def run_curl_probe(req: CurlProbeRequest) -> CurlProbeResult:
         )
 
     content_ok = clen >= 300
-    dpi_fake = any(p in body.lower() for p in _DPI_FAKE_PATTERNS)
+    dpi_fake = any(p in body.lower() for p in DPI_FAKE_PATTERNS)
     if dpi_fake:
         content_ok = False
 
@@ -261,31 +300,63 @@ def run_curl_probe(req: CurlProbeRequest) -> CurlProbeResult:
     )
 
 
+MAX_CURL_REPEATS = 10  # GP DiscoveryOptions cap
+
+
+def clamp_repeats(n: int) -> int:
+    """Bound curl repeats to GP/blockcheck2 practical range (1..10)."""
+    return max(1, min(MAX_CURL_REPEATS, int(n)))
+
+
 def run_curl_probe_with_repeats(
     req: CurlProbeRequest,
     *,
     repeats: int = 1,
     parallel_repeats: bool = False,
+    repeats_mode: str = "fast",
+    quick_break: bool = False,
 ) -> dict:
-    """Run probe with blockcheck2-style repeats; stop early on first PASS."""
-    n = max(1, int(repeats))
+    """Run probe with blockcheck2-style repeats.
+
+    *fast* (default): stop on first PASS (blockcheckS mass-scan speed).
+    *stable*: run all N attempts; PASS if any succeeded (BC2 stability test).
+    *quick_break*: on sequential FAIL, stop early (BC2 SCANLEVEL=quick).
+    """
+    n = clamp_repeats(repeats)
+    stable = repeats_mode == "stable"
+
     if parallel_repeats and n > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
             futs = [ex.submit(run_curl_probe, req) for _ in range(n)]
+            first_pass: CurlProbeResult | None = None
             last: CurlProbeResult | None = None
             for fut in concurrent.futures.as_completed(futs):
-                last = fut.result()
-                if last.success:
-                    return last.as_dict()
+                result = fut.result()
+                last = result
+                if result.success:
+                    if first_pass is None:
+                        first_pass = result
+                    if not stable:
+                        return result.as_dict()
+            if first_pass is not None:
+                return first_pass.as_dict()
             if last is not None:
                 return last.as_dict()
         return CurlProbeResult(error="all parallel repeats failed").as_dict()
 
+    first_pass: CurlProbeResult | None = None
     last: CurlProbeResult | None = None
     for _ in range(n):
         last = run_curl_probe(req)
         if last.success:
-            return last.as_dict()
+            if first_pass is None:
+                first_pass = last
+            if not stable:
+                return last.as_dict()
+        elif quick_break:
+            break
+    if first_pass is not None:
+        return first_pass.as_dict()
     return (last or CurlProbeResult()).as_dict()
 
 
@@ -294,6 +365,9 @@ class CurlProbeBatch:
     requests: list[CurlProbeRequest] = field(default_factory=list)
     curl_parallel: int = 4
     repeats: int = 1
+    parallel_repeats: bool = False
+    repeats_mode: str = "fast"
+    quick_break: bool = False
 
 
 def run_curl_probe_batch(batch: CurlProbeBatch) -> dict[str, dict]:
@@ -302,10 +376,16 @@ def run_curl_probe_batch(batch: CurlProbeBatch) -> dict[str, dict]:
         return {}
 
     workers = max(1, min(int(batch.curl_parallel), len(batch.requests)))
-    repeats = max(1, int(batch.repeats))
+    repeats = clamp_repeats(batch.repeats)
 
     def run_one(req: CurlProbeRequest) -> dict:
-        return run_curl_probe_with_repeats(req, repeats=repeats, parallel_repeats=False)
+        return run_curl_probe_with_repeats(
+            req,
+            repeats=repeats,
+            parallel_repeats=batch.parallel_repeats,
+            repeats_mode=batch.repeats_mode,
+            quick_break=batch.quick_break,
+        )
 
     out: dict[str, dict] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
@@ -314,3 +394,13 @@ def run_curl_probe_batch(batch: CurlProbeBatch) -> dict[str, dict]:
             domain = futs[fut]
             out[domain] = fut.result()
     return out
+
+
+def repeats_from_args(args) -> tuple[int, bool, str, bool]:
+    """Parse repeats CLI into (repeats, parallel_repeats, repeats_mode, quick_break)."""
+    repeats = clamp_repeats(getattr(args, "repeats", 1) or 1)
+    parallel = bool(getattr(args, "parallel_repeats", False))
+    mode = getattr(args, "repeats_mode", "fast") or "fast"
+    scan_level = getattr(args, "scan_level", "fast") or "fast"
+    quick_break = scan_level in ("single", "fast") and mode == "stable"
+    return repeats, parallel, mode, quick_break

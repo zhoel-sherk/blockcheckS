@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -23,3 +24,16 @@ jobs:
 
       - name: Pytest (unit)
         run: pytest -m "not integration"
+
+  integration:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Integration placeholder
+        run: echo "Run scripts/release_smoke.sh on Fryazino host with sudo"

@@ -32,7 +32,7 @@ Lightspeed DPI strategy tester для **zapret2/nfqws2**:
 | **9** | Secure DNS + blockcheck2 preflight | ✅ | **P0** | SD ✅; BC2-1..8,11,12 ✅ |
 | **10** | Matrix coverage & blobs | 🔄 | P1 | M1–M10, ~80% zapret2 / ~95% flowseal |
 | **11** | Speed / throughput | 🔄 | P1 | A1–A10, B1–B11 |
-| **12** | Smart scan (ML / hierarchy / AQ) | 📋 | P3 | ML1–5, H1–10, AQ1–8 |
+| **12** | Smart scan (ML / hierarchy / AQ) | 🔄 partial | P3 | ML1–5, H1–10; AQ1–10 ✅ |
 | **13** | Developer onboarding (docs, hygiene, modularity) | ✅ | P1 | ONB-1..ONB-13 |
 
 **Легенда приоритетов:** P0 = без этого mass-scan ненадёжен; P1 = production
@@ -295,7 +295,30 @@ hostfakesplit); blockcheckS stress **0 PASS** (TLS на корень домен�
 - [x] **GV-3** Починить hostfakesplit checker: `Session.request() unexpected keyword 'options'`
   — вынесено в `checkers/curl_probe.py` + `_curl_probe_worker`; ECH только через `setopt`
 - [x] **GV-4** После GV-1: убрать `googlevideo.com` из denylist / вернуть в lean coverage
-- [ ] **GV-5** `quic_gv_kyber` blob тесты — после videoplayback probe (см. blob table)
+- [x] **GV-5** `quic_gv_kyber` blob тесты — `quic_gv` family, `blob_aliases.py`, `gv5-quic-smoke.quic`, `scripts/gv5_quic_smoke.sh`
+
+**GV e2e smoke (2026-08-02, Fryazino, `scripts/gv_e2e_smoke.sh`):**
+
+| Strategy | Result | Notes |
+|----------|--------|-------|
+| `hostfakesplit:nofake2:tcp_ts=-1000` | **206 PASS** 256ms | videoplayback chunk OK |
+| `hostfakesplit:disorder_after:…` | timeout | YouTube-page strategy; CDN hop differs |
+| `fake:blob=stun/max_ru` | timeout | expected on Fryazino (fake≠YouTube CDN) |
+
+**GV probe fixes (2026-08-02):** yt-dlp `--force-ipv4` + SOCKS5 fallback (`SOCKS5_PROXY`);
+reject IPv6-bound signed URLs; CDN redirect one-hop follow; Referer/Origin; timeout wire;
+`presets/strategies/gv-e2e-smoke.tls`.
+
+**GV-5 QUIC smoke (2026-08-02, Fryazino, `scripts/gv5_quic_smoke.sh`):**
+
+| Strategy | Result | Notes |
+|----------|--------|-------|
+| `fake:blob=quic_gv_kyber_1:repeats=6` | FAIL ~45ms | conn reset (QUIC blocked on YT CDN) |
+| `fake:blob=quic_gv_kyber_2:repeats=6` | FAIL ~44ms | TLS connect error (HTTP/3 probe) |
+| `fake:blob=quic_google:repeats=6` | timeout | expected — transport block |
+| `fake:blob=fake_default_quic:repeats=11` | FAIL ~44ms | conn reset |
+
+Инфраструктура OK (blob resolve, nfqws2 UDP q201, `check_http3`); PASS ожидается на провайдерах без QUIC-block YouTube.
 
 ### Domain denylist / fool filter (2026-07-31) — Phase 11 A1
 
@@ -358,11 +381,11 @@ Telegram — blob вторичен (IP-block); built-in `fake_default_tls/http/q
 | `fake_default_tls` | *(built-in)* | — | ★★★★ | GP/blockcheck2 без custom file | тесты есть |
 | `fake_default_quic` | *(built-in)* | — | ★★★ | GP `list_quic.txt` | тесты есть |
 | `fake_default_http` | *(built-in)* | — | ★★ | HTTP :80 families | тесты есть |
-| `game_udp` | `ACTIVE_GAME_UDP.bin` | ❌ | ★★★ | Game filter UDP (21 Flowseal ref) | **да** |
-| `stun2` | `stun2.bin` | ❌ | ★ | Alt STUN payload | опционально |
-| `quic_4pda` | `quic_initial_4pda.to.bin` | ❌ | ★ | Alt QUIC fingerprint | опционально |
-| `quic_tencent` | `quic_initial_tencent_com.bin` | ❌ | ★ | Gaming / Tencent QUIC | опционально |
-| `quic_steam` | `quic_initial_steamcommunity_com.bin` | ❌ | ★ | Steam QUIC | опционально |
+| `game_udp` | `ACTIVE_GAME_UDP.bin` | ✅ | ★★★ | Game filter UDP (21 Flowseal ref) | `install_blobs.sh` |
+| `stun2` | `stun2.bin` | ✅ | ★ | Alt STUN payload | Flowseal |
+| `quic_4pda` | `quic_initial_4pda.to.bin` | ✅ | ★ | Alt QUIC fingerprint | Flowseal |
+| `quic_tencent` | `quic_initial_tencent_com.bin` | ✅ | ★ | Gaming / Tencent QUIC | Flowseal |
+| `quic_steam` | `quic_initial_steamcommunity_com.bin` | ✅ | ★ | Steam QUIC | Flowseal |
 | `tls_vk` | `tls_clienthello_vk_com.bin` | в `files/fake` | ★★ | VK / RU whitelist TLS | **да** |
 | `quic_vk` | `quic_initial_vk_com.bin` | в `files/fake` | ★★ | VK QUIC | **да** |
 | `discord_ipdisc` | `discord-ip-discovery-with-port.bin` | в `files/fake` | ★★ | Official zapret 74B voice alt | сравнить |
@@ -371,10 +394,10 @@ Telegram — blob вторичен (IP-block); built-in `fake_default_tls/http/q
 | `http_iana` | `http_iana_org.bin` | в `files/fake` | ★ | HTTP fake desync | low |
 | `blob_zero` | `0x00000000` hex inline | — | ★★ | UDP fallback, multisplit | hex в matrix |
 
-- [ ] **BLOB-1** Синхронизировать `presets/blobs/` manifest: wheel vs symlink `/opt/zapret2/blobs/`
-- [ ] **BLOB-2** Скопировать tier-1 gaps: `game_udp`, `tls_vk`, `quic_vk` из Flowseal/bol-van
-- [ ] **BLOB-3** Matrix generator: alias map `google`→`tls_clienthello_www_google_com.bin`
-- [ ] **BLOB-4** Документировать built-in vs file blobs в `presets/README.md`
+- [x] **BLOB-1** Синхронизировать `presets/blobs/` manifest: wheel vs symlink `/opt/zapret2/blobs/` → `presets/blobs/README.md`
+- [x] **BLOB-2** Все tier-1 gaps: Flowseal fetch + `scripts/install_blobs.sh` + `verify_blobs.py` (22/22 OK)
+- [x] **BLOB-3** Matrix generator: alias map `google`→`tls_clienthello_www_google_com.bin` → `engine/blob_aliases.py`
+- [x] **BLOB-4** Документировать built-in vs file blobs в `presets/README.md`
 
 ### Multi-blob chains (ТСПУ) — покрытие blockcheckS (2026-07-31)
 
@@ -387,13 +410,12 @@ Community: цепочки разных blobs подряд = несколько `
 | Dual fake `stun→max_ru` (+repeats, tcp_ts) | Flowseal ALT2 | ✅ | `StandardGenerator.multi_fake`, `--generate fake_multi`, `flowseal` |
 | Dual fake пары (stun/google/max_ru/4pda) | Flowseal | ✅ | 4 ordered pairs; **нет reverse** (max_ru→stun) |
 | `fake` + `multisplit` + `seqovl_pattern=blob` | ALT11, PR #10293 | ⚠️ | `configs/alt11*`; `fake_faked` только seqovl=1; **нет** fake blob ≠ seqovl blob |
-| Triple: fake + multisplit + hostfakesplit | ALT12 | ⚠️ | `configs/alt12*` only; **не в matrix generator** |
 | `fake` + `hostfakesplit` | fake_hostfake | ✅ | `StandardGenerator.fake_hostfake` |
 | `multisplit` seqovl 568–681 + blob | Flowseal FAKE TLS AUTO | ✅ | `multisplit` family, `FlowsealGenerator` |
-| `fake` + `multidisorder` | sonicdpi #3, zapret default | ❌ | `configs/fake_tls_auto__fake_multidisorder.conf`; **нет generator** |
-| `fakedsplit` / `fakeddisorder` | sonicdpi #4 | ❌ | `FakedTcpGenerator` = multisplit seqovl=1, **не fakedsplit** |
-| `dupfake` (multi-blob один вызов) | GP/Keenetic custom Lua | ❌ | **нет** в matrix / presets |
-| 3+ blobs в цепочке | редко | ❌ | только пары |
+| `fake` + `multidisorder` | sonicdpi #3, zapret default | ✅ | `multidisorder`, `fake_multidisorder` families (M3) |
+| `fakedsplit` / `fakeddisorder` | sonicdpi #4 | ✅ | `fakedsplit`, `fakeddisorder`, `fake_fakedsplit` (M3) |
+| `dupfake` (multi-blob один вызов) | GP/Keenetic custom Lua | ⚠️ | `gp-custom-dupfake.tls`; BS fallback = dual fake |
+| Triple: fake + multisplit + hostfakesplit | ALT12 | ✅ | `fake_multisplit_hostfake` family (M2) |
 | HTTP fake + TLS fake (один профиль) | Flowseal `--fake-http`+`--fake-tls` | ❌ | **нет** generator → M6 |
 | UDP dual-blob (quic_dbank на discord+stun L7) | Flowseal UDP profile | ❌ | UDP = single blob → M7 |
 | `circular` rotate strategies | zapret2-auto | ⚠️ | export [`conf_builder`](src/blockchecks/engine/conf_builder.py); **не scan** |
@@ -405,15 +427,15 @@ Community: цепочки разных blobs подряд = несколько `
 **Итог:** ядро ТСПУ (dual fake stun+max_ru) **покрыто**. Пробелы — комбо-desync,
 multidisorder/fakedsplit/dupfake, triple chains, HTTP+TLS dual fake, UDP multi-blob.
 
-- [ ] **M1** `fake_multisplit` family: `fake:blob=X` + `multisplit:seqovl=664:seqovl_pattern=Y` (X≠Y)
-- [ ] **M2** `fake_multisplit_hostfake` triple chain (ALT12) в StandardGenerator
-- [ ] **M3** `multidisorder` + `fakedsplit`/`fakeddisorder` families (sonicdpi tier-1)
-- [ ] **M4** `dupfake` preset / GP custom list import
-- [ ] **M5** blob order matrix: reverse pairs + 3-blob permutations subset
-- [ ] **M6** HTTP+TLS dual-fake generator → Phase 8
-- [ ] **M7** UDP multi-blob (discord L7: quic_dbank на stun+discord) → Phase 7
+- [x] **M1** `fake_multisplit` family: `fake:blob=X` + `multisplit:seqovl=664:seqovl_pattern=Y` (X≠Y)
+- [x] **M2** `fake_multisplit_hostfake` triple chain (ALT12) в StandardGenerator
+- [x] **M3** `multidisorder` + `fakedsplit`/`fakeddisorder` families (sonicdpi tier-1)
+- [x] **M4** `dupfake` preset / GP custom list import → `presets/strategies/gp-custom-dupfake.tls`
+- [x] **M5** blob order matrix: reverse pairs + 3-blob permutations subset
+- [x] **M6** HTTP+TLS dual-fake generator — `http_tls_dual` family + tests
+- [x] **M7** UDP multi-blob — `udp_multiblob` family + tests
 - [ ] **M8** `flowseal` в default `bs full --tcp-sources` или merge combos в `standard`
-- [ ] **M9** rename/fix `FakedTcpGenerator` → real `fakedsplit` или deprecate
+- [x] **M9** `FakedTcpGenerator` → real `fakedsplit`/`fakeddisorder`; `FakeSplitComboGenerator` → `fake+fakedsplit`
 - [ ] **M10** `circular` в optional scan mode (rotate blob combos on fail)
 - [ ] TTL > 255, `repeats=4` generator — matrix gap
 
@@ -433,7 +455,7 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - [x] **A2** `scan_level=fast` — пропуск TTL/autottl expansions
 - [x] **A3** `--resume` — skip записанных (strategy, domain) в DB
 - [ ] **A4** GP multi-domain + `curl_parallelism` 4–10 — один nfqws2, parallel curl *(GP-side; BS = B2)*
-- [ ] **A5** *(dpi-tester)* `provider_summary.json` — custom lists, `TEST=custom`; BS shortlist import
+- [x] **A5** *(dpi-tester)* `provider_summary.json` — `dpi-tester/src/provider_summary.py`; BS import `python -m blockchecks.provider_import`
 - [x] **A6** GP `SCANLEVEL=quick|standard` — early-exit (уже в GP; BS = B4, BC2-6)
 - [x] **A7** `--parallel 4` — **потолок**; масштабировать через B2, не ↑parallel; B7 для >4
 - [x] **A8** короткие presets: `critical.txt`, `benchmark.txt`, `gp-verified.tls` для smoke
@@ -446,10 +468,10 @@ community mass-scan; GP — production orchestrator + import shortlists.
 - [x] **B2** multi-domain fan-out — 1 nfqws2, `asyncio.gather` curl, `--curl-parallel N`
 - [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
 - [x] **B4** runtime family early-exit в `bs full` на первом PASS *(= BC2-6)*
-- [ ] **B5** hybrid: BS shortlist export → GP multi-domain на роутере
+- [ ] **B5** hybrid: BS shortlist export → GP multi-domain на роутере — `scripts/export_shortlist.sh` + `nfconf` module
 - [ ] **B6** blockcheckw (Rust vmap) — fast scan reference, не drop-in voice/pair
 - [ ] **B7** nftables vmap POC — prerequisite parallel > 4
-- [ ] **B8** batch DB writes (~5%)
+- [x] **B8** batch DB writes — `StateDB(batch_size)` + `--db-batch`
 - [x] **B9** double Semaphore cleanup в `main.py`
 - [x] **B10** wire `get_fresh_url()` для googlevideo → **GV-1**
 - [x] **B11** dynamic per-strategy settle+curl из результатов A9
@@ -540,14 +562,28 @@ PASS discord.com + fake+multisplit(seqovl=664)
 **Гипотеза:** ~90% рабочих стратегий в первой половине jobs при shuffle + family weights.
 Проверить SQL по `state.db`.
 
-- [ ] **AQ1** `AdaptiveJobQueue`: priority heap + ε-random
-- [ ] **AQ2** fan-out on PASS: `(strategy, domain)` → sibling domains
-- [ ] **AQ3** domain clusters: `discord*`, `google*`, `youtube*`, `general`
-- [ ] **AQ4** family/blob weight table + persist в `state.db` (`scan_weights`)
-- [ ] **AQ5** интеграция с B2: одна стратегия → `asyncio.gather` curl
-- [ ] **AQ6** CLI `bs full --adaptive` / `--fan-out`
-- [ ] **AQ7** метрики: `time_to_first_pass`, `pass_found_before_50pct_jobs`
-- [ ] **AQ8** SQL benchmark на stress: validate «90% в первой половине»
+- [x] **AQ1** `AdaptiveJobQueue`: priority heap + ε-random
+- [x] **AQ2** fan-out on PASS: `(strategy, domain)` → sibling domains
+- [x] **AQ3** domain clusters: `discord*`, `google*`, `youtube*`, `general`
+- [x] **AQ4** family/blob weight table + persist в `state.db` (`scan_weights`)
+- [x] **AQ5** интеграция с B2: одна стратегия → `asyncio.gather` curl
+- [x] **AQ6** CLI `bs full --adaptive` / `--fan-out`
+- [x] **AQ7** метрики: `time_to_first_pass`, `pass_found_before_50pct_jobs`
+- [x] **AQ8** SQL benchmark на stress: `scripts/aq_benchmark.py`
+- [x] **AQ9** `--max-timeh` / `--max-timem` graceful shutdown (full, scan, tcp)
+- [x] **AQ10** `bs scan --adaptive` / `--fan-out` + optional `--out-dir` export
+
+---
+
+## 1.0.0 release criteria (2026-08)
+
+**Входит в 1.0.0:**
+- BC2/GP curl repeats parity (`--repeats`, `--parallel-repeats`, `--repeats-mode fast|stable`)
+- AQ + time limit + B2 fan-out + SD/preflight + keenetic export
+- M5/M6/M7 matrix gaps closed; Fryazino integration smoke scripts
+- Docs: glossary repeats, GP bridge cookbook, changelog
+
+**Post-1.0.0:** ML/Hierarchy (Phase 12), B3/B6/B7, V2 multi-endpoint voice, `ipfrag_*`, M10 circular scan
 
 ---
 
@@ -581,8 +617,8 @@ PASS discord.com + fake+multisplit(seqovl=664)
 
 ### Phase 5 — GP bridge
 
-- [ ] **A5** dpi-tester `provider_summary.json` → GP/Keenetic; BS shortlist import
-- [ ] **B5** hybrid: BS shortlist export → GP multi-domain discovery
+- [x] **A5** dpi-tester `provider_summary.json` → GP/Keenetic; BS shortlist import (`provider_import.py`)
+- [ ] **B5** hybrid: BS shortlist export → GP multi-domain — cookbook [`docs/cookbook/gp-bridge.md`](cookbook/gp-bridge.md) + `scripts/release_smoke.sh`
 - [ ] **P5-1** GP JSON import в `state.db` (partial сейчас)
 
 ### Phase 6 — Export

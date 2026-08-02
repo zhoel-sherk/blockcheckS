@@ -7,6 +7,7 @@ import re
 import time
 from collections.abc import Iterable
 
+from blockchecks.engine.blob_aliases import resolve_blob_path as _resolve_blob_path
 from blockchecks.engine.config import BLOB_DIR, LUA_INIT_SCRIPTS
 
 # Keenetic Entware layout (override via prefix=)
@@ -42,17 +43,7 @@ def extract_blob_names(*strategies: str) -> list[str]:
 
 def resolve_blob_path(name: str, blobs_dir: str) -> str | None:
     """Map blob name → absolute .bin path under blobs_dir."""
-    if not os.path.isdir(blobs_dir):
-        exact = os.path.join(blobs_dir, f"{name}.bin")
-        return exact if os.path.exists(exact) else None
-    known = sorted(f for f in os.listdir(blobs_dir) if f.endswith(".bin"))
-    candidates = [f for f in known if name in f and "quic_initial" not in f]
-    if not candidates:
-        candidates = [f for f in known if name in f]
-    if candidates:
-        return os.path.join(blobs_dir, candidates[0])
-    exact = os.path.join(blobs_dir, f"{name}.bin")
-    return exact if os.path.exists(exact) else None
+    return _resolve_blob_path(name, blobs_dir)
 
 
 def blob_cli_lines(names: Iterable[str], blobs_dir: str) -> list[str]:

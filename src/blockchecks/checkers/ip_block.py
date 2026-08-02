@@ -119,7 +119,25 @@ def print_ip_block_report(report: IpBlockReport) -> None:
     if report.sni_block_likely:
         print("  → SNI-based block likely (blocked host works on clean IP)")
     if report.ip_block_on:
+        cdn_hint = _cdn_hint(report.ip_block_on)
         print(f"  → IP block likely on: {', '.join(report.ip_block_on)}")
+        if cdn_hint:
+            print(f"    ⚠  {cdn_hint}")
+
+
+_CDN_OCTETS: tuple[str, ...] = ("104.", "162.158.", "162.159.", "172.64.", "172.65.", "172.66.", "172.67.")
+_CDN_NAMES: str = "Cloudflare"
+
+
+def _cdn_hint(ips: list[str]) -> str:
+    cdn_ips = [ip for ip in ips if ip.startswith(_CDN_OCTETS)]
+    if not cdn_ips:
+        return ""
+    return (
+        f"{len(cdn_ips)}/{len(ips)} IP(s) appear to be {_CDN_NAMES} CDN — "
+        "SNI enforcement indistinguishable from IP block. "
+        "Verify with origin-server IPs."
+    )
 
 
 def run_ip_block_preflight(

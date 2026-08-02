@@ -13,6 +13,28 @@ CACHE_FILE = "bs_gv_url_cache.json"
 CACHE_TTL = 3 * 3600  # 3 hours (googlevideo URLs expire in ~6 hours)
 
 
+def _signed_url_ip_family(url: str) -> str | None:
+    """Return 'v4' / 'v6' from videoplayback ``ip=`` param, or None if absent."""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    ip = parse_qs(urlparse(url).query).get("ip", [""])[0]
+    if not ip:
+        return None
+    return "v6" if ":" in unquote(ip) else "v4"
+
+
+def _cache_entry_valid(data: dict) -> bool:
+    url = data.get("url") or ""
+    if "googlevideo.com" not in url:
+        return False
+    if time.time() - data.get("timestamp", 0) >= CACHE_TTL:
+        return False
+    # Signed URLs bind to client IP; IPv6-bound URLs 403 on IPv4-only egress.
+    if _signed_url_ip_family(url) == "v6":
+        return False
+    return True
+
+
 def _cache_path() -> str:
     from blockchecks.engine.config import PROJECT_DIR
 
@@ -21,7 +43,9 @@ def _cache_path() -> str:
 
 
 def get_fresh_url(
-    video_id: str = "dQw4w9WgXcQ", format_code: str = "18", proxy: str | None = None
+    video_id: str = "dQw4w9WgXcQ",
+    format_code: str = "18",
+    proxy: str | None = None,
 ) -> str | None:
     """Get a fresh googlevideo.com URL for testing.
 
@@ -42,10 +66,8 @@ def get_fresh_url(
         try:
             with open(cache_file) as f:
                 data = json.load(f)
-            if time.time() - data.get("timestamp", 0) < CACHE_TTL:
-                url = data.get("url")
-                if url and "googlevideo.com" in url:
-                    return url
+            if _cache_entry_valid(data):
+                return data.get("url")
         except (json.JSONDecodeError, KeyError):
             pass
 
@@ -61,13 +83,68 @@ def get_fresh_url(
             ytdlp = candidate
     if not ytdlp:
         return None
-    cmd = [ytdlp, "-g", "-f", format_code, f"https://www.youtube.com/watch?v={video_id}"]
+    if not ytdlp:
+        return None
+
+    from blockchecks.engine.config import SOCKS5_PROXY
+
+    proxies = []
     if proxy:
-        cmd.insert(1, proxy)
-        cmd.insert(1, "--proxy")
+        proxies.append(proxy)
+    else:
+        proxies.append(None)
+        if SOCKS5_PROXY:
+            proxies.append(SOCKS5_PROXY)
+
+    for px in proxies:
+        url = _fetch_ytdlp_url(ytdlp, video_id, format_code, proxy=px)
+        if url:
+            with open(cache_file, "w") as f:
+                json.dump(
+                    {
+                        "timestamp": time.time(),
+                        "url": url,
+                        "video_id": video_id,
+                        "proxy": px or "",
+                    },
+                    f,
+                )
+            return url
+
+    # Fallback: return cached URL even if expired (skip IPv6-bound entries)
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file) as f:
+                data = json.load(f)
+            url = data.get("url")
+            if url and _signed_url_ip_family(url) != "v6":
+                return url
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    return None
+
+
+def _fetch_ytdlp_url(
+    ytdlp: str,
+    video_id: str,
+    format_code: str,
+    *,
+    proxy: str | None = None,
+) -> str | None:
+    cmd = [
+        ytdlp,
+        "--force-ipv4",
+        "-g",
+        "-f",
+        format_code,
+        f"https://www.youtube.com/watch?v={video_id}",
+    ]
+    if proxy:
+        cmd[1:1] = ["--proxy", proxy]
 
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         urls = [
             line.strip()
             for line in r.stdout.splitlines()
@@ -75,21 +152,11 @@ def get_fresh_url(
         ]
         if urls:
             url = urls[0]
-            with open(cache_file, "w") as f:
-                json.dump({"timestamp": time.time(), "url": url, "video_id": video_id}, f)
+            if _signed_url_ip_family(url) == "v6":
+                return None
             return url
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
-
-    # Fallback: return cached URL even if expired
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file) as f:
-                data = json.load(f)
-            return data.get("url")
-        except (json.JSONDecodeError, KeyError):
-            pass
-
     return None
 
 
@@ -101,7 +168,7 @@ def has_fresh_url() -> bool:
     try:
         with open(cache_file) as f:
             data = json.load(f)
-        return time.time() - data.get("timestamp", 0) < CACHE_TTL
+        return _cache_entry_valid(data)
     except (json.JSONDecodeError, KeyError):
         return False
 

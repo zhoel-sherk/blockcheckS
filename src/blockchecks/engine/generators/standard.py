@@ -1,5 +1,6 @@
 """Standard hardcoded generators (blockcheck2.d/standard replicas)."""
 
+from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP
 from blockchecks.engine.db_logger import StateDB
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
 
@@ -146,7 +147,11 @@ class HostfakeTcpGenerator(StrategyGenerator):
 
 
 class FakedTcpGenerator(StrategyGenerator):
-    """fakedsplit (faked) + position + fooling."""
+    """fakedsplit / fakeddisorder — blockcheck2 30-faked.sh (M9)."""
+
+    _SPLIT_FNS = ("fakedsplit", "fakeddisorder")
+    _POSITIONS = [1, "midsld", "sniext+1", "method+2"]
+    _PATTERNS = ["stun", "max_ru", "google", "4pda"]
 
     async def generate(
         self,
@@ -158,16 +163,18 @@ class FakedTcpGenerator(StrategyGenerator):
         run_set: set = None,
     ) -> list[StrategyItem]:
         items = []
-        for pos in [1, "midsld", "sniext+1"]:
-            for fool in ["", "tcp_md5", "tcp_ts=-1000"]:
-                fool_part = _fooling_clause(fool)
-                strat = f"multisplit:pos={pos}:seqovl=1{fool_part}"
-                label = f"faked_p{pos}_{fool or 'nofool'}"
-                items.append(StrategyItem(label=label, strategy=strat))
-                if scan_level == "single":
-                    return items[:max_count]
-                if len(items) >= max_count:
-                    return items[:max_count]
+        for splitfn in self._SPLIT_FNS:
+            for pos in self._POSITIONS:
+                for pattern in self._PATTERNS:
+                    for fool in ["", "tcp_md5", "tcp_ts=-1000"]:
+                        fool_part = _fooling_clause(fool)
+                        strat = f"{splitfn}:pos={pos}:pattern={pattern}{fool_part}"
+                        label = f"{splitfn}_p{pos}_{pattern}_{fool or 'nofool'}"
+                        items.append(StrategyItem(label=label, strategy=strat))
+                        if scan_level == "single":
+                            return items[:max_count]
+                        if len(items) >= max_count:
+                            return items[:max_count]
         return items[:max_count]
 
 
@@ -184,16 +191,23 @@ class FakeMultiGenerator(StrategyGenerator):
         run_set: set = None,
     ) -> list[StrategyItem]:
         items = []
-        blob_pairs = [("stun", "max_ru"), ("stun", "google"), ("max_ru", "google")]
-        for r in [6, 3]:
+        blob_pairs = [
+            ("stun", "max_ru"),
+            ("max_ru", "stun"),
+            ("stun", "google"),
+            ("google", "stun"),
+            ("max_ru", "google"),
+            ("google", "max_ru"),
+        ]
+        for r1, r2 in [(6, 6), (6, 3), (3, 6)]:
             for fool in ["tcp_ts=-1000", ""]:
                 fool_part = _fooling_clause(fool)
                 for b1, b2 in blob_pairs:
                     strat = (
-                        f"fake:blob={b1}:repeats={r}{fool_part}\n"
-                        f"fake:blob={b2}:repeats={r}{fool_part}"
+                        f"fake:blob={b1}:repeats={r1}{fool_part}\n"
+                        f"fake:blob={b2}:repeats={r2}{fool_part}"
                     )
-                    label = f"fake_multi_{b1}+{b2}_r{r}_{fool or 'nofool'}"
+                    label = f"fake_multi_{b1}+{b2}_r{r1}+{r2}_{fool or 'nofool'}"
                     items.append(StrategyItem(label=label, strategy=strat))
                     if scan_level == "single":
                         return items[:max_count]
@@ -203,7 +217,10 @@ class FakeMultiGenerator(StrategyGenerator):
 
 
 class FakeSplitComboGenerator(StrategyGenerator):
-    """fake + fakedsplit combined."""
+    """fake + fakedsplit combined (blockcheck2 55-fake-faked.sh, M9)."""
+
+    _POSITIONS = ["1", "midsld", "method+2"]
+    _PATTERNS = ["stun", "max_ru", "google"]
 
     async def generate(
         self,
@@ -215,19 +232,26 @@ class FakeSplitComboGenerator(StrategyGenerator):
         run_set: set = None,
     ) -> list[StrategyItem]:
         items = []
-        for r in [6, 3]:
-            for fool in ["", "tcp_ts=-1000"]:
+        for r in [6, 3, 8]:
+            for fool in ["", "tcp_ts=-1000", "tcp_md5"]:
                 fool_part = _fooling_clause(fool)
-                for blob in ["", "stun"]:
+                for blob in ["stun", "max_ru", "google", ""]:
                     blob_part = f":blob={blob}" if blob else ""
-                    strat = (
-                        f"fake{blob_part}:repeats={r}{fool_part}\n"
-                        f"multisplit:pos=1,midsld:seqovl=1{fool_part}"
-                    )
-                    label = f"fake+faked_{blob or 'none'}_r{r}_{fool or 'nofool'}"
-                    items.append(StrategyItem(label=label, strategy=strat))
-                    if len(items) >= max_count:
-                        return items[:max_count]
+                    for pos in self._POSITIONS:
+                        for pattern in self._PATTERNS:
+                            strat = (
+                                f"fake{blob_part}:repeats={r}{fool_part}\n"
+                                f"fakedsplit:pos={pos}:pattern={pattern}{fool_part}"
+                            )
+                            label = (
+                                f"fake+fakedsplit_{blob or 'none'}+{pattern}_"
+                                f"p{pos}_r{r}_{fool or 'nofool'}"
+                            )
+                            items.append(StrategyItem(label=label, strategy=strat))
+                            if scan_level == "single":
+                                return items[:max_count]
+                            if len(items) >= max_count:
+                                return items[:max_count]
         return items[:max_count]
 
 
@@ -295,20 +319,35 @@ FAST_FOOLINGS_TCP = [
 ]
 FAST_REPEATS = [6, 8, 3, 11, 12]
 
+
+def _blob_file(alias: str) -> str:
+    """Resolve alias to filename under zapret2 blobs dir."""
+    return BLOB_ALIAS_MAP.get(alias, f"{alias}.bin")
+
+
 TCP_FAMILIES = [
     "fake",
     "hostfake",
     "multisplit",
+    "multidisorder",
     "syndata",
     "tcpseg",
     "oob",
     "multi_fake",
+    "triple_fake",
+    "fake_multisplit",
+    "fake_multidisorder",
+    "fake_multisplit_hostfake",
     "fake_hostfake",
+    "fakedsplit",
+    "fakeddisorder",
+    "fake_fakedsplit",
+    "tcp_ipfrag",
 ]
-HTTP_FAMILIES = ["http_simple", "http_fake"]
+HTTP_FAMILIES = ["http_simple", "http_fake", "http_tls_dual"]
 UDP_VOICE_FAMILIES = ["udp_discord"]
-QUIC_HTTP3_FAMILIES = ["quic_fake", "quic_ipfrag", "udp_quic"]
-UDP_QUIC_FAMILIES = ["udp_quic", "udp_game"]
+QUIC_HTTP3_FAMILIES = ["quic_fake", "quic_gv", "quic_ipfrag", "udp_quic", "udp_multiblob"]
+UDP_QUIC_FAMILIES = ["udp_quic", "udp_game", "udp_multiblob"]
 
 # ── Standard Generator (parameterized strategy families) ──
 
@@ -351,6 +390,13 @@ class StandardGenerator(StrategyGenerator):
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
         },
+        # M3: multidisorder (sonicdpi tier-1, blockcheck2 20-multi.sh)
+        "multidisorder": {
+            "positions": ["1", "2", "midsld", "method+2", "1,midsld"],
+            "foolings": FAST_FOOLINGS_TCP[:3],
+            "seqovl": [664, 681],
+            "seqovl_blobs": ALL_BLOBS_TCP,
+        },
         "syndata": {
             "blobs": ["0x1603", "fake_default_tls"],
             "tls_mods": ["rnd,dupsid", "rnd,dupsid,sni=www.google.com"],
@@ -368,12 +414,90 @@ class StandardGenerator(StrategyGenerator):
         "multi_fake": {
             "blob_pairs": [
                 ("stun", "max_ru"),
+                ("max_ru", "stun"),
+                ("stun", "google"),
+                ("google", "stun"),
+                ("max_ru", "google"),
+                ("google", "max_ru"),
+                ("stun", "4pda"),
+                ("4pda", "stun"),
+            ],
+            "repeat_pairs": [(6, 6), (6, 3), (8, 6), (3, 6)],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", ""],
+        },
+        # M5: three-blob order subset (stun, max_ru, google permutations)
+        "triple_fake": {
+            "triples": [
+                ("stun", "max_ru", "google"),
+                ("stun", "google", "max_ru"),
+                ("max_ru", "stun", "google"),
+                ("google", "stun", "max_ru"),
+            ],
+            "repeats": [6, 3],
+            "foolings": ["tcp_ts=-1000", ""],
+        },
+        # M1: fake + multisplit seqovl_pattern (blockcheck2 50-fake-multi / 55-fake-faked)
+        "fake_multisplit": {
+            "blob_pairs": [
+                ("stun", "max_ru"),
                 ("stun", "google"),
                 ("max_ru", "google"),
                 ("stun", "4pda"),
+                ("google", "max_ru"),
+                ("4pda", "google"),
             ],
-            "repeats": [6, 3, 8, 12, 11, 2],
+            "pattern_blobs": ALL_BLOBS_TCP,
+            "seqovl": [664, 681, 652],
+            "positions": ["2", "1,midsld", "midsld"],
+            "repeats": [6, 3, 8],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", ""],
+        },
+        # M2: fake + multisplit + hostfakesplit triple chain (ALT12)
+        "fake_multisplit_hostfake": {
+            "blob_pairs": [
+                ("google", "max_ru"),
+                ("stun", "max_ru"),
+                ("stun", "google"),
+                ("max_ru", "google"),
+            ],
+            "seqovl": [664, 681],
+            "positions": ["1", "2"],
+            "repeats": [6, 8],
             "foolings": ["tcp_ts=-1000", "tcp_md5"],
+            "hf_hosts": ["www.google.com", "fonts.google.com"],
+        },
+        # M3: fake + multidisorder combo (blockcheck2 50-fake-multi.sh)
+        "fake_multidisorder": {
+            "blobs": ALL_BLOBS_TCP,
+            "positions": ["1", "2", "midsld", "method+2"],
+            "repeats": [6, 3, 8, 11],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", ""],
+        },
+        # M3: fakedsplit / fakeddisorder (blockcheck2 30-faked.sh)
+        "fakedsplit": {
+            "positions": ["1", "midsld", "sniext+1", "method+2"],
+            "pattern_blobs": ALL_BLOBS_TCP,
+            "foolings": FAST_FOOLINGS_TCP[:3],
+            "repeats": [6, 11],
+        },
+        "fakeddisorder": {
+            "positions": ["1", "midsld", "method+2", "1,midsld"],
+            "pattern_blobs": ALL_BLOBS_TCP,
+            "foolings": FAST_FOOLINGS_TCP[:3],
+            "repeats": [6, 11],
+        },
+        "fake_fakedsplit": {
+            "blobs": ALL_BLOBS_TCP,
+            "positions": ["1", "midsld", "method+2"],
+            "pattern_blobs": ALL_BLOBS_TCP,
+            "repeats": [6, 3, 8],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", ""],
+        },
+        # Phase 7: TCP ipfrag (complement to quic_ipfrag)
+        "tcp_ipfrag": {
+            "positions": [8, 16, 32, 64],
+            "repeats": [6, 11],
+            "combo_blobs": ["", "stun", "google"],
         },
         "fake_hostfake": {
             "blobs": ALL_BLOBS_TCP,
@@ -387,14 +511,28 @@ class StandardGenerator(StrategyGenerator):
         },
         "udp_quic": {
             "port_ranges": ["443"],
-            "blobs": ["quic_initial_www_google_com", "quic_initial_dbankcloud_ru"],
+            "blobs": [
+                "quic_initial_www_google_com",
+                "quic_initial_dbankcloud_ru",
+                "quic_gv_kyber_1",
+                "quic_gv_kyber_2",
+            ],
             "repeats": [1, 2, 5, 6, 10, 11, 20],
         },
         "udp_game": {
             "port_ranges": ["1024-65535"],
-            "blobs": ["quic_initial_dbankcloud_ru"],
+            "blobs": ["quic_initial_dbankcloud_ru", "game_udp"],
             "repeats": [10, 12, 14],
             "out_range": [None, "n1-<n3", "n1-<n4", "n1-<n5"],
+        },
+        # M7: dual L7 UDP profile (stun + discord voice blob)
+        "udp_multiblob": {
+            "profiles": [
+                ("stun", "discord_udp"),
+                ("quic_dbank", "discord_udp"),
+                ("game_udp", "discord_udp"),
+            ],
+            "repeats": [6, 10, 12],
         },
         # 25-fake.sh pktws_check_http — port 80, payload=http_req
         "http_simple": {
@@ -409,10 +547,21 @@ class StandardGenerator(StrategyGenerator):
             "repeats": FAST_REPEATS[:4],
             "foolings": FAST_FOOLINGS_TCP[:3],
         },
+        # M6: HTTP :80 fake (TLS side in composite preset / pair)
+        "http_tls_dual": {
+            "http_blobs": ["fake_default_http"],
+            "repeats": [6, 3],
+            "foolings": ["tcp_ts=-1000", ""],
+        },
         # 90-quic.sh — HTTP/3 over UDP/443
         "quic_fake": {
-            "blobs": ["fake_default_quic", "quic_initial"],
+            "blobs": ["fake_default_quic", "quic_initial", "quic_google", "quic_vk"],
             "repeats": [1, 2, 5, 10, 11, 20],
+        },
+        # GV-5: googlevideo CDN QUIC kyber blobs (HTTP/3 probe)
+        "quic_gv": {
+            "blobs": ["quic_gv_kyber_1", "quic_gv_kyber_2", "quic_google"],
+            "repeats": [1, 2, 5, 6, 11],
         },
         "quic_ipfrag": {
             "positions": [8, 16, 32, 64],
@@ -602,14 +751,194 @@ class StandardGenerator(StrategyGenerator):
                     return items
 
         elif stype == "multi_fake":
+            repeat_pairs = family.get(
+                "repeat_pairs",
+                [(r, r) for r in family.get("repeats", [6])],
+            )
             for b1, b2 in family["blob_pairs"]:
+                for r1, r2 in repeat_pairs:
+                    for fool in family["foolings"]:
+                        f = f":{fool}" if fool else ""
+                        strat = (
+                            f"fake:blob={b1}:repeats={r1}{f}\n"
+                            f"fake:blob={b2}:repeats={r2}{f}"
+                        )
+                        self._add(
+                            items,
+                            seen,
+                            f"std_multi_{b1}+{b2}_r{r1}+{r2}_{fool or 'nofool'}",
+                            strat,
+                        )
+                        if scan_level == "single":
+                            return items
+
+        elif stype == "triple_fake":
+            for b1, b2, b3 in family["triples"]:
                 for r in family["repeats"]:
                     for fool in family["foolings"]:
                         f = f":{fool}" if fool else ""
-                        strat = f"fake:blob={b1}:repeats={r}{f}\nfake:blob={b2}:repeats={r}{f}"
-                        self._add(
-                            items, seen, f"std_multi_{b1}+{b2}_r{r}_{fool or 'nofool'}", strat
+                        strat = (
+                            f"fake:blob={b1}:repeats={r}{f}\n"
+                            f"fake:blob={b2}:repeats={r}{f}\n"
+                            f"fake:blob={b3}:repeats={r}{f}"
                         )
+                        self._add(
+                            items,
+                            seen,
+                            f"std_triple_{b1}+{b2}+{b3}_r{r}_{fool or 'nofool'}",
+                            strat,
+                        )
+                        if scan_level == "single":
+                            return items
+
+        elif stype == "fake_multisplit":
+            for fake_blob, pattern_blob in family["blob_pairs"]:
+                if fake_blob == pattern_blob:
+                    continue
+                for pos in family["positions"]:
+                    for seqovl in family["seqovl"]:
+                        for r in family["repeats"]:
+                            for fool in family["foolings"]:
+                                f = f":{fool}" if fool else ""
+                                fake_line = f"fake:blob={fake_blob}:repeats={r}{f}"
+                                split_line = (
+                                    f"multisplit:pos={pos}:seqovl={seqovl}"
+                                    f":seqovl_pattern={pattern_blob}{f}"
+                                )
+                                strat = f"{fake_line}\n{split_line}"
+                                label = (
+                                    f"std_fms_{fake_blob}+{pattern_blob}_p{pos}_"
+                                    f"s{seqovl}_r{r}_{fool or 'nofool'}"
+                                )
+                                self._add(items, seen, label, strat)
+                                if scan_level == "single":
+                                    return items
+
+        elif stype == "multidisorder":
+            for pos in family["positions"]:
+                for fool in family["foolings"]:
+                    f = f":{fool}" if fool else ""
+                    for blob_name in family["seqovl_blobs"]:
+                        strat = f"multidisorder:pos={pos}:seqovl_pattern={blob_name}{f}"
+                        label = f"std_mdis_{pos}_{blob_name}_{fool or 'nofool'}"
+                        self._add(items, seen, label, strat)
+                        if scan_level == "single":
+                            return items
+                        for seqovl in family["seqovl"]:
+                            strat = (
+                                f"multidisorder:pos={pos}:seqovl={seqovl}"
+                                f":seqovl_pattern={blob_name}{f}"
+                            )
+                            label = (
+                                f"std_mdis_{pos}_s{seqovl}_{blob_name}_{fool or 'nofool'}"
+                            )
+                            self._add(items, seen, label, strat)
+                            if scan_level == "single":
+                                return items
+
+        elif stype == "fake_multisplit_hostfake":
+            for fake_blob, pattern_blob in family["blob_pairs"]:
+                if fake_blob == pattern_blob:
+                    continue
+                for pos in family["positions"]:
+                    for seqovl in family["seqovl"]:
+                        for r in family["repeats"]:
+                            for fool in family["foolings"]:
+                                f = f":{fool}" if fool else ""
+                                for host in family["hf_hosts"]:
+                                    strat = (
+                                        f"fake:blob={fake_blob}:repeats={r}{f}\n"
+                                        f"multisplit:pos={pos}:seqovl={seqovl}"
+                                        f":seqovl_pattern={pattern_blob}{f}\n"
+                                        f"hostfakesplit:host={host}:nofake2{f}:repeats=1"
+                                    )
+                                    label = (
+                                        f"std_fmsh_{fake_blob}+{pattern_blob}_p{pos}_"
+                                        f"h{host.split('.')[0]}_r{r}_{fool or 'nofool'}"
+                                    )
+                                    self._add(items, seen, label, strat)
+                                    if scan_level == "single":
+                                        return items
+
+        elif stype == "fake_multidisorder":
+            for blob_name in family["blobs"]:
+                for pos in family["positions"]:
+                    for r in family["repeats"]:
+                        for fool in family["foolings"]:
+                            f = f":{fool}" if fool else ""
+                            strat = (
+                                f"fake:blob={blob_name}:repeats={r}{f}\n"
+                                f"multidisorder:pos={pos}{f}"
+                            )
+                            label = (
+                                f"std_fmd_{blob_name}_p{pos}_r{r}_{fool or 'nofool'}"
+                            )
+                            self._add(items, seen, label, strat)
+                            if scan_level == "single":
+                                return items
+
+        elif stype == "fakedsplit":
+            for pos in family["positions"]:
+                for blob_name in family["pattern_blobs"]:
+                    for fool in family["foolings"]:
+                        f = f":{fool}" if fool else ""
+                        for r in family["repeats"]:
+                            strat = f"fakedsplit:pos={pos}:pattern={blob_name}{f}:repeats={r}"
+                            label = f"std_fds_p{pos}_{blob_name}_r{r}_{fool or 'nofool'}"
+                            self._add(items, seen, label, strat)
+                            if scan_level == "single":
+                                return items
+
+        elif stype == "fakeddisorder":
+            for pos in family["positions"]:
+                for blob_name in family["pattern_blobs"]:
+                    for fool in family["foolings"]:
+                        f = f":{fool}" if fool else ""
+                        for r in family["repeats"]:
+                            strat = f"fakeddisorder:pos={pos}:pattern={blob_name}{f}:repeats={r}"
+                            label = f"std_fdd_p{pos}_{blob_name}_r{r}_{fool or 'nofool'}"
+                            self._add(items, seen, label, strat)
+                            if scan_level == "single":
+                                return items
+
+        elif stype == "fake_fakedsplit":
+            for blob_name in family["blobs"]:
+                for pattern_blob in family["pattern_blobs"]:
+                    for pos in family["positions"]:
+                        for r in family["repeats"]:
+                            for fool in family["foolings"]:
+                                f = f":{fool}" if fool else ""
+                                strat = (
+                                    f"fake:blob={blob_name}:repeats={r}{f}\n"
+                                    f"fakedsplit:pos={pos}:pattern={pattern_blob}{f}"
+                                )
+                                label = (
+                                    f"std_ffds_{blob_name}+{pattern_blob}_p{pos}_"
+                                    f"r{r}_{fool or 'nofool'}"
+                                )
+                                self._add(items, seen, label, strat)
+                                if scan_level == "single":
+                                    return items
+
+        elif stype == "tcp_ipfrag":
+            for pos in family["positions"]:
+                strat = f"send:ipfrag:ipfrag_pos_tcp={pos}\ndrop"
+                label = f"std_tcp_ipfrag_pos{pos}"
+                self._add(items, seen, label, strat)
+                if scan_level == "single":
+                    return items
+            for pos in family["positions"]:
+                for blob_name in family.get("combo_blobs", [""]):
+                    if not blob_name:
+                        continue
+                    for r in family["repeats"]:
+                        strat = (
+                            f"fake:blob={blob_name}:repeats={r}\n"
+                            f"send:ipfrag:ipfrag_pos_tcp={pos}\n"
+                            f"drop"
+                        )
+                        label = f"std_tcp_fake_ipfrag_{blob_name}_r{r}_pos{pos}"
+                        self._add(items, seen, label, strat)
                         if scan_level == "single":
                             return items
 
@@ -651,6 +980,25 @@ class StandardGenerator(StrategyGenerator):
                             if scan_level == "single":
                                 return items
 
+        elif stype == "udp_multiblob":
+            for b1, b2 in family["profiles"]:
+                f1 = _blob_file(b1)
+                f2 = _blob_file(b2)
+                for r in family["repeats"]:
+                    s = (
+                        f"--filter-udp=443 --filter-l7=stun "
+                        f"--blob=STUN:@/opt/zapret2/blobs/{f1} "
+                        f"--payload=stun "
+                        f"--lua-desync=fake:blob=STUN:repeats={r}\n"
+                        f"--filter-udp=443 --filter-l7=discord "
+                        f"--blob=DISC:@/opt/zapret2/blobs/{f2} "
+                        f"--payload=discord_ip_discovery "
+                        f"--lua-desync=fake:blob=DISC:repeats={r}"
+                    )
+                    self._add(items, seen, f"std_udp_multiblob_{b1}+{b2}_r{r}", s)
+                    if scan_level == "single":
+                        return items
+
         elif stype == "fake_hostfake":
             for blob_name in family["blobs"]:
                 for r in family["repeats"]:
@@ -691,11 +1039,31 @@ class StandardGenerator(StrategyGenerator):
                         if scan_level == "single":
                             return items
 
+        elif stype == "http_tls_dual":
+            for blob_name in family["http_blobs"]:
+                for repeats in family["repeats"]:
+                    for fool in family["foolings"]:
+                        fool_str = f":{fool}" if fool else ""
+                        strat = f"fake:blob={blob_name}:repeats={repeats}{fool_str}"
+                        label = f"std_http_tls_dual_{blob_name}_r{repeats}_{fool or 'nofool'}"
+                        self._add(items, seen, label, strat, protocol="http")
+                        if scan_level == "single":
+                            return items
+
         elif stype == "quic_fake":
             for blob_name in family["blobs"]:
                 for r in family["repeats"]:
                     strat = f"fake:blob={blob_name}:repeats={r}"
                     label = f"std_quic_fake_{blob_name}_r{r}"
+                    self._add(items, seen, label, strat, protocol="quic")
+                    if scan_level == "single":
+                        return items
+
+        elif stype == "quic_gv":
+            for blob_name in family["blobs"]:
+                for r in family["repeats"]:
+                    strat = f"fake:blob={blob_name}:repeats={r}"
+                    label = f"std_quic_gv_{blob_name}_r{r}"
                     self._add(items, seen, label, strat, protocol="quic")
                     if scan_level == "single":
                         return items

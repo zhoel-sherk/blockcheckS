@@ -67,6 +67,19 @@ and `user.list`. ETA printed as `N_strat × N_domains / parallel`. Resume skips
 `--auto-discover N` — DNS bulk `finland{N}.discord.gg` (+ опционально gateway).
 Сейчас в matrix берётся **первый** найденный endpoint (multi-EP loop — в todo).
 
+## Curl repeats (BC2 / GP parity)
+
+Three levels — see [glossary.md](glossary.md):
+
+| Flag | GP / BC2 | Meaning |
+|------|----------|---------|
+| `--repeats N` | `REPEATS` / `repeats` | N curl attempts per strategy×domain (1–10) |
+| `--parallel-repeats` | `PARALLEL` / `repeat_parallel` | Run repeats concurrently |
+| `--repeats-mode fast\|stable` | — | `fast`=first PASS; `stable`=all N like blockcheck2 |
+| `--curl-parallel N` | `curl_parallelism` | Multi-domain fan-out (B2, **not** repeats) |
+
+GP bridge workflow: [cookbook/gp-bridge.md](cookbook/gp-bridge.md).
+
 ## Тесты
 
 ```bash

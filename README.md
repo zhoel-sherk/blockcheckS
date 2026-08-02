@@ -26,7 +26,7 @@ Linux host с zapret2/nfqws2 и root (netns + iptables). Unit-тесты — б�
 | Последовательный shell | asyncio + NetNsPool |
 | Легко «ложно-зелёный» | Контрактные pytest + content/DPI checks |
 
-## Структура (v0.3)
+## Структура (v1.0)
 
 ```
 src/blockchecks/   # пакет (bs, main, nfconf, engine/, checkers/)
@@ -56,8 +56,13 @@ sudo bs pair -d discord.com --generate --auto-discover 5
 
 # Mass strategy×coverage + keenetic/raw export (long run; use --resume)
 sudo bs full
-sudo bs full --parallel 2 --resume
+sudo bs full --parallel 4 --fan-out --max-timeh 2 \
+  --domains-file presets/domains/benchmark.txt \
+  --db logs/run.db --out-dir logs/export
 bc-nfconf --db state.db --out-dir output
+
+# BC2/GP-style curl repeats
+sudo bs scan -d discord.com --generate --repeats 3 --repeats-mode stable
 
 # Один .conf
 sudo bs tcp -d discord.com -c configs/simple_fake__fake_ts.conf
@@ -72,5 +77,5 @@ Roadmap: [docs/todo.md](docs/todo.md).
 
 ## Status
 
-Пакет `blockchecks` 0.3.0: scan/pair/async, `bs full` + nfconf export, ruff clean.
+Пакет `blockchecks` 1.0.0: scan/pair/async, `bs full` + nfconf export, ruff clean.
 Roadmap: [docs/todo.md](docs/todo.md). Layout: [docs/package.md](docs/package.md).

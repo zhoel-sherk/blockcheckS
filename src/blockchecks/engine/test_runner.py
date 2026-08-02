@@ -28,6 +28,7 @@ class ScanReport:
     protocol: str
     results: list[StrategyResult] = field(default_factory=list)
     total_time_sec: float = 0.0
+    stopped_reason: str = ""
 
     @property
     def passed(self) -> int:
@@ -71,11 +72,26 @@ class TestRunner:
     Phase 2: Parallel — multiple strategies via asyncio.
     """
 
-    def __init__(self, ns_name: str | None = None, dns_cache=None, secure_dns: bool = True):
+    def __init__(
+        self,
+        ns_name: str | None = None,
+        dns_cache=None,
+        secure_dns: bool = True,
+        repeats: int = 1,
+        parallel_repeats: bool = False,
+        repeats_mode: str = "fast",
+        quick_break: bool = False,
+    ):
         self.ns_name = ns_name
         self._python = sys.executable  # use same Python that runs the tester
         self.dns_cache = dns_cache
         self.secure_dns = secure_dns
+        from blockchecks.checkers.curl_probe import clamp_repeats
+
+        self.repeats = clamp_repeats(repeats)
+        self.parallel_repeats = parallel_repeats
+        self.repeats_mode = repeats_mode or "fast"
+        self.quick_break = quick_break
 
     def _run_check(self, domain: str, timeout: float) -> StrategyResult:
         """Run curl probe inside namespace (or main ns if no netns)."""
@@ -93,6 +109,12 @@ class TestRunner:
             return result
 
         payload = json.dumps(info["payload"])
+        probe = json.loads(payload)
+        probe["repeats"] = self.repeats
+        probe["parallel_repeats"] = bool(self.parallel_repeats and self.repeats > 1)
+        probe["repeats_mode"] = self.repeats_mode
+        probe["quick_break"] = self.quick_break
+        payload = json.dumps(probe)
         if self.ns_name:
             cmd = [
                 "sudo",
@@ -198,12 +220,16 @@ class TestRunner:
         timeout: float = 3.0,
         hostlist: list[str] | None = None,
         qnum: int = 200,
+        deadline=None,
     ) -> ScanReport:
         """Test multiple strategies against one domain sequentially."""
         report = ScanReport(domain=domain, protocol="tls")
         t0 = time.perf_counter()
 
         for strategy in strategies:
+            if deadline is not None and deadline.expired_sync():
+                report.stopped_reason = "time_limit"
+                break
             r = self.test_single(strategy, domain, timeout=timeout, hostlist=hostlist, qnum=qnum)
             report.results.append(r)
 
@@ -216,13 +242,21 @@ class TestRunner:
         return report
 
     def test_sequential_configs(
-        self, config_paths: list[str], domain: str, timeout: float = 3.0, qnum: int = 200
+        self,
+        config_paths: list[str],
+        domain: str,
+        timeout: float = 3.0,
+        qnum: int = 200,
+        deadline=None,
     ) -> ScanReport:
         """Test multiple .conf files against one domain sequentially."""
         report = ScanReport(domain=domain, protocol="tls")
         t0 = time.perf_counter()
 
         for config_path in config_paths:
+            if deadline is not None and deadline.expired_sync():
+                report.stopped_reason = "time_limit"
+                break
             r = self.test_config(config_path, domain, timeout=timeout, qnum=qnum)
             report.results.append(r)
 

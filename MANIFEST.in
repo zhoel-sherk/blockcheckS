@@ -1,5 +1,10 @@
 include configs/*.conf
 include configs/composite_discord.conf
+recursive-include presets/strategies *.tls
+recursive-include presets/domains *.txt
+include presets/voice/gcp-hamina.txt
+include presets/blobs/README.md
+include presets/README.md
 include LICENSE
 include README.md
 include docs/todo.md

@@ -294,6 +294,80 @@ async def test_fake_hostfake_disorder_after():
 
 
 @pytest.mark.asyncio
+async def test_fake_multisplit_family_m1():
+    gen = StandardGenerator(strategy_types=["fake_multisplit"])
+    items = await gen.generate("tls12", scan_level="fast", max_count=50)
+    assert items
+    sample = items[0].strategy
+    assert "fake:blob=" in sample
+    assert "multisplit:" in sample
+    assert "seqovl_pattern=" in sample
+    fake_blob = sample.split("fake:blob=")[1].split(":")[0]
+    pattern_blob = sample.split("seqovl_pattern=")[1].split(":")[0]
+    assert fake_blob != pattern_blob
+
+
+@pytest.mark.asyncio
+async def test_fake_multisplit_hostfake_m2():
+    gen = StandardGenerator(strategy_types=["fake_multisplit_hostfake"])
+    items = await gen.generate("tls12", scan_level="single", max_count=10)
+    assert items
+    strat = items[0].strategy
+    assert "fake:blob=" in strat
+    assert "multisplit:" in strat
+    assert "hostfakesplit:host=" in strat
+
+
+@pytest.mark.asyncio
+async def test_multidisorder_m3():
+    gen = StandardGenerator(strategy_types=["multidisorder"])
+    items = await gen.generate("tls12", scan_level="single", max_count=10)
+    assert items
+    assert "multidisorder:" in items[0].strategy
+
+
+@pytest.mark.asyncio
+async def test_fakedsplit_m3():
+    gen = StandardGenerator(strategy_types=["fakedsplit"])
+    items = await gen.generate("tls12", scan_level="single", max_count=10)
+    assert items
+    assert "fakedsplit:" in items[0].strategy
+    assert "pattern=" in items[0].strategy
+
+
+@pytest.mark.asyncio
+async def test_quic_gv_family_gv5():
+    gen = StandardGenerator(strategy_types=["quic_gv"])
+    items = await gen.generate("quic", scan_level="single", max_count=10)
+    assert items
+    assert items[0].protocol == "quic"
+    assert "quic_gv_kyber" in items[0].strategy or "quic_google" in items[0].strategy
+
+
+@pytest.mark.asyncio
+async def test_faked_tcp_generator_m9_real_fakedsplit():
+    from blockchecks.engine.generators.standard import FakedTcpGenerator
+
+    gen = FakedTcpGenerator()
+    items = await gen.generate("tls12", scan_level="single", max_count=5)
+    assert items
+    assert "fakedsplit:" in items[0].strategy or "fakeddisorder:" in items[0].strategy
+    assert "multisplit:" not in items[0].strategy
+    assert "pattern=" in items[0].strategy
+
+
+@pytest.mark.asyncio
+async def test_fake_split_combo_m9():
+    from blockchecks.engine.generators.standard import FakeSplitComboGenerator
+
+    gen = FakeSplitComboGenerator()
+    items = await gen.generate("tls12", scan_level="single", max_count=5)
+    assert items
+    assert "fakedsplit:" in items[0].strategy
+    assert "fake:blob=" in items[0].strategy
+
+
+@pytest.mark.asyncio
 async def test_scan_level_single_one_per_family():
     gen = StandardGenerator(strategy_types=list(TCP_FAMILIES))
     items = await gen.generate("tls12", scan_level="single", max_count=500)
@@ -304,3 +378,61 @@ async def test_scan_level_single_one_per_family():
     gen_u = StandardGenerator(strategy_types=list(UDP_VOICE_FAMILIES))
     u_items = await gen_u.generate("udp_voice", scan_level="single", max_count=50)
     assert len(u_items) <= len(UDP_VOICE_FAMILIES)
+
+
+@pytest.mark.asyncio
+async def test_multi_fake_m5_reverse_and_repeat_pairs():
+    gen = StandardGenerator(strategy_types=["multi_fake"])
+    items = await gen.generate("tls12", scan_level="fast", max_count=500)
+    strategies = {i.strategy for i in items}
+    assert any("fake:blob=max_ru:repeats=6" in s and "fake:blob=stun:repeats=6" in s for s in strategies)
+    assert any(
+        "fake:blob=stun:repeats=6" in s and "fake:blob=max_ru:repeats=3" in s for s in strategies
+    )
+    labels = [i.label for i in items]
+    assert len(labels) == len(set(labels)) or len(items) == len({i.strategy for i in items})
+
+
+@pytest.mark.asyncio
+async def test_triple_fake_m5():
+    gen = StandardGenerator(strategy_types=["triple_fake"])
+    items = await gen.generate("tls12", scan_level="single", max_count=10)
+    assert items
+    assert items[0].strategy.count("fake:blob=") == 3
+
+
+@pytest.mark.asyncio
+async def test_tcp_ipfrag_family():
+    gen = StandardGenerator(strategy_types=["tcp_ipfrag"])
+    items = await gen.generate("tls12", scan_level="single", max_count=10)
+    assert items
+    assert "ipfrag_pos_tcp=" in items[0].strategy
+
+
+@pytest.mark.asyncio
+async def test_http_tls_dual_m6():
+    gen = StandardGenerator(strategy_types=["http_tls_dual"])
+    items = await gen.generate("http", scan_level="single", max_count=10)
+    assert items
+    assert items[0].protocol == "http"
+    assert "fake_default_http" in items[0].strategy
+
+
+@pytest.mark.asyncio
+async def test_udp_multiblob_m7():
+    gen = StandardGenerator(strategy_types=["udp_multiblob"])
+    items = await gen.generate("quic", scan_level="single", max_count=10)
+    assert items
+    assert "--filter-udp=" in items[0].strategy
+    assert "discord" in items[0].strategy.lower()
+
+
+@pytest.mark.asyncio
+async def test_db_batch_flush(temp_db: StateDB):
+    temp_db.batch_size = 3
+    for i in range(5):
+        await temp_db.log_tcp(f"s{i}", "discord.com", "PASS", float(i), 200)
+    await temp_db.flush()
+    stats = await temp_db.domain_pass_stats("discord.com")
+    assert stats["passed"] == 5
+

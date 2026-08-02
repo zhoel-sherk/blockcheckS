@@ -1,0 +1,12 @@
+# flowseal-fast — curated Flowseal ALT2 top strategies (M8)
+# Use: bs scan -d discord.com -M flowseal-fast --scan-level single
+# Dual-fake combos: configs/simple_fake_alt2__fake_max_ru_ts.conf or --generate multi_fake
+
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=max_ru:repeats=6:tcp_ts=-1000
+fake:blob=google:repeats=6:tcp_ts=-1000
+fake:blob=4pda:repeats=6:tcp_ts=-1000
+hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up:repeats=1
+fake:blob=google:repeats=6:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=www.google.com
+multisplit:pos=midsld:seqovl=681:seqovl_pattern=google
+hostfakesplit:nofake2:tcp_ts=-1000:repeats=1

@@ -19,3 +19,8 @@
 | **videoplayback_probe** | curl to signed `googlevideo.com/videoplayback?…` URL (GV-1) |
 | **PASS / FAIL / THROTTLED** | TCP result statuses in `state.db` |
 | **fingerprint** | Hash of strategy matrix for `--resume` safety |
+| **curl repeats** | `--repeats N` — N curl attempts per strategy×domain (BC2 `REPEATS`, GP 1..10) |
+| **parallel repeats** | `--parallel-repeats` — concurrent curl attempts (BC2 `PARALLEL`, GP `repeat_parallel`) |
+| **repeats mode** | `fast` = stop on first PASS; `stable` = run all N like blockcheck2 |
+| **curl fan-out** | `--curl-parallel` — multi-domain per nfqws2 (GP `curl_parallelism`, **not** repeats) |
+| **strategy repeats** | `:repeats=N` in lua-desync line — nfqws2 fake packet count (matrix only) |

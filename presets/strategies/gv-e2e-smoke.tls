@@ -1,0 +1,6 @@
+# GV e2e smoke — googlevideo videoplayback probe (GV-1/3 validation)
+# YouTube GP-verified + Flowseal ALT2 baseline
+hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up:repeats=1
+hostfakesplit:nofake2:tcp_ts=-1000:repeats=1
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=max_ru:repeats=6:tcp_ts=-1000

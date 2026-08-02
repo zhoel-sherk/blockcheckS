@@ -9,7 +9,7 @@ import curl_cffi
 
 from blockchecks.checkers.tcp_tls import classify_http_status
 
-_HTTP3_PROBE_URL = "https://127.0.0.1:65535"
+_HTTP3_PROBE_URL = "https://cloudflare.com"
 
 
 @dataclass
@@ -29,7 +29,7 @@ def supports_http3() -> bool:
         curl_cffi.get(
             _HTTP3_PROBE_URL,
             http_version="v3only",
-            timeout=1,
+            timeout=3,
             allow_redirects=False,
         )
         return True
@@ -37,9 +37,9 @@ def supports_http3() -> bool:
         msg = str(exc).lower()
         if "unknown" in msg and "http" in msg:
             return False
-        return "unrecognized" not in msg and "not supported" not in msg
-    except Exception:
-        return False
+        if "not supported" in msg or "unrecognized" in msg:
+            return False
+        return True
 
 
 def check_http3(

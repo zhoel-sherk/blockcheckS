@@ -81,11 +81,16 @@ def _save_cache(endpoints: list[dict]) -> None:
         json.dump(data, f)
 
 
-async def _resolve_host(host: str) -> str | None:
+async def _resolve_host(host: str, sem: asyncio.Semaphore | None = None) -> str | None:
     """Resolve a single hostname to IPv4. Returns IP or None."""
     try:
-        loop = asyncio.get_event_loop()
-        addrs = await loop.getaddrinfo(host, 0, family=socket.AF_INET, type=socket.SOCK_DGRAM)
+        if sem:
+            async with sem:
+                loop = asyncio.get_event_loop()
+                addrs = await loop.getaddrinfo(host, 0, family=socket.AF_INET, type=socket.SOCK_DGRAM)
+        else:
+            loop = asyncio.get_event_loop()
+            addrs = await loop.getaddrinfo(host, 0, family=socket.AF_INET, type=socket.SOCK_DGRAM)
         if addrs:
             return addrs[0][4][0]
     except Exception:
@@ -94,18 +99,20 @@ async def _resolve_host(host: str) -> str | None:
 
 
 async def resolve_finland_range(
-    start: int = DNS_RANGE[0], end: int = DNS_RANGE[1]
+    start: int = DNS_RANGE[0], end: int = DNS_RANGE[1],
+    max_concurrent: int = 32,
 ) -> dict[str, list[str]]:
     """Bulk-resolve finland{N}.discord.gg in parallel.
 
     Returns: {ip: [list of matching hostnames]}
     """
+    sem = asyncio.Semaphore(max_concurrent)
     tasks = []
     hosts = []
     for n in range(start, end):
         host = f"finland{n}.discord.gg"
         hosts.append(host)
-        tasks.append(_resolve_host(host))
+        tasks.append(_resolve_host(host, sem=sem))
 
     results = await asyncio.gather(*tasks)
 

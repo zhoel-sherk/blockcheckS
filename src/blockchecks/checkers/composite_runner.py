@@ -33,6 +33,15 @@ DOMAINS = [
 ]
 
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
+from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS
+
+# Inject DPI_FAKE_PATTERNS into the subprocess code template
+_DPI_PATTERNS_LITERAL = repr(DPI_FAKE_PATTERNS)
+_CHECK_BODY = f"""
+    body = resp.content[:4096]
+    clen = len(resp.content)
+    content_ok = clen >= 300
+    dpi_fake = any(p in body.lower() for p in {_DPI_PATTERNS_LITERAL})"""
 
 CHECK_CODE = """
 import json, time
@@ -41,14 +50,10 @@ try:
     start = time.perf_counter()
     resp = curl_cffi.get(
         "https://{domain}", impersonate="chrome124", http_version=2,
-        timeout={timeout}, headers={"Accept":"text/html"},
+        timeout={timeout}, headers={{"Accept":"text/html"}},
         allow_redirects=False,
     )
-    body = resp.content[:4096]
-    clen = len(resp.content)
-    content_ok = clen >= 300
-    dpi_fake = any(p in body.lower() for p in (
-        b"roskomnadzor", b"rkn.gov.ru", b"utmblock", b"blockpage"))
+""" + _CHECK_BODY + """
     if dpi_fake: content_ok = False
     # Do not treat 301/302 as success when DPI fake page is present
     small_body_ok = (not dpi_fake) and resp.status_code in (

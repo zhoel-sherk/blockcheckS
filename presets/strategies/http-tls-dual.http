@@ -1,0 +1,4 @@
+# M6 HTTP+TLS dual-fake smoke — HTTP :80 side
+# Pair with presets/strategies/http-tls-dual.tls for full profile
+fake:blob=fake_default_http:repeats=6:tcp_ts=-1000
+fake:blob=fake_default_http:repeats=3:tcp_ts=-1000

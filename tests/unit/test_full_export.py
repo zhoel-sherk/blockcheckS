@@ -1,5 +1,6 @@
 """Unit tests for conf_builder + DB best/coverage + nfconf."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -209,5 +210,51 @@ async def test_export_configs_writes_files(tmp_path):
     assert "ISP_INTERFACE" not in raw
     assert "stun" in keen
     assert "discord_udp" in keen
+
+
+@pytest.mark.asyncio
+async def test_maybe_export_on_time_limit(tmp_path):
+    from argparse import Namespace
+
+    from blockchecks.engine.run_deadline import RunDeadline
+    from blockchecks.engine.run_finalize import maybe_export_configs
+
+    db_path = str(tmp_path / "state.db")
+    db = StateDB(db_path)
+    await db.init()
+    await db.log_tcp(
+        "lab1",
+        "discord.com",
+        "PASS",
+        80.0,
+        200,
+        config_path="fake:blob=stun:repeats=6:tcp_ts=-1000",
+    )
+    out = tmp_path / "output"
+    args = Namespace(
+        out_dir=str(out),
+        export_limit=2,
+        isp_interface="eth3",
+        prefix="/opt/etc/nfqws2",
+        mode="auto",
+        no_common_only=False,
+        no_export_on_stop=False,
+    )
+    stop = asyncio.Event()
+    stop.set()
+    deadline = RunDeadline(stop, budget_sec=60.0)
+    deadline.triggered = True
+    deadline.reason = "time_limit"
+
+    result = await maybe_export_configs(
+        db,
+        args,
+        primary="discord.com",
+        domains_file=None,
+        stop_set=True,
+        deadline=deadline,
+    )
+    assert result is not None
+    assert Path(result["keenetic"]).exists()
     user = Path(result["user_list"]).read_text(encoding="utf-8")
     assert "discord.com" in user

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blockchecks"
-version = "0.3.0"
+version = "1.0.0"
 description = "Lightspeed DPI strategy tester for zapret2/nfqws2"
 readme = "README.md"
 license = {text = "MIT"}
@@ -32,8 +32,9 @@ youtube = ["yt-dlp>=2024.1.0"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# configs/*.conf ship via MANIFEST.in (sdist). Use editable install for runtime.
-# See docs/package.md (ONB-7) — not the same as BLOB-1 presets/blobs/.
+# configs/*.conf and presets/* ship via MANIFEST.in (sdist).
+# For wheel installs (pip install .), editable install (-e) is required
+# so PROJECT_DIR resolves to the source tree. See docs/package.md (ONB-7).
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
