@@ -18,7 +18,7 @@ def should_export(
     args,
     *,
     stop_set: bool,
-    deadline: RunDeadline | None,
+    _deadline: RunDeadline | None,
     pass_count: int,
 ) -> bool:
     if getattr(args, "no_export_on_stop", False) and stop_set:
@@ -39,7 +39,7 @@ async def maybe_export_configs(
 ) -> dict[str, Any] | None:
     await store.flush()
     passes = await store.count_tcp_passes()
-    if not should_export(args, stop_set=stop_set, deadline=deadline, pass_count=passes):
+    if not should_export(args, stop_set=stop_set, _deadline=deadline, pass_count=passes):
         return None
     return await export_configs(
         store=store,
@@ -79,7 +79,7 @@ async def finalize_db_and_weights(
         await persist_adaptive_weights(store, aq_weights)
 
 
-def run_exit_code(stop_set: bool, deadline: RunDeadline | None, signal_hit: bool) -> int:
+def run_exit_code(_stop_set: bool, deadline: RunDeadline | None, signal_hit: bool) -> int:
     if signal_hit and not (deadline and deadline.triggered):
         return 130
     return 0

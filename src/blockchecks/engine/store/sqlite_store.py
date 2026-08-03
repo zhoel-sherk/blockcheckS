@@ -27,6 +27,11 @@ def matrix_fingerprint(
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+def fingerprint_mismatch(checkpoint_fp: str | None, current_fp: str) -> bool:
+    """True when a saved checkpoint fingerprint disagrees with the current matrix."""
+    return bool(checkpoint_fp and checkpoint_fp != current_fp)
+
+
 _WORKING_STATUSES = "('PASS','THROTTLED')"
 
 

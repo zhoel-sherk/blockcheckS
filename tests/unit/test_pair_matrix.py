@@ -30,6 +30,59 @@ async def test_pair_parallel(mock_runner):
         voice_port=5,
     )
     assert len(pairs) == 2
+    assert all(p.overall == "PASS" for p in pairs)
+    assert all(p.tcp_ok and p.udp_ok for p in pairs)
+    assert {p.udp_item.label for p in pairs} == {"u1", "u2"}
+
+
+@pytest.mark.asyncio
+async def test_pair_partial_when_udp_fails(mock_runner, monkeypatch):
+    def fail_udp(*a, **k):
+        return {"success": False, "latency_ms": 0.0, "detail": "timeout"}
+
+    monkeypatch.setattr("blockchecks.engine.async_runner._run_udp_check", fail_udp)
+    tcp_res = TcpTestResult(
+        item=StrategyItem(label="tcp_ok", strategy="fake:repeats=1"),
+        domain="d",
+        success=True,
+        latency_ms=50,
+    )
+    pairs = await mock_runner.test_pair_matrix(
+        [tcp_res],
+        [StrategyItem(label="u", strategy="f")],
+        "d",
+        voice_ip="1.2.3.4",
+        voice_port=5,
+    )
+    assert len(pairs) == 1
+    assert pairs[0].overall == "PARTIAL"
+    assert pairs[0].tcp_ok is True
+    assert pairs[0].udp_ok is False
+
+
+@pytest.mark.asyncio
+async def test_pair_fail_when_tcp_and_udp_fail(mock_runner, monkeypatch):
+    def fail_udp(*a, **k):
+        return {"success": False, "latency_ms": 0.0, "detail": "stun fail"}
+
+    monkeypatch.setattr("blockchecks.engine.async_runner._run_udp_check", fail_udp)
+    tcp_res = TcpTestResult(
+        item=StrategyItem(label="tcp_fail", strategy="fake:repeats=1"),
+        domain="d",
+        success=False,
+    )
+    pairs = await mock_runner.test_pair_matrix(
+        [tcp_res],
+        [StrategyItem(label="u", strategy="f")],
+        "d",
+        voice_ip="1.2.3.4",
+        voice_port=5,
+        udp_bypass=True,
+    )
+    assert len(pairs) == 1
+    assert pairs[0].overall == "FAIL"
+    assert pairs[0].tcp_ok is False
+    assert pairs[0].udp_ok is False
 
 
 @pytest.mark.asyncio

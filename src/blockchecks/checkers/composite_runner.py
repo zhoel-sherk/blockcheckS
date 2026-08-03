@@ -21,7 +21,8 @@ from blockchecks.engine.async_runner import (
     StrategyItem,
     TcpTestResult,
 )
-from blockchecks.engine.config import NFQUEUE_TCP, NFQUEUE_UDP, PYTHON_BIN as PYTHON
+from blockchecks.engine.config import NFQUEUE_TCP, NFQUEUE_UDP
+from blockchecks.engine.config import PYTHON_BIN as PYTHON
 from blockchecks.engine.nfqws2 import start_daemon
 from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
 
@@ -64,7 +65,9 @@ def normalize_domains(domains: list[str] | None) -> list[str]:
     return out
 
 
-async def run(config_path: str, domains: list[str] = None, parallel: int = 2, timeout: float = 5.0):
+async def run(
+    config_path: str, domains: list[str] = None, _parallel: int = 2, timeout: float = 5.0
+):
     domains = normalize_domains(domains)
 
     config_abs = os.path.abspath(config_path)

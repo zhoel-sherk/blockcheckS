@@ -93,9 +93,8 @@ def _validate_content(data: bytes, time_for_read: float, http_status: int = 200)
     warnings = []
     content_len = len(data)
 
-    if http_status not in SMALL_BODY_STATUSES:
-        if content_len < MIN_CONTENT_LENGTH:
-            warnings.append(f"body too small ({content_len}B < {MIN_CONTENT_LENGTH}B)")
+    if http_status not in SMALL_BODY_STATUSES and content_len < MIN_CONTENT_LENGTH:
+        warnings.append(f"body too small ({content_len}B < {MIN_CONTENT_LENGTH}B)")
 
     if time_for_read > 0:
         rate = content_len / time_for_read

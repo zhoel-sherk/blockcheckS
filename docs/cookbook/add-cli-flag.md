@@ -38,6 +38,10 @@ For machine-specific tool paths, prefer `BLOCKCHECKS_*` in
 ## 4. Tests
 
 - `tests/unit/test_package_structure.py` — `bs --help` exits 0
+- New flag must be **read** in the command handler (or shared helper). The quality gate
+  `pytest -m quality` → `test_dead_cli_flags` fails on unused dests.
+- Policy: `[tool.blockchecks.dead_flags]` in `pyproject.toml` (readers / allow / parity_dests).
+- Typed env/TOML: `[tool.blockchecks.settings]` + `engine/settings.py` (`BlockchecksSettings`).
 - Add regression in `test_audit_regressions.py` if flag affects resume/matrix
 
 ## 5. Docs

@@ -17,7 +17,7 @@ from blockchecks.engine.async_runner import (
 )
 from blockchecks.engine.config import PYTHON_BIN
 from blockchecks.engine.matrix_generator import MatrixGenerator
-from blockchecks.engine.store import Checkpoint, StateDB, matrix_fingerprint
+from blockchecks.engine.store import Checkpoint, StateDB, fingerprint_mismatch, matrix_fingerprint
 
 pytestmark = pytest.mark.unit
 
@@ -93,7 +93,7 @@ async def test_resume_skip_uses_completed_pair_keys(mock_runner, temp_db):
 
 @pytest.mark.asyncio
 async def test_fingerprint_mismatch_refuses_resume(temp_db: StateDB, tmp_path):
-    """bs helper: fp mismatch must error (not silent resume)."""
+    """Production helper must refuse resume when matrix fingerprint drifts."""
     fp_old = matrix_fingerprint(["a"], ["b"], "fast", 10)
     fp_new = matrix_fingerprint(["a", "x"], ["b"], "fast", 10)
     assert fp_old != fp_new
@@ -106,9 +106,10 @@ async def test_fingerprint_mismatch_refuses_resume(temp_db: StateDB, tmp_path):
     )
     cp = await temp_db.latest_checkpoint()
     assert cp.fingerprint == fp_old
-    # Simulate bs.py refuse logic
-    refused = bool(cp.fingerprint and cp.fingerprint != fp_new)
-    assert refused is True
+    assert fingerprint_mismatch(cp.fingerprint, fp_new) is True
+    assert fingerprint_mismatch(cp.fingerprint, fp_old) is False
+    assert fingerprint_mismatch("", fp_new) is False
+    assert fingerprint_mismatch(None, fp_new) is False
 
 
 @pytest.mark.asyncio
@@ -122,7 +123,13 @@ async def test_generate_tcp_run_set_all_sources():
         max_count=20,
         run_set=set(),
     )
-    assert isinstance(items, list)
+    assert len(items) >= 1
+    labels = [i.label for i in items]
+    assert len(labels) == len(set(labels))
+    for item in items:
+        assert item.strategy.strip()
+        assert item.label.strip()
+        assert item.protocol in {"tls", "tls12", "tls13", "http", "tcp", ""}
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,40 @@ from blockchecks.engine.store import matrix_fingerprint
 pytestmark = pytest.mark.unit
 
 
-def test_tcp_tls_no_empty_user_agent():
+def test_tcp_tls_no_empty_user_agent(monkeypatch):
+    """Omit empty UA so curl_cffi impersonation supplies a real browser UA."""
+    captured: dict = {}
+
+    class FakeResp:
+        status_code = 200
+        headers = {}
+        content = b"ok"
+        http_version = "2"
+
+    class FakeSession:
+        def __init__(self, *a, **k):
+            captured["session_kwargs"] = k
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, **k):
+            return FakeResp()
+
+    monkeypatch.setattr("curl_cffi.Session", FakeSession)
+    monkeypatch.setattr(
+        "blockchecks.checkers.tcp_tls._apply_read_timeout",
+        lambda *a, **k: None,
+    )
+    result = check_tls("example.com", timeout=1.0, verify_content=False)
+    assert result.success is True
+    hdrs = captured["session_kwargs"].get("headers") or {}
+    assert "User-Agent" not in hdrs
+    assert hdrs.get("Accept")
+    # Footgun: never force empty UA string
     src = inspect.getsource(check_tls)
     assert '"User-Agent": ""' not in src
     assert "'User-Agent': ''" not in src

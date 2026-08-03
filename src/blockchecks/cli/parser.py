@@ -88,7 +88,9 @@ def add_curl_fanout_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_curl_repeats_args(parser: argparse.ArgumentParser) -> None:
+def add_curl_repeats_args(
+    parser: argparse.ArgumentParser, *, include_quic_timeout: bool = False
+) -> None:
     """BC2-4: blockcheck2-style curl repeats per strategy."""
     g = parser.add_argument_group("curl repeats")
     g.add_argument(
@@ -109,12 +111,13 @@ def add_curl_repeats_args(parser: argparse.ArgumentParser) -> None:
         default="fast",
         help="fast=stop on first PASS; stable=run all N like blockcheck2 (PASS if any)",
     )
-    g.add_argument(
-        "--quic-timeout",
-        type=float,
-        default=8.0,
-        help="HTTP/3 curl timeout (BC2-10, default 8s)",
-    )
+    if include_quic_timeout:
+        g.add_argument(
+            "--quic-timeout",
+            type=float,
+            default=8.0,
+            help="HTTP/3 curl timeout (BC2-10, default 8s)",
+        )
 
 
 def add_domain_filter_args(parser: argparse.ArgumentParser) -> None:
@@ -154,8 +157,10 @@ def add_family_gate_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_secure_dns_args(parser: argparse.ArgumentParser) -> None:
-    """CLI flags for Phase 9 secure DNS (SD5)."""
+def add_secure_dns_args(
+    parser: argparse.ArgumentParser, *, include_preflight: bool = False
+) -> None:
+    """CLI flags for Phase 9 secure DNS (SD5); optional preflight group."""
     g = parser.add_argument_group("secure DNS")
     g.add_argument(
         "--no-secure-dns",
@@ -169,6 +174,8 @@ def add_secure_dns_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Continue when DNS hijack detected",
     )
+    if not include_preflight:
+        return
     g = parser.add_argument_group("preflight")
     g.add_argument("--skip-ip-block", action="store_true", help="Skip IP-block cross-test")
     g.add_argument(
@@ -345,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Buffer N DB writes before flush (0=immediate, default)",
     )
     scan.add_argument("--resume", action="store_true")
-    add_secure_dns_args(scan)
+    add_secure_dns_args(scan, include_preflight=True)
     add_system_deps_args(scan)
     add_curl_repeats_args(scan)
     add_family_gate_args(scan)
@@ -360,14 +367,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Export best per-domain instead of COMMON intersection",
     )
     scan.add_argument("--tcp-sources", default="")
-    scan.add_argument("--ip", default="35.217.5.42", help=argparse.SUPPRESS)
-    scan.add_argument("--port", type=int, default=50006, help=argparse.SUPPRESS)
-    scan.add_argument("--udp-timeout", type=float, default=3.0, help=argparse.SUPPRESS)
-    scan.add_argument("--udp-bypass", action="store_true", help=argparse.SUPPRESS)
-    scan.add_argument(
-        "--auto-discover", nargs="?", const=5, type=int, default=None, help=argparse.SUPPRESS
-    )
-    scan.add_argument("--full-voice", action="store_true", help=argparse.SUPPRESS)
     scan.add_argument(
         "--nfqws2-debug",
         nargs="?",
@@ -454,7 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Buffer N DB writes before flush (0=immediate, default)",
     )
     pair.add_argument("--resume", action="store_true")
-    add_secure_dns_args(pair)
+    add_secure_dns_args(pair, include_preflight=True)
     add_system_deps_args(pair)
     add_curl_repeats_args(pair)
     add_family_gate_args(pair)
@@ -468,7 +467,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Export best per-domain instead of COMMON intersection",
     )
-    pair.add_argument("--ns")
     pair.add_argument(
         "--nfqws2-debug",
         nargs="?",
@@ -522,12 +520,13 @@ def dispatch(args: argparse.Namespace) -> int:
         os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
 
     live = {"tcp", "udp", "scan", "pair", "composite", "bench-settle"}
-    if args.command in live:
-        # list-presets / help paths still need args; skip only when listing presets
-        if not (args.command in {"scan", "pair"} and getattr(args, "list_presets", False)):
-            code = ensure_system_deps_or_exit(args)
-            if code:
-                return code
+    # Skip deps when listing presets under scan/pair.
+    if args.command in live and not (
+        args.command in {"scan", "pair"} and getattr(args, "list_presets", False)
+    ):
+        code = ensure_system_deps_or_exit(args)
+        if code:
+            return code
 
     def _scan(a: argparse.Namespace) -> int:
         if getattr(a, "list_presets", False):
@@ -541,14 +540,17 @@ def dispatch(args: argparse.Namespace) -> int:
             )
         a.generate = bool(a.generate)
         a.tcp_only = True
-        a.full_voice = False
-        a.udp_bypass = False
-        if not hasattr(a, "auto_discover") or a.auto_discover is False:
-            a.auto_discover = None
         a.udp_sources = ""
         a.configs_dir = CONFIGS_DIR
         a.config = None
         a.udp_config = None
+        # Pair-only attrs not on scan CLI — set safe defaults for cmd_pair.
+        a.full_voice = False
+        a.udp_bypass = False
+        a.auto_discover = None
+        a.ip = DEFAULT_VOICE_IP
+        a.port = DEFAULT_VOICE_PORT
+        a.udp_timeout = 3.0
         return asyncio.run(cmd_pair(a))
 
     def _pair(a: argparse.Namespace) -> int:
@@ -593,6 +595,19 @@ def dispatch(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point — pydantic CliApp (flag defs still from build_parser helpers)."""
+    import os
+
+    # Escape hatch for bisect / legacy automation
+    if os.environ.get("BLOCKCHECKS_ARGPARSE", "").strip() in ("1", "true", "yes"):
+        return _main_argparse(argv)
+
+    from blockchecks.cli.cliapp import main as cliapp_main
+
+    return cliapp_main(argv)
+
+
+def _main_argparse(argv: list[str] | None = None) -> int:
     from blockchecks.cli.user_config import (
         apply_parser_defaults,
         finalize_store_args,
@@ -625,9 +640,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         sys.argv = old_argv
 
-    if args.command is None:
-        parser.print_help()
-        return 1
     finalize_store_args(args, user_cfg)
     from blockchecks.engine.run_deadline import validate_time_limit_args
 

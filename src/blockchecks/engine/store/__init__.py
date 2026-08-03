@@ -7,7 +7,11 @@ from typing import Any, Protocol, runtime_checkable
 
 from blockchecks.engine.paths import DEFAULT_DB_PATH, expand_path
 from blockchecks.engine.store.models import Checkpoint
-from blockchecks.engine.store.sqlite_store import SqliteRunStore, matrix_fingerprint
+from blockchecks.engine.store.sqlite_store import (
+    SqliteRunStore,
+    fingerprint_mismatch,
+    matrix_fingerprint,
+)
 
 
 @runtime_checkable
@@ -86,6 +90,7 @@ __all__ = [
     "RunStateStore",
     "SqliteRunStore",
     "StateDB",
+    "fingerprint_mismatch",
     "matrix_fingerprint",
     "open_run_store",
 ]

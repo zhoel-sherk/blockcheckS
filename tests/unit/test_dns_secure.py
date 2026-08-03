@@ -17,9 +17,23 @@ from blockchecks.checkers.dns_secure import (
 
 
 @pytest.mark.unit
-def test_parse_dns_response_extracts_a_records():
-    # Minimal synthetic response is complex; test empty buffer
+def test_parse_dns_response_empty_buffer():
     assert _parse_dns_response(b"") == []
+    assert _parse_dns_response(b"\x00" * 11) == []
+
+
+@pytest.mark.unit
+def test_parse_dns_response_extracts_a_records():
+    """Crafted wire response with one A record → exact IP list."""
+    import struct
+
+    # Header: qd=1, an=1
+    header = struct.pack("!HHHHHH", 0x4242, 0x8180, 1, 1, 0, 0)
+    qname = b"\x07example\x03com\x00"
+    question = qname + struct.pack("!HH", 1, 1)  # A IN
+    # Answer: pointer to qname at offset 12, type A, class IN, ttl, rdlength=4, 1.2.3.4
+    answer = b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4) + bytes((1, 2, 3, 4))
+    assert _parse_dns_response(header + question + answer) == ["1.2.3.4"]
 
 
 @pytest.mark.unit

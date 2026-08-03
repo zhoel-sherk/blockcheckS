@@ -32,7 +32,7 @@ def test_build_keenetic_has_required_keys():
         isp_interface="eth3",
         domains=["discord.com", "youtube.com"],
     )
-    assert 'ISP_INTERFACE="eth3"' in text or "ISP_INTERFACE=" in text
+    assert 'ISP_INTERFACE="eth3"' in text
     assert "NFQWS_BASE_ARGS=" in text
     assert "NFQWS_ARGS=" in text
     assert "NFQWS_ARGS_QUIC=" in text

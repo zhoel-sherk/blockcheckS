@@ -35,7 +35,22 @@ export BLOCKCHECKS_BLOBS=/opt/zapret2/blobs
 
 ```bash
 ruff check src tests
-pytest -m "not integration" -q
+pytest -m "not integration and not quality and not mutation" -q
+```
+
+Static quality gates (policy in `pyproject.toml`: vulture, McCabe/C90, SIM, ARG, archon, AST, dead CLI flags):
+
+```bash
+pytest -m quality -q
+```
+
+CLI entry uses **pydantic CliApp** (`blockchecks.cli.cliapp`); flag definitions remain in `cli/parser.py` `add_*` helpers. Legacy argparse entry: `BLOCKCHECKS_ARGPARSE=1`.
+
+Optional mutation testing (scoped via `[tool.mutmut]`, slow; also CI `workflow_dispatch`):
+
+```bash
+./scripts/mutmut_gate.sh
+# or: pytest -m mutation
 ```
 
 Optional (Linux + nfqws2 + sudo):
@@ -58,12 +73,14 @@ See [`.gitignore`](.gitignore). Never commit:
 - `state.db`, `logs/`, `output/`
 - tokens, `settings.ini`, credentials
 - `*.egg-info/`, `.venv/`
+- `.mutmut-cache/`, mutmut HTML reports
 
 ## Where to change what
 
 | Task | Start here |
 |------|------------|
 | Architecture / data flow | [docs/architecture.md](docs/architecture.md) |
+| Quality thresholds / layers | [`pyproject.toml`](pyproject.toml) (`tool.blockchecks.*`, `tool.vulture`, `tool.mutmut`) |
 | Add a checker | [docs/cookbook/add-checker.md](docs/cookbook/add-checker.md) |
 | Add a strategy family | [docs/cookbook/add-generator.md](docs/cookbook/add-generator.md) |
 | Add a CLI flag | [docs/cookbook/add-cli-flag.md](docs/cookbook/add-cli-flag.md) |
@@ -74,7 +91,8 @@ See [`.gitignore`](.gitignore). Never commit:
 ## PR checklist
 
 - [ ] `ruff check src tests` passes
-- [ ] `pytest -m "not integration"` passes
+- [ ] `pytest -m "not integration and not quality and not mutation"` passes
+- [ ] `pytest -m quality` passes (or CI quality job)
 - [ ] Docs updated if CLI or public API changed
 - [ ] No secrets, `state.db`, or machine-specific paths
 

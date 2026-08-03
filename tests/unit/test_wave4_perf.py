@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from blockchecks.engine.config import effective_default_pool_size
-from blockchecks.engine.system_deps import check_nfqws2_arch, _elf_machine
+from blockchecks.engine.system_deps import _elf_machine, check_nfqws2_arch
 
 
 @pytest.mark.unit
@@ -77,9 +77,22 @@ def test_check_nfqws2_arch_ok_on_matching(monkeypatch, tmp_path):
 
 @pytest.mark.unit
 def test_async_uses_nfqueue_constants():
+    from blockchecks.engine.async_runner import (
+        _build_inline_nfqws_lines,
+        _build_quic_nfqws_lines,
+    )
+    from blockchecks.engine.config import NFQUEUE_TCP, NFQUEUE_UDP
+
+    assert NFQUEUE_TCP != NFQUEUE_UDP
+    tcp_lines = _build_inline_nfqws_lines("fake:repeats=1", "tls12")
+    assert f"--qnum={NFQUEUE_TCP}" in tcp_lines
+    assert f"--qnum={NFQUEUE_UDP}" not in tcp_lines
+    quic_lines = _build_quic_nfqws_lines("fake:blob=quic_initial:repeats=1")
+    assert f"--qnum={NFQUEUE_UDP}" in quic_lines
+    # Footgun: never hardcode queue numbers in source
     src = Path("src/blockchecks/engine/async_runner.py").read_text(encoding="utf-8")
-    assert "NFQUEUE_TCP" in src and "NFQUEUE_UDP" in src
     assert '"--qnum=200"' not in src
+    assert "'--qnum=200'" not in src
 
 
 @pytest.mark.unit

@@ -15,7 +15,11 @@ RESET = Style.RESET_ALL
 
 
 def cmd_udp(args):
-    from blockchecks.checkers.voice_dns import check_discover_mutex, discover_dns_alive
+    from blockchecks.checkers.voice_dns import (
+        check_discover_mutex,
+        discover_dns_alive,
+        positive_discover_count,
+    )
 
     mutex_err = check_discover_mutex(
         getattr(args, "discover_dns", None),
@@ -42,9 +46,11 @@ def cmd_udp(args):
     explicit_ip = voice_ip != DEFAULT_VOICE_IP
     discover_dns = getattr(args, "discover_dns", None)
     auto_discover = getattr(args, "auto_discover", None)
+    dns_count = positive_discover_count(discover_dns)
+    auto_count = positive_discover_count(auto_discover)
 
-    if not explicit_ip and discover_dns is not None and int(discover_dns) > 0:
-        count = int(discover_dns)
+    if not explicit_ip and dns_count is not None:
+        count = dns_count
         print(f"\n  {CYAN}DNS-alive discovering {count} voice endpoints...{RESET}")
         try:
             eps = asyncio.run(
@@ -69,8 +75,8 @@ def cmd_udp(args):
         except Exception as e:
             print(f"  {YELLOW}discover-dns error: {e}{RESET}")
             voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
-    elif not explicit_ip and auto_discover is not None and int(auto_discover) > 0:
-        count = int(auto_discover)
+    elif not explicit_ip and auto_count is not None:
+        count = auto_count
         print(f"\n  {CYAN}Auto-discovering {count} voice endpoints...{RESET}")
         try:
             from blockchecks.checkers.voice_discovery import discover_multiple

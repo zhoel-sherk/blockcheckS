@@ -88,22 +88,45 @@ async def test_db_migrates_read_rate_column(tmp_path):
 
 
 def test_scan_auto_discover_none_skips():
-    """None/False must not call discover; only int > 0 does."""
-    # Mirror the guard used in cmd_scan / cmd_pair
-    for auto_discover in (None, False):
-        should = auto_discover is not None and int(auto_discover) > 0
-        assert should is False
-    assert (5 != None and 5 > 0) is True
+    """None/False/0 must not enable discovery; only positive int does."""
+    from blockchecks.checkers.voice_dns import positive_discover_count
 
-    # scan path must normalize False → None (never leave False for int())
-    pair_src = (
-        Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "cli" / "commands" / "pair.py"
+    assert positive_discover_count(None) is None
+    assert positive_discover_count(False) is None
+    assert positive_discover_count(0) is None
+    assert positive_discover_count("0") is None
+    assert positive_discover_count(5) == 5
+    assert positive_discover_count("3") == 3
+
+    phases = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "blockchecks"
+        / "cli"
+        / "commands"
+        / "pair_phases.py"
     )
-    parser_src = Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "cli" / "parser.py"
-    pair_text = pair_src.read_text(encoding="utf-8")
-    parser_text = parser_src.read_text(encoding="utf-8")
-    assert "args.auto_discover = False" not in parser_text or "auto_discover = None" in parser_text
-    assert "int(auto_discover) > 0" in pair_text
+    phases_text = phases.read_text(encoding="utf-8")
+    assert "positive_discover_count" in phases_text
+
+
+@pytest.mark.asyncio
+async def test_auto_discover_gates_discover_multiple_calls():
+    """Only positive auto_discover count invokes discovery (pair/udp gate)."""
+    from blockchecks.checkers.voice_dns import positive_discover_count
+
+    calls: list[int] = []
+
+    async def fake_discover(count, use_dns=True):
+        calls.append(count)
+        return [{"ip": "1.2.3.4", "port": 50000, "hostname": "x"}]
+
+    for auto_discover in (None, False, 0, 2):
+        count = positive_discover_count(auto_discover)
+        if count is not None:
+            await fake_discover(count, use_dns=True)
+
+    assert calls == [2]
 
 
 @pytest.mark.asyncio
@@ -131,10 +154,10 @@ async def test_protocol_forwarded_to_generate():
 
 def test_preset_domains_used():
     """cmd_pair uses preset_domains when -d omitted."""
-    src = (
-        Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "cli" / "commands" / "pair.py"
+    root = Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "cli" / "commands"
+    text = (root / "pair.py").read_text(encoding="utf-8") + (root / "pair_phases.py").read_text(
+        encoding="utf-8"
     )
-    text = src.read_text(encoding="utf-8")
     assert "preset_domains if preset_domains else [args.domain]" in text
     assert "ERROR: --domain or --preset required" in text
 
@@ -325,13 +348,14 @@ async def test_fake_multisplit_family_m1():
     gen = StandardGenerator(strategy_types=["fake_multisplit"])
     items = await gen.generate("tls12", scan_level="fast", max_count=50)
     assert items
-    sample = items[0].strategy
-    assert "fake:blob=" in sample
-    assert "multisplit:" in sample
-    assert "seqovl_pattern=" in sample
-    fake_blob = sample.split("fake:blob=")[1].split(":")[0]
-    pattern_blob = sample.split("seqovl_pattern=")[1].split(":")[0]
-    assert fake_blob != pattern_blob
+    assert len({i.label for i in items}) == len(items)
+    for sample in items:
+        assert "fake:blob=" in sample.strategy
+        assert "multisplit:" in sample.strategy
+        assert "seqovl_pattern=" in sample.strategy
+        fake_blob = sample.strategy.split("fake:blob=")[1].split(":")[0]
+        pattern_blob = sample.strategy.split("seqovl_pattern=")[1].split(":")[0]
+        assert fake_blob != pattern_blob
 
 
 @pytest.mark.asyncio

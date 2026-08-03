@@ -28,7 +28,6 @@ from blockchecks.engine.config import (
     NFQUEUE_UDP,
     PYTHON_BIN,
     get_lua_init_scripts,
-    get_nfqws2_bin,
 )
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.netns_pool import NetNsPool

@@ -6,15 +6,12 @@ import os
 from dataclasses import dataclass
 
 from blockchecks.engine.config import PROJECT_DIR
+from blockchecks.engine.preset_paths import RESERVED_DOMAIN_FILES, resolve_domain_preset
 
 DOMAINS_PRESET_DIR = os.path.join(PROJECT_DIR, "presets", "domains")
 DEFAULT_DOMAINS_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage-tcp.txt")
 FULL_COVERAGE_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage.txt")
 DENYLIST_FILE = os.path.join(DOMAINS_PRESET_DIR, "denylist.txt")
-
-# Not selectable as a domain preset (filter list only).
-RESERVED_DOMAIN_FILES = frozenset({"denylist.txt"})
-
 
 @dataclass(frozen=True)
 class DenylistEntry:
@@ -31,9 +28,7 @@ class DomainLoadResult:
 
 
 def preset_path(name: str) -> str:
-    """Path to presets/domains/{name}.txt (path-jailed; see cli.presets)."""
-    from blockchecks.cli.presets import resolve_domain_preset
-
+    """Path to presets/domains/{name}.txt (path-jailed; see engine.preset_paths)."""
     return str(resolve_domain_preset(name))
 
 

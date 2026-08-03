@@ -37,6 +37,16 @@ def resolve_store_path(value: str | None, cfg: dict[str, Any], key: str, default
 
 def apply_parser_defaults(parser: argparse.ArgumentParser, cfg: dict[str, Any]) -> None:
     """Merge config.toml defaults into argparse (lower priority than CLI)."""
+    from blockchecks.engine.settings import apply_settings_env, clear_settings_cache, load_settings
+
+    clear_settings_cache()
+    # Ensure [secure_dns] / [tools] from cfg path are visible via settings overlay.
+    settings = load_settings()
+    apply_settings_env(settings)
+    from blockchecks.engine.config import refresh_secure_dns_from_env
+
+    refresh_secure_dns_from_env()
+
     defaults: dict[str, Any] = {}
     paths = cfg.get("paths") or {}
     if isinstance(paths, dict):
@@ -60,6 +70,14 @@ def apply_parser_defaults(parser: argparse.ArgumentParser, cfg: dict[str, Any]) 
         from blockchecks.engine.config import apply_tool_paths
 
         apply_tool_paths()
+    # Apply secure_dns defaults onto argparse when flags absent
+    secure = cfg.get("secure_dns") or {}
+    if (
+        isinstance(secure, dict)
+        and secure.get("doh_server")
+        and "doh_server" not in defaults
+    ):
+        defaults["doh_server"] = str(secure["doh_server"])
     if defaults:
         parser.set_defaults(**defaults)
 

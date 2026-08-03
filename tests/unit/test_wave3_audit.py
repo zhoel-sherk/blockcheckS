@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -62,8 +61,10 @@ def test_doh_rotate_on_failure(monkeypatch):
 
 @pytest.mark.unit
 def test_run_prolog_passes_verify_content():
+    from blockchecks.checkers.tcp_tls import TlsResult
+
     with patch("blockchecks.engine.preflight.check_tls") as tls:
-        tls.return_value = MagicMock(success=True)
+        tls.return_value = TlsResult(domain="iana.org", success=True, http_status=200)
         assert run_prolog("iana.org", verify_content=True) is True
         assert tls.call_args.kwargs["verify_content"] is True
 

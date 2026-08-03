@@ -60,18 +60,54 @@ def test_prepare_googlevideo_probe_ok(monkeypatch):
 
 
 def test_run_curl_probe_googlevideo_request_shape():
-    """googlevideo probe must set Range header and disable ECH (no options= kwarg)."""
+    """googlevideo probe must set Range header and disable ECH via setopt (not options=)."""
+    from blockchecks.engine.config import CURLOPT_ECH
+
+    setopts: list[tuple] = []
+    captured: dict = {}
+
+    class FakeCurl:
+        def setopt(self, opt, value):
+            setopts.append((opt, value))
+
+    class FakeSession:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+            self.curl = FakeCurl()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, timeout=None):
+            captured["url"] = url
+            captured["timeout"] = timeout
+            resp = MagicMock()
+            resp.status_code = 206
+            resp.content = b"x" * 400
+            resp.headers = {}
+            return resp
+
     req = CurlProbeRequest(
         domain="googlevideo.com",
         curl_url="https://cdn.googlevideo.com/videoplayback?x=1",
         resolve_name="cdn.googlevideo.com",
+        resolved_ip="9.9.9.9",
         googlevideo=True,
         disable_ech=True,
+        timeout=5.0,
     )
-    assert req.googlevideo is True
-    assert req.curl_url is not None
-    assert "videoplayback" in req.curl_url
-    assert googlevideo_range_header().startswith("bytes=0-")
+    with patch("curl_cffi.Session", FakeSession):
+        result = run_curl_probe(req)
+
+    assert result.http_code == 206
+    assert captured["kwargs"]["headers"]["Range"] == googlevideo_range_header()
+    assert captured["kwargs"]["allow_redirects"] is False
+    assert captured["url"] == req.curl_url
+    assert any(v == "" for o, v in setopts if "ECH" in str(o) or o == CURLOPT_ECH)
+    assert any("cdn.googlevideo.com:443:9.9.9.9" in str(v) for o, v in setopts)
 
 
 def test_run_curl_probe_slow_rate_fails():

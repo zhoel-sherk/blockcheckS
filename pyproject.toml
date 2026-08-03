@@ -14,6 +14,7 @@ dependencies = [
     "colorama>=0.4.6",
     "aiosqlite>=0.20.0",
     "tomli>=2.0.0; python_version < '3.11'",
+    "pydantic-settings>=2.0",
 ]
 
 [project.scripts]
@@ -26,6 +27,9 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.9.0",
+    "vulture>=2.14",
+    "pytest-archon>=0.0.6",
+    "mutmut>=3.6",
 ]
 discovery = ["aiohttp-socks>=0.11.0", "aiohttp>=3.9"]
 youtube = ["yt-dlp>=2024.1.0"]
@@ -44,8 +48,10 @@ markers = [
     "unit: no root/netns",
     "integration: needs linux+sudo+nfqws2",
     "slow: long-running",
+    "quality: static gates (AST, vulture, mccabe, SIM, archon)",
+    "mutation: mutmut survivors gate (slow)",
 ]
-addopts = "-m \"not integration\""
+addopts = "-m \"not integration and not quality and not mutation\""
 
 [tool.ruff]
 target-version = "py310"
@@ -62,6 +68,8 @@ select = [
     "UP",  # pyupgrade
     "B",   # bugbear
     "SIM", # simplify
+    "C90", # mccabe complexity
+    "ARG", # unused arguments
 ]
 ignore = [
     "E501",   # line length — formatter / long CLI strings
@@ -74,14 +82,146 @@ ignore = [
     "UP007",  # keep Optional[X] where already used
 ]
 
+[tool.ruff.lint.mccabe]
+# Soft cap for new code; known hotspots ignored per-file below (ratchet later).
+max-complexity = 25
+
+[tool.ruff.lint.flake8-unused-arguments]
+ignore-variadic-names = true
+
 [tool.ruff.lint.per-file-ignores]
 "src/blockchecks/cli/parser.py" = ["E402"]
 "src/blockchecks/engine/async_runner.py" = ["E402"]
+"src/blockchecks/engine/generators/*.py" = ["C901", "ARG"]
 "src/blockchecks/checkers/composite_runner.py" = ["E402"]
-"tests/conftest.py" = ["E402"]
+"tests/**" = ["ARG"]
+"tests/conftest.py" = ["E402", "ARG"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+# ── Quality policy (pytest -m quality reads these) ───────────────────
+
+[tool.blockchecks.ruff_quality]
+select = ["SIM", "C90", "ARG", "B006", "B007", "UP006", "UP007", "UP045"]
+# Must restate ignores: CLI --select re-enables codes listed in [tool.ruff.lint].ignore
+ignore = ["SIM105", "SIM102", "SIM108", "SIM117", "UP007"]
+
+[tool.blockchecks.ast_quality]
+max_nesting = 5
+max_elif = 3
+nest_exempt_parts = ["/generators/"]
+target_dirs = ["src"]
+
+[tool.vulture]
+paths = ["src/blockchecks", "vulture_whitelist.py"]
+min_confidence = 80
+ignore_names = [
+    "main",
+    "visit_*",
+    "cmd_*",
+    "do_*",
+    "kwargs",
+]
+ignore_decorators = ["@pytest.fixture"]
+
+[tool.mutmut]
+source_paths = [
+    "src/blockchecks/engine/store/sqlite_store.py",
+    "src/blockchecks/engine/nfqws2_settle.py",
+    "src/blockchecks/checkers/dns_secure.py",
+    "src/blockchecks/checkers/voice_dns.py",
+]
+pytest_add_cli_args_test_selection = [
+    "-m", "unit and not quality and not mutation",
+    "tests/unit",
+]
+pytest_add_cli_args = ["-q"]
+do_not_mutate_patterns = ["logger\\.", "raise "]
+
+[tool.blockchecks.architecture]
+package = "blockchecks"
+
+[[tool.blockchecks.architecture.rules]]
+name = "checkers_no_cli"
+match = "blockchecks.checkers*"
+should_not_import = ["blockchecks.cli*"]
+
+[[tool.blockchecks.architecture.rules]]
+name = "store_leaf"
+match = "blockchecks.engine.store*"
+should_not_import = [
+    "blockchecks.cli*",
+    "blockchecks.checkers*",
+    "blockchecks.bs",
+    "blockchecks.main",
+]
+
+[[tool.blockchecks.architecture.rules]]
+name = "generators_leaf"
+match = "blockchecks.engine.generators*"
+should_not_import = ["blockchecks.cli*", "blockchecks.checkers*"]
+
+[[tool.blockchecks.architecture.rules]]
+name = "engine_no_cli"
+match = "blockchecks.engine*"
+should_not_import = ["blockchecks.cli*"]
+
+[[tool.blockchecks.architecture.rules]]
+name = "checkers_no_entry"
+match = "blockchecks.checkers*"
+should_not_import = ["blockchecks.bs", "blockchecks.main"]
+
+[[tool.blockchecks.architecture.rules]]
+name = "engine_no_entry"
+match = "blockchecks.engine*"
+should_not_import = ["blockchecks.bs", "blockchecks.main"]
+
+# ── Dead CLI flags + settings policy ─────────────────────────────────
+
+[tool.blockchecks.dead_flags]
+ignore_dests = ["help", "command", "func"]
+allow = []
+parity_dests = [
+    "domain",
+    "timeout",
+    "parallel",
+    "scan_level",
+    "no_secure_dns",
+    "doh_server",
+    "resume",
+    "export_limit",
+]
+# command → source files that must mention each dest (plus shared_readers)
+shared_readers = [
+    "src/blockchecks/cli/parser.py",
+    "src/blockchecks/cli/user_config.py",
+    "src/blockchecks/engine/preflight.py",
+    "src/blockchecks/engine/run_finalize.py",
+    "src/blockchecks/engine/run_deadline.py",
+    "src/blockchecks/engine/system_deps.py",
+    "src/blockchecks/checkers/curl_probe.py",
+    "src/blockchecks/checkers/dns_secure.py",
+]
+[tool.blockchecks.dead_flags.command_readers]
+tcp = ["src/blockchecks/cli/commands/tcp.py"]
+udp = ["src/blockchecks/cli/commands/udp.py"]
+scan = [
+    "src/blockchecks/cli/commands/pair.py",
+    "src/blockchecks/cli/commands/pair_phases.py",
+    "src/blockchecks/cli/parser.py",
+]
+pair = [
+    "src/blockchecks/cli/commands/pair.py",
+    "src/blockchecks/cli/commands/pair_phases.py",
+]
+composite = ["src/blockchecks/checkers/composite_runner.py", "src/blockchecks/cli/parser.py"]
+bench-settle = ["src/blockchecks/cli/commands/bench_settle.py"]
+full = ["src/blockchecks/main.py", "src/blockchecks/main_phases.py"]
+
+[tool.blockchecks.settings]
+env_prefix = "BLOCKCHECKS_"
+required_fields = ["nfqws2", "blobs", "pool"]

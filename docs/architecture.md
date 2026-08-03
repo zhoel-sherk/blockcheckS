@@ -182,7 +182,7 @@ lookups. `--no-secure-dns` skips DoH.
 - `blockchecks.engine.nfqws2.start_daemon`, `Nfqws2Manager`
 - `blockchecks.checkers.TlsResult`, `check_tls`
 - `conf_builder.build_keenetic_conf`, `build_raw_conf`
-- `cli.presets.resolve_domain_preset`, `resolve_strategy_preset`
+- `engine.preset_paths.resolve_domain_preset`, `resolve_strategy_preset` (CLI re-exports)
 
 **Internal (do not import from outside):**
 

@@ -77,7 +77,53 @@ def test_check_http3_success():
     session.__exit__.return_value = False
     session.head.return_value = resp
 
-    with patch("blockchecks.checkers.http3.curl_cffi.Session", return_value=session):
+    with patch("blockchecks.checkers.http3.curl_cffi.Session", return_value=session) as Sess:
         result = check_http3("example.com", timeout=5.0)
     assert result.success is True
     assert result.http_status == 200
+    assert Sess.call_args.kwargs.get("http_version") == "v3only"
+    session.head.assert_called_once()
+
+
+def test_check_http3_non_2xx_fails():
+    resp = MagicMock()
+    resp.status_code = 503
+    resp.headers = {}
+    resp.http_version = "v3"
+
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.__exit__.return_value = False
+    session.head.return_value = resp
+
+    with patch("blockchecks.checkers.http3.curl_cffi.Session", return_value=session):
+        result = check_http3("example.com", timeout=5.0)
+    assert result.success is False
+    assert result.http_status == 503
+    assert result.error == "http 503"
+
+
+def test_check_http3_requests_error():
+    from curl_cffi.requests import RequestsError
+
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.__exit__.return_value = False
+    session.head.side_effect = RequestsError("quic timeout")
+
+    with patch("blockchecks.checkers.http3.curl_cffi.Session", return_value=session):
+        result = check_http3("example.com", timeout=5.0)
+    assert result.success is False
+    assert result.error == "timeout"
+
+
+def test_supports_http3_false_when_not_supported():
+    from curl_cffi.requests import RequestsError
+
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.__exit__.return_value = False
+    session.get.side_effect = RequestsError("option not supported")
+
+    with patch("blockchecks.checkers.http3.curl_cffi.Session", return_value=session):
+        assert supports_http3() is False

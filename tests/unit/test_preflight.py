@@ -23,18 +23,55 @@ def test_find_host_nfqws2_pids_parses_pgrep():
 
 @pytest.mark.unit
 def test_unblocked_baseline_ok():
-    with patch("blockchecks.engine.preflight.check_tls") as mock_tls:
-        mock_tls.return_value.success = True
-        mock_tls.return_value.http_status = 200
-        ok, _ = run_unblocked_baseline("iana.org")
-    assert ok
+    from blockchecks.checkers.tcp_tls import TlsResult
+
+    with patch(
+        "blockchecks.engine.preflight.check_tls",
+        return_value=TlsResult(domain="iana.org", success=True, http_status=200),
+    ) as mock_tls:
+        ok, dom = run_unblocked_baseline("iana.org")
+    assert ok is True
+    assert dom == "iana.org"
+    mock_tls.assert_called_once()
+    assert mock_tls.call_args.args[0] == "iana.org"
+
+
+@pytest.mark.unit
+def test_unblocked_baseline_fail():
+    from blockchecks.checkers.tcp_tls import TlsResult
+
+    with patch(
+        "blockchecks.engine.preflight.check_tls",
+        return_value=TlsResult(
+            domain="iana.org", success=False, http_status=0, error="timeout"
+        ),
+    ):
+        ok, msg = run_unblocked_baseline("iana.org")
+    assert ok is False
+    assert "baseline failed" in msg
+    assert "timeout" in msg
 
 
 @pytest.mark.unit
 def test_prolog_returns_tls_success():
-    with patch("blockchecks.engine.preflight.check_tls") as mock_tls:
-        mock_tls.return_value.success = True
+    from blockchecks.checkers.tcp_tls import TlsResult
+
+    with patch(
+        "blockchecks.engine.preflight.check_tls",
+        return_value=TlsResult(domain="discord.com", success=True, http_status=200),
+    ):
         assert run_prolog("discord.com") is True
+
+
+@pytest.mark.unit
+def test_prolog_returns_tls_failure():
+    from blockchecks.checkers.tcp_tls import TlsResult
+
+    with patch(
+        "blockchecks.engine.preflight.check_tls",
+        return_value=TlsResult(domain="discord.com", success=False, http_status=403),
+    ):
+        assert run_prolog("discord.com") is False
 
 
 @pytest.mark.unit

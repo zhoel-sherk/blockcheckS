@@ -184,10 +184,24 @@ async def discover_voice_endpoints(count: int = 5, use_cache: bool = True) -> li
     return endpoints[:count]
 
 
+def positive_discover_count(value) -> int | None:
+    """Return N when discover flag is set to a positive int; else None.
+
+    ``None`` / ``False`` / ``0`` / non-int → do not run discovery.
+    """
+    if value is None or value is False:
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
 def check_discover_mutex(discover_dns, auto_discover) -> str | None:
     """Return error message if both discover flags are set, else None."""
-    dns_on = discover_dns is not None and int(discover_dns) > 0
-    auto_on = auto_discover is not None and int(auto_discover) > 0
+    dns_on = positive_discover_count(discover_dns) is not None
+    auto_on = positive_discover_count(auto_discover) is not None
     if dns_on and auto_on:
         return (
             "ERROR: --discover-dns and --auto-discover are mutually exclusive "

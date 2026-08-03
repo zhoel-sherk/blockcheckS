@@ -25,6 +25,9 @@ tmp-scripts/
 # pytest / lint
 .pytest_cache/
 .ruff_cache/
+.mutmut-cache/
+html/
+mutants/
 
 # venv
 .venv/

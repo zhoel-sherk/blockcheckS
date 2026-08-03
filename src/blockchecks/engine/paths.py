@@ -176,9 +176,8 @@ def apply_pycache_prefix() -> None:
     """Isolate .pyc writes under XDG cache (main process)."""
     ensure_dirs()
     prefix = str(PYCACHE_DIR)
-    if hasattr(sys, "pycache_prefix"):
-        if not sys.pycache_prefix:
-            sys.pycache_prefix = prefix
+    if hasattr(sys, "pycache_prefix") and not sys.pycache_prefix:
+        sys.pycache_prefix = prefix
     os.environ.setdefault("PYTHONPYCACHEPREFIX", prefix)
 
 

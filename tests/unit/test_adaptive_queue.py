@@ -38,9 +38,20 @@ def test_adaptive_queue_priority_boost_aq1_aq4():
     q = AdaptiveJobQueue.build([item_a, item_b], ["discord.com"], epsilon=0.0, seed=1)
     job = q.pop()
     assert job is not None
+    fam = job.family
+    assert fam  # classified
     q.mark_done(job, passed=True)
-    # fake family boosted — second pop should prefer fake if re-enqueued
-    assert q.weights.family.get("fake", 1.0) > 1.0
+    assert q.weights.family.get(fam, 1.0) > 1.0
+
+    # Fresh queue with pre-boosted weights: boosted family must pop first (ε=0)
+    w = ScanWeights()
+    w.family[fam] = 5.0
+    q2 = AdaptiveJobQueue.build(
+        [item_a, item_b], ["discord.com"], weights=w, epsilon=0.0, seed=1
+    )
+    nxt = q2.pop()
+    assert nxt is not None
+    assert nxt.family == fam
 
 
 def test_fanout_on_pass_aq2():

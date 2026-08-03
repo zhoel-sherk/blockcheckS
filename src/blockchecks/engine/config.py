@@ -169,6 +169,13 @@ SECURE_DNS_DEFAULT = _env_bool("BLOCKCHECKS_SECURE_DNS", True)
 DEFAULT_DOH_SERVER = os.environ.get("BLOCKCHECKS_DOH_SERVER", "").strip()
 DNS_CACHE_TTL = float(_env_or("BLOCKCHECKS_DNS_CACHE_TTL", "3600"))
 
+
+def refresh_secure_dns_from_env() -> None:
+    """Re-read SECURE_DNS / DoH after settings/config.toml applied env."""
+    global SECURE_DNS_DEFAULT, DEFAULT_DOH_SERVER
+    SECURE_DNS_DEFAULT = _env_bool("BLOCKCHECKS_SECURE_DNS", True)
+    DEFAULT_DOH_SERVER = os.environ.get("BLOCKCHECKS_DOH_SERVER", "").strip()
+
 DOH_SERVERS = [
     ("https://cloudflare-dns.com/dns-query", "Cloudflare"),
     ("https://dns.google/dns-query", "Google"),
