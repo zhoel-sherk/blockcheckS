@@ -1,10 +1,15 @@
 """nfqws2 process manager — start, stop, load config files.
 
-Uses foreground subprocess with start_new_session for clean killpg.
-No --daemon, no pkill -9 — only kills owned process groups via PID.
+Two launch modes:
+
+- ``start_daemon`` — ``@config`` + ``--daemon`` inside temp conf (async/pair coexist).
+- ``Nfqws2Manager`` — foreground Popen + killpg (sync test_runner / voice bootstrap).
 """
 
+from __future__ import annotations
+
 import os
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -17,6 +22,84 @@ from blockchecks.engine.config import (
     get_nfqws2_bin,
     nfqws2_debug_conf_line,
 )
+from blockchecks.engine.nfqws2_settle import wait_nfqws2_ready
+
+
+def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
+    """Ensure conf contains --daemon and optional --debug=@log. Returns log path."""
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    changed = False
+    if not any(ln.startswith("--daemon") for ln in lines):
+        lines.insert(0, "--daemon")
+        changed = True
+    dbg, dbg_path = nfqws2_debug_conf_line(tag=tag or "async")
+    if dbg and not any(ln.startswith("--debug=") for ln in lines):
+        lines.insert(1 if lines and lines[0].startswith("--daemon") else 0, dbg)
+        changed = True
+        if dbg_path:
+            print(f"  [nfqws2 debug] {dbg_path}")
+    if changed:
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except OSError:
+            return None
+    return dbg_path if dbg else None
+
+
+def start_daemon(
+    ns_name: str,
+    config_path: str,
+    kill_existing: bool = True,
+    *,
+    settle_max: float | None = None,
+    settle_poll: float | None = None,
+) -> float:
+    """Launch nfqws2 in daemon mode inside ns. Non-blocking.
+
+    kill_existing=True (default) clears prior nfqws2 in the ns — for solo
+    TCP/UDP checks. Pair matrix must pass kill_existing=False when starting
+    the UDP instance so the TCP desync (qnum 200) stays alive.
+
+    Note: with ``@config`` nfqws2 ignores trailing CLI flags — put ``--debug``
+    and ``--daemon`` inside a *temporary* copy of the config.
+
+    Returns settle elapsed seconds (B1 readiness poll).
+    """
+    _fd, tmp_conf = tempfile.mkstemp(prefix="bs_nfq_", suffix=".conf")
+    os.close(_fd)
+    try:
+        shutil.copy2(config_path, tmp_conf)
+        inject_debug_and_daemon(tmp_conf, tag=ns_name)
+        if kill_existing:
+            subprocess.run(
+                ["sudo", "ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        # @config must be the only argument; daemon/debug are inside the file
+        cmd = [
+            "sudo",
+            "ip",
+            "netns",
+            "exec",
+            ns_name,
+            get_nfqws2_bin(),
+            f"@{tmp_conf}",
+        ]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
+    finally:
+        # Daemon has read @config into memory by settle; do not leak /tmp/bs_nfq_*
+        try:
+            os.unlink(tmp_conf)
+        except OSError:
+            pass
 
 
 class Nfqws2Manager:

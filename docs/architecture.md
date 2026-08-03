@@ -179,12 +179,13 @@ lookups. `--no-secure-dns` skips DoH.
 - Entry points: `bs`, `bc-main`, `bc-nfconf`
 - `blockchecks.engine.StrategyItem`, `StateDB`, `matrix_fingerprint`
 - `blockchecks.engine.probe.invoke_curl_probe_worker`, `probe_request_dict`
+- `blockchecks.engine.nfqws2.start_daemon`, `Nfqws2Manager`
 - `blockchecks.checkers.TlsResult`, `check_tls`
 - `conf_builder.build_keenetic_conf`, `build_raw_conf`
 - `cli.presets.resolve_domain_preset`, `resolve_strategy_preset`
 
 **Internal (do not import from outside):**
 
-- `_nfqws2_daemon` (→ unified `nfqws2.start_daemon` in 1.1), private settle helpers
+- Private settle helpers; async_runner thin aliases (`_nfqws2_daemon` → `start_daemon`)
 
 See [package.md](package.md) for import graph. Operational guide: [guide.md](guide.md).

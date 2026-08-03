@@ -20,9 +20,9 @@ from blockchecks.engine.async_runner import (
     AsyncTestRunner,
     StrategyItem,
     TcpTestResult,
-    _nfqws2_daemon as start_nfqws2,
 )
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
+from blockchecks.engine.nfqws2 import start_daemon
 from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
 
 colorama_init(autoreset=True)
@@ -86,7 +86,7 @@ async def run(config_path: str, domains: list[str] = None, parallel: int = 2, ti
 
     try:
         # Start the single nfqws2 instance
-        await asyncio.to_thread(start_nfqws2, ns_name, config_abs)
+        await asyncio.to_thread(start_daemon, ns_name, config_abs)
         await asyncio.sleep(0.5)
 
         # Add iptables rules inside the netns

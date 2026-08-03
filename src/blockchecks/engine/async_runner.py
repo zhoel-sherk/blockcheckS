@@ -27,7 +27,6 @@ from blockchecks.engine.config import (
     PYTHON_BIN,
     get_lua_init_scripts,
     get_nfqws2_bin,
-    nfqws2_debug_conf_line,
 )
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.netns_pool import NetNsPool
@@ -124,7 +123,7 @@ class ScanReport:
 # ── Utility: run command synchronously (called via asyncio.to_thread) ──
 
 
-from blockchecks.engine.nfqws2_settle import wait_nfqws2_ready
+from blockchecks.engine.nfqws2 import start_daemon as _nfqws2_daemon
 
 
 def _sudo(*args: str) -> str:
@@ -132,79 +131,6 @@ def _sudo(*args: str) -> str:
     if r.returncode != 0:
         raise RuntimeError(f"sudo {' '.join(args)}: {r.stderr[:200]}")
     return r.stdout.strip()
-
-
-def _nfqws2_daemon(
-    ns_name: str,
-    config_path: str,
-    kill_existing: bool = True,
-    *,
-    settle_max: float | None = None,
-    settle_poll: float | None = None,
-) -> float:
-    """Launch nfqws2 in daemon mode inside ns. Non-blocking.
-
-    kill_existing=True (default) clears prior nfqws2 in the ns — for solo
-    TCP/UDP checks. Pair matrix must pass kill_existing=False when starting
-    the UDP instance so the TCP desync (qnum 200) stays alive.
-
-    Note: with ``@config`` nfqws2 ignores trailing CLI flags — put ``--debug``
-    and ``--daemon`` inside a *temporary* copy of the config (never mutate
-    user/presets ``configs/*.conf``).
-
-    Returns settle elapsed seconds (B1 readiness poll).
-    """
-    import shutil
-    import tempfile as _tf
-
-    _fd, tmp_conf = _tf.mkstemp(prefix="bs_nfq_", suffix=".conf")
-    os.close(_fd)
-    try:
-        shutil.copy2(config_path, tmp_conf)
-        _inject_debug_and_daemon(tmp_conf, tag=ns_name)
-        if kill_existing:
-            sp.run(
-                ["sudo", "ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2"],
-                stdout=sp.DEVNULL,
-                stderr=sp.DEVNULL,
-            )
-        # @config must be the only argument; daemon/debug are inside the file
-        cmd = ["sudo", "ip", "netns", "exec", ns_name, get_nfqws2_bin(), f"@{tmp_conf}"]
-        sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
-        return wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
-    finally:
-        # Daemon has read @config into memory by settle; do not leak /tmp/bs_nfq_*
-        try:
-            os.unlink(tmp_conf)
-        except OSError:
-            pass
-
-
-def _inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
-    """Ensure conf contains --daemon and optional --debug=@log. Returns log path."""
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            text = f.read()
-    except OSError:
-        return None
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    changed = False
-    if not any(ln.startswith("--daemon") for ln in lines):
-        lines.insert(0, "--daemon")
-        changed = True
-    dbg, dbg_path = nfqws2_debug_conf_line(tag=tag or "async")
-    if dbg and not any(ln.startswith("--debug=") for ln in lines):
-        lines.insert(1 if lines and lines[0].startswith("--daemon") else 0, dbg)
-        changed = True
-        if dbg_path:
-            print(f"  [nfqws2 debug] {dbg_path}")
-    if changed:
-        try:
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
-        except OSError:
-            return None
-    return dbg_path if dbg else None
 
 
 def _add_blobs_from_strategy(lines: list[str], strategy: str) -> None:

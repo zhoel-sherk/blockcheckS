@@ -210,10 +210,14 @@ def test_udp_coexist_skips_pkill(monkeypatch):
 
 
 def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
-    src = Path(ar.__file__).read_text(encoding="utf-8")
-    assert "stderr=sp.DEVNULL" in src or "stderr=subprocess.DEVNULL" in src
+    import blockchecks.engine.nfqws2 as nfq
+
+    src = Path(nfq.__file__).read_text(encoding="utf-8")
+    assert "stderr=subprocess.DEVNULL" in src
+    assert "kill_existing" in inspect.signature(nfq.start_daemon).parameters
     assert "kill_existing" in inspect.signature(ar._nfqws2_daemon).parameters
-    assert "--queue-bypass" in src
+    ar_src = Path(ar.__file__).read_text(encoding="utf-8")
+    assert "--queue-bypass" in ar_src
     probe = (
         Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "checkers" / "curl_probe.py"
     ).read_text(encoding="utf-8")
@@ -223,6 +227,8 @@ def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
 
 def test_nfqws2_daemon_unlinks_temp_conf(tmp_path, monkeypatch):
     """C1: daemon mkstemp copy must not leak in /tmp after settle."""
+    import blockchecks.engine.nfqws2 as nfq
+
     src = tmp_path / "src.conf"
     src.write_text("--filter-tcp=443\n", encoding="utf-8")
     seen: list[str] = []
@@ -233,12 +239,12 @@ def test_nfqws2_daemon_unlinks_temp_conf(tmp_path, monkeypatch):
                 seen.append(part[1:])
         return None
 
-    monkeypatch.setattr(ar.sp, "Popen", fake_popen)
-    monkeypatch.setattr(ar.sp, "run", lambda *a, **k: None)
-    monkeypatch.setattr(ar, "wait_nfqws2_ready", lambda *a, **k: 0.01)
-    monkeypatch.setattr(ar, "_inject_debug_and_daemon", lambda *a, **k: None)
+    monkeypatch.setattr(nfq.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(nfq.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(nfq, "wait_nfqws2_ready", lambda *a, **k: 0.01)
+    monkeypatch.setattr(nfq, "inject_debug_and_daemon", lambda *a, **k: None)
 
-    ar._nfqws2_daemon("mock-ns", str(src), kill_existing=False)
+    nfq.start_daemon("mock-ns", str(src), kill_existing=False)
     assert seen, "expected @bs_nfq_* path in Popen cmd"
     assert not Path(seen[0]).exists(), f"leaked temp conf: {seen[0]}"
 

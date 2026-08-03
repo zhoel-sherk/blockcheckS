@@ -30,10 +30,11 @@
 
 ### Still open (follow-up)
 
-- [ ] Unify `_nfqws2_daemon` ↔ `Nfqws2Manager` (E3)
+_(none — E3 closed in Wave2)_
 
-### Closed in 1.1.0a1 (alpha Wave1)
+### Closed in 1.1.0a1 (alpha Wave1–2)
 
+- [x] Unify `_nfqws2_daemon` ↔ `Nfqws2Manager` (E3 → `nfqws2.start_daemon`)
 - [x] Docs architecture rewrite (DoH/GV-1 as current + NetNsPool scale)
 - [x] `--preset` path jail + token file modes
 - [x] composite_runner: public `engine.probe.invoke_curl_probe_worker`
