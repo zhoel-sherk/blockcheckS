@@ -24,6 +24,8 @@ from blockchecks.checkers.curl_probe import (
 from blockchecks.checkers.dns_secure import DnsRunCache
 from blockchecks.engine.config import (
     BLOB_DIR,
+    NFQUEUE_TCP,
+    NFQUEUE_UDP,
     PYTHON_BIN,
     get_lua_init_scripts,
     get_nfqws2_bin,
@@ -175,7 +177,7 @@ def _build_inline_nfqws_lines(
     is_http = protocol == "http"
     if is_http:
         config_lines = [
-            "--qnum=200",
+            f"--qnum={NFQUEUE_TCP}",
             "--filter-tcp=80",
             "--filter-l3=ipv4",
             "--filter-l7=http",
@@ -185,7 +187,7 @@ def _build_inline_nfqws_lines(
         ]
     else:
         config_lines = [
-            "--qnum=200",
+            f"--qnum={NFQUEUE_TCP}",
             "--filter-tcp=443",
             "--filter-l3=ipv4",
             "--filter-l7=tls",
@@ -214,7 +216,7 @@ def _build_quic_nfqws_lines(strategy: str) -> list[str]:
     """Build nfqws2 config for HTTP/3 QUIC strategies (UDP/443, BC2-10)."""
     if strategy.strip().startswith("--"):
         config_lines = [
-            "--qnum=201",
+            f"--qnum={NFQUEUE_UDP}",
             "--filter-l3=ipv4",
             "--ipcache-lifetime=0",
             "--bind-fix4",
@@ -230,7 +232,7 @@ def _build_quic_nfqws_lines(strategy: str) -> list[str]:
         return config_lines
 
     config_lines = [
-        "--qnum=201",
+        f"--qnum={NFQUEUE_UDP}",
         "--filter-udp=443",
         "--filter-l3=ipv4",
         "--filter-l7=quic",
@@ -300,7 +302,7 @@ def _run_quic_check(
         "-j",
         "NFQUEUE",
         "--queue-num",
-        "201",
+        str(NFQUEUE_UDP),
         "--queue-bypass",
     )
 
@@ -431,7 +433,7 @@ def _run_tcp_check(
         "-j",
         "NFQUEUE",
         "--queue-num",
-        "200",
+        str(NFQUEUE_TCP),
         "--queue-bypass",
     )
 
@@ -560,7 +562,7 @@ def _run_tcp_check_multi(
         "-j",
         "NFQUEUE",
         "--queue-num",
-        "200",
+        str(NFQUEUE_TCP),
         "--queue-bypass",
     )
 
@@ -631,7 +633,7 @@ def _run_udp_check(
     elif strategy.strip().startswith("--"):
         # Full CLI config (standard_udp dual-blob etc.)
         config_lines = [
-            "--qnum=201",
+            f"--qnum={NFQUEUE_UDP}",
             "--filter-l3=ipv4",
             "--ipcache-lifetime=0",
             "--bind-fix4",
@@ -654,7 +656,7 @@ def _run_udp_check(
     else:
         # Inline lua-desync core (e.g. fake:blob=discord_udp:repeats=6)
         config_lines = [
-            "--qnum=201",
+            f"--qnum={NFQUEUE_UDP}",
             "--filter-udp=50000-50100",
             "--filter-l3=ipv4",
             "--ipcache-lifetime=0",
@@ -692,7 +694,7 @@ def _run_udp_check(
         "-j",
         "NFQUEUE",
         "--queue-num",
-        "201",
+        str(NFQUEUE_UDP),
         "--queue-bypass",
     )
 

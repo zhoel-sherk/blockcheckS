@@ -13,7 +13,12 @@ from blockchecks.cli.commands.pair import cmd_pair
 from blockchecks.cli.commands.tcp import cmd_tcp
 from blockchecks.cli.commands.udp import cmd_udp
 from blockchecks.cli.presets import list_presets
-from blockchecks.engine.config import CONFIGS_DIR, DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
+from blockchecks.engine.config import (
+    CONFIGS_DIR,
+    DEFAULT_VOICE_IP,
+    DEFAULT_VOICE_PORT,
+    effective_default_pool_size,
+)
 from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR
 from blockchecks.engine.settle_profile import DEFAULT_PROFILE_PATH
 
@@ -324,7 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="TLS protocol version to test",
     )
     scan.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
-    scan.add_argument("--parallel", type=int, default=4)
+    scan.add_argument("--parallel", type=int, default=effective_default_pool_size())
     scan.add_argument("--max", type=int, default=100)
     scan.add_argument("--timeout", type=float, default=5.0)
     scan.add_argument("--user-matrix", default="")
@@ -371,7 +376,7 @@ def build_parser() -> argparse.ArgumentParser:
     composite = sub.add_parser("composite", help="Test composite nfqws2 config")
     composite.add_argument("-c", "--config", required=True, help="Path to composite .conf file")
     composite.add_argument("-d", "--domains", nargs="+", help="Domains to test (default: Discord set)")
-    composite.add_argument("--parallel", type=int, default=4)
+    composite.add_argument("--parallel", type=int, default=effective_default_pool_size())
     composite.add_argument("--timeout", type=float, default=5.0)
     add_system_deps_args(composite)
 
@@ -403,7 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="TLS protocol version to test",
     )
     pair.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
-    pair.add_argument("--parallel", type=int, default=4)
+    pair.add_argument("--parallel", type=int, default=effective_default_pool_size())
     pair.add_argument("--max", type=int, default=100)
     pair.add_argument("--timeout", type=float, default=5.0)
     pair.add_argument("--udp-timeout", type=float, default=3.0)

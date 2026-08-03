@@ -126,6 +126,34 @@ NFQUEUE_UDP = int(_env_or("BLOCKCHECKS_QNUM_UDP", "201"))
 NETNS_BASE = _env_or("BLOCKCHECKS_NETNS_BASE", "bs-p")
 DEFAULT_POOL_SIZE = int(_env_or("BLOCKCHECKS_POOL", "4"))
 
+
+def effective_default_pool_size(*, mem_soft_cap_kb: int = 1_500_000) -> int:
+    """CLI default for ``--parallel``: env/DEFAULT_POOL_SIZE, soft-capped on low RAM.
+
+    If MemAvailable < ~1.5 GiB (Pi2-class), default to 1 and leave a WARNING to stderr
+    when the uncapped value would have been higher.
+    """
+    base = max(1, int(DEFAULT_POOL_SIZE))
+    avail = None
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    avail = int(line.split()[1])
+                    break
+    except (OSError, ValueError):
+        avail = None
+    if avail is not None and avail < mem_soft_cap_kb and base > 1:
+        import sys
+
+        print(
+            f"  WARNING: MemAvailable={avail} kB < {mem_soft_cap_kb}; "
+            f"default --parallel capped {base} → 1 (override with --parallel)",
+            file=sys.stderr,
+        )
+        return 1
+    return base
+
 # Sing-box SOCKS5 proxy
 SOCKS5_PROXY = _env_or("BLOCKCHECKS_PROXY", "socks5://127.0.0.1:11080")
 

@@ -18,6 +18,12 @@ parallel = 4
 scan_level = "fast"
 # timeout = 5.0
 # max = 0
+#
+# Raspberry Pi 2 / ~1 GiB RAM (prebuild linux-arm nfqws2 elsewhere):
+# parallel = 1
+# scan_level = "fast"
+# Also: --curl-parallel 1, --preset pi2, -M timeout-benchmark, --max 20
+# Env: BLOCKCHECKS_POOL=1  (now wired into --parallel default)
 
 [tools]
 nfqws2 = "/opt/zapret2/nfq2/nfqws2"

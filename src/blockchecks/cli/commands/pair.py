@@ -27,6 +27,7 @@ from blockchecks.engine.config import (
     PROJECT_DIR,
     SECURE_DNS_DEFAULT,
     UNBLOCKED_DOM,
+    effective_default_pool_size,
 )
 from blockchecks.engine.domain_loader import (
     RESERVED_DOMAIN_FILES,
@@ -103,7 +104,7 @@ async def cmd_pair(args):
     if not args.domain and preset_domains:
         args.domain = preset_domains[0]
 
-    pool_size = args.parallel or 4
+    pool_size = args.parallel or effective_default_pool_size()
 
     domains_for_dns = list(
         dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))

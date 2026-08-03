@@ -49,6 +49,54 @@ _ARCH_MAP = {
 _LUA_REQUIRED = ("zapret-lib.lua", "zapret-antidpi.lua")
 
 
+def _elf_machine(path: str) -> str | None:
+    """Return coarse ELF machine tag or None if not a readable ELF."""
+    try:
+        with open(path, "rb") as f:
+            hdr = f.read(20)
+    except OSError:
+        return None
+    if len(hdr) < 20 or hdr[:4] != b"\x7fELF":
+        return None
+    ei_data = hdr[5]
+    em = hdr[18] | (hdr[19] << 8) if ei_data != 2 else (hdr[18] << 8) | hdr[19]
+    return {
+        3: "x86",
+        40: "arm",
+        62: "x86_64",
+        183: "aarch64",
+    }.get(em, f"em_{em}")
+
+
+def _host_elf_expected() -> str:
+    m = platform.machine().lower()
+    if m in ("x86_64", "amd64"):
+        return "x86_64"
+    if m in ("aarch64", "arm64"):
+        return "aarch64"
+    if m in ("armv7l", "armv6l"):
+        return "arm"
+    if m in ("i386", "i686"):
+        return "x86"
+    return m
+
+
+def check_nfqws2_arch(nfq_path: str) -> str | None:
+    """Return warning text if ELF arch mismatches host; else None."""
+    got = _elf_machine(nfq_path)
+    if got is None:
+        return None
+    expect = _host_elf_expected()
+    if got == expect:
+        return None
+    arch = zapret2_arch() or "linux-x86_64"
+    return (
+        f"nfqws2 ELF machine={got} but host is {platform.machine()} "
+        f"(expected ~{expect}) — Exec format error likely; "
+        f"use binaries/{arch}/nfqws2"
+    )
+
+
 @dataclass
 class DepsReport:
     ok: bool = True
@@ -399,6 +447,11 @@ def verify_system_dependencies(
                 report.lua_dir = str(lua)
         else:
             cfg.apply_tool_paths(nfqws2=nfq)
+
+    arch_msg = check_nfqws2_arch(nfq) if nfq else None
+    if arch_msg:
+        report.ok = False
+        report.errors.append(arch_msg)
 
     # Lua
     lua_dir = os.environ.get("BLOCKCHECKS_LUA_DIR") or cfg.LUA_INIT_DIR

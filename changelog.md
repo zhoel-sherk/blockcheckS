@@ -6,7 +6,11 @@
 - **1.1.0a1 (alpha):** public `engine.probe.invoke_curl_probe_worker`; `--preset` / `-M` path jail; token refuse world-writable + `write_secure_text`
 - **E3:** `engine.nfqws2.start_daemon` (+ `inject_debug_and_daemon`); async/composite use public API; `Nfqws2Manager` remains for sync/foreground
 - **H2–H8 / migrate:** export reuses open store; AQ `filter_resume` gather; `--prolog-content`; DoH rotate; sing-box lock; `./state.db` → XDG migrate
-- Docs: architecture rewrite (DoH → preflight → AQ → curl subprocess → store; NetNsPool scale)
+- **Wave4:** `BLOCKCHECKS_POOL` / low-RAM soft-cap for `--parallel`; NFQUEUE_* in async+composite; `--queue-bypass` on composite; ELF arch check; `presets/domains/pi2.txt`
+- Docs: architecture rewrite (DoH → preflight → AQ → curl subprocess → store; NetNsPool scale); B7 todo corrected (not required for netns parallel>4)
+
+### Notes
+- Xeon smoke (`-M gp-verified --max 24`, curl-parallel 1): `--parallel 4` ≈13.7s wall, `--parallel 8` ≈15.0s — with ≤8 strategies wall time is dominated by 5s FAIL timeouts + netns pool create; larger matrices benefit from more workers (architecture already isolates per-netns).
 
 ### Changed
 - README: table of contents, badges, hero section, humor/jargon

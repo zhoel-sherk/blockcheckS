@@ -1,0 +1,5 @@
+# Pi2 / low-RAM lean domain list (Wave4)
+# Use with: sudo bs scan --preset pi2 -M timeout-benchmark --parallel 1 --curl-parallel 1 --max 20
+discord.com
+google.com
+youtube.com

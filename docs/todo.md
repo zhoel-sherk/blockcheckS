@@ -58,7 +58,7 @@ _(none — E3 closed in Wave2)_
 - [ ] **A4** GP multi-domain + `curl_parallelism` 4–10 — один nfqws2, parallel curl *(GP-side; BS = B2)*
 - [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
 - [ ] **B6** blockcheckw (Rust vmap) — fast scan reference, не drop-in voice/pair
-- [ ] **B7** nftables vmap POC — prerequisite parallel > 4
+- [ ] **B7** nftables vmap POC — optional for **host-shared** / mark→queue multiplexing (blockcheckw-style); **not** required for netns `--parallel > 4` (each worker already has isolated NFQUEUE)
 
 ### YouTube
 

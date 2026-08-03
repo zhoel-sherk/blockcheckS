@@ -60,6 +60,26 @@ sudo bs full --max 500 --domains-file presets/domains/critical.txt
 bc-nfconf --db state.db --limit 3 --out-dir output
 ```
 
+Default `--parallel` comes from `BLOCKCHECKS_POOL` / `DEFAULT_POOL_SIZE` (usually 4).
+On hosts with `MemAvailable < ~1.5 GiB` the CLI default is soft-capped to **1**
+(override with an explicit `--parallel`).
+
+### Raspberry Pi 2 (ARMv7)
+
+Must use a **prebuilt `linux-arm`** nfqws2 (not x86_64 / not arm64). Suggested:
+
+```bash
+sudo bs scan --preset pi2 -M timeout-benchmark \
+  --parallel 1 --curl-parallel 1 --scan-level fast --max 20 --no-fetch-deps
+```
+
+Transfer checklist: `nfqws2` + `lua/` + `blobs/` (`rsync --copy-links`); install
+`curl_cffi` **on the Pi** (armv7l wheels). `system_deps` refuses wrong-arch ELF.
+
+Scale note: more workers = more netns×nfqws2 (already isolated). Raising
+`--parallel` on a Xeon is the first throughput lever; nftables vmap (B7) is for
+host-shared designs, not a prerequisite for `parallel > 4` under netns.
+
 `bs full` writes `output/nfqws2_<ts>.conf` (keenetic), `nfqws2_raw_<ts>.conf`,
 and `user.list`. ETA printed as `N_strat × N_domains / parallel`. Resume skips
 `(strategy, domain)` already in DB. STUN discover concurrency is capped at 4.

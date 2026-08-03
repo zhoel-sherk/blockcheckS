@@ -38,6 +38,7 @@ from blockchecks.engine.config import (
     MAX_CURL_PARALLEL,
     SECURE_DNS_DEFAULT,
     UNBLOCKED_DOM,
+    effective_default_pool_size,
 )
 from blockchecks.engine.domain_loader import (
     DEFAULT_DOMAINS_FILE,
@@ -784,7 +785,7 @@ def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser
     p.add_argument("--no-http", action="store_true", help="Skip HTTP :80 strategy phase")
     p.add_argument("--scan-level", default="full", choices=["single", "fast", "full"])
     p.add_argument("--max", type=int, default=0, help="Cap strategies (0=uncapped)")
-    p.add_argument("--parallel", type=int, default=4)
+    p.add_argument("--parallel", type=int, default=effective_default_pool_size())
     p.add_argument("--timeout", type=float, default=5.0)
     p.add_argument("--udp-timeout", type=float, default=3.0)
     p.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"])

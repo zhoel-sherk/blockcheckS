@@ -11,6 +11,7 @@ bs scan --preset google-youtube       # 23 YouTube CDN domains
 bs scan -d discord.com --preset critical   # -d + preset: all preset domains
 bs scan --preset coverage             # 40 domains, full GP coverage
 bs scan --preset benchmark            # 6 domains, lightweight test
+bs scan --preset pi2                  # 3 domains, Pi2 / low-RAM lean
 bs scan --preset cloudflare           # 9 Cloudflare domains
 bs scan --preset amazon-aws           # 11 AWS domains
 bs scan --preset diagnostic           # 1 domain: web.telegram.org
