@@ -1,7 +1,8 @@
 """Canonical blob alias → file map (BLOB-3).
 
 Strategy strings use short names (`google`, `quic_gv_kyber_1`, …). Resolution
-checks ``BLOCKCHECKS_BLOBS`` then ``/opt/zapret2/files/fake``.
+checks ``BLOCKCHECKS_BLOBS``, then in-repo ``blobs/``, then ``/opt/zapret2/blobs``
+and ``/opt/zapret2/files/fake``.
 """
 
 from __future__ import annotations
@@ -10,9 +11,10 @@ import os
 import re
 from collections.abc import Iterable
 
-from blockchecks.engine.config import BLOB_DIR
+from blockchecks.engine.config import BLOB_DIR, PROJECT_DIR, REPO_BLOBS_DIR
 
 FAKE_FILES_DIR = os.environ.get("BLOCKCHECKS_FAKE_FILES", "/opt/zapret2/files/fake")
+_OPT_BLOBS = "/opt/zapret2/blobs"
 
 # Alias → filename (under blobs dir or files/fake)
 BLOB_ALIAS_MAP: dict[str, str] = {
@@ -44,42 +46,64 @@ BLOB_ALIAS_MAP: dict[str, str] = {
 _BUILTIN_BLOBS = frozenset({"fake_default_tls", "fake_default_http", "fake_default_quic"})
 _BLOB_NAME_RE = re.compile(r"(?:blob|pattern|seqovl_pattern)=(\w+)")
 
+# Flowseal / core set expected to be baked under repo blobs/
+FLOWSEAL_CORE_ALIASES = (
+    "stun",
+    "stun2",
+    "max_ru",
+    "google",
+    "4pda",
+    "quic_google",
+    "quic_dbank",
+    "discord_udp",
+    "game_udp",
+)
+
+
+def _search_bases(blobs_dir: str | None) -> list[str]:
+    bases: list[str] = []
+    primary = blobs_dir or BLOB_DIR
+    for candidate in (
+        primary,
+        REPO_BLOBS_DIR,
+        os.path.join(PROJECT_DIR, "blobs"),
+        _OPT_BLOBS,
+        FAKE_FILES_DIR,
+    ):
+        if candidate and candidate not in bases:
+            bases.append(candidate)
+    return bases
+
 
 def resolve_blob_path(name: str, blobs_dir: str | None = None) -> str | None:
     """Map blob alias to absolute ``.bin`` path, or None if built-in / missing."""
     if name in _BUILTIN_BLOBS or name == "0x00000000":
         return None
 
-    blobs_dir = blobs_dir or BLOB_DIR
-    search_bases = [blobs_dir]
-    if FAKE_FILES_DIR and blobs_dir != FAKE_FILES_DIR:
-        search_bases.append(FAKE_FILES_DIR)
-
+    search_bases = _search_bases(blobs_dir)
     mapped = BLOB_ALIAS_MAP.get(name)
+
     if mapped:
         for base in search_bases:
             path = os.path.join(base, mapped)
             if os.path.isfile(path):
                 return path
 
-    if not os.path.isdir(blobs_dir):
-        exact = os.path.join(blobs_dir, f"{name}.bin")
-        return exact if os.path.exists(exact) else None
-
-    known = sorted(f for f in os.listdir(blobs_dir) if f.endswith(".bin"))
-    candidates = [f for f in known if name in f and "quic_initial" not in f]
-    if not candidates:
-        candidates = [f for f in known if name in f]
-    if candidates:
-        return os.path.join(blobs_dir, candidates[0])
-
-    exact = os.path.join(blobs_dir, f"{name}.bin")
-    if os.path.exists(exact):
-        return exact
+    for base in search_bases:
+        if not os.path.isdir(base):
+            continue
+        exact = os.path.join(base, f"{name}.bin")
+        if os.path.isfile(exact):
+            return exact
+        known = sorted(f for f in os.listdir(base) if f.endswith(".bin"))
+        candidates = [f for f in known if name in f and "quic_initial" not in f]
+        if not candidates:
+            candidates = [f for f in known if name in f]
+        if candidates:
+            return os.path.join(base, candidates[0])
 
     if mapped:
         for base in search_bases:
-            # Long zapret stock names (e.g. quic_initial_*_googlevideo_com_kyber_1.bin)
             if not os.path.isdir(base):
                 continue
             for fname in os.listdir(base):

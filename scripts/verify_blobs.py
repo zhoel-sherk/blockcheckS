@@ -15,7 +15,7 @@ from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP, resolve_blob_path  #
 from blockchecks.engine.config import BLOB_DIR  # noqa: E402
 
 _MIN_SIZE = 20
-_OPTIONAL = frozenset({"game_udp"})  # warn only
+_OPTIONAL = frozenset()  # core aliases are baked in-repo blobs/
 
 
 def main() -> int:

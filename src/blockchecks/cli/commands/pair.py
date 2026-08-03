@@ -145,6 +145,7 @@ async def cmd_pair(args):
                 stop_event,
                 curl_parallel,
                 protocol,
+                multi_eps=voice_ctx.multi_eps,
             )
         else:
             phase = await run_standard_pair_phase(
@@ -162,6 +163,7 @@ async def cmd_pair(args):
                 scan_level,
                 use_family_gates,
                 strategies.run_set,
+                multi_eps=voice_ctx.multi_eps,
             )
 
         tcp_passed = phase.tcp_passed

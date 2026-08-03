@@ -106,8 +106,11 @@ plain wheel их не найдёт. Это осознанное решение (
 `~/.local/share/blockcheckS/zapret2/`. Если nfqws2 уже стоит в `/opt/zapret2` —
 использует его. Отключить авто-фетч: `--no-fetch-deps`.
 
-**Блобы** (fake payloads) — либо из `/opt/zapret2/blobs/`, либо
-`scripts/install_blobs.sh` (клонирует Flowseal-блобы).
+**Блобы** (fake payloads) — в репо `blobs/` (без скачивания). Override:
+`BLOCKCHECKS_BLOBS`. Опционально: `scripts/install_blobs.sh` для extras на хосте.
+Flowseal-техники: `--tcp-sources flowseal` / `-M flowseal-fast`
+([Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube);
+howto: [docs/cookbook/blobs.md](docs/cookbook/blobs.md)).
 
 Юнит-тесты запускаются **без root**:
 ```bash

@@ -657,7 +657,14 @@ def _run_udp_check(
             blob = os.path.join(BLOB_DIR, "discord_udp.bin")
             if os.path.exists(blob):
                 config_lines.append(f"--blob=discord_udp:@{blob}")
-        config_lines.append(f"--lua-desync={strategy}")
+        for raw_line in strategy.split("\n"):
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            if raw_line.startswith("--"):
+                config_lines.extend(_split_cli_args(raw_line))
+            else:
+                config_lines.append(f"--lua-desync={raw_line}")
         import tempfile as _tf2
 
         _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf")
@@ -1154,12 +1161,18 @@ class AsyncTestRunner:
         resume_from=None,
         full_voice: bool = False,
         fingerprint: str = "",
+        *,
+        pair_domain: str | None = None,
     ) -> list[PairResult]:
         """Parallel UDP probes for each PASS TCP × each UDP strategy.
 
         Each pair runs in its own netns via asyncio.create_task + Semaphore.
         TCP nfqws2 started once per pair, UDP nfqws2 per strategy.
         DB writes serialized via asyncio.Lock.
+
+        ``pair_domain`` overrides the domain key used for pair_results /
+        resume (e.g. ``discord.com@1.2.3.4:50004`` for multi-EP fan-out);
+        TCP curl still uses ``domain``.
         """
         from blockchecks.engine.store.models import Checkpoint
 
@@ -1167,6 +1180,7 @@ class AsyncTestRunner:
         db_lock = asyncio.Lock()
         pair_sem = asyncio.Semaphore(self.pool.size)
         fp = fingerprint or self.matrix_fingerprint
+        log_domain = pair_domain or domain
 
         if udp_bypass:
             working = list(enumerate(tcp_results))
@@ -1184,7 +1198,7 @@ class AsyncTestRunner:
         completed: set[tuple[str, str]] = set()
         if self.db:
             try:
-                completed = await self.db.get_completed_pair_keys(domain)
+                completed = await self.db.get_completed_pair_keys(log_domain)
             except Exception:
                 completed = set()
         if isinstance(resume_from, Checkpoint) and resume_from.tcp_label:
@@ -1201,9 +1215,10 @@ class AsyncTestRunner:
             )
         elif completed:
             print(f"  {YELLOW}Resuming: {len(completed)} pairs already in DB{RESET}")
+        ep_tag = f" ep={voice_ip}:{voice_port}" if pair_domain else ""
         print(
             f"  {CYAN}Pair matrix: {len(working)} TCP × {len(udp_strategies)} UDP "
-            f"= {total} pairs, {self.pool.size} parallel{RESET}"
+            f"= {total} pairs, {self.pool.size} parallel{ep_tag}{RESET}"
         )
 
         async def run_pair(tcp_i: int, tcp_r: TcpTestResult, udp_s: StrategyItem, pair_idx: int):
@@ -1274,7 +1289,7 @@ class AsyncTestRunner:
                             await self.db.log_pair(
                                 tcp_r.item.label,
                                 udp_s.label,
-                                domain,
+                                log_domain,
                                 tcp_r.success,
                                 False,
                                 udp_ok,
@@ -1286,7 +1301,7 @@ class AsyncTestRunner:
                             await self.db.save_checkpoint(
                                 tcp_i,
                                 pair_idx,
-                                f"{tcp_r.item.label}+{udp_s.label}",
+                                f"{tcp_r.item.label}+{udp_s.label}@{voice_ip}:{voice_port}",
                                 fingerprint=fp,
                                 tcp_label=tcp_r.item.label,
                                 udp_label=udp_s.label,

@@ -25,7 +25,10 @@ BlockcheckS user-matrix format (one strategy per line, `#` comments).
 
 ```bash
 bs scan -d discord.com -M gp-verified          # GP top-10 strategies
-bs scan -d discord.com -M flowseal-fast        # curated Flowseal ALT2 (M8)
+bs scan -d discord.com -M flowseal-fast        # curated Flowseal techniques
+# Full Flowseal-like matrix (may be >1000): --tcp-sources flowseal
+# Upstream bats: https://github.com/Flowseal/zapret-discord-youtube
+# `bs full` default --tcp-sources includes flowseal (M8)
 bs scan -d discord.com -M http-tls-dual.tls     # M6 TLS side (pair with .http)
 bs scan -d discord.com -M gp-verified.tls      # same (extension stripped)
 bs scan -d discord.com -M gp-custom-tls12      # GP custom TLS 1.2 test
@@ -145,22 +148,22 @@ Strategy strings use **short aliases** (`stun`, `google`, `quic_gv_kyber_1`, …
 | Kind | Examples | Source |
 |------|----------|--------|
 | **Built-in** | `fake_default_tls`, `fake_default_http`, `fake_default_quic` | nfqws2 internal (no `.bin` file) |
-| **File aliases** | `stun`, `max_ru`, `google`, `discord_udp`, `quic_dbank` | `/opt/zapret2/blobs/` or `files/fake/` |
+| **File aliases** | `stun`, `max_ru`, `google`, `discord_udp`, `quic_dbank` | **repo `blobs/`** (baked), then `/opt/zapret2/blobs` |
 
 Canonical alias map: `src/blockchecks/engine/blob_aliases.py` (`BLOB_ALIAS_MAP`).
 
 ```bash
-# Install / refresh blobs from Flowseal + zapret2 stock
+# Optional: sync extras into /opt/zapret2/blobs (core set is already in repo blobs/)
 scripts/install_blobs.sh
 
-# Verify all 22 aliases resolve
+# Verify aliases resolve
 python3 scripts/verify_blobs.py
 
-# Per-blob docs
+# How to add a blob: docs/cookbook/blobs.md
 cat presets/blobs/README.md
 ```
 
-Built-in blobs need no install step. File blobs must exist before scan; missing blobs fail at nfqws2 start with a clear path error.
+Built-in blobs need no install step. Baked file blobs ship with the repo.
 
 ## GP shortlist export (P5-1)
 

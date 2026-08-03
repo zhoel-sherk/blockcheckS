@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# BLOB-2: install tier-1 gap blobs into /opt/zapret2/blobs/
+# Optional: sync extra / host-local blobs into BLOCKCHECKS_BLOBS (default /opt/zapret2/blobs).
+# Core Flowseal blobs are baked in-repo under blobs/ — no download required for bs scan --tcp-sources flowseal.
 # Sources: Flowseal GitHub (bin/), zapret2 files/fake/, local cache
 set -euo pipefail
 
@@ -7,6 +8,12 @@ BLOBS="${BLOCKCHECKS_BLOBS:-/opt/zapret2/blobs}"
 FAKE="${BLOCKCHECKS_FAKE_FILES:-/opt/zapret2/files/fake}"
 CACHE="${BLOCKCHECKS_BLOB_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/blockcheckS/blob-cache}"
 FLOWSEAL_BASE="${FLOWSEAL_BLOB_URL:-https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/bin}"
+REPO_BLOBS="$(cd "$(dirname "$0")/.." && pwd)/blobs"
+
+echo "NOTE: repo blobs/ is preferred at runtime; this script only fills $BLOBS extras."
+if [[ -d "$REPO_BLOBS" ]]; then
+  echo "NOTE: baked set: $(ls -1 "$REPO_BLOBS"/*.bin 2>/dev/null | wc -l) files in $REPO_BLOBS"
+fi
 
 mkdir -p "$CACHE"
 

@@ -29,6 +29,7 @@ def _resolve_project_dir() -> str:
 PROJECT_DIR = _resolve_project_dir()
 PACKAGE_DIR = _PACKAGE_DIR
 CONFIGS_DIR = os.path.join(PROJECT_DIR, "configs")
+REPO_BLOBS_DIR = os.path.join(PROJECT_DIR, "blobs")
 
 
 def _env_or(key, default: str) -> str:
@@ -37,9 +38,18 @@ def _env_or(key, default: str) -> str:
 
 # External tool paths
 _DEFAULT_NFQWS2 = "/opt/zapret2/nfq2/nfqws2"
-_DEFAULT_BLOBS = "/opt/zapret2/blobs"
 _DEFAULT_LUA = "/opt/zapret2/lua"
 _LUA_SCRIPT_NAMES = ("zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua")
+
+
+def _default_blobs_dir() -> str:
+    """Prefer in-repo baked blobs/; then /opt/zapret2/blobs."""
+    if os.path.isdir(REPO_BLOBS_DIR) and any(
+        name.endswith(".bin") for name in os.listdir(REPO_BLOBS_DIR)
+    ):
+        return REPO_BLOBS_DIR
+    return "/opt/zapret2/blobs"
+
 
 NFQWS2_BIN = _env_or("BLOCKCHECKS_NFQWS2", _DEFAULT_NFQWS2)
 SING_BOX_BIN = _env_or("BLOCKCHECKS_SINGBOX", "/usr/local/bin/sing-box")
@@ -70,8 +80,8 @@ DPI_TESTER_SETTINGS = _env_or(
     "BLOCKCHECKS_SETTINGS", os.path.join(PROJECT_DIR, "../dpi-tester/settings.ini")
 )
 
-# Blob directory
-BLOB_DIR = _env_or("BLOCKCHECKS_BLOBS", _DEFAULT_BLOBS)
+# Blob directory — repo blobs/ by default (baked); override with BLOCKCHECKS_BLOBS
+BLOB_DIR = _env_or("BLOCKCHECKS_BLOBS", _default_blobs_dir())
 
 # Lua init scripts (env: BLOCKCHECKS_LUA_DIR)
 LUA_INIT_DIR = _env_or("BLOCKCHECKS_LUA_DIR", _DEFAULT_LUA)

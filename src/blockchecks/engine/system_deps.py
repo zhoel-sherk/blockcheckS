@@ -478,14 +478,14 @@ def verify_system_dependencies(
     report.blobs_dir = blobs_dir
     if not os.path.isdir(blobs_dir):
         report.warnings.append(
-            f"blobs dir missing: {blobs_dir} (see scripts/install_blobs.sh)"
+            f"blobs dir missing: {blobs_dir} (repo ships blobs/; see docs/cookbook/blobs.md)"
         )
     else:
         n_bin = sum(1 for _ in Path(blobs_dir).glob("*.bin"))
         if n_bin == 0:
             report.warnings.append(
                 f"no .bin blobs in {blobs_dir} — strategies with blob= may fail "
-                "(scripts/install_blobs.sh)"
+                "(docs/cookbook/blobs.md; optional scripts/install_blobs.sh)"
             )
 
     return report

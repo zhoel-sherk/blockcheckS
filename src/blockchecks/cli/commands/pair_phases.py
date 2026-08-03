@@ -13,6 +13,7 @@ from colorama import Fore, Style
 
 from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
+from blockchecks.checkers.voice_dns import pair_log_domain, resolve_voice_targets
 from blockchecks.engine.adaptive_runner import (
     build_adaptive_queue,
     persist_adaptive_weights,
@@ -225,7 +226,9 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
     from blockchecks.checkers.voice_dns import (
         check_discover_mutex,
         discover_dns_alive,
+        pair_log_domain,
         positive_discover_count,
+        resolve_voice_targets,
     )
 
     mutex_err = check_discover_mutex(
@@ -476,6 +479,52 @@ async def resolve_resume_checkpoint(args, db, fp: str) -> tuple[Any | None, int 
     return resume_from, None
 
 
+async def _run_pair_matrix_multi_ep(
+    runner: AsyncTestRunner,
+    tcp_results: list,
+    udp_items: list[StrategyItem],
+    domain: str,
+    voice_ip: str,
+    voice_port: int,
+    multi_eps: list,
+    *,
+    udp_timeout: float,
+    udp_bypass: bool,
+    resume_from: Any,
+    full_voice: bool,
+    fingerprint: str,
+) -> list:
+    """Fan-out pair matrix across discovered voice endpoints (V2-1)."""
+    targets = resolve_voice_targets(voice_ip, voice_port, multi_eps)
+    multi = len(targets) > 1
+    if multi:
+        n_pairs = len([r for r in tcp_results if r.success]) * len(udp_items) * len(targets)
+        print(
+            f"  {YELLOW}Multi-EP fan-out: {len(targets)} endpoints × pairs "
+            f"(~{n_pairs} probes){RESET}"
+        )
+    all_pairs: list = []
+    for ip, port in targets:
+        log_dom = pair_log_domain(domain, ip, port, multi=multi)
+        if multi:
+            print(f"\n  {CYAN}[UDP Pairs]{RESET} ep={ip}:{port}  {len(udp_items)} strategies...")
+        batch = await runner.test_pair_matrix(
+            tcp_results,
+            udp_items,
+            domain,
+            ip,
+            port,
+            udp_timeout=udp_timeout,
+            udp_bypass=udp_bypass,
+            resume_from=resume_from,
+            full_voice=full_voice,
+            fingerprint=fingerprint,
+            pair_domain=log_dom if multi else None,
+        )
+        all_pairs.extend(batch)
+    return all_pairs
+
+
 async def run_adaptive_pair_phase(
     args,
     runner: AsyncTestRunner,
@@ -491,6 +540,7 @@ async def run_adaptive_pair_phase(
     stop_event: asyncio.Event,
     curl_parallel: int,
     protocol: str,
+    multi_eps: list | None = None,
 ) -> PhaseResult:
     """Adaptive TCP queue phase with optional UDP pair matrix."""
     eps = getattr(args, "adaptive_epsilon", 0.1)
@@ -537,12 +587,14 @@ async def run_adaptive_pair_phase(
         tcp_results = tcp_results_from_details(by_label, details, primary)
         if tcp_results:
             print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
-            pairs = await runner.test_pair_matrix(
+            pairs = await _run_pair_matrix_multi_ep(
+                runner,
                 tcp_results,
                 udp_items,
                 primary,
                 voice_ip,
                 voice_port,
+                multi_eps or [],
                 udp_timeout=args.udp_timeout,
                 udp_bypass=args.udp_bypass,
                 resume_from=resume_from,
@@ -571,6 +623,7 @@ async def run_standard_pair_phase(
     scan_level: str,
     use_family_gates: bool,
     run_set: set,
+    multi_eps: list | None = None,
 ) -> PhaseResult:
     """Standard per-domain TCP batch with UDP pair matrix on primary domain."""
     all_tcp_results: list = []
@@ -605,12 +658,14 @@ async def run_standard_pair_phase(
             if stop_event.is_set():
                 break
             print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
-            pairs = await runner.test_pair_matrix(
+            pairs = await _run_pair_matrix_multi_ep(
+                runner,
                 tcp_results,
                 udp_items,
                 domain,
                 voice_ip,
                 voice_port,
+                multi_eps or [],
                 udp_timeout=args.udp_timeout,
                 udp_bypass=args.udp_bypass,
                 resume_from=resume_from,

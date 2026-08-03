@@ -1,12 +1,18 @@
-# flowseal-fast — curated Flowseal ALT2 top strategies (M8)
-# Use: bs scan -d discord.com -M flowseal-fast --scan-level single
-# Dual-fake combos: configs/simple_fake_alt2__fake_max_ru_ts.conf or --generate multi_fake
+# flowseal-fast — curated Flowseal-technique shortlist (nfqws2)
+# Full matrix: bs scan --tcp-sources flowseal
+# Upstream: https://github.com/Flowseal/zapret-discord-youtube
+# Multi-desync: use literal \n between lua cores (UserMatrixGenerator).
 
-fake:blob=stun:repeats=6:tcp_ts=-1000
-fake:blob=max_ru:repeats=6:tcp_ts=-1000
+fake:blob=stun:repeats=6:tcp_ts=-1000\nfake:blob=max_ru:repeats=6:tcp_ts=-1000
+fake:blob=stun:repeats=6:tcp_ts=-1000\nfake:blob=google:repeats=6:tcp_ts=-1000
 fake:blob=google:repeats=6:tcp_ts=-1000
 fake:blob=4pda:repeats=6:tcp_ts=-1000
+multisplit:pos=1:seqovl=568:seqovl_pattern=4pda
+multisplit:pos=1:seqovl=480:seqovl_pattern=stun2
+fakedsplit:pos=1:pattern=0x00000000:tcp_ts=-1000:repeats=1
+hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=1
 hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up:repeats=1
 fake:blob=google:repeats=6:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=www.google.com
-multisplit:pos=midsld:seqovl=681:seqovl_pattern=google
-hostfakesplit:nofake2:tcp_ts=-1000:repeats=1
+fake:blob=0x00000000:repeats=11:badsid:tls_mod=rnd,dupsid,sni=www.google.com\nmultidisorder:pos=1,midsld
+syndata
+fake:blob=google:repeats=6:tcp_ts=-1000:ip_id=zero

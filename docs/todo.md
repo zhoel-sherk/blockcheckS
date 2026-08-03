@@ -50,47 +50,64 @@ _(none — E3 closed in Wave2)_
 - [x] Voice discovery `match/case` + sing-box async CM; `--full-voice` UX
 - [x] Shared blob CLI helpers; UDP family registry start; CLI/preflight DRY; settle unify
 
+### Closed in 1.1.0a1 (todo debt close, no ML)
+
+- [x] Phase 7: `ipfrag_tcp` / `ipfrag_udp` axes (`ipfrag_disorder`, `ipfrag_next`, fuller pos) + UDP multiline dual `--lua-desync`
+- [x] **M8** `flowseal` in default `bs full --tcp-sources`
+- [x] TTL > 255 (`256`/`512`) + `repeats=4` matrix axes
+- [x] **V2-1** multi-endpoint pair/udp/full fan-out (`domain@ip:port` resume keys)
+- [x] **V2-3** `scripts/voice_smoke.sh`
+- [x] **P5-1** `provider_import --seed-db` → `seed_state_db`
+
 ---
 
 ## P1 — Matrix, protocols, speed
 
 ### Phase 7 — QUIC / HTTP3
 
-- [ ] `ipfrag_udp` / `ipfrag_tcp` (`send:` dual-call) — generator gap
+- [x] `ipfrag_udp` / `ipfrag_tcp` (`send:` dual-call) — generator gap
 
 ### Phase 10 — Matrix coverage
 
-- [ ] **M8** `flowseal` в default `bs full --tcp-sources` или merge combos в `standard`
-- [ ] **M10** `circular` в optional scan mode (rotate blob combos on fail)
-- [ ] TTL > 255, `repeats=4` generator — matrix gap
+- [x] **M8** `flowseal` в default `bs full --tcp-sources` или merge combos в `standard`
+- [x] TTL > 255, `repeats=4` generator — matrix gap
 
 ### Phase 11 — Speed / throughput
 
-- [ ] **A4** GP multi-domain + `curl_parallelism` 4–10 — один nfqws2, parallel curl *(GP-side; BS = B2)*
-- [ ] **B3** persistent nfqws2 per worker — высокий риск; после B7
-- [ ] **B6** blockcheckw (Rust vmap) — fast scan reference, не drop-in voice/pair
-- [ ] **B7** nftables vmap POC — optional for **host-shared** / mark→queue multiplexing (blockcheckw-style); **not** required for netns `--parallel > 4` (each worker already has isolated NFQUEUE)
+_(see Deferred)_
 
-### YouTube
+### YouTube / External
 
-- [ ] **GV-2** Опционально: Playwright intercept как в `dpi-tester/youtube_test.py`
-
-### External heuristics
-
-- [ ] **[unblock-pro](https://github.com/by-sonic/unblock-pro)** — переносимые эвристики в matrix/checkers
+_(see Deferred)_
 
 ---
 
 ## P2 — Voice & GP bridge
 
-- [ ] **V2-1** multi-endpoint pair matrix по всем discover EP (сейчас только `eps[0]`)
+- [x] **V2-1** multi-endpoint pair matrix по всем discover EP
 - [x] **V2-2** `--full-voice` gateway WS path (discovery via gateway; messaging fixed in DS1)
-- [ ] **V2-3** `scripts/voice_smoke.sh` — новый smoke-скрипт для voice end-to-end (есть аналоги: `gv_e2e_smoke.sh`, `gv1_smoke.sh`)
-- [ ] **P5-1** GP JSON import в `state.db` (partial сейчас)
+- [x] **V2-3** `scripts/voice_smoke.sh`
+- [x] **P5-1** GP JSON import в `state.db` (`provider_import --seed-db`; NDJSON candidates still deferred)
 
 ---
 
-## P3 — Smart scan (Phase 12)
+## Deferred (parked)
+
+| ID | Why |
+|----|-----|
+| **ML1–ML5** | Smart scan / sklearn — far corner |
+| **H1–H10** | Progressive hierarchical scan — with ML |
+| **M10** circular *scan* mode | L; export scaffold already exists |
+| **A4** | GP-side multi-domain defaults (BS B2 done) |
+| **B3** persistent nfqws2 | High risk; after B7 |
+| **B6** blockcheckw | External / removed reference |
+| **B7** nftables vmap | Optional host-shared POC; not needed for netns parallel |
+| **GV-2** Playwright | Optional yt-dlp alternative |
+| **unblock-pro** | External heuristics port |
+
+---
+
+## P3 — Smart scan (Phase 12) — deferred with ML
 
 ### ML ranker (sklearn)
 

@@ -14,7 +14,7 @@ FOOLINGS_TCP = [
     "tcp_md5",
     "tcp_ack=-66000:tcp_ts_up",
 ]
-REPEATS_VALUES = [6, 3, 1, 8, 10, 11, 12, 2]  # 6,8 working on Fryazino; 2,11 from Flowseal
+REPEATS_VALUES = [6, 3, 1, 8, 10, 11, 12, 2, 4]  # 6,8 Fryazino; 2,11 Flowseal; 4 matrix gap
 TTL_VALUES = [1, 5, 7, 12, 63, 64, 127, 128, 255]
 AUTOTTL_RANGES = ["-1,3-20", "-2,5-15", "-3,7-12"]
 
@@ -285,8 +285,8 @@ ALL_FOOLINGS_IPV6 = [
 FAST_FOOLINGS_IPV6 = ["ip6_hopbyhop", "ip6_destopt"]
 
 # Extended repeats, TTL
-ALL_REPEATS = [6, 3, 1, 8, 10, 11, 12, 2, 5, 7, 9, 15, 20]  # 100,260 only for tcpseg
-ALL_TTL = [1, 5, 7, 12, 63, 64, 127, 128, 255]  # 63=ttl_minus_1, boundary values for other ISPs
+ALL_REPEATS = [6, 3, 1, 8, 10, 11, 12, 2, 4, 5, 7, 9, 15, 20]  # 100,260 only for tcpseg
+ALL_TTL = [1, 5, 7, 12, 63, 64, 127, 128, 255, 256, 512]  # >255 = out-of-range fooling wrap/cast
 ALL_AUTOTTL = ["-1,3-20", "-2,5-15", "-3,7-12", "-4,3-20", "-5,5-15"]
 
 # All split positions from blockcheck2.sh
@@ -331,7 +331,7 @@ FAST_FOOLINGS_TCP = [
     "tcp_ack=-66000:tcp_ts_up",
     "tcp_md5:tcp_ts=-1000",
 ]
-FAST_REPEATS = [6, 8, 3, 11, 12]
+FAST_REPEATS = [6, 8, 3, 11, 12, 4]
 
 
 def _with_ack_drop(core: str) -> str:
@@ -382,6 +382,12 @@ HTTP_FAMILIES = ["http_simple", "http_fake", "http_tls_dual"]
 UDP_VOICE_FAMILIES = ["udp_discord"]
 QUIC_HTTP3_FAMILIES = ["quic_fake", "quic_gv", "quic_ipfrag", "udp_quic", "udp_multiblob"]
 UDP_QUIC_FAMILIES = ["udp_quic", "udp_game", "udp_multiblob"]
+FAMILY_ALIASES = {"ipfrag_tcp": "tcp_ipfrag", "ipfrag_udp": "quic_ipfrag"}
+
+
+def _resolve_family_name(name: str) -> str:
+    return FAMILY_ALIASES.get(name, name)
+
 
 # ── Standard Generator (parameterized strategy families) ──
 
@@ -540,9 +546,11 @@ class StandardGenerator(StrategyGenerator):
         },
         # Phase 7: TCP ipfrag (complement to quic_ipfrag)
         "tcp_ipfrag": {
-            "positions": [8, 16, 32, 64],
-            "repeats": [6, 11],
+            "positions": [8, 16, 24, 32, 40, 48, 64],
+            "repeats": [6, 11, 4],
             "combo_blobs": ["", "stun", "google"],
+            "disorder": [False, True],
+            "ipfrag_next": [None, 255],
         },
         "fake_hostfake": {
             "blobs": ALL_BLOBS_TCP,
@@ -618,15 +626,18 @@ class StandardGenerator(StrategyGenerator):
             "repeats": [1, 2, 5, 6, 11],
         },
         "quic_ipfrag": {
-            "positions": [8, 16, 32, 64],
-            "repeats": [6, 11],
+            "positions": [8, 16, 24, 32, 40, 48, 64],
+            "repeats": [6, 11, 4],
+            "disorder": [False, True],
+            "ipfrag_next": [None, 255],
         },
     }
 
     def __init__(self, strategy_types: list[str] | None = None):
         self.strategy_types = strategy_types or list(TCP_FAMILIES)
         for t in self.strategy_types:
-            if t not in self.STRATEGY_FAMILIES and t != "all":
+            resolved = _resolve_family_name(t)
+            if resolved not in self.STRATEGY_FAMILIES and t != "all":
                 raise ValueError(f"Unknown strategy type: {t}")
 
     async def generate(
@@ -651,29 +662,30 @@ class StandardGenerator(StrategyGenerator):
 
         # Protocol gate — empty intersection means nothing for this protocol
         if protocol == "udp_voice":
-            types = [t for t in types if t in UDP_VOICE_FAMILIES]
+            types = [t for t in types if _resolve_family_name(t) in UDP_VOICE_FAMILIES]
         elif protocol == "http":
-            types = [t for t in types if t in HTTP_FAMILIES]
+            types = [t for t in types if _resolve_family_name(t) in HTTP_FAMILIES]
         elif protocol == "quic":
-            types = [t for t in types if t in QUIC_HTTP3_FAMILIES]
+            types = [t for t in types if _resolve_family_name(t) in QUIC_HTTP3_FAMILIES]
         else:
             # tls12/tls13 — TCP TLS only
-            types = [t for t in types if t in TCP_FAMILIES]
+            types = [t for t in types if _resolve_family_name(t) in TCP_FAMILIES]
 
         # Expand axes for full scan
         full = scan_level == "full"
         n_types = max(1, len(types))
 
         for idx, stype in enumerate(types):
-            family = self.STRATEGY_FAMILIES.get(stype)
+            resolved = _resolve_family_name(stype)
+            family = self.STRATEGY_FAMILIES.get(resolved)
             if not family:
                 continue
             fam = dict(family)
-            if full and stype == "fake":
+            if full and resolved == "fake":
                 fam["repeats"] = [r for r in ALL_REPEATS if r not in (100, 260)]
                 fam["foolings"] = ALL_FOOLINGS_TCP + ALL_FOOLINGS_IPV6
                 fam["tls_mods"] = TLS_MODS
-            elif full and stype in (
+            elif full and resolved in (
                 "hostfake",
                 "fakedsplit",
                 "fakeddisorder",
@@ -683,12 +695,12 @@ class StandardGenerator(StrategyGenerator):
                 fam["foolings"] = list(
                     dict.fromkeys(list(fam.get("foolings", [])) + ALL_FOOLINGS_TCP)
                 )
-            elif full and stype == "quic_fake":
+            elif full and resolved == "quic_fake":
                 fam["foolings"] = list(
                     dict.fromkeys(list(fam.get("foolings", [""])) + ALL_FOOLINGS_UDP)
                 )
                 fam["ip6_fools"] = ALL_FOOLINGS_IPV6
-            elif scan_level == "fast" and stype == "fake":
+            elif scan_level == "fast" and resolved == "fake":
                 # Limited IPv6 fooling axis on fast
                 fam["ipv6_extra"] = FAST_FOOLINGS_IPV6
             room = max_count - len(items)
@@ -696,7 +708,7 @@ class StandardGenerator(StrategyGenerator):
                 break
             remaining_types = n_types - idx
             share = max(1, room // remaining_types)
-            new = self._expand_family(stype, fam, scan_level, seen, known_working)
+            new = self._expand_family(resolved, fam, scan_level, seen, known_working)
             items.extend(new[:share])
 
         return items[:max_count]
@@ -1149,25 +1161,42 @@ class StandardGenerator(StrategyGenerator):
     def _fam_tcp_ipfrag(self, items, seen, family, scan_level, _known_working):
         """Expand tcp_ipfrag family."""
         for pos in family["positions"]:
-            strat = f"send:ipfrag:ipfrag_pos_tcp={pos}\ndrop"
-            label = f"std_tcp_ipfrag_pos{pos}"
-            self._add(items, seen, label, strat)
-            if scan_level == "single":
-                return items
+            for disorder in family.get("disorder", [False]):
+                for nxt in family.get("ipfrag_next", [None]):
+                    opts = f"ipfrag_pos_tcp={pos}"
+                    if disorder:
+                        opts += ":ipfrag_disorder"
+                    if nxt is not None:
+                        opts += f":ipfrag_next={nxt}"
+                    strat = f"send:ipfrag:{opts}\ndrop"
+                    label = f"std_tcp_ipfrag_pos{pos}"
+                    if disorder:
+                        label += "_disorder"
+                    if nxt is not None:
+                        label += f"_next{nxt}"
+                    self._add(items, seen, label, strat)
+                    if scan_level == "single":
+                        return items
         for pos in family["positions"]:
             for blob_name in family.get("combo_blobs", [""]):
                 if not blob_name:
                     continue
                 for r in family["repeats"]:
-                    strat = (
-                        f"fake:blob={blob_name}:repeats={r}\n"
-                        f"send:ipfrag:ipfrag_pos_tcp={pos}\n"
-                        f"drop"
-                    )
-                    label = f"std_tcp_fake_ipfrag_{blob_name}_r{r}_pos{pos}"
-                    self._add(items, seen, label, strat)
-                    if scan_level == "single":
-                        return items
+                    for disorder in family.get("disorder", [False])[:1]:
+                        opts = f"ipfrag_pos_tcp={pos}"
+                        if disorder:
+                            opts += ":ipfrag_disorder"
+                        strat = (
+                            f"fake:blob={blob_name}:repeats={r}\n"
+                            f"send:ipfrag:{opts}\n"
+                            f"drop"
+                        )
+                        label = f"std_tcp_fake_ipfrag_{blob_name}_r{r}_pos{pos}"
+                        if disorder:
+                            label += "_disorder"
+                        self._add(items, seen, label, strat)
+                        if scan_level == "single":
+                            return items
         return items
 
     def _fam_fake_hostfake(self, items, seen, family, scan_level, _known_working):
@@ -1264,24 +1293,42 @@ class StandardGenerator(StrategyGenerator):
     def _fam_quic_ipfrag(self, items, seen, family, scan_level, _known_working):
         """Expand quic_ipfrag family."""
         for pos in family["positions"]:
-            strat = f"send:ipfrag:ipfrag_pos_udp={pos}\ndrop"
-            label = f"std_quic_ipfrag_pos{pos}"
-            self._add(items, seen, label, strat, protocol="quic")
-            if scan_level == "single":
-                return items
+            for disorder in family.get("disorder", [False]):
+                for nxt in family.get("ipfrag_next", [None]):
+                    opts = f"ipfrag_pos_udp={pos}"
+                    if disorder:
+                        opts += ":ipfrag_disorder"
+                    if nxt is not None:
+                        opts += f":ipfrag_next={nxt}"
+                    strat = f"send:ipfrag:{opts}\ndrop"
+                    label = f"std_quic_ipfrag_pos{pos}"
+                    if disorder:
+                        label += "_disorder"
+                    if nxt is not None:
+                        label += f"_next{nxt}"
+                    self._add(items, seen, label, strat, protocol="quic")
+                    if scan_level == "single":
+                        return items
         for pos in family["positions"]:
             for r in family["repeats"]:
-                strat = (
-                    f"fake:blob=fake_default_quic:repeats={r}\n"
-                    f"send:ipfrag:ipfrag_pos_udp={pos}\n"
-                    f"drop"
-                )
-                label = f"std_quic_fake_ipfrag_r{r}_pos{pos}"
-                self._add(items, seen, label, strat, protocol="quic")
-                if scan_level == "single":
-                    return items
+                for disorder in family.get("disorder", [False])[:1]:
+                    opts = f"ipfrag_pos_udp={pos}"
+                    if disorder:
+                        opts += ":ipfrag_disorder"
+                    strat = (
+                        f"fake:blob=fake_default_quic:repeats={r}\n"
+                        f"send:ipfrag:{opts}\n"
+                        f"drop"
+                    )
+                    label = f"std_quic_fake_ipfrag_r{r}_pos{pos}"
+                    if disorder:
+                        label += "_disorder"
+                    self._add(items, seen, label, strat, protocol="quic")
+                    if scan_level == "single":
+                        return items
         return items
 
+    # Aliases for todo / CLI naming (ipfrag_tcp / ipfrag_udp)
     _FAMILY_EXPANDERS = {
         "fake": "_fam_fake",
         "hostfake": "_fam_hostfake",
@@ -1299,6 +1346,7 @@ class StandardGenerator(StrategyGenerator):
         "fakeddisorder": "_fam_fakeddisorder",
         "fake_fakedsplit": "_fam_fake_fakedsplit",
         "tcp_ipfrag": "_fam_tcp_ipfrag",
+        "ipfrag_tcp": "_fam_tcp_ipfrag",
         "fake_hostfake": "_fam_fake_hostfake",
         "udp_discord": "_fam_udp_discord",
         "udp_quic": "_fam_udp_quic",
@@ -1310,6 +1358,7 @@ class StandardGenerator(StrategyGenerator):
         "quic_fake": "_fam_quic_fake",
         "quic_gv": "_fam_quic_gv",
         "quic_ipfrag": "_fam_quic_ipfrag",
+        "ipfrag_udp": "_fam_quic_ipfrag",
     }
 
     def _expand_family(

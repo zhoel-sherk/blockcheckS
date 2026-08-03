@@ -210,6 +210,41 @@ def check_discover_mutex(discover_dns, auto_discover) -> str | None:
     return None
 
 
+def resolve_voice_targets(
+    voice_ip: str,
+    voice_port: int,
+    multi_eps: list | None = None,
+) -> list[tuple[str, int]]:
+    """Return (ip, port) list for pair/udp fan-out (V2-1).
+
+    Prefers ``multi_eps`` when non-empty; otherwise a single ``(voice_ip, voice_port)``.
+    """
+    out: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    for ep in multi_eps or []:
+        if not isinstance(ep, dict):
+            continue
+        ip = ep.get("ip")
+        port = ep.get("port")
+        if not ip or port is None:
+            continue
+        key = (str(ip), int(port))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    if out:
+        return out
+    return [(str(voice_ip), int(voice_port))]
+
+
+def pair_log_domain(domain: str, ip: str, port: int, *, multi: bool) -> str:
+    """Domain key for pair_results resume when fan-out across endpoints."""
+    if multi:
+        return f"{domain}@{ip}:{port}"
+    return domain
+
+
 def parse_maks_ip_list(text: str) -> list[str]:
     """Parse one-IP-per-line text from Maks-gaming voice ip lists."""
     ips: list[str] = []

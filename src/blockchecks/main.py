@@ -141,7 +141,7 @@ def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser
         help="Warn if domain has 0%% PASS after N DB results (0=off, default 10)",
     )
     add_domain_filter_args(p)
-    p.add_argument("--tcp-sources", default="standard,custom,configs")
+    p.add_argument("--tcp-sources", default="standard,custom,configs,flowseal")
     p.add_argument("--udp-sources", default="custom,standard_udp")
     p.add_argument("--quic-sources", default="standard_quic")
     p.add_argument("--http-sources", default="custom,standard_http")

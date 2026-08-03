@@ -36,6 +36,9 @@ python3 -m blockchecks.shortlist_export --db logs/bs_run.db -o logs/shortlist.js
 # 3. Optional: seed blockcheckS DB from shortlist
 python3 -m blockchecks.shortlist_import -i logs/shortlist.json --seed-db --db logs/seed.db
 
+# 3b. Or seed directly from GP provider_summary.json (P5-1)
+python3 -m blockchecks.provider_import -i logs/provider_summary.json --seed-db logs/seed.db
+
 # 4. GP multi-domain discovery uses blockcheck2 with same repeats env
 #    (see gp-control-plane DiscoveryOptions.to_blockcheck_env)
 ```

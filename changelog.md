@@ -2,6 +2,20 @@
 
 ## Unreleased / HEAD
 
+### Added (Flowseal unified + baked blobs)
+- **Repo `blobs/`:** Flowseal+custom binaries committed; default `BLOB_DIR` prefers in-repo path (no download)
+- **`FlowsealGenerator`:** full bat-technique axes (multi/split/fds/hf/md/syndata/tls_mod/QUIC/UDP); >1000 OK
+- **`flowseal-fast`:** curated technique shortlist (not ALT2-branded)
+- **Cookbook:** [docs/cookbook/blobs.md](docs/cookbook/blobs.md) — how to add a blob
+
+### Added (todo debt close)
+- **M8:** `bs full` default `--tcp-sources` includes `flowseal`
+- **Matrix:** `repeats=4`; TTL overflow `256`/`512` on full axes; Flowseal multi-blob `r=4`
+- **Phase 7:** ipfrag `disorder` / `next` / fuller pos; aliases `ipfrag_tcp`/`ipfrag_udp`; UDP multiline dual `--lua-desync`
+- **V2-1:** pair/udp/full fan-out across discovered voice endpoints (`domain@ip:port` pair keys)
+- **V2-3:** `scripts/voice_smoke.sh`
+- **P5-1:** `python -m blockchecks.provider_import --seed-db PATH`
+
 ### Fixed (CLI / CliApp)
 - **Short flags restored** on CliApp path (`-d`, `-M`, `-c`, …) via `cli_shortcuts` + `case_sensitive=True`
 - **Bare `--generate`** again expands to `custom,configs` (argv preprocess before CliApp)

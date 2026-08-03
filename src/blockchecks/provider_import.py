@@ -114,6 +114,62 @@ def merge_into_user_matrix(
     return str(matrix_path)
 
 
+def provider_summary_to_shortlist(summary: dict[str, Any]) -> dict[str, Any]:
+    """Convert provider_summary.json → shortlist v1 shape for ``seed_state_db``."""
+    strategies = extract_strategies(summary)
+    domains: list[str] = []
+    shortlist_map = summary.get("shortlist") or {}
+    if isinstance(shortlist_map, dict):
+        domains = [str(d) for d in shortlist_map if d and d != "*"]
+    if not domains:
+        domains = ["discord.com"]
+
+    tcp_rows: list[dict[str, Any]] = []
+    for proto in ("tls12", "tls13", "tcp"):
+        for i, strat in enumerate(strategies.get(proto, [])):
+            tcp_rows.append(
+                {
+                    "label": f"provider_{proto}_{i}",
+                    "strategy": strat,
+                    "domains_pass": domains,
+                    "latency_ms": 0.0,
+                }
+            )
+
+    udp_rows: list[dict[str, Any]] = []
+    for i, strat in enumerate(strategies.get("udp_voice", []) + strategies.get("udp", [])):
+        udp_rows.append(
+            {
+                "label": f"provider_udp_{i}",
+                "strategy": strat,
+                "target": "voice",
+                "latency_ms": 0.0,
+            }
+        )
+
+    quic_rows: list[dict[str, Any]] = []
+    for i, strat in enumerate(strategies.get("quic", [])):
+        quic_rows.append(
+            {
+                "label": f"provider_quic_{i}",
+                "strategy": strat,
+                "domains_pass": domains,
+                "latency_ms": 0.0,
+            }
+        )
+
+    return {
+        "schema": "blockchecks.shortlist/v1",
+        "source_db": f"provider:{summary.get('provider_id', 'import')}",
+        "generated_at": summary.get("generated_at", ""),
+        "domains": domains,
+        "tcp": tcp_rows,
+        "udp": udp_rows,
+        "quic": quic_rows,
+        "common_tcp": [],
+    }
+
+
 def build_import_report(summary: dict[str, Any]) -> str:
     strategies = extract_strategies(summary)
     lines = [
@@ -140,6 +196,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Append strategies to user-matrix file (for bs scan --user-matrix)",
     )
     p.add_argument("--prefix", default="provider", help="Preset filename prefix")
+    p.add_argument(
+        "--seed-db",
+        default=None,
+        metavar="PATH",
+        help="Seed state.db PASS rows from provider strategies (P5-1)",
+    )
     args = p.parse_args(argv)
 
     summary = load_provider_summary(args.summary)
@@ -152,6 +214,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.merge_matrix:
         path = merge_into_user_matrix(args.summary, args.merge_matrix)
         print(f"Merged user-matrix: {path}")
+
+    if args.seed_db:
+        import asyncio
+
+        from blockchecks.shortlist_import import seed_state_db
+
+        shortlist = provider_summary_to_shortlist(summary)
+        seeded = asyncio.run(seed_state_db(shortlist, args.seed_db))
+        print(f"Seeded {seeded} rows → {args.seed_db}")
     return 0
 
 

@@ -111,6 +111,7 @@ class FullRunContext:
     deadline: RunDeadline | None = None
     signal_interrupted: bool = False
     aq_result: Any = None
+    voice_eps: list = field(default_factory=list)
     repeats: int = 0
     parallel_repeats: int = 0
     repeats_mode: str = ""
@@ -690,12 +691,18 @@ async def discover_voice_endpoint(ctx: FullRunContext) -> tuple[str, int]:
                 use_bootstrap=not args.discover_dns_no_bootstrap,
             )
             if eps:
+                ctx.voice_eps = eps
                 voice_ip, voice_port = eps[0]["ip"], eps[0]["port"]
                 print(
                     f"  {GREEN}Voice {voice_ip}:{voice_port} "
+                    f"({len(eps)} endpoints) "
                     f"method={eps[0].get('method')} "
                     f"bootstrap={eps[0].get('bootstrap')}{RESET}"
                 )
+                for ep in eps[1:3]:
+                    print(f"  {GREEN}  + {ep['ip']}:{ep['port']}{RESET}")
+                if len(eps) > 3:
+                    print(f"  {GREEN}  ... and {len(eps) - 3} more{RESET}")
             else:
                 print(f"  {YELLOW}No alive voice — using defaults{RESET}")
         except Exception as e:
@@ -793,17 +800,32 @@ async def run_pairs_phase(
                         f"({resume_from.fingerprint}≠{ctx.fp}) — full pair re-run{RESET}"
                     )
                     resume_from = None
-            pairs = await ctx.runner.test_pair_matrix(
-                tcp_results,
-                ctx.udp_items[: max(1, args.pair_max // 2)],
-                ctx.primary,
-                voice_ip,
-                voice_port,
-                udp_timeout=args.udp_timeout,
-                udp_bypass=True,
-                resume_from=resume_from,
-                fingerprint=ctx.fp,
-            )
+            from blockchecks.checkers.voice_dns import pair_log_domain, resolve_voice_targets
+
+            targets = resolve_voice_targets(voice_ip, voice_port, ctx.voice_eps)
+            multi = len(targets) > 1
+            if multi:
+                print(
+                    f"  {YELLOW}Multi-EP fan-out: {len(targets)} endpoints{RESET}"
+                )
+            pairs = []
+            for ip, port in targets:
+                log_dom = pair_log_domain(ctx.primary, ip, port, multi=multi)
+                if multi:
+                    print(f"  {CYAN}pairs ep={ip}:{port}{RESET}")
+                batch = await ctx.runner.test_pair_matrix(
+                    tcp_results,
+                    ctx.udp_items[: max(1, args.pair_max // 2)],
+                    ctx.primary,
+                    ip,
+                    port,
+                    udp_timeout=args.udp_timeout,
+                    udp_bypass=True,
+                    resume_from=resume_from,
+                    fingerprint=ctx.fp,
+                    pair_domain=log_dom if multi else None,
+                )
+                pairs.extend(batch)
             n_pass = sum(1 for p in pairs if p.overall == "PASS")
             print(f"  Pairs PASS={n_pass}/{len(pairs)}")
         else:

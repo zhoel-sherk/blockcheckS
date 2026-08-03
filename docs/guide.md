@@ -56,10 +56,14 @@ sudo bs pair -d discord.com -c configs/alt__fake_fakedsplit_ts.conf -u configs/u
 sudo bs pair -d discord.com --resume   # откажется, если matrix fingerprint сменился
 
 # Mass run (intentionally huge — GP-scale strategy×domain). Defaults = max.
+# Default --tcp-sources includes flowseal (M8).
 sudo bs full
 sudo bs full --parallel 2 --resume
 sudo bs full --max 500 --domains-file presets/domains/critical.txt
 bc-nfconf --db state.db --limit 3 --out-dir output
+
+# Voice UDP smoke (sudo + nfqws2 + discord_udp blob):
+./scripts/voice_smoke.sh
 ```
 
 Default `--parallel` comes from `BLOCKCHECKS_POOL` / `DEFAULT_POOL_SIZE` (usually 4).
@@ -101,6 +105,7 @@ Three levels — see [glossary.md](glossary.md):
 | `--curl-parallel N` | `curl_parallelism` | Multi-domain fan-out (B2, **not** repeats) |
 
 GP bridge workflow: [cookbook/gp-bridge.md](cookbook/gp-bridge.md).
+Blobs (add/bake): [cookbook/blobs.md](cookbook/blobs.md).
 
 ## Тесты
 

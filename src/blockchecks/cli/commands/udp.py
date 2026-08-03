@@ -4,6 +4,12 @@ import asyncio
 
 from colorama import Fore, Style
 
+from blockchecks.checkers.voice_dns import (
+    check_discover_mutex,
+    discover_dns_alive,
+    positive_discover_count,
+    resolve_voice_targets,
+)
 from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
 from blockchecks.engine.strategy_loader import StrategyLoader
 from blockchecks.engine.test_runner import TestRunner
@@ -15,12 +21,6 @@ RESET = Style.RESET_ALL
 
 
 def cmd_udp(args):
-    from blockchecks.checkers.voice_dns import (
-        check_discover_mutex,
-        discover_dns_alive,
-        positive_discover_count,
-    )
-
     mutex_err = check_discover_mutex(
         getattr(args, "discover_dns", None),
         getattr(args, "auto_discover", None),
@@ -48,27 +48,35 @@ def cmd_udp(args):
     auto_discover = getattr(args, "auto_discover", None)
     dns_count = positive_discover_count(discover_dns)
     auto_count = positive_discover_count(auto_discover)
+    multi_eps: list = []
 
     if not explicit_ip and dns_count is not None:
         count = dns_count
         print(f"\n  {CYAN}DNS-alive discovering {count} voice endpoints...{RESET}")
         try:
-            eps = asyncio.run(
+            multi_eps = asyncio.run(
                 discover_dns_alive(
                     count,
                     use_bootstrap=not getattr(args, "discover_dns_no_bootstrap", False),
                 )
             )
-            if eps:
-                voice_ip, voice_port = eps[0]["ip"], eps[0]["port"]
-                method = eps[0].get("method", "?")
-                boot = "on" if eps[0].get("bootstrap") else "off"
+            if multi_eps:
+                voice_ip, voice_port = multi_eps[0]["ip"], multi_eps[0]["port"]
+                method = multi_eps[0].get("method", "?")
+                boot = "on" if multi_eps[0].get("bootstrap") else "off"
                 print(
                     f"  {GREEN}Voice source: dns-alive "
-                    f"({len(eps)}/{count}) {voice_ip}:{voice_port} "
+                    f"({len(multi_eps)}/{count}) {voice_ip}:{voice_port} "
                     f"method={method} bootstrap={boot} "
-                    f"({eps[0].get('hostname', '')}){RESET}"
+                    f"({multi_eps[0].get('hostname', '')}){RESET}"
                 )
+                for ep in multi_eps[1:3]:
+                    print(
+                        f"  {GREEN}  + {ep['ip']}:{ep['port']} "
+                        f"({ep.get('hostname', '')}){RESET}"
+                    )
+                if len(multi_eps) > 3:
+                    print(f"  {GREEN}  ... and {len(multi_eps) - 3} more{RESET}")
             else:
                 print(f"  {YELLOW}No alive endpoints — using static DEFAULT_VOICE_*{RESET}")
                 voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
@@ -84,7 +92,10 @@ def cmd_udp(args):
             multi_eps = asyncio.run(discover_multiple(count, use_dns=True))
             if multi_eps:
                 voice_ip, voice_port = multi_eps[0]["ip"], multi_eps[0]["port"]
-                print(f"  {GREEN}Voice source: auto-discover {voice_ip}:{voice_port}{RESET}")
+                print(
+                    f"  {GREEN}Voice source: auto-discover "
+                    f"({len(multi_eps)}) {voice_ip}:{voice_port}{RESET}"
+                )
             else:
                 print(f"  {YELLOW}No endpoints found — using static{RESET}")
                 voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
@@ -92,13 +103,24 @@ def cmd_udp(args):
             print(f"  {YELLOW}Discovery error: {e}{RESET}")
             voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
 
+    targets = resolve_voice_targets(voice_ip, voice_port, multi_eps)
     print("\n  blockcheckS — UDP Voice test")
-    print(f"  Target: {voice_ip}:{voice_port}  Items: {len(configs)}  Timeout: {args.timeout}s\n")
-    runner = TestRunner(ns_name=args.ns)
-    report = runner.test_sequential_udp(
-        configs, voice_ip, port=voice_port, timeout=args.timeout, qnum=args.qnum
-    )
     print(
-        f"\n  Results: {report.passed}/{len(report.results)} passed ({report.total_time_sec:.1f}s)"
+        f"  Targets: {len(targets)}  Items: {len(configs)}  Timeout: {args.timeout}s\n"
     )
-    return 0 if report.passed > 0 else 1
+    runner = TestRunner(ns_name=args.ns)
+    passed_any = 0
+    total_time = 0.0
+    for ip, port in targets:
+        print(f"  {CYAN}--- ep={ip}:{port} ---{RESET}")
+        report = runner.test_sequential_udp(
+            configs, ip, port=port, timeout=args.timeout, qnum=args.qnum
+        )
+        passed_any += report.passed
+        total_time += report.total_time_sec
+        print(
+            f"  Results @{ip}:{port}: "
+            f"{report.passed}/{len(report.results)} passed ({report.total_time_sec:.1f}s)"
+        )
+    print(f"\n  Total passed probes: {passed_any} ({total_time:.1f}s)")
+    return 0 if passed_any > 0 else 1
