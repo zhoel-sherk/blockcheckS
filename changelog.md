@@ -1,5 +1,13 @@
 # blockcheckS Changelog
 
+## Unreleased / HEAD
+
+### Changed
+- README: table of contents, badges, hero section, humor/jargon
+- docs: presets README counts corrected; architecture module map expanded; database refs updated; glossary +15 terms; troubleshooting added to guide; blobs tier-1 clean-up
+
+---
+
 ## 1.0.2 — 2026-08-03
 
 ### Fixed

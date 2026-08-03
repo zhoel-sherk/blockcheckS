@@ -70,7 +70,7 @@
 
 - [ ] **V2-1** multi-endpoint pair matrix по всем discover EP (сейчас только `eps[0]`)
 - [ ] **V2-2** `--full-voice` gateway WS probe (сейчас discovery+STUN only)
-- [ ] **V2-3** `scripts/voice_smoke.sh` — post-1.0.0 (есть `gv_e2e_smoke.sh`, `gv1_smoke.sh`)
+- [ ] **V2-3** `scripts/voice_smoke.sh` — новый smoke-скрипт для voice end-to-end (есть аналоги: `gv_e2e_smoke.sh`, `gv1_smoke.sh`)
 - [ ] **P5-1** GP JSON import в `state.db` (partial сейчас)
 
 ---

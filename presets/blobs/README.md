@@ -17,9 +17,6 @@ by nfqws2 at runtime — not wheel-packaged binaries.
 | `quic_dbank` | `quic_initial_dbankcloud_ru.bin` | VK/social QUIC |
 | `quic_gv_kyber_1` | `quic_gv_kyber_1.bin` → `files/fake/quic_initial_*_googlevideo_com_kyber_1.bin` | YouTube CDN QUIC (GV-5) |
 | `quic_gv_kyber_2` | `quic_gv_kyber_2.bin` | YouTube CDN QUIC alt kyber |
-| `tls_vk` | `tls_clienthello_vk_com.bin` | VK TLS (BLOB-2) |
-| `quic_vk` | `quic_initial_vk_com.bin` | VK QUIC (BLOB-2) |
-| `game_udp` | `game_udp.bin` | Flowseal ACTIVE_GAME_UDP (BLOB-2) |
 | `stun2` | `stun2.bin` | Alt STUN (Flowseal) |
 | `quic_4pda` | `quic_4pda.bin` | Alt QUIC 4pda |
 | `quic_tencent` | `quic_tencent.bin` | Tencent QUIC |

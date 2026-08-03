@@ -6,11 +6,11 @@ One domain per line, `#` comments.
 
 ```bash
 # --preset alone is enough (-d optional; first domain used as primary)
-bs scan --preset discord              # 21 Discord domains
+bs scan --preset discord              # 22 Discord domains
 bs scan --preset google-youtube       # 23 YouTube CDN domains
 bs scan -d discord.com --preset critical   # -d + preset: all preset domains
-bs scan --preset coverage             # 37 domains, full GP coverage
-bs scan --preset benchmark            # 8 domains, lightweight test
+bs scan --preset coverage             # 40 domains, full GP coverage
+bs scan --preset benchmark            # 6 domains, lightweight test
 bs scan --preset cloudflare           # 9 Cloudflare domains
 bs scan --preset amazon-aws           # 11 AWS domains
 bs scan --preset diagnostic           # 1 domain: web.telegram.org
@@ -70,7 +70,7 @@ sudo bs full --scan-level fast --max 100 --preset benchmark
 sudo bs full --domains-file presets/domains/coverage-tcp.txt --max 100
 ```
 
-Presets: `benchmark.txt` (6 dom), `critical.txt` (4 dom), `coverage-tcp.txt` (13 dom),
+Presets: `benchmark.txt` (6 dom), `critical.txt` (4 dom), `coverage-tcp.txt` (14 dom),
 `gp-verified.tls` (7 strategies), `timeout-benchmark.tls` (3 strategies for A9).
 
 ## Full mass run (`bs full`)

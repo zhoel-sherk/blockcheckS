@@ -1,7 +1,9 @@
 # Database — state.db
 
 SQLite persistence for mass scans (`bs full`, `bs scan --resume`). Schema defined in
-[`db_logger.py`](../src/blockchecks/engine/db_logger.py).
+[`engine/store/schema.py`](../src/blockchecks/engine/store/schema.py) (SqliteRunStore).
+
+WAL mode and `busy_timeout=5000` are applied on every connection.
 
 ## ER diagram
 
@@ -141,4 +143,4 @@ SELECT * FROM checkpoints ORDER BY id DESC LIMIT 1;
 bc-nfconf --db state.db --limit 3 --out-dir output
 ```
 
-Reads `v_coverage` / best strategies via `db_logger.get_best_*`.
+Reads `v_coverage` / best strategies via `SqliteRunStore.get_best_*`.

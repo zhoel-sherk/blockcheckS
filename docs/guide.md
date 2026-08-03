@@ -126,6 +126,36 @@ pytest -m "not integration"
 4. В git лучше не держать `state.db` и `*.egg-info` (gitignore + untrack).
 5. На Windows `bs --help` падал на `×` в argparse (cp1251) — заменено на `x`.
 
+## Troubleshooting
+
+**nfqws2 not found / command not found**
+- Проверь `/opt/zapret2/nfq2/nfqws2` или разреши авто-фетч: удали `--no-fetch-deps`.
+- Вручную: `export BLOCKCHECKS_NFQWS2=/path/to/nfqws2`.
+- Или пропиши в `~/.config/blockcheckS/config.toml` → `[tools] nfqws2`.
+
+**Permission denied / sudo password prompt**
+- blockcheckS требует **passwordless sudo** (`sudo -n`).
+- Добавь в `/etc/sudoers.d/blockchecks`: `username ALL=(ALL) NOPASSWD: ALL`.
+- Юнит-тесты (`pytest`) запускаются БЕЗ sudo.
+
+**Все стратегии FAIL / parse: / timeout**
+- nfqws2 крашнулся при старте? Проверь `BLOCKCHECKS_NFQWS2_DEBUG=1 bs tcp ...`.
+- Увеличь таймаут: `--timeout 20` (дефолт 10).
+- Проверь iptables: `sudo iptables -L OUTPUT -n | grep NFQUEUE`.
+- Для googlevideo.com: это известная проблема — IP `142.251.x.x` блокируется на уровне IP (не SNI).
+
+**STUN probe всегда timeout**
+- GCP Discord-сервера требуют активную WebSocket-сессию для ответа на STUN.
+- Без `--full-voice` (gateway WS + voice WS) STUN таймаутит — это ожидаемо.
+
+**Database is locked**
+- SQLite под нагрузкой нескольких воркеров. `bs full` автоматически ставит `busy_timeout=5000`.
+- При ручном конкурентном доступе к `state.db` используй отдельные копии.
+
+**netns: RTNETLINK answers: Operation not permitted**
+- Убедись что модуль `veth` загружен: `sudo modprobe veth`.
+- Проверь `sysctl net.ipv4.ip_forward=1`.
+
 ## Packaging check
 
 ```bash

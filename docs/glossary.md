@@ -24,3 +24,17 @@
 | **repeats mode** | `fast` = stop on first PASS; `stable` = run all N like blockcheck2 |
 | **curl fan-out** | `--curl-parallel` — multi-domain per nfqws2 (GP `curl_parallelism`, **not** repeats) |
 | **strategy repeats** | `:repeats=N` in lua-desync line — nfqws2 fake packet count (matrix only) |
+| **XDG** | XDG Base Directory spec — `~/.config`, `~/.local/state`, `~/.local/share`, `~/.cache` |
+| **ONB-7** | Packaging rule: editable install required for `configs/` and `presets/` resolution |
+| **T1 / T2** | Blob tiers: T1 = shipped, T2 = external (Flowseal/bol-van) |
+| **fan-out** | Multi-domain curl probe per single nfqws2 session (B2) |
+| **composite** | One `.conf` handling TCP+UDP with `--new=voice` profiles |
+| **settle profile** | Per-strategy calibrated timing (min settle + curl timeout) |
+| **adaptive queue** | Priority-based strategy ordering: epsilon-greedy + fan-out on PASS |
+| **system deps** | Auto-fetch nfqws2 + Lua + blobs on first live run (Phase 1.0.1) |
+| **preflight** | Startup checks: baseline reachability, IP-block, port-block, nfqws2 detection |
+| **DoH** | DNS-over-HTTPS pre-resolution via Cloudflare/Google/Quad9 |
+| **GV-1** | Googlevideo videoplayback probe (signed CDN URL, not apex) |
+| **BC2** | blockcheck2.sh parity — foolings list, repeats logic, family ordering |
+| **shortlist** | JSON export of best strategies per domain for GP control-plane |
+| **JA4** | Browser TLS fingerprint — curl_cffi impersonates Chrome 124 BoringSSL |

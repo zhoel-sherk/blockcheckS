@@ -1,7 +1,6 @@
 # Architecture — blockcheckS
 
-Canonical data-flow reference. Supersedes [`tmp-scripts/README.md`](../tmp-scripts/README.md)
-(deprecated architecture section).
+Canonical data-flow reference.
 
 ## Main runtime flow (`bs scan` / `bs pair` / `bs full`)
 
@@ -33,15 +32,34 @@ sequenceDiagram
 | CLI / argparse | `blockchecks.cli` (entry: `bs.py`) |
 | Mass orchestration | [`main.py`](../src/blockchecks/main.py) |
 | Strategy matrix | [`engine/matrix_generator.py`](../src/blockchecks/engine/matrix_generator.py) |
+| Domain loader | [`engine/domain_loader.py`](../src/blockchecks/engine/domain_loader.py) |
+| Preflight | [`engine/preflight.py`](../src/blockchecks/engine/preflight.py) |
+| Blob aliases | [`engine/blob_aliases.py`](../src/blockchecks/engine/blob_aliases.py) |
 | Parallel TCP/UDP/pair | [`engine/async_runner.py`](../src/blockchecks/engine/async_runner.py) |
 | Sync single-ns (legacy) | [`engine/test_runner.py`](../src/blockchecks/engine/test_runner.py) |
+| Adaptive runner | [`engine/adaptive_runner.py`](../src/blockchecks/engine/adaptive_runner.py) |
+| Adaptive queue | [`engine/adaptive_queue.py`](../src/blockchecks/engine/adaptive_queue.py) |
+| TCP fanout | [`engine/tcp_fanout.py`](../src/blockchecks/engine/tcp_fanout.py) |
+| Curl probe worker | [`engine/_curl_probe_worker.py`](../src/blockchecks/engine/_curl_probe_worker.py) |
+| Family needs | [`engine/family_needs.py`](../src/blockchecks/engine/family_needs.py) |
+| Run finalize | [`engine/run_finalize.py`](../src/blockchecks/engine/run_finalize.py) |
+| Run deadline | [`engine/run_deadline.py`](../src/blockchecks/engine/run_deadline.py) |
+| Settle profile | [`engine/settle_profile.py`](../src/blockchecks/engine/settle_profile.py) |
+| nfqws2 settle | [`engine/nfqws2_settle.py`](../src/blockchecks/engine/nfqws2_settle.py) |
+| System deps | [`engine/system_deps.py`](../src/blockchecks/engine/system_deps.py) |
 | netns + iptables | [`netns_pool.py`](../src/blockchecks/engine/netns_pool.py), [`firewall.py`](../src/blockchecks/engine/firewall.py) |
 | TLS/content check | [`checkers/tcp_tls.py`](../src/blockchecks/checkers/tcp_tls.py) |
+| HTTP3 check | [`checkers/http3.py`](../src/blockchecks/checkers/http3.py) |
+| DNS secure check | [`checkers/dns_secure.py`](../src/blockchecks/checkers/dns_secure.py) |
+| IP block check | [`checkers/ip_block.py`](../src/blockchecks/checkers/ip_block.py) |
+| Port block check | [`checkers/port_block.py`](../src/blockchecks/checkers/port_block.py) |
+| Curl probe | [`checkers/curl_probe.py`](../src/blockchecks/checkers/curl_probe.py) |
+| YouTube URL | [`checkers/youtube_url.py`](../src/blockchecks/checkers/youtube_url.py) |
 | Voice UDP | [`checkers/udp_voice.py`](../src/blockchecks/checkers/udp_voice.py) |
 | Discover-dns | [`checkers/voice_dns.py`](../src/blockchecks/checkers/voice_dns.py) |
 | Auto-discover (VPN) | [`checkers/voice_discovery.py`](../src/blockchecks/checkers/voice_discovery.py) |
 | Export keenetic | [`nfconf.py`](../src/blockchecks/nfconf.py), [`conf_builder.py`](../src/blockchecks/engine/conf_builder.py) |
-| Persistence | [`db_logger.py`](../src/blockchecks/engine/db_logger.py) |
+| Persistence | `engine/store/` (RunStateStore / SqliteRunStore) |
 
 ## Canonical vs legacy paths
 
