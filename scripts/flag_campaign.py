@@ -601,7 +601,7 @@ def main() -> int:
         sudo_bs(
             "pair", "-d", "discord.com", "-M", "gp-verified",
             "-u", "configs/udp_voice__fake_r6.conf", "--discover-dns", "5",
-            "--max", "40", "--pair-max", "60", "--max-timem", "70", "--parallel", "2",
+            "--max", "40", "--max-timem", "70", "--parallel", "2",
             "--db", str(LOG / "P4_2.db"), "--allow-dns-hijack",
         ),
         timeout=70 * 60 + 600,
