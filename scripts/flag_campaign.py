@@ -165,7 +165,15 @@ def run_test(
     for db in LOG.glob(f"{tid.replace('.', '_')}*.db"):
         chown_db(db)
 
-    status = "OK" if exit_code == 0 else ("TIMEOUT" if exit_code == 124 else "FAIL")
+    # pytest exit 5 = no tests collected/deselected — not a product FAIL
+    if exit_code == 0:
+        status = "OK"
+    elif exit_code == 124:
+        status = "TIMEOUT"
+    elif exit_code == 5:
+        status = "SKIP"
+    else:
+        status = "FAIL"
     if "[deadline]" in text or "TIME LIMIT reached" in text:
         if "TCP done:" in text or exit_code in (0, 2):
             status = "OK"
@@ -269,7 +277,18 @@ def main() -> int:
     )
     run_test(
         "P0.3",
-        [str(PY), "-m", "pytest", "tests/integration", "-q", "--tb=no"],
+        [
+            str(PY),
+            "-m",
+            "pytest",
+            "tests/integration",
+            "-m",
+            "integration",
+            "-o",
+            "addopts=",
+            "-q",
+            "--tb=no",
+        ],
         live=False,
         timeout=180,
         phase="P0",

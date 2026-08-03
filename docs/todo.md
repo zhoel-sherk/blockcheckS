@@ -4,7 +4,7 @@
 
 Приоритеты: **P1** = matrix/speed/protocol gaps; **P2** = voice/GP integration; **P3** = ML/hierarchy.
 
-### Closed in unreleased audit pass (see changelog)
+### Closed in 1.0.0 audit / campaign (see changelog)
 
 - [x] adaptive pair matrix after AQ TCP
 - [x] repeats-aware worker wall timeout

@@ -1,22 +1,6 @@
 # blockcheckS Changelog
 
-## Unreleased — audit fixes (post-1.0.0)
-
-### Fixed
-- `bs pair --adaptive`: run UDP pair matrix after AQ TCP (was TCP-only)
-- Curl worker wall timeout scales with `--repeats` (`worker_wall_timeout`)
-- AQ `pop_batch` solos googlevideo (match B2 `fanout_batches`)
-- Pair resume: **completed-set only** from `pair_results` (idx skip removed — unsafe with parallel pairs)
-- `bs full` pair phase passes `--resume` checkpoint + fingerprint
-- `family_needs.finish_family` clears needs for `fakedsplit` / `fakeddisorder`
-- THROTTLED counts as working for export / coverage / pair selection
-- Pair rebuild preserves THROTTLED via `get_working_tcp_details` / `tcp_results_from_details`
-- Removed orphan `pair_runner` / `pair_manager`; composite uses JSON curl worker
-- Netns base allowlist; resolv.conf via `tee` (no `bash -c`)
-- `ensure_strategy` sets `busy_timeout`; GV tiny 206 no longer auto-PASS
-- SQLite views `v_working_tcp` / `v_coverage` / `v_latest_run` treat THROTTLED as working
-
-## 1.0.0 — 2026-08-02
+## 1.0.0 — 2026-08-03
 
 Первый production-ready релиз: mass-scan DPI-стратегий для zapret2/nfqws2 с curl_cffi,
 netns-изоляцией, adaptive queue и XDG layout.
@@ -30,11 +14,11 @@ netns-изоляцией, adaptive queue и XDG layout.
 - **Secure DNS + preflight:** DoH pre-resolve, DNS audit, IP-block cross-test (Phase 9)
 - **Export:** keenetic + raw nfconf via `bs full` / `bc-nfconf`
 - **Matrix M5–M7:** reverse/triple fake pairs, `http_tls_dual`, `udp_multiblob`
+- **Global BC2 parity:** expanded foolings (`badsum`, IPv6), presets `bc2-parity-*`, fair-share `--max`
 - **XDG layout:** `~/.config/blockcheckS/config.toml`, `~/.local/state/blockcheckS/` (state.db, export, logs, shortlists), `~/.cache/blockcheckS/`
 - **DAO:** `engine/store/` — `RunStateStore` / `SqliteRunStore`; `db_logger.py` → deprecation shim
 - **Docs:** `docs/cookbook/gp-bridge.md`, repeats glossary, `docs/package.md`, onboarding split
-- **Scripts:** `scripts/release_smoke.sh` (Fryazino gate + B5 shortlist round-trip)
-- **CI:** GitHub Actions unit job + optional `workflow_dispatch` integration placeholder
+- **Scripts:** `scripts/release_smoke.sh` (Fryazino gate + B5 shortlist round-trip), `scripts/flag_campaign.py`
 
 ### Changed
 
@@ -43,14 +27,30 @@ netns-изоляцией, adaptive queue и XDG layout.
 - `bs tcp` — `--repeats`, `--parallel-repeats`, `--repeats-mode`, `--max-timem`
 - Runtime state moved from `~/.local/share/` to `~/.local/state/` per XDG spec
 - Roadmap consolidated in `docs/todo.md` (removed root `research.md` / `GOALS.md` stubs)
+- `--pair-max` applies to `bs full` only (not `bs pair`)
 
-### Fixed (audit)
+### Fixed
 
 - Content validation redirect suffix match, curl timeout cap, HTTP/3 probe, CDN IP-block detect
 - SQLite `busy_timeout=5000`, MANIFEST.in presets coverage, matrix default TCP sources
 - DPI fake patterns single source; duplicate strategies/domains in presets
+- `bs pair --adaptive`: run UDP pair matrix after AQ TCP (was TCP-only)
+- Curl worker wall timeout scales with `--repeats` (`worker_wall_timeout`)
+- AQ `pop_batch` solos googlevideo (match B2 `fanout_batches`)
+- Pair resume: **completed-set only** from `pair_results` (idx skip removed — unsafe with parallel pairs)
+- `bs full` pair phase passes `--resume` checkpoint + fingerprint
+- `family_needs.finish_family` clears needs for `fakedsplit` / `fakeddisorder`
+- THROTTLED counts as working for export / coverage / pair selection
+- Pair rebuild preserves THROTTLED via `get_working_tcp_details` / `tcp_results_from_details`
+- Removed orphan `pair_runner` / `pair_manager`; composite uses JSON curl worker
+- Netns base allowlist; resolv.conf via `tee` (no `bash -c`)
+- `ensure_strategy` sets `busy_timeout`; GV tiny 206 no longer auto-PASS
+- SQLite views `v_working_tcp` / `v_coverage` / `v_latest_run` treat THROTTLED as working
+- Sudo→user DB reclaim (`reclaim_sudo_ownership`); composite comma-domain normalize; deadline `stop_event`
+- nfqws2 daemon copies config to temp before injecting `--daemon` (no mutate of `configs/*.conf`)
 
 ### Quality
 
-- **249** unit tests; `ruff check src tests` clean
-- Fryazino release smoke: `logs/release_smoke_20260802_132958/` — 34 TCP PASS, AQ 61.8% first-pass-before-50%, shortlist + B5 round-trip OK
+- Unit tests via `pytest -m "not integration"`; `ruff check src tests` clean
+- Fryazino release smoke + flag campaign product gates (BC2 parity markers, pair resume, shortlist/nfconf)
+- Install contract: editable/checkout required for `configs/` (ONB-7); blobs on host `/opt/zapret2/blobs/`

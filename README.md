@@ -6,6 +6,10 @@ TCP×UDP matrix, checkpoint/resume).
 
 ## Установка
 
+Канон (ONB-7): **editable install из git checkout** — так `configs/` и `presets/`
+резолвятся с корня репо. Plain wheel без checkout configs не находит.
+Нужны host **nfqws2** (`/opt/zapret2`) и **blobs** (`/opt/zapret2/blobs/` или `scripts/install_blobs.sh`).
+
 ```bash
 pip install -e ".[dev,discovery]"
 # CLI:
