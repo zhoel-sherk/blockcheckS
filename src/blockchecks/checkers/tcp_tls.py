@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass, field
 
 import curl_cffi
+from curl_cffi.requests import RequestsError
 
 # Minimal response size for a real web page.
 # Redirects (301/302), No Content (204), WebSocket upgrades (101), and
@@ -36,6 +37,14 @@ DPI_FAKE_PATTERNS = [
 
 # blockcheck2 curl exit 254 — suspicious redirect / blockpage
 REDIRECT_BLOCK_STATUSES = frozenset({301, 302, 307, 308})
+
+
+def _apply_read_timeout(session: curl_cffi.Session, read_timeout: float) -> None:
+    """Abort stalled transfers via CURLOPT_LOW_SPEED_* (seconds)."""
+    if read_timeout <= 0:
+        return
+    session.curl.setopt(curl_cffi.CurlOpt.LOW_SPEED_LIMIT, 1)
+    session.curl.setopt(curl_cffi.CurlOpt.LOW_SPEED_TIME, int(max(1, read_timeout)))
 
 
 def is_suspicious_redirect(domain: str, status: int, location: str) -> bool:
@@ -124,33 +133,23 @@ def check_tls(
     result = TlsResult(domain=domain)
     start = time.perf_counter()
 
-    target = domain
     # Omit User-Agent so curl_cffi impersonation supplies a real browser UA
     headers = {"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9"}
 
     try:
-        if pre_resolved_ip:
-            session = curl_cffi.Session(
-                impersonate=impersonate,
-                http_version=http_version,
-                headers=headers,
-                allow_redirects=False,
-            )
-            from blockchecks.checkers.dns_secure import apply_curl_resolve
+        with curl_cffi.Session(
+            impersonate=impersonate,
+            http_version=http_version,
+            headers=headers,
+            allow_redirects=False,
+        ) as session:
+            if pre_resolved_ip:
+                from blockchecks.checkers.dns_secure import apply_curl_resolve
 
-            apply_curl_resolve(session, domain, pre_resolved_ip)
+                apply_curl_resolve(session, domain, pre_resolved_ip)
+            _apply_read_timeout(session, read_timeout)
             read_start = time.perf_counter()
             resp = session.get(f"https://{domain}", timeout=timeout)
-        else:
-            read_start = time.perf_counter()
-            resp = curl_cffi.get(
-                f"https://{target}",
-                impersonate=impersonate,
-                http_version=http_version,
-                timeout=timeout,
-                headers=headers,
-                allow_redirects=False,
-            )
         read_elapsed = time.perf_counter() - read_start
         result.http_status = resp.status_code
         result.content_length = len(resp.content)
@@ -168,7 +167,7 @@ def check_tls(
         else:
             result.success = 200 <= resp.status_code < 400
 
-    except curl_cffi.CurlError as e:
+    except RequestsError as e:
         error_msg = str(e)
         if "Timeout" in error_msg:
             if time.perf_counter() - start < timeout * 0.6:

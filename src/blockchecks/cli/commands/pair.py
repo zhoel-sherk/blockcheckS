@@ -282,7 +282,7 @@ async def cmd_pair(args):
 
         if full_voice:
             print(
-                f"  {CYAN}Full-voice mode: discovery+STUN (gateway WS probe not implemented){RESET}"
+                f"  {CYAN}Full-voice mode: gateway WS → OP2 Ready → UDP endpoint{RESET}"
             )
 
         strategy_preset = getattr(args, "strategy_preset", None)

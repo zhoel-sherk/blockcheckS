@@ -21,7 +21,7 @@ from blockchecks.engine.async_runner import (
     StrategyItem,
     TcpTestResult,
 )
-from blockchecks.engine.config import NFQUEUE_TCP, PYTHON_BIN as PYTHON
+from blockchecks.engine.config import NFQUEUE_TCP, NFQUEUE_UDP, PYTHON_BIN as PYTHON
 from blockchecks.engine.nfqws2 import start_daemon
 from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
 
@@ -132,7 +132,7 @@ async def run(config_path: str, domains: list[str] = None, parallel: int = 2, ti
                 "-j",
                 "NFQUEUE",
                 "--queue-num",
-                str(NFQUEUE_TCP),
+                str(NFQUEUE_UDP),
                 "--queue-bypass",
             ],
             capture_output=True,

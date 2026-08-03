@@ -10,11 +10,15 @@ Flow (without token):
   Returns None → caller uses static IP fallback.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 import subprocess
 import threading
 import time
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 
 from blockchecks.checkers.voice_dns import discover_voice_endpoints as dns_discover
 from blockchecks.engine.config import (
@@ -57,6 +61,22 @@ def _manage_singbox(start: bool) -> subprocess.Popen | None:
                 pass
             _singbox_proc = None
         return None
+
+
+@asynccontextmanager
+async def _singbox_session() -> AsyncIterator[subprocess.Popen | None]:
+    """Async CM: start sing-box for discovery, always stop on exit."""
+    print("[discovery] Starting sing-box proxy...")
+    sb = await asyncio.to_thread(_manage_singbox, True)
+    if not sb:
+        print("[discovery] sing-box unavailable — using static IP")
+        yield None
+        return
+    try:
+        yield sb
+    finally:
+        await asyncio.to_thread(_manage_singbox, False)
+        print("[discovery] sing-box stopped")
 
 
 def load_token() -> str | None:
@@ -104,6 +124,23 @@ def write_secure_text(path: str, content: str, *, mode: int = 0o600) -> None:
         raise
 
 
+def _load_guild_channel() -> tuple[str, str]:
+    import configparser as cp
+
+    cfg = cp.ConfigParser(
+        interpolation=None,
+        delimiters=("=",),
+        comment_prefixes=("#", ";"),
+        inline_comment_prefixes=("#", ";"),
+    )
+    cfg.optionxform = str
+    cfg.read(DPI_TESTER_SETTINGS, encoding="utf-8")
+    return (
+        cfg.get("discord", "guild_id", fallback=""),
+        cfg.get("discord", "channel_id", fallback=""),
+    )
+
+
 async def discover_voice_endpoint() -> dict | None:
     """Auto-discover Discord voice server via sing-box proxy.
 
@@ -114,197 +151,167 @@ async def discover_voice_endpoint() -> dict | None:
     if not token:
         return None
 
-    # Start proxy
-    print("[discovery] Starting sing-box proxy...")
-    sb = _manage_singbox(True)
-    if not sb:
-        print("[discovery] sing-box unavailable — using static IP")
-        return None
+    async with _singbox_session() as sb:
+        if not sb:
+            return None
+        try:
+            return await _discover_via_gateway(token)
+        except Exception as e:
+            print(f"[discovery] Failed: {e}")
+            return None
 
-    try:
-        import aiohttp
-        from aiohttp_socks import ProxyConnector
 
-        connector = ProxyConnector.from_url(SOCKS5_PROXY)
-        timeout = aiohttp.ClientTimeout(total=30, connect=10)
-        session = aiohttp.ClientSession(timeout=timeout, connector=connector)
+async def _discover_via_gateway(token: str) -> dict | None:
+    import aiohttp
+    from aiohttp_socks import ProxyConnector
+
+    connector = ProxyConnector.from_url(SOCKS5_PROXY)
+    timeout = aiohttp.ClientTimeout(total=30, connect=10)
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+        ws = await asyncio.wait_for(
+            session.ws_connect("wss://gateway.discord.gg/?encoding=json&v=10"),
+            timeout=10,
+        )
+        hello = await asyncio.wait_for(ws.receive_json(), 10)
+        hi = hello["d"]["heartbeat_interval"] / 1000
+        guild_id, channel_id = _load_guild_channel()
+
+        async def hb() -> None:
+            while True:
+                await asyncio.sleep(hi)
+                try:
+                    await ws.send_json({"op": 1, "d": None})
+                except Exception:
+                    break
+
+        hbt = asyncio.create_task(hb())
+        await ws.send_json(
+            {
+                "op": 2,
+                "d": {
+                    "token": token,
+                    "properties": {"os": "linux", "browser": "chrome", "device": "pc"},
+                    "intents": 513,
+                },
+            }
+        )
+
+        voice_endpoint = ""
+        voice_token_shard = ""
+        user_id = ""
+        session_id = ""
+        got_session = False
+        got_server = False
+        t0 = asyncio.get_event_loop().time()
 
         try:
-            # ── Gateway WS ──
-            ws = await asyncio.wait_for(
-                session.ws_connect("wss://gateway.discord.gg/?encoding=json&v=10"), timeout=10
-            )
-            hello = await asyncio.wait_for(ws.receive_json(), 10)
-            hi = hello["d"]["heartbeat_interval"] / 1000
-
-            # Load guild/channel
-            import configparser as cp
-
-            cfg = cp.ConfigParser(
-                interpolation=None,
-                delimiters=("=",),
-                comment_prefixes=("#", ";"),
-                inline_comment_prefixes=("#", ";"),
-            )
-            cfg.optionxform = str
-            cfg.read(DPI_TESTER_SETTINGS, encoding="utf-8")
-            guild_id = cfg.get("discord", "guild_id", fallback="")
-            channel_id = cfg.get("discord", "channel_id", fallback="")
-
-            async def hb():
-                while True:
-                    await asyncio.sleep(hi)
-                    try:
-                        await ws.send_json({"op": 1, "d": None})
-                    except Exception:
-                        break
-
-            hbt = asyncio.create_task(hb())
-
-            await ws.send_json(
-                {
-                    "op": 2,
-                    "d": {
-                        "token": token,
-                        "properties": {"os": "linux", "browser": "chrome", "device": "pc"},
-                        "intents": 513,
-                    },
-                }
-            )
-
-            voice_endpoint = ""
-            voice_token_shard = ""
-            user_id = ""
-            session_id = ""
-            got_session = False
-            got_server = False
-            t0 = asyncio.get_event_loop().time()
-
             while True:
                 try:
                     msg = await asyncio.wait_for(ws.receive_json(), 15)
                 except asyncio.TimeoutError:
                     break
 
-                t = msg.get("t", "")
-                d = msg.get("d", {})
+                match msg:
+                    case {"t": "READY", "d": {"user": {"id": str(uid)}}}:
+                        user_id = uid
+                        if guild_id and channel_id:
+                            await ws.send_json(
+                                {
+                                    "op": 4,
+                                    "d": {
+                                        "guild_id": guild_id,
+                                        "channel_id": channel_id,
+                                        "self_mute": True,
+                                        "self_deaf": True,
+                                    },
+                                }
+                            )
+                    case {"t": "VOICE_STATE_UPDATE", "d": dict(d)}:
+                        session_id = d.get("session_id", "")
+                        got_session = bool(session_id)
+                    case {
+                        "t": "VOICE_SERVER_UPDATE",
+                        "d": {"endpoint": str(ep), "token": str(tok)},
+                    }:
+                        voice_endpoint = ep
+                        voice_token_shard = tok
+                        got_server = True
+                    case _:
+                        pass
 
-                if t == "READY":
-                    user_id = d["user"]["id"]
-                    if guild_id and channel_id:
-                        await ws.send_json(
-                            {
-                                "op": 4,
-                                "d": {
-                                    "guild_id": guild_id,
-                                    "channel_id": channel_id,
-                                    "self_mute": True,
-                                    "self_deaf": True,
-                                },
-                            }
-                        )
-
-                if t == "VOICE_STATE_UPDATE":
-                    session_id = d.get("session_id", "")
-                    if session_id:
-                        got_session = True
-
-                if t == "VOICE_SERVER_UPDATE":
-                    voice_endpoint = d["endpoint"]
-                    voice_token_shard = d["token"]
-                    got_server = True
-
-                # Wait for BOTH events before breaking
                 if got_session and got_server:
                     break
-
                 if asyncio.get_event_loop().time() - t0 > 25:
                     break
-
+        finally:
             hbt.cancel()
             await ws.close()
 
-            if not voice_endpoint or not voice_token_shard:
-                await session.close()
-                return None
+        if not voice_endpoint or not voice_token_shard:
+            return None
 
-            # ── Voice WS → OP2 Ready ──
-            parts = voice_endpoint.rsplit(":", 1)
-            v_host = parts[0]
-            v_port = int(parts[1]) if len(parts) > 1 else 443
+        parts = voice_endpoint.rsplit(":", 1)
+        v_host = parts[0]
+        v_port = int(parts[1]) if len(parts) > 1 else 443
+        vws = await asyncio.wait_for(
+            session.ws_connect(f"wss://{v_host}:{v_port}/?v=4"), timeout=10
+        )
+        await asyncio.wait_for(vws.receive_json(), 10)
+        await vws.send_json(
+            {
+                "op": 0,
+                "d": {
+                    "server_id": guild_id,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "token": voice_token_shard,
+                },
+            }
+        )
 
-            vws = await asyncio.wait_for(
-                session.ws_connect(f"wss://{v_host}:{v_port}/?v=4"), timeout=10
-            )
-            await asyncio.wait_for(vws.receive_json(), 10)
-
-            await vws.send_json(
-                {
-                    "op": 0,
-                    "d": {
-                        "server_id": guild_id,
-                        "user_id": user_id,
-                        "session_id": session_id,
-                        "token": voice_token_shard,
-                    },
-                }
-            )
-
-            result = {}
-            op9_retries = 0
-            v_t0 = asyncio.get_event_loop().time()
+        result: dict = {}
+        op9_retries = 0
+        v_t0 = asyncio.get_event_loop().time()
+        try:
             while True:
                 vmsg = await asyncio.wait_for(vws.receive_json(), 10)
-                vop = vmsg["op"]
-                vd = vmsg.get("d", {})
-                if vop == 2:
-                    ip_addr = vd.get("ip", "")
-                    udp_port = vd.get("port", 0)
-                    ssrc = vd.get("ssrc", 1)
-                    result = {
-                        "ip": ip_addr,
-                        "port": udp_port,
-                        "ssrc": ssrc,
-                        "voice_ws_endpoint": voice_endpoint,
-                    }
-                    break
-                if vop == 9 and op9_retries < 2:
-                    op9_retries += 1
-                    await vws.send_json(
-                        {
-                            "op": 0,
-                            "d": {
-                                "server_id": guild_id,
-                                "user_id": user_id,
-                                "session_id": "" if op9_retries > 1 else session_id,
-                                "token": voice_token_shard,
-                            },
+                match vmsg:
+                    case {"op": 2, "d": dict(vd)}:
+                        result = {
+                            "ip": vd.get("ip", ""),
+                            "port": vd.get("port", 0),
+                            "ssrc": vd.get("ssrc", 1),
+                            "voice_ws_endpoint": voice_endpoint,
                         }
-                    )
-                    continue
-                if vop == 9:
-                    break
-                if asyncio.get_event_loop().time() - v_t0 > 15:
-                    break
-
-            await vws.close()
-            await session.close()
-
-            if result:
-                print(
-                    f"[discovery] Voice server: {result['ip']}:{result['port']} "
-                    f"(SSRC={result['ssrc']})"
-                )
-            return result if result else None
-
+                        break
+                    case {"op": 9} if op9_retries < 2:
+                        op9_retries += 1
+                        await vws.send_json(
+                            {
+                                "op": 0,
+                                "d": {
+                                    "server_id": guild_id,
+                                    "user_id": user_id,
+                                    "session_id": "" if op9_retries > 1 else session_id,
+                                    "token": voice_token_shard,
+                                },
+                            }
+                        )
+                    case {"op": 9}:
+                        break
+                    case _ if asyncio.get_event_loop().time() - v_t0 > 15:
+                        break
+                    case _:
+                        pass
         finally:
-            await session.close()
-    except Exception as e:
-        print(f"[discovery] Failed: {e}")
-        return None
-    finally:
-        _manage_singbox(False)
-        print("[discovery] sing-box stopped")
+            await vws.close()
+
+        if result:
+            print(
+                f"[discovery] Voice server: {result['ip']}:{result['port']} "
+                f"(SSRC={result['ssrc']})"
+            )
+        return result or None
 
 
 async def discover_multiple(
@@ -321,7 +328,6 @@ async def discover_multiple(
     endpoints = []
     seen_ips: set[str] = set()
 
-    # ── Layer 1: DNS bulk ──
     if use_dns:
         try:
             dns_eps = await dns_discover(count, use_cache=use_cache)
@@ -336,7 +342,6 @@ async def discover_multiple(
     if len(endpoints) >= count:
         return endpoints[:count]
 
-    # ── Layer 2: Gateway (token required) ──
     token = load_token()
     if token and len(endpoints) < count:
         print(f"[discovery] Gateway layer (up to {count - len(endpoints)} more)...")

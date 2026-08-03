@@ -55,10 +55,14 @@ def test_build_quic_nfqws_config_cli():
 
 
 def test_supports_http3_true_on_connection_error():
-    with patch("blockchecks.checkers.http3.curl_cffi.get") as mock_get:
-        import curl_cffi
+    from curl_cffi.requests import RequestsError
 
-        mock_get.side_effect = curl_cffi.CurlError("connection refused")
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.__exit__.return_value = False
+    session.get.side_effect = RequestsError("connection refused")
+
+    with patch("blockchecks.checkers.http3.curl_cffi.Session", return_value=session):
         assert supports_http3() is True
 
 
@@ -69,6 +73,8 @@ def test_check_http3_success():
     resp.http_version = "v3"
 
     session = MagicMock()
+    session.__enter__.return_value = session
+    session.__exit__.return_value = False
     session.head.return_value = resp
 
     with patch("blockchecks.checkers.http3.curl_cffi.Session", return_value=session):

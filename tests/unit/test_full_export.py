@@ -42,6 +42,10 @@ def test_build_keenetic_has_required_keys():
     assert "strategy=1" in text
     assert "fake:blob=stun" in text
     assert "discord_udp" in text
+    assert "--out-range=-s34228" in text
+    assert "--in-range=-s5556" in text
+    assert "--in-range=x" in text
+    assert "circular:" in text
 
 
 def test_build_raw_has_no_isp():

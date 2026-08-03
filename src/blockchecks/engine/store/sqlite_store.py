@@ -345,7 +345,7 @@ class SqliteRunStore:
         *,
         protos: tuple[str, ...] = ("tcp",),
     ) -> dict[str, int]:
-        """Count tcp_results rows for domain (all strategies, given protos)."""
+        """Count latest-row results per strategy for domain (given protos)."""
         if not protos:
             return {"total": 0, "passed": 0}
         placeholders = ",".join("?" * len(protos))
@@ -356,14 +356,19 @@ class SqliteRunStore:
                            SUM(CASE WHEN t.status IN {_WORKING_STATUSES} THEN 1 ELSE 0 END)
                     FROM tcp_results t
                     JOIN strategies s ON t.strategy_id = s.id
-                    WHERE t.domain=? AND s.proto IN ({placeholders})""",
+                    WHERE t.domain=? AND s.proto IN ({placeholders})
+                      AND t.id = (
+                        SELECT t2.id FROM tcp_results t2
+                        WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+                        ORDER BY t2.id DESC LIMIT 1
+                      )""",
                 (domain, *protos),
             )
             r = await row.fetchone()
             return {"total": int(r[0] or 0), "passed": int(r[1] or 0)}
 
     async def count_tcp_passes(self, domain: str | None = None) -> int:
-        """Count PASS rows for tcp proto (optionally per domain)."""
+        """Count latest-row PASS/THROTTLED for tcp proto (optionally per domain)."""
         if domain:
             stats = await self.domain_pass_stats(domain, protos=("tcp",))
             return int(stats.get("passed", 0))
@@ -373,7 +378,12 @@ class SqliteRunStore:
                 await db.execute(
                     f"""SELECT COUNT(*) FROM tcp_results t
                        JOIN strategies s ON t.strategy_id=s.id
-                       WHERE t.status IN {_WORKING_STATUSES} AND s.proto='tcp'"""
+                       WHERE t.status IN {_WORKING_STATUSES} AND s.proto='tcp'
+                         AND t.id = (
+                           SELECT t2.id FROM tcp_results t2
+                           WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+                           ORDER BY t2.id DESC LIMIT 1
+                         )"""
                 )
             ).fetchone()
         return int(row[0] or 0)
@@ -476,14 +486,14 @@ class SqliteRunStore:
             return [dict(zip(cols, r)) for r in await rows.fetchall()]
 
     async def get_best_udp(self, *, limit: int = 5) -> list[dict]:
-        """Latest PASS UDP strategies, ordered by latency."""
+        """Latest PASS/THROTTLED UDP strategies, ordered by latency."""
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
             rows = await db.execute(
-                """SELECT s.name, t.target, t.latency_ms, t.timestamp
+                f"""SELECT s.name, t.target, t.latency_ms, t.timestamp
                    FROM strategies s
                    JOIN udp_results t ON t.strategy_id = s.id
-                   WHERE s.proto='udp' AND t.status='PASS'
+                   WHERE s.proto='udp' AND t.status IN {_WORKING_STATUSES}
                      AND t.id = (
                        SELECT t2.id FROM udp_results t2
                        WHERE t2.strategy_id = s.id
@@ -497,13 +507,20 @@ class SqliteRunStore:
             return [dict(zip(cols, r)) for r in await rows.fetchall()]
 
     async def get_best_pairs(self, domain: str, *, limit: int = 10) -> list[dict]:
-        """PASS/THROTTLED pairs for domain, best by tcp_ms+udp_ms."""
+        """Latest PASS/THROTTLED pair per (tcp,udp,domain), best by tcp_ms+udp_ms."""
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
             rows = await db.execute(
                 f"""SELECT tcp_strategy, udp_strategy, tcp_ms, udp_ms, overall
-                   FROM pair_results
+                   FROM pair_results p
                    WHERE domain=? AND overall IN {_WORKING_STATUSES}
+                     AND id = (
+                       SELECT p2.id FROM pair_results p2
+                       WHERE p2.tcp_strategy = p.tcp_strategy
+                         AND p2.udp_strategy = p.udp_strategy
+                         AND p2.domain = p.domain
+                       ORDER BY p2.id DESC LIMIT 1
+                     )
                    ORDER BY (tcp_ms + udp_ms) ASC
                    LIMIT ?""",
                 (domain, limit),

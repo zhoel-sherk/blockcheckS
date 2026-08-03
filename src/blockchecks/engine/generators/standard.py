@@ -1,6 +1,9 @@
 """Standard hardcoded generators (blockcheck2.d/standard replicas)."""
 
-from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP
+import os
+
+from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP, resolve_blob_path
+from blockchecks.engine.config import BLOB_DIR
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
 from blockchecks.engine.store import RunStateStore
 
@@ -349,6 +352,11 @@ def _with_ip6_send_drop(fool: str) -> str:
 def _blob_file(alias: str) -> str:
     """Resolve alias to filename under zapret2 blobs dir."""
     return BLOB_ALIAS_MAP.get(alias, f"{alias}.bin")
+
+
+def _blob_abs(alias: str) -> str:
+    """Absolute blob path via resolve_blob_path, fallback to BLOB_DIR/filename."""
+    return resolve_blob_path(alias) or os.path.join(BLOB_DIR, _blob_file(alias))
 
 
 TCP_FAMILIES = [
@@ -1104,7 +1112,7 @@ class StandardGenerator(StrategyGenerator):
                     for r in family["repeats"]:
                         s = (
                             f"--filter-udp={ports} "
-                            f"--blob=QUIC:@/opt/zapret2/blobs/{blob_name}.bin "
+                            f"--blob=QUIC:@{_blob_abs(blob_name)} "
                             f"--payload=quic_initial "
                             f"--lua-desync=fake:blob=QUIC:repeats={r}"
                         )
@@ -1119,7 +1127,7 @@ class StandardGenerator(StrategyGenerator):
                         for orng in family["out_range"]:
                             s = (
                                 f"--filter-udp={ports} "
-                                f"--blob=GAME:@/opt/zapret2/blobs/{blob_name}.bin "
+                                f"--blob=GAME:@{_blob_abs(blob_name)} "
                                 f"--payload=unknown "
                                 f"--lua-desync=fake:blob=GAME:repeats={r}"
                                 + (f" --out-range={orng}" if orng else "")
@@ -1130,16 +1138,14 @@ class StandardGenerator(StrategyGenerator):
 
         elif stype == "udp_multiblob":
             for b1, b2 in family["profiles"]:
-                f1 = _blob_file(b1)
-                f2 = _blob_file(b2)
                 for r in family["repeats"]:
                     s = (
                         f"--filter-udp=443 --filter-l7=stun "
-                        f"--blob=STUN:@/opt/zapret2/blobs/{f1} "
+                        f"--blob=STUN:@{_blob_abs(b1)} "
                         f"--payload=stun "
                         f"--lua-desync=fake:blob=STUN:repeats={r}\n"
                         f"--filter-udp=443 --filter-l7=discord "
-                        f"--blob=DISC:@/opt/zapret2/blobs/{f2} "
+                        f"--blob=DISC:@{_blob_abs(b2)} "
                         f"--payload=discord_ip_discovery "
                         f"--lua-desync=fake:blob=DISC:repeats={r}"
                     )

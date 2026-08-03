@@ -114,11 +114,14 @@ def build_keenetic_conf(
     base_parts = _lua_init_lines(prefix) + blob_cli_lines(blob_names, blobs_dir)
     base_args = "\n ".join(base_parts)
 
+    # circular needs inbound until s5556 + outbound until s34228 (manual.md)
     tcp_lines = [
         "--filter-tcp=443,80,1984,5222",
         "--filter-l7=http,tls,mtproto",
         "--payload=tls_client_hello,mtproto_initial",
-        f"--lua-desync={CIRCULAR_TCP}",
+        "--out-range=-s34228",
+        f"--in-range=-s5556 --lua-desync={CIRCULAR_TCP}",
+        "--in-range=x",
     ]
     for i, strat in enumerate(tcp_strategies, start=1):
         # Multi-line strategy (fake\\nmultisplit) → one --lua-desync per line

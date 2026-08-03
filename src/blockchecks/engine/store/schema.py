@@ -79,6 +79,11 @@ SELECT s.name AS strategy, s.proto,
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
 WHERE t.status IN ('PASS', 'THROTTLED')
+  AND t.id = (
+    SELECT t2.id FROM tcp_results t2
+    WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+    ORDER BY t2.id DESC LIMIT 1
+  )
 GROUP BY s.name, s.proto
 HAVING domains_passed > 0
 ORDER BY domains_passed DESC;
@@ -86,7 +91,12 @@ CREATE VIEW IF NOT EXISTS v_latest_run AS
 SELECT domain, COUNT(*) AS total,
        SUM(CASE WHEN status IN ('PASS','THROTTLED') THEN 1 ELSE 0 END) AS passed,
        MAX(timestamp) AS last_test
-FROM tcp_results
+FROM tcp_results t
+WHERE t.id = (
+  SELECT t2.id FROM tcp_results t2
+  WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+  ORDER BY t2.id DESC LIMIT 1
+)
 GROUP BY domain
 ORDER BY last_test DESC;
 """
@@ -148,6 +158,11 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         FROM tcp_results t
         JOIN strategies s ON t.strategy_id = s.id
         WHERE t.status IN ('PASS', 'THROTTLED')
+          AND t.id = (
+            SELECT t2.id FROM tcp_results t2
+            WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+            ORDER BY t2.id DESC LIMIT 1
+          )
         GROUP BY s.name, s.proto
         HAVING domains_passed > 0
         ORDER BY domains_passed DESC;
@@ -155,7 +170,12 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         SELECT domain, COUNT(*) AS total,
                SUM(CASE WHEN status IN ('PASS','THROTTLED') THEN 1 ELSE 0 END) AS passed,
                MAX(timestamp) AS last_test
-        FROM tcp_results
+        FROM tcp_results t
+        WHERE t.id = (
+          SELECT t2.id FROM tcp_results t2
+          WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+          ORDER BY t2.id DESC LIMIT 1
+        )
         GROUP BY domain
         ORDER BY last_test DESC;
         """

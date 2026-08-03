@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, field
 
 import curl_cffi
+from curl_cffi.requests import RequestsError
 
 from blockchecks.engine.config import (
     DEFAULT_DOH_SERVER,
@@ -105,17 +106,17 @@ def _doh_json_query(
     """DoH via JSON API (application/dns-json)."""
     start = time.perf_counter()
     try:
-        resp = curl_cffi.get(
-            f"{doh_url}?name={domain}&type=A",
-            impersonate="chrome124",
-            timeout=timeout,
-            headers={"Accept": "application/dns-json"},
-        )
+        with curl_cffi.Session(impersonate="chrome124") as session:
+            resp = session.get(
+                f"{doh_url}?name={domain}&type=A",
+                timeout=timeout,
+                headers={"Accept": "application/dns-json"},
+            )
         elapsed = (time.perf_counter() - start) * 1000
         data = resp.json()
         ips = [a["data"] for a in data.get("Answer", []) if a.get("type") == 1]
         return ips, "", elapsed
-    except curl_cffi.CurlError as e:
+    except RequestsError as e:
         return [], str(e)[:80], (time.perf_counter() - start) * 1000
     except Exception as e:
         return [], str(e)[:80], (time.perf_counter() - start) * 1000
@@ -128,19 +129,19 @@ def _doh_wire_query(
     start = time.perf_counter()
     try:
         wire = _build_dns_query(domain)
-        resp = curl_cffi.post(
-            doh_url,
-            data=wire,
-            impersonate="chrome124",
-            timeout=timeout,
-            headers={
-                "Accept": "application/dns-message",
-                "Content-Type": "application/dns-message",
-            },
-        )
+        with curl_cffi.Session(impersonate="chrome124") as session:
+            resp = session.post(
+                doh_url,
+                data=wire,
+                timeout=timeout,
+                headers={
+                    "Accept": "application/dns-message",
+                    "Content-Type": "application/dns-message",
+                },
+            )
         elapsed = (time.perf_counter() - start) * 1000
         return _parse_dns_response(resp.content), "", elapsed
-    except curl_cffi.CurlError as e:
+    except RequestsError as e:
         return [], str(e)[:80], (time.perf_counter() - start) * 1000
     except Exception as e:
         return [], str(e)[:80], (time.perf_counter() - start) * 1000

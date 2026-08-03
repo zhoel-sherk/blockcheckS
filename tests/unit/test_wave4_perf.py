@@ -87,7 +87,16 @@ def test_composite_has_queue_bypass():
     src = Path("src/blockchecks/checkers/composite_runner.py").read_text(encoding="utf-8")
     assert "--queue-bypass" in src
     assert "NFQUEUE_TCP" in src
-
+    assert "str(NFQUEUE_UDP)" in src
+    lines = src.splitlines()
+    for i, line in enumerate(lines):
+        if "50000:50100" in line:
+            nearby = "\n".join(lines[i : i + 8])
+            assert "NFQUEUE_UDP" in nearby
+            assert "NFQUEUE_TCP" not in nearby
+            break
+    else:
+        raise AssertionError("multiport 50000:50100 not found")
 
 @pytest.mark.unit
 def test_pi2_preset_exists():

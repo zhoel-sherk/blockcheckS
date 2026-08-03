@@ -1134,18 +1134,14 @@ class AsyncTestRunner:
     async def test_batch_tcp(
         self, strategies: list[StrategyItem], domain: str, timeout: float = 5.0
     ) -> list[TcpTestResult]:
-        """Parallel batch of TCP strategy tests."""
+        """Parallel batch of TCP strategy tests (results in input order)."""
         if not strategies:
             return []
 
-        tasks = []
-        for s in strategies:
-            task = asyncio.create_task(self.test_tcp(s, domain, timeout))
-            tasks.append(task)
-
-        results = []
-        for task in asyncio.as_completed(tasks):
-            r = await task
+        results = await asyncio.gather(
+            *(self.test_tcp(s, domain, timeout) for s in strategies)
+        )
+        for r in results:
             if r.throttled:
                 tag = f"{YELLOW}THROTTLED{RESET}"
             elif r.success:
@@ -1157,9 +1153,7 @@ class AsyncTestRunner:
             err = f" — {r.error[:40]}" if r.error else ""
             label = r.item.label[:30]
             print(f"  [{tag}] {lat:>6s}  {status:>8s}  {label}{err}")
-            results.append(r)
-
-        return list(results)  # maintain order via tasks list
+        return list(results)
 
     async def test_pair_matrix(
         self,

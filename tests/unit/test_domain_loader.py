@@ -77,13 +77,25 @@ def test_format_skip_summary():
 async def test_domain_pass_stats_and_zero_warn(tmp_path: Path):
     db = StateDB(str(tmp_path / "t.db"))
     await db.init()
-    for _ in range(5):
-        await db.log_tcp("s1", "dead.example", "FAIL", 0, 0, config_path="fake:blob=stun")
+    for i in range(5):
+        await db.log_tcp(f"s{i}", "dead.example", "FAIL", 0, 0, config_path="fake:blob=stun")
     zero = await warn_zero_pass_domains(db, ["dead.example"], min_results=5)
     assert zero == ["dead.example"]
-    await db.log_tcp("s1", "dead.example", "PASS", 100, 200, config_path="fake:blob=stun")
+    await db.log_tcp("s0", "dead.example", "PASS", 100, 200, config_path="fake:blob=stun")
     stats = await db.domain_pass_stats("dead.example", protos=("tcp",))
-    assert stats["total"] == 6
+    assert stats["total"] == 5  # latest row per strategy
     assert stats["passed"] == 1
     zero2 = await warn_zero_pass_domains(db, ["dead.example"], min_results=5)
     assert zero2 == []
+
+
+@pytest.mark.asyncio
+async def test_count_tcp_passes_latest_row(tmp_path: Path):
+    """Historical PASS must not inflate count after a later FAIL on same strategy."""
+    db = StateDB(str(tmp_path / "t.db"))
+    await db.init()
+    await db.log_tcp("s1", "discord.com", "PASS", 100, 200, config_path="fake:blob=stun")
+    assert await db.count_tcp_passes("discord.com") == 1
+    await db.log_tcp("s1", "discord.com", "FAIL", 0, 0, config_path="fake:blob=stun")
+    assert await db.count_tcp_passes("discord.com") == 0
+    assert await db.count_tcp_passes() == 0

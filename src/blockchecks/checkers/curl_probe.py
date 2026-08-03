@@ -12,6 +12,7 @@ import concurrent.futures
 from dataclasses import dataclass, field
 
 import curl_cffi
+from curl_cffi.requests import RequestsError
 
 from blockchecks.checkers.dns_secure import CURLOPT_RESOLVE
 from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS, classify_http_status
@@ -199,30 +200,30 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
 
     start = time.perf_counter()
     try:
-        session = curl_cffi.Session(
+        with curl_cffi.Session(
             impersonate="chrome124",
             http_version=2,
             headers=headers,
             allow_redirects=False,
-        )
-        if req.googlevideo:
-            session.curl.setopt(CURLOPT_IPRESOLVE, _CURL_IPRESOLVE_V4)
-        if req.resolved_ip:
-            session.curl.setopt(
-                CURLOPT_RESOLVE,
-                [f"{resolve_name}:{resolve_port}:{req.resolved_ip}"],
-            )
-        if use_ech_off:
-            ech_err = _apply_ech_off(session)
-            if ech_err:
-                return CurlProbeResult(
-                    latency_ms=(time.perf_counter() - start) * 1000,
-                    error=ech_err,
+        ) as session:
+            if req.googlevideo:
+                session.curl.setopt(CURLOPT_IPRESOLVE, _CURL_IPRESOLVE_V4)
+            if req.resolved_ip:
+                session.curl.setopt(
+                    CURLOPT_RESOLVE,
+                    [f"{resolve_name}:{resolve_port}:{req.resolved_ip}"],
                 )
-        url = req.curl_url if req.curl_url else f"{url_scheme}://{req.domain}"
-        curl_timeout = min(req.timeout, 8.0) if req.googlevideo else req.timeout
-        resp = session.get(url, timeout=curl_timeout)
-    except curl_cffi.CurlError as e:
+            if use_ech_off:
+                ech_err = _apply_ech_off(session)
+                if ech_err:
+                    return CurlProbeResult(
+                        latency_ms=(time.perf_counter() - start) * 1000,
+                        error=ech_err,
+                    )
+            url = req.curl_url if req.curl_url else f"{url_scheme}://{req.domain}"
+            curl_timeout = min(req.timeout, 8.0) if req.googlevideo else req.timeout
+            resp = session.get(url, timeout=curl_timeout)
+    except RequestsError as e:
         msg = str(e)
         return CurlProbeResult(
             latency_ms=(time.perf_counter() - start) * 1000,

@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 
 import curl_cffi
+from curl_cffi.requests import RequestsError
 
 from blockchecks.checkers.tcp_tls import classify_http_status
 
@@ -26,14 +27,10 @@ class Http3Result:
 def supports_http3() -> bool:
     """Return True if curl_cffi can request HTTP/3 (blockcheck2 curl_supports_http3)."""
     try:
-        curl_cffi.get(
-            _HTTP3_PROBE_URL,
-            http_version="v3only",
-            timeout=3,
-            allow_redirects=False,
-        )
+        with curl_cffi.Session(http_version="v3only", allow_redirects=False) as session:
+            session.get(_HTTP3_PROBE_URL, timeout=3)
         return True
-    except curl_cffi.CurlError as exc:
+    except RequestsError as exc:
         msg = str(exc).lower()
         if "unknown" in msg and "http" in msg:
             return False
@@ -52,17 +49,17 @@ def check_http3(
     headers = {"Accept": "text/html,application/xhtml+xml"}
 
     try:
-        session = curl_cffi.Session(
+        with curl_cffi.Session(
             impersonate=impersonate,
             http_version="v3only",
             headers=headers,
             allow_redirects=False,
-        )
-        if pre_resolved_ip:
-            from blockchecks.checkers.dns_secure import apply_curl_resolve
+        ) as session:
+            if pre_resolved_ip:
+                from blockchecks.checkers.dns_secure import apply_curl_resolve
 
-            apply_curl_resolve(session, domain, pre_resolved_ip, port=443)
-        resp = session.head(f"https://{domain}", timeout=timeout)
+                apply_curl_resolve(session, domain, pre_resolved_ip, port=443)
+            resp = session.head(f"https://{domain}", timeout=timeout)
         result.http_status = resp.status_code
         result.content_length = int(resp.headers.get("Content-Length") or 0)
         result.http_version = str(getattr(resp, "http_version", "")).replace("_", "/")
@@ -75,7 +72,7 @@ def check_http3(
             result.success = True
         else:
             result.error = f"http {resp.status_code}"
-    except curl_cffi.CurlError as exc:
+    except RequestsError as exc:
         msg = str(exc)
         low = msg.lower()
         if "unknown" in low or "not supported" in low:
