@@ -39,6 +39,17 @@ _(none — E3 closed in Wave2)_
 - [x] `--preset` path jail + token file modes
 - [x] composite_runner: public `engine.probe.invoke_curl_probe_worker`
 
+### Closed in 1.1.0a1 (dpi-stack audit DS1–DS2)
+
+- [x] Composite UDP qnum → `NFQUEUE_UDP` (Wave4 regression)
+- [x] `test_batch_tcp` input-order via `asyncio.gather`
+- [x] curl_cffi Session/`RequestsError`/`read_timeout` + DoH Session
+- [x] DAO latest-row stats/views; `get_best_udp` THROTTLED; pair dedupe
+- [x] Generator `tls13` protocol + blob path via `resolve_blob_path`
+- [x] Keenetic circular `--in-range`/`--out-range` scaffold
+- [x] Voice discovery `match/case` + sing-box async CM; `--full-voice` UX
+- [x] Shared blob CLI helpers; UDP family registry start; CLI/preflight DRY; settle unify
+
 ---
 
 ## P1 — Matrix, protocols, speed
@@ -73,7 +84,7 @@ _(none — E3 closed in Wave2)_
 ## P2 — Voice & GP bridge
 
 - [ ] **V2-1** multi-endpoint pair matrix по всем discover EP (сейчас только `eps[0]`)
-- [ ] **V2-2** `--full-voice` gateway WS probe (сейчас discovery+STUN only)
+- [x] **V2-2** `--full-voice` gateway WS path (discovery via gateway; messaging fixed in DS1)
 - [ ] **V2-3** `scripts/voice_smoke.sh` — новый smoke-скрипт для voice end-to-end (есть аналоги: `gv_e2e_smoke.sh`, `gv1_smoke.sh`)
 - [ ] **P5-1** GP JSON import в `state.db` (partial сейчас)
 

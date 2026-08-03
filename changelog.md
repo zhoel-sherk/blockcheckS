@@ -2,6 +2,21 @@
 
 ## Unreleased / HEAD
 
+### Fixed (dpi-stack audit DS1)
+- **Composite UDP qnum:** multiport `50000:50100` → `NFQUEUE_UDP` (Wave4 regression)
+- **`test_batch_tcp` order:** `asyncio.gather` preserves strategy input order (pair filters)
+- **curl_cffi hygiene:** `Session` + `with`, catch `RequestsError`; wire `read_timeout` via `LOW_SPEED_*`; DoH via Session
+- **DAO latest-row:** `count_tcp_passes` / `domain_pass_stats` / `v_coverage` / `v_latest_run`; `get_best_udp` += THROTTLED; `get_best_pairs` dedupe
+- **Generators:** `tls13` protocol metadata; `UserMatrixGenerator.protocol`; udp_quic/game/multiblob via `resolve_blob_path`
+- **Keenetic circular scaffold:** `--out-range=-s34228` / `--in-range=-s5556` / `--in-range=x`
+- **Voice:** Discord WS `match/case`; sing-box `@asynccontextmanager`; `--full-voice` messaging (gateway path)
+
+### Changed (dpi-stack audit DS2)
+- Shared `blob_cli_line` / `append_blob_cli_lines` / `extract_blob_names` in `blob_aliases`
+- UDP family registry start (`udp_discord`/`quic`/`game`/`multiblob`)
+- Status/verdict maps (tls/http3/dns audit); CLI dispatch maps; `PreflightOptions.from_args`
+- `Nfqws2Manager` settle via `wait_nfqws2_ready`; `tls_clienthello` alias; user presets preferred
+
 ### Added
 - **1.1.0a1 (alpha):** public `engine.probe.invoke_curl_probe_worker`; `--preset` / `-M` path jail; token refuse world-writable + `write_secure_text`
 - **E3:** `engine.nfqws2.start_daemon` (+ `inject_debug_and_daemon`); async/composite use public API; `Nfqws2Manager` remains for sync/foreground
