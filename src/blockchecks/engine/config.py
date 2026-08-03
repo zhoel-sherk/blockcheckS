@@ -36,7 +36,12 @@ def _env_or(key, default: str) -> str:
 
 
 # External tool paths
-NFQWS2_BIN = _env_or("BLOCKCHECKS_NFQWS2", "/opt/zapret2/nfq2/nfqws2")
+_DEFAULT_NFQWS2 = "/opt/zapret2/nfq2/nfqws2"
+_DEFAULT_BLOBS = "/opt/zapret2/blobs"
+_DEFAULT_LUA = "/opt/zapret2/lua"
+_LUA_SCRIPT_NAMES = ("zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua")
+
+NFQWS2_BIN = _env_or("BLOCKCHECKS_NFQWS2", _DEFAULT_NFQWS2)
 SING_BOX_BIN = _env_or("BLOCKCHECKS_SINGBOX", "/usr/local/bin/sing-box")
 SING_BOX_CONFIG = os.environ.get(
     "BLOCKCHECKS_SINGBOX_CONFIG", os.path.expanduser("~/.config/sing-box/config.json")
@@ -66,14 +71,54 @@ DPI_TESTER_SETTINGS = _env_or(
 )
 
 # Blob directory
-BLOB_DIR = _env_or("BLOCKCHECKS_BLOBS", "/opt/zapret2/blobs")
+BLOB_DIR = _env_or("BLOCKCHECKS_BLOBS", _DEFAULT_BLOBS)
 
-# Lua init scripts
-LUA_INIT_DIR = "/opt/zapret2/lua"
-LUA_INIT_SCRIPTS = [
-    os.path.join(LUA_INIT_DIR, f)
-    for f in ("zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua")
-]
+# Lua init scripts (env: BLOCKCHECKS_LUA_DIR)
+LUA_INIT_DIR = _env_or("BLOCKCHECKS_LUA_DIR", _DEFAULT_LUA)
+LUA_INIT_SCRIPTS = [os.path.join(LUA_INIT_DIR, f) for f in _LUA_SCRIPT_NAMES]
+
+
+def get_lua_init_scripts() -> list[str]:
+    """Return current lua-init paths (honours apply_tool_paths / env)."""
+    return [os.path.join(LUA_INIT_DIR, f) for f in _LUA_SCRIPT_NAMES]
+
+
+def get_nfqws2_bin() -> str:
+    """Return current nfqws2 path (env override or module constant)."""
+    return os.environ.get("BLOCKCHECKS_NFQWS2") or NFQWS2_BIN
+
+
+def apply_tool_paths(
+    *,
+    nfqws2: str | None = None,
+    blobs: str | None = None,
+    lua_dir: str | None = None,
+) -> None:
+    """Refresh module-level tool paths after vendor install or config.toml.
+
+    Also updates ``os.environ`` so child processes inherit the same layout.
+    """
+    global NFQWS2_BIN, BLOB_DIR, LUA_INIT_DIR, LUA_INIT_SCRIPTS
+
+    if nfqws2:
+        os.environ["BLOCKCHECKS_NFQWS2"] = nfqws2
+        NFQWS2_BIN = nfqws2
+    else:
+        NFQWS2_BIN = os.environ.get("BLOCKCHECKS_NFQWS2", NFQWS2_BIN)
+
+    if blobs:
+        os.environ["BLOCKCHECKS_BLOBS"] = blobs
+        BLOB_DIR = blobs
+    else:
+        BLOB_DIR = os.environ.get("BLOCKCHECKS_BLOBS", BLOB_DIR)
+
+    if lua_dir:
+        os.environ["BLOCKCHECKS_LUA_DIR"] = lua_dir
+        LUA_INIT_DIR = lua_dir
+    else:
+        LUA_INIT_DIR = os.environ.get("BLOCKCHECKS_LUA_DIR", LUA_INIT_DIR)
+
+    LUA_INIT_SCRIPTS = [os.path.join(LUA_INIT_DIR, f) for f in _LUA_SCRIPT_NAMES]
 
 # Network isolation
 NFQUEUE_TCP = int(_env_or("BLOCKCHECKS_QNUM_TCP", "200"))

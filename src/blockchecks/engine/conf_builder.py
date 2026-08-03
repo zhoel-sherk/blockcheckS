@@ -8,7 +8,7 @@ import time
 from collections.abc import Iterable
 
 from blockchecks.engine.blob_aliases import resolve_blob_path as _resolve_blob_path
-from blockchecks.engine.config import BLOB_DIR, LUA_INIT_SCRIPTS
+from blockchecks.engine.config import BLOB_DIR, get_lua_init_scripts
 
 # Keenetic Entware layout (override via prefix=)
 DEFAULT_KEENETIC_PREFIX = "/opt/etc/nfqws2"
@@ -78,7 +78,7 @@ def _lua_init_lines(prefix: str) -> list[str]:
         path = os.path.join(lua_dir, name)
         # Fall back to zapret2 paths if keenetic tree missing
         if not os.path.exists(path):
-            for alt in LUA_INIT_SCRIPTS:
+            for alt in get_lua_init_scripts():
                 if alt.endswith(name) and os.path.exists(alt):
                     path = alt
                     break
@@ -237,7 +237,7 @@ def build_raw_conf(
     lines.append("--ipcache-lifetime=0")
     lines.append("--bind-fix4")
 
-    for lua in LUA_INIT_SCRIPTS:
+    for lua in get_lua_init_scripts():
         if os.path.exists(lua):
             lines.append(f"--lua-init=@{lua}")
 

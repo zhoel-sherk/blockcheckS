@@ -13,8 +13,8 @@ from pathlib import Path
 
 from blockchecks.engine.config import (
     BLOB_DIR,
-    LUA_INIT_SCRIPTS,
-    NFQWS2_BIN,
+    get_lua_init_scripts,
+    get_nfqws2_bin,
     nfqws2_debug_conf_line,
 )
 
@@ -41,7 +41,7 @@ class Nfqws2Manager:
         if stop_first:
             self.stop()
 
-        args = [NFQWS2_BIN, config_arg]
+        args = [get_nfqws2_bin(), config_arg]
         if self.ns_name:
             args = ["sudo", "-n", "ip", "netns", "exec", self.ns_name] + args
         else:
@@ -103,7 +103,7 @@ class Nfqws2Manager:
             self.last_debug_log = dbg_path
             if dbg_path:
                 print(f"  [nfqws2 debug] {dbg_path}")
-        for lua in LUA_INIT_SCRIPTS:
+        for lua in get_lua_init_scripts():
             if os.path.exists(lua):
                 lines.append(f"--lua-init=@{lua}")
 

@@ -55,6 +55,11 @@ def apply_parser_defaults(parser: argparse.ArgumentParser, cfg: dict[str, Any]) 
             os.environ.setdefault("BLOCKCHECKS_NFQWS2", str(tools["nfqws2"]))
         if tools.get("blobs") and not os.environ.get("BLOCKCHECKS_BLOBS"):
             os.environ.setdefault("BLOCKCHECKS_BLOBS", str(tools["blobs"]))
+        if tools.get("lua_dir") and not os.environ.get("BLOCKCHECKS_LUA_DIR"):
+            os.environ.setdefault("BLOCKCHECKS_LUA_DIR", str(tools["lua_dir"]))
+        from blockchecks.engine.config import apply_tool_paths
+
+        apply_tool_paths()
     if defaults:
         parser.set_defaults(**defaults)
 

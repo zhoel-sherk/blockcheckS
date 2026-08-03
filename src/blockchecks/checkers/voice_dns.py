@@ -250,8 +250,8 @@ def udp_discover_bootstrap(
 
     from blockchecks.engine.config import (
         BLOB_DIR,
-        LUA_INIT_SCRIPTS,
         NFQUEUE_UDP,
+        get_lua_init_scripts,
         nfqws2_debug_conf_line,
     )
     from blockchecks.engine.firewall import Firewall
@@ -273,7 +273,7 @@ def udp_discover_bootstrap(
         dbg, _dbg_path = nfqws2_debug_conf_line(tag="discover-boot")
         if dbg:
             lines.append(dbg)
-        for lua in LUA_INIT_SCRIPTS:
+        for lua in get_lua_init_scripts():
             if os.path.exists(lua):
                 lines.append(f"--lua-init=@{lua}")
         blob = os.path.join(BLOB_DIR, "discord_udp.bin")

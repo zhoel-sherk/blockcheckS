@@ -24,8 +24,9 @@ from blockchecks.checkers.curl_probe import (
 from blockchecks.checkers.dns_secure import DnsRunCache
 from blockchecks.engine.config import (
     BLOB_DIR,
-    NFQWS2_BIN,
     PYTHON_BIN,
+    get_lua_init_scripts,
+    get_nfqws2_bin,
     nfqws2_debug_conf_line,
 )
 from blockchecks.engine.matrix_generator import StrategyItem
@@ -164,7 +165,7 @@ def _nfqws2_daemon(
                 stderr=sp.DEVNULL,
             )
         # @config must be the only argument; daemon/debug are inside the file
-        cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN, f"@{tmp_conf}"]
+        cmd = ["sudo", "ip", "netns", "exec", ns_name, get_nfqws2_bin(), f"@{tmp_conf}"]
         sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
         return wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
     finally:
@@ -262,7 +263,7 @@ def _build_inline_nfqws_lines(
             "--bind-fix4",
             "--payload=tls_client_hello",
         ]
-    for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
+    for lua in get_lua_init_scripts():
         if os.path.exists(lua):
             config_lines.append(f"--lua-init=@{lua}")
     _add_blobs_from_strategy(config_lines, strategy)
@@ -288,7 +289,7 @@ def _build_quic_nfqws_lines(strategy: str) -> list[str]:
             "--ipcache-lifetime=0",
             "--bind-fix4",
         ]
-        for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
+        for lua in get_lua_init_scripts():
             if os.path.exists(lua):
                 config_lines.append(f"--lua-init=@{lua}")
         for raw_line in strategy.split("\n"):
@@ -307,7 +308,7 @@ def _build_quic_nfqws_lines(strategy: str) -> list[str]:
         "--bind-fix4",
         "--payload=quic_initial",
     ]
-    for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
+    for lua in get_lua_init_scripts():
         if os.path.exists(lua):
             config_lines.append(f"--lua-init=@{lua}")
     _add_blobs_from_strategy(config_lines, strategy)
@@ -751,7 +752,7 @@ def _run_udp_check(
             "--ipcache-lifetime=0",
             "--bind-fix4",
         ]
-        for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
+        for lua in get_lua_init_scripts():
             if os.path.exists(lua):
                 config_lines.append(f"--lua-init=@{lua}")
         for raw_line in strategy.split("\n"):
@@ -775,7 +776,7 @@ def _run_udp_check(
             "--ipcache-lifetime=0",
             "--bind-fix4",
         ]
-        for lua in ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]:
+        for lua in get_lua_init_scripts():
             if os.path.exists(lua):
                 config_lines.append(f"--lua-init=@{lua}")
         _add_blobs_from_strategy(config_lines, strategy)

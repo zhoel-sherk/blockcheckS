@@ -8,7 +8,11 @@ TCP×UDP matrix, checkpoint/resume).
 
 Канон (ONB-7): **editable install из git checkout** — так `configs/` и `presets/`
 резолвятся с корня репо. Plain wheel без checkout configs не находит.
-Нужны host **nfqws2** (`/opt/zapret2`) и **blobs** (`/opt/zapret2/blobs/` или `scripts/install_blobs.sh`).
+
+**nfqws2 / zapret2:** либо host `/opt/zapret2`, либо при первом live-запуске
+blockcheckS сам скачает официальный релиз bol-van/zapret2 в
+`~/.local/share/blockcheckS/zapret2/` (отключить: `--no-fetch-deps` /
+`BLOCKCHECKS_FETCH_DEPS=0`). Blobs: host или `scripts/install_blobs.sh`.
 
 ```bash
 pip install -e ".[dev,discovery]"
@@ -18,7 +22,7 @@ bs --help
 python -m blockchecks.bs --help
 ```
 
-Linux host с zapret2/nfqws2 и root (netns + iptables). Unit-тесты — без root.
+Linux host с root (netns + iptables). Unit-тесты — без root.
 
 ## Отличия от blockcheck.sh
 
@@ -81,7 +85,7 @@ Roadmap: [docs/todo.md](docs/todo.md).
 
 ## Status
 
-Пакет `blockchecks` 1.0.0: scan/pair/async, `bs full` + nfconf export, ruff clean.
+Пакет `blockchecks` 1.0.1: scan/pair/async, `bs full` + nfconf export, system deps + zapret2 auto-fetch.
 Roadmap: [docs/todo.md](docs/todo.md). Layout: [docs/package.md](docs/package.md).
 
 ---

@@ -21,7 +21,9 @@ from blockchecks.cli.parser import (
     add_family_gate_args,
     add_protocol_phase_args,
     add_store_args,
+    add_system_deps_args,
     add_time_limit_args,
+    ensure_system_deps_or_exit,
 )
 from blockchecks.engine.adaptive_runner import (
     build_adaptive_queue,
@@ -827,6 +829,7 @@ def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser
         action="store_true",
         help="Abort if nfqws2 already running on host",
     )
+    add_system_deps_args(p)
     add_curl_repeats_args(p)
     add_family_gate_args(p)
     add_protocol_phase_args(p)
@@ -861,6 +864,9 @@ def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
     if args.out_dir is None:
         args.out_dir = str(DEFAULT_OUT_DIR)
     validate_time_limit_args(p, args)
+    deps_rc = ensure_system_deps_or_exit(args)
+    if deps_rc:
+        return deps_rc
     return asyncio.run(run_full(args))
 
 

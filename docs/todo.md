@@ -1,8 +1,15 @@
 # Backlog — blockcheckS
 
-Открытые задачи после **1.0.0**. Закрытые фазы и release notes: [changelog.md](../changelog.md).
+Открытые задачи после **1.0.1**. Закрытые фазы и release notes: [changelog.md](../changelog.md).
 
 Приоритеты: **P1** = matrix/speed/protocol gaps; **P2** = voice/GP integration; **P3** = ML/hierarchy.
+
+### Closed in 1.0.1
+
+- [x] system deps warnings + zapret2 auto-fetch (`engine/system_deps.py`)
+- [x] C1 nfqws2 temp unlink; C2 portable chown; C3 chown warn
+- [x] requirements sync; `BLOCKCHECKS_LUA_DIR` / `apply_tool_paths`
+- [x] README legal disclaimer
 
 ### Closed in 1.0.0 audit / campaign (see changelog)
 

@@ -184,6 +184,41 @@ def add_secure_dns_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_system_deps_args(parser: argparse.ArgumentParser) -> None:
+    """Host tool / zapret2 vendor fetch flags (1.0.1)."""
+    g = parser.add_argument_group("system dependencies")
+    g.add_argument(
+        "--no-fetch-deps",
+        action="store_true",
+        help="Do not auto-download zapret2/nfqws2 when missing (BLOCKCHECKS_FETCH_DEPS=0)",
+    )
+    g.add_argument(
+        "--offline",
+        action="store_true",
+        help="Never contact the network for dependency fetch",
+    )
+    g.add_argument(
+        "--skip-deps-check",
+        action="store_true",
+        help="Skip verify_system_dependencies (advanced)",
+    )
+
+
+def ensure_system_deps_or_exit(args) -> int:
+    """Run deps check before live nfqws2 work. Returns 0 or error exit code."""
+    if getattr(args, "skip_deps_check", False):
+        return 0
+    from blockchecks.engine.system_deps import verify_system_dependencies
+
+    fetch = not getattr(args, "no_fetch_deps", False)
+    offline = bool(getattr(args, "offline", False))
+    report = verify_system_dependencies(fetch=fetch, offline=offline)
+    report.print_report()
+    if not report.ok:
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="blockcheckS - lightspeed DPI strategy tester")
     sub = parser.add_subparsers(dest="command", help="Commands")
@@ -209,6 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
     tcp.add_argument("--qnum", type=int, default=200)
     tcp.add_argument("--ns")
     add_secure_dns_args(tcp)
+    add_system_deps_args(tcp)
     add_time_limit_args(tcp)
     add_curl_repeats_args(tcp)
     tcp.add_argument(
@@ -255,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
     )
+    add_system_deps_args(udp)
 
     scan = sub.add_parser("scan", help="Async TCP strategy batch scan")
     scan.add_argument("-d", "--domain", default=None)
@@ -296,6 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--resume", action="store_true")
     add_secure_dns_args(scan)
+    add_system_deps_args(scan)
     add_curl_repeats_args(scan)
     add_family_gate_args(scan)
     add_domain_filter_args(scan)
@@ -330,6 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
     composite.add_argument("-d", "--domains", nargs="+", help="Domains to test (default: Discord set)")
     composite.add_argument("--parallel", type=int, default=4)
     composite.add_argument("--timeout", type=float, default=5.0)
+    add_system_deps_args(composite)
 
     pair = sub.add_parser("pair", help="TCP x UDP pair matrix (async)")
     pair.add_argument("-d", "--domain", default=None)
@@ -403,6 +442,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pair.add_argument("--resume", action="store_true")
     add_secure_dns_args(pair)
+    add_system_deps_args(pair)
     add_curl_repeats_args(pair)
     add_family_gate_args(pair)
     add_domain_filter_args(pair)
@@ -458,6 +498,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip writing settle profile JSON",
     )
+    add_system_deps_args(bench)
 
     return parser
 
@@ -466,6 +507,14 @@ def dispatch(args: argparse.Namespace) -> int:
     dbg = getattr(args, "nfqws2_debug", None)
     if dbg is not None:
         os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
+
+    live = {"tcp", "udp", "scan", "pair", "composite", "bench-settle"}
+    if args.command in live:
+        # list-presets / help paths still need args; skip only when listing presets
+        if not (args.command in {"scan", "pair"} and getattr(args, "list_presets", False)):
+            code = ensure_system_deps_or_exit(args)
+            if code:
+                return code
 
     if args.command == "tcp":
         return cmd_tcp(args)

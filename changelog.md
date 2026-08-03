@@ -1,5 +1,24 @@
 # blockcheckS Changelog
 
+## 1.0.1 — 2026-08-03
+
+### Added
+- **System deps check** (`engine/system_deps.py`): warn on missing `sudo`/`ip`/`iptables`; resolve nfqws2
+- **Auto-fetch zapret2**: when nfqws2 missing, download official `bol-van/zapret2` release (sha256-verified)
+  into `~/.local/share/blockcheckS/zapret2/` (+ `bin/nfqws2` symlink); lua + blobs seeded from the archive
+- CLI: `--no-fetch-deps`, `--offline`, `--skip-deps-check`; env `BLOCKCHECKS_FETCH_DEPS`, `BLOCKCHECKS_LUA_DIR`
+
+### Fixed
+- nfqws2 daemon temp leak (`bs_nfq_*` unlink after settle)
+- Campaign `chown_db` hardcoded user → `getpass.getuser()`
+- `reclaim_sudo_ownership` now logs WARNING on chown OSError
+- Hardcoded `/opt/zapret2/lua` paths → `LUA_INIT_DIR` / `get_lua_init_scripts()`
+- Packaging: `requirements.txt` / `requirements-dev.txt` synced with `pyproject.toml` (incl. tomli)
+
+### Docs
+- Bilingual legal disclaimer in README
+- Install contract: host `/opt/zapret2` **or** XDG auto-vendor
+
 ## 1.0.0 — 2026-08-03
 
 Первый production-ready релиз: mass-scan DPI-стратегий для zapret2/nfqws2 с curl_cffi,

@@ -1,3 +1,5 @@
+# Mirrors pyproject.toml [project.dependencies]. Prefer: pip install -e ".[dev,discovery]"
 curl-cffi>=0.8.0
 colorama>=0.4.6
 aiosqlite>=0.20.0
+tomli>=2.0.0; python_version < "3.11"

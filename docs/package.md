@@ -61,6 +61,16 @@ Plain `pip install` wheel without checkout may not find configs — use editable
 install or clone repo. This is intentional (not the same as **BLOB-1**
 `presets/blobs/` manifest).
 
+### Tools / zapret2 vendor (1.0.1)
+
+Resolution for `nfqws2`: `BLOCKCHECKS_NFQWS2` → `PATH` → `/opt/zapret2/nfq2/nfqws2`
+→ `~/.local/share/blockcheckS/bin/nfqws2`. If missing and fetch enabled (default),
+`engine/system_deps.py` downloads the latest `bol-van/zapret2` release (sha256)
+into `~/.local/share/blockcheckS/zapret2/` and sets `BLOCKCHECKS_BLOBS` /
+`BLOCKCHECKS_LUA_DIR`. Cache: `~/.cache/blockcheckS/zapret2-dl/`.
+
+Flags: `--no-fetch-deps`, `--offline`, `--skip-deps-check`.
+
 ## Import graph
 
 ```
