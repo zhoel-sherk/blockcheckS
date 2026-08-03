@@ -68,7 +68,47 @@ async def test_pair_udp_bypass(mock_runner):
 
 
 @pytest.mark.asyncio
-async def test_pair_resume_skip(mock_runner):
+async def test_pair_resume_completed_set(mock_runner, temp_db):
+    """Pairs already in DB are skipped; checkpoint idx alone must not skip others."""
+    await temp_db.log_pair(
+        "tcp_a", "u_a", "d", True, False, True, 10, 0, 8, "PASS"
+    )
+    tcp_a = TcpTestResult(
+        item=StrategyItem(label="tcp_a", strategy="f"),
+        domain="d",
+        success=True,
+    )
+    tcp_b = TcpTestResult(
+        item=StrategyItem(label="tcp_b", strategy="f"),
+        domain="d",
+        success=True,
+    )
+    # Misleading high idx (as if parallel wrote checkpoint for tcp_b first)
+    cp = Checkpoint(
+        tcp_idx=1,
+        udp_idx=0,
+        timestamp="",
+        note="",
+        fingerprint="",
+        tcp_label="tcp_b",
+        udp_label="u_a",
+    )
+    pairs = await mock_runner.test_pair_matrix(
+        [tcp_a, tcp_b],
+        [StrategyItem(label="u_a", strategy="f")],
+        "d",
+        voice_ip="1.2.3.4",
+        voice_port=5,
+        resume_from=cp,
+    )
+    # tcp_a+u_a skipped (in DB); tcp_b+u_a still runs despite checkpoint idx
+    assert len(pairs) == 1
+    assert pairs[0].tcp_item.label == "tcp_b"
+
+
+@pytest.mark.asyncio
+async def test_pair_checkpoint_idx_does_not_skip(mock_runner):
+    """Without completed-set entries, checkpoint idx must not block any pair."""
     tcp = TcpTestResult(
         item=StrategyItem(label="tcp_a", strategy="f"),
         domain="d",
@@ -91,4 +131,24 @@ async def test_pair_resume_skip(mock_runner):
         voice_port=5,
         resume_from=cp,
     )
-    assert len(pairs) == 0
+    assert len(pairs) == 1
+
+
+@pytest.mark.asyncio
+async def test_pair_throttled_overall(mock_runner):
+    tcp = TcpTestResult(
+        item=StrategyItem(label="tcp_t", strategy="f"),
+        domain="d",
+        success=True,
+        throttled=True,
+        latency_ms=200,
+    )
+    pairs = await mock_runner.test_pair_matrix(
+        [tcp],
+        [StrategyItem(label="u", strategy="f")],
+        "d",
+        voice_ip="1.2.3.4",
+        voice_port=5,
+    )
+    assert len(pairs) == 1
+    assert pairs[0].overall == "THROTTLED"

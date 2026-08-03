@@ -6,13 +6,15 @@
 - `bs pair --adaptive`: run UDP pair matrix after AQ TCP (was TCP-only)
 - Curl worker wall timeout scales with `--repeats` (`worker_wall_timeout`)
 - AQ `pop_batch` solos googlevideo (match B2 `fanout_batches`)
-- Pair resume: completed-set from DB + checkpoint `(tcp_idx, udp_idx)` (not lexicographic labels)
+- Pair resume: **completed-set only** from `pair_results` (idx skip removed — unsafe with parallel pairs)
 - `bs full` pair phase passes `--resume` checkpoint + fingerprint
 - `family_needs.finish_family` clears needs for `fakedsplit` / `fakeddisorder`
 - THROTTLED counts as working for export / coverage / pair selection
+- Pair rebuild preserves THROTTLED via `get_working_tcp_details` / `tcp_results_from_details`
 - Removed orphan `pair_runner` / `pair_manager`; composite uses JSON curl worker
 - Netns base allowlist; resolv.conf via `tee` (no `bash -c`)
 - `ensure_strategy` sets `busy_timeout`; GV tiny 206 no longer auto-PASS
+- SQLite views `v_working_tcp` / `v_coverage` / `v_latest_run` treat THROTTLED as working
 
 ## 1.0.0 — 2026-08-02
 

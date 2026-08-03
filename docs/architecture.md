@@ -50,7 +50,7 @@ sequenceDiagram
 | `bs scan`, `bs pair` | **async** [`async_runner`](src/blockchecks/engine/async_runner.py) | canonical |
 | `bs full` | **async** via [`main.py`](src/blockchecks/main.py) | mass matrix |
 | `bs tcp`, `bs udp` | **sync** [`test_runner`](src/blockchecks/engine/test_runner.py) | single strategy |
-| — | [`pair_runner.py`](src/blockchecks/engine/pair_runner.py) | legacy sync pair; do not extend |
+| `bs pair` | **async** [`async_runner.test_pair_matrix`](src/blockchecks/engine/async_runner.py) | TCP×UDP pairs |
 
 Known limitation: `bs scan` forces `auto_discover=None` (see [guide.md](guide.md)).
 
@@ -146,6 +146,5 @@ See Phase 10 **GV-1..GV-5** in [todo.md](todo.md).
 **Internal (do not import from outside):**
 
 - `_nfqws2_daemon`, `_sudo`, subprocess probe strings
-- `pair_runner` (legacy)
 
 See [package.md](package.md) for import graph.

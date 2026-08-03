@@ -9,7 +9,8 @@
 - [x] adaptive pair matrix after AQ TCP
 - [x] repeats-aware worker wall timeout
 - [x] AQ googlevideo solo batches
-- [x] pair resume completed-set + idx
+- [x] pair resume completed-set only (idx skip removed)
+- [x] THROTTLED pair metadata via `get_working_tcp_details`
 - [x] family_needs fakedsplit finish
 - [x] THROTTLED ∈ working set
 - [x] delete pair_runner/pair_manager; composite JSON worker; netns allowlist
@@ -19,6 +20,7 @@
 - [ ] Unify `_nfqws2_daemon` ↔ `Nfqws2Manager` (E3)
 - [ ] Docs architecture rewrite (DoH/GV-1 as current)
 - [ ] `--preset` path jail + token file modes
+- [ ] composite_runner: stop importing private `_invoke_curl_probe_worker`
 
 ---
 

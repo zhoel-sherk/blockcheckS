@@ -56,8 +56,28 @@ async def test_throttled_counts_as_working(tmp_path):
     assert "s1" in working
     assert "s2" in working
     assert "s3" not in working
+    details = await db.get_working_tcp_details("discord.com")
+    by_name = {d["name"]: d for d in details}
+    assert by_name["s1"]["status"] == "THROTTLED"
+    assert by_name["s2"]["status"] == "PASS"
     cov = await db.coverage_score("s1")
     assert cov["domains_passed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_tcp_results_from_details_throttled():
+    from blockchecks.engine.async_runner import tcp_results_from_details
+
+    item = StrategyItem(label="s1", strategy="fake:repeats=1")
+    results = tcp_results_from_details(
+        {"s1": item},
+        [{"name": "s1", "status": "THROTTLED", "latency_ms": 120.0}],
+        "discord.com",
+    )
+    assert len(results) == 1
+    assert results[0].success is True
+    assert results[0].throttled is True
+    assert results[0].latency_ms == 120.0
 
 
 @pytest.mark.asyncio

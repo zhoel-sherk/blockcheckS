@@ -64,10 +64,10 @@ CREATE INDEX IF NOT EXISTS idx_udp_status ON udp_results(status);
 CREATE INDEX IF NOT EXISTS idx_pair_overall ON pair_results(overall);
 CREATE VIEW IF NOT EXISTS v_working_tcp AS
 SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
-       t.content_valid, t.timestamp
+       t.content_valid, t.timestamp, t.status
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
-WHERE t.status = 'PASS'
+WHERE t.status IN ('PASS', 'THROTTLED')
 ORDER BY t.domain, t.latency_ms;
 CREATE VIEW IF NOT EXISTS v_coverage AS
 SELECT s.name AS strategy, s.proto,
@@ -75,13 +75,13 @@ SELECT s.name AS strategy, s.proto,
        ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
-WHERE t.status = 'PASS'
+WHERE t.status IN ('PASS', 'THROTTLED')
 GROUP BY s.name, s.proto
 HAVING domains_passed > 0
 ORDER BY domains_passed DESC;
 CREATE VIEW IF NOT EXISTS v_latest_run AS
 SELECT domain, COUNT(*) AS total,
-       SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) AS passed,
+       SUM(CASE WHEN status IN ('PASS','THROTTLED') THEN 1 ELSE 0 END) AS passed,
        MAX(timestamp) AS last_test
 FROM tcp_results
 GROUP BY domain
@@ -114,5 +114,38 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
             weight REAL NOT NULL DEFAULT 1.0,
             updated_at TEXT NOT NULL DEFAULT ''
         )"""
+    )
+    await db.commit()
+    # Recreate views so THROTTLED ∈ working (IF NOT EXISTS keeps stale defs)
+    await db.executescript(
+        """
+        DROP VIEW IF EXISTS v_working_tcp;
+        DROP VIEW IF EXISTS v_coverage;
+        DROP VIEW IF EXISTS v_latest_run;
+        CREATE VIEW v_working_tcp AS
+        SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
+               t.content_valid, t.timestamp, t.status
+        FROM tcp_results t
+        JOIN strategies s ON t.strategy_id = s.id
+        WHERE t.status IN ('PASS', 'THROTTLED')
+        ORDER BY t.domain, t.latency_ms;
+        CREATE VIEW v_coverage AS
+        SELECT s.name AS strategy, s.proto,
+               COUNT(DISTINCT t.domain) AS domains_passed,
+               ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
+        FROM tcp_results t
+        JOIN strategies s ON t.strategy_id = s.id
+        WHERE t.status IN ('PASS', 'THROTTLED')
+        GROUP BY s.name, s.proto
+        HAVING domains_passed > 0
+        ORDER BY domains_passed DESC;
+        CREATE VIEW v_latest_run AS
+        SELECT domain, COUNT(*) AS total,
+               SUM(CASE WHEN status IN ('PASS','THROTTLED') THEN 1 ELSE 0 END) AS passed,
+               MAX(timestamp) AS last_test
+        FROM tcp_results
+        GROUP BY domain
+        ORDER BY last_test DESC;
+        """
     )
     await db.commit()

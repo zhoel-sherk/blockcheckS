@@ -362,9 +362,9 @@ class SqliteRunStore:
             await db.execute("PRAGMA busy_timeout = 5000")
             row = await (
                 await db.execute(
-                    """SELECT COUNT(*) FROM tcp_results t
+                    f"""SELECT COUNT(*) FROM tcp_results t
                        JOIN strategies s ON t.strategy_id=s.id
-                       WHERE t.status IN ('PASS','THROTTLED') AND s.proto='tcp'"""
+                       WHERE t.status IN {_WORKING_STATUSES} AND s.proto='tcp'"""
                 )
             ).fetchone()
         return int(row[0] or 0)
@@ -378,10 +378,18 @@ class SqliteRunStore:
         return await self.get_working_proto(domain, "quic")
 
     async def get_working_proto(self, domain: str, proto: str) -> list[str]:
+        details = await self.get_working_proto_details(domain, proto)
+        return [d["name"] for d in details]
+
+    async def get_working_tcp_details(self, domain: str) -> list[dict]:
+        """Latest PASS/THROTTLED TCP rows for domain: name, status, latency_ms."""
+        return await self.get_working_proto_details(domain, "tcp")
+
+    async def get_working_proto_details(self, domain: str, proto: str) -> list[dict]:
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
             rows = await db.execute(
-                f"""SELECT s.name FROM strategies s
+                f"""SELECT s.name, t.status, t.latency_ms FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.proto=? AND t.domain=? AND t.id = (
                        SELECT t2.id FROM tcp_results t2
@@ -390,7 +398,8 @@ class SqliteRunStore:
                    ) AND t.status IN {_WORKING_STATUSES}""",
                 (proto, domain, domain),
             )
-            return [r[0] for r in await rows.fetchall()]
+            cols = ["name", "status", "latency_ms"]
+            return [dict(zip(cols, r)) for r in await rows.fetchall()]
 
     async def get_completed_pair_keys(self, domain: str) -> set[tuple[str, str]]:
         """All (tcp, udp) pairs already logged for domain (any overall) — resume skip."""

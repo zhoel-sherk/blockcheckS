@@ -46,6 +46,7 @@ __all__ = [
     "StrategyItem",
     "TcpTestResult",
     "UdpTestResult",
+    "tcp_results_from_details",
 ]
 
 
@@ -61,6 +62,29 @@ class TcpTestResult:
     throttled: bool = False
     read_rate_bps: float = 0
     error: str = ""
+
+
+def tcp_results_from_details(
+    by_label: dict[str, StrategyItem],
+    details: list[dict],
+    domain: str,
+) -> list[TcpTestResult]:
+    """Build TcpTestResult list from get_working_tcp_details rows (PASS/THROTTLED)."""
+    out: list[TcpTestResult] = []
+    for d in details:
+        item = by_label.get(d["name"])
+        if item is None:
+            continue
+        out.append(
+            TcpTestResult(
+                item=item,
+                domain=domain,
+                success=True,
+                throttled=d.get("status") == "THROTTLED",
+                latency_ms=float(d.get("latency_ms") or 0),
+            )
+        )
+    return out
 
 
 @dataclass
@@ -1273,28 +1297,28 @@ class AsyncTestRunner:
 
         total = len(working) * len(udp_strategies)
 
-        # Resume: completed-set from DB + checkpoint (tcp_idx, udp_idx) order
+        # Resume: skip only pairs already in DB (completed-set).
+        # Checkpoint idx is NOT used for skip — parallel pairs make idx a non-frontier.
         completed: set[tuple[str, str]] = set()
-        resume_tcp_idx = None
-        resume_udp_idx = None
         if self.db:
             try:
                 completed = await self.db.get_completed_pair_keys(domain)
             except Exception:
                 completed = set()
-        if isinstance(resume_from, Checkpoint):
-            resume_tcp_idx = resume_from.tcp_idx
-            resume_udp_idx = resume_from.udp_idx
-            if resume_from.tcp_label:
-                print(
-                    f"  {YELLOW}Resuming after "
-                    f"{resume_from.tcp_label}+{resume_from.udp_label} "
-                    f"(idx {resume_tcp_idx},{resume_udp_idx}; "
-                    f"{len(completed)} pairs in DB){RESET}"
-                )
-        elif resume_from is not None and hasattr(resume_from, "tcp_idx"):
-            resume_tcp_idx = getattr(resume_from, "tcp_idx", None)
-            resume_udp_idx = getattr(resume_from, "udp_idx", None)
+        if isinstance(resume_from, Checkpoint) and resume_from.tcp_label:
+            print(
+                f"  {YELLOW}Resuming after "
+                f"{resume_from.tcp_label}+{resume_from.udp_label} "
+                f"({len(completed)} pairs in DB){RESET}"
+            )
+        elif resume_from is not None and getattr(resume_from, "tcp_label", None):
+            print(
+                f"  {YELLOW}Resuming after "
+                f"{resume_from.tcp_label}+{getattr(resume_from, 'udp_label', '')} "
+                f"({len(completed)} pairs in DB){RESET}"
+            )
+        elif completed:
+            print(f"  {YELLOW}Resuming: {len(completed)} pairs already in DB{RESET}")
         print(
             f"  {CYAN}Pair matrix: {len(working)} TCP × {len(udp_strategies)} UDP "
             f"= {total} pairs, {self.pool.size} parallel{RESET}"
@@ -1304,12 +1328,6 @@ class AsyncTestRunner:
             key = (tcp_r.item.label, udp_s.label)
             if key in completed:
                 return
-            # Checkpoint idx: skip pairs at or before last completed (tcp_i, udp order)
-            if resume_tcp_idx is not None and resume_udp_idx is not None:
-                if tcp_i < resume_tcp_idx:
-                    return
-                if tcp_i == resume_tcp_idx and pair_idx <= resume_udp_idx:
-                    return
             async with pair_sem:
                 ns_name = await self.pool.acquire()
                 try:

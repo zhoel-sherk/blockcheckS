@@ -623,22 +623,29 @@ async def run_full(args) -> int:
         # ── Pairs ──
         if not stop.is_set() and not args.tcp_only and udp_items:
             print(f"\n  {CYAN}[{pair_step}/{steps}] Pair matrix...{RESET}")
-            working_names = await db.get_working_tcp(primary)
-            # Prefer coverage winners
+            from blockchecks.engine.async_runner import tcp_results_from_details
+
+            details = await db.get_working_tcp_details(primary)
+            by_status = {d["name"]: d for d in details}
             covered = await db.get_best_by_coverage(limit=args.pair_max)
             if covered:
                 labels = {c["strategy"] for c in covered}
-                working_tcp = [i for i in tcp_items if i.label in labels or i.strategy in labels]
-            else:
-                working_tcp = [i for i in tcp_items if i.label in working_names]
-            # Build fake TcpTestResult-like for pair matrix — need real results
-            # Re-use pair API: requires list[TcpTestResult]
-            from blockchecks.engine.async_runner import TcpTestResult
-
-            tcp_results = []
-            for item in working_tcp[: args.pair_max]:
-                tr = TcpTestResult(item=item, domain=primary, success=True)
-                tcp_results.append(tr)
+                selected = [
+                    i for i in tcp_items if i.label in labels or i.strategy in labels
+                ]
+                details = [
+                    by_status.get(
+                        i.label,
+                        {"name": i.label, "status": "PASS", "latency_ms": 0},
+                    )
+                    for i in selected
+                ]
+            by_label = {i.label: i for i in tcp_items}
+            for i in tcp_items:
+                by_label.setdefault(i.strategy, i)
+            tcp_results = tcp_results_from_details(by_label, details, primary)[
+                : args.pair_max
+            ]
             if tcp_results:
                 resume_from = None
                 if args.resume:

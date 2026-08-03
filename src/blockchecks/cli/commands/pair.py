@@ -16,7 +16,7 @@ from blockchecks.engine.adaptive_runner import (
     persist_adaptive_weights,
     run_adaptive_tcp,
 )
-from blockchecks.engine.async_runner import AsyncTestRunner, TcpTestResult
+from blockchecks.engine.async_runner import AsyncTestRunner, tcp_results_from_details
 from blockchecks.engine.config import (
     CONFIGS_DIR,
     DEFAULT_CURL_PARALLEL,
@@ -484,13 +484,9 @@ async def cmd_pair(args):
             # Adaptive path previously stopped after TCP — still run UDP pairs
             if not args.tcp_only and udp_items and not stop_event.is_set():
                 primary = domains_to_test[0]
-                working_names = await db.get_working_tcp(primary)
+                details = await db.get_working_tcp_details(primary)
                 by_label = {i.label: i for i in tcp_items}
-                tcp_results = [
-                    TcpTestResult(item=by_label[name], domain=primary, success=True)
-                    for name in working_names
-                    if name in by_label
-                ]
+                tcp_results = tcp_results_from_details(by_label, details, primary)
                 if tcp_results:
                     print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
                     pairs = await runner.test_pair_matrix(
