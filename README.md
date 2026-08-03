@@ -83,3 +83,21 @@ Roadmap: [docs/todo.md](docs/todo.md).
 
 Пакет `blockchecks` 1.0.0: scan/pair/async, `bs full` + nfconf export, ruff clean.
 Roadmap: [docs/todo.md](docs/todo.md). Layout: [docs/package.md](docs/package.md).
+
+---
+
+## ⚖️ Legal Disclaimer / Дисклеймер
+
+### English
+This software is provided "as is", without warranty of any kind, express or implied. **blockcheckS** is an open-source analytical tool designed strictly for educational, academic, and network research purposes. It is intended for network administrators and systems engineers to analyze Deep Packet Inspection (DPI) behaviors and diagnose network topologies.
+
+*   The author(s) do not encourage, facilitate, or promote any illegal activities or violations of local telecommunication laws.
+*   This software does not contain any malicious code, malware, or exploits designed to compromise computer security or bypass information protection systems (in compliance with Art. 273 of the Criminal Code of the Russian Federation).
+*   The use of this tool is entirely **at your own risk**. The author(s) shall not be held liable for any direct, indirect, incidental, or consequential damages, service disruptions, or legal actions resulting from the use or misuse of this software.
+
+### Русский
+Данное программное обеспечение предоставляется по принципу «как есть» (as is). **blockcheckS** является аналитическим инструментом и распространяется исключительно в ознакомительных, научно-исследовательских и диагностических целях для системных инженеров и сетевых администраторов.
+
+*   **Исключительно исследовательский характер**: Программа предназначена для изучения механизмов работы систем глубокого анализа пакетов (DPI) и не содержит вредоносного функционала, средств обхода систем защиты информации или вирусов (соответствует требованиям **Ст. 273 УК РФ**). Утилита оперирует стандартными сетевыми вызовами и легитимными механизмами ядра Linux.
+*   **Соблюдение законодательства**: Автор(ы) не призывают к нарушению действующего законодательства Российской Федерации, включая Федеральный закон «О связи» № 126-ФЗ и Федеральный закон «Об информации, информационных технологиях и о защите информации» № 149-ФЗ.
+*   **Отказ от ответственности**: Вы используете данное ПО **на свой страх и риск**. Автор(ы) не несут ответственности за любые ограничения связи, блокировки, штрафы, потерю данных или иные прямые или косвенные последствия, возникшие в результате работы или неправильной настройки данной утилиты.
