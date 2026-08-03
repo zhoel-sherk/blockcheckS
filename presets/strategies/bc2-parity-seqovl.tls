@@ -1,0 +1,8 @@
+# BC2 23-seqovl / padencap / bare syndata
+multisplit:pos=10,sniext+1:seqovl=1
+multisplit:pos=2:seqovl=652:seqovl_pattern=stun
+fake:blob=google:repeats=6:tls_mod=rnd,dupsid,padencap\nmultisplit:pos=10,sniext+1:seqovl=1
+fake:blob=google:repeats=6:tls_mod=rnd,dupsid\nmultisplit:pos=1,midsld:seqovl=1
+syndata
+syndata:blob=0x1603:tls_mod=rnd,dupsid
+syndata\nhostfakesplit:nofake2:tcp_ts=-1000

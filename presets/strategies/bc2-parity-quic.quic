@@ -1,0 +1,8 @@
+# BC2 list_quic + 90-quic.sh
+fake:blob=fake_default_quic:repeats=11
+fake:blob=fake_default_quic:repeats=6
+fake:blob=fake_default_quic:repeats=6:badsum
+send:ipfrag:ipfrag_pos_udp=8\ndrop
+fake:blob=fake_default_quic:repeats=6\nsend:ipfrag:ipfrag_pos_udp=16\ndrop
+send:ip6_hopbyhop\ndrop
+send:ip6_destopt\ndrop

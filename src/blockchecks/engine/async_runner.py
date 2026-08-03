@@ -144,11 +144,18 @@ def _nfqws2_daemon(
     the UDP instance so the TCP desync (qnum 200) stays alive.
 
     Note: with ``@config`` nfqws2 ignores trailing CLI flags — put ``--debug``
-    and ``--daemon`` inside the config file (see ``_inject_debug_and_daemon``).
+    and ``--daemon`` inside a *temporary* copy of the config (never mutate
+    user/presets ``configs/*.conf``).
 
     Returns settle elapsed seconds (B1 readiness poll).
     """
-    _inject_debug_and_daemon(config_path, tag=ns_name)
+    import shutil
+    import tempfile as _tf
+
+    _fd, tmp_conf = _tf.mkstemp(prefix="bs_nfq_", suffix=".conf")
+    os.close(_fd)
+    shutil.copy2(config_path, tmp_conf)
+    _inject_debug_and_daemon(tmp_conf, tag=ns_name)
     if kill_existing:
         sp.run(
             ["sudo", "ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2"],
@@ -156,7 +163,7 @@ def _nfqws2_daemon(
             stderr=sp.DEVNULL,
         )
     # @config must be the only argument; daemon/debug are inside the file
-    cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN, f"@{config_path}"]
+    cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN, f"@{tmp_conf}"]
     sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
     return wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
 

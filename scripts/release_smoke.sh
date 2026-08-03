@@ -35,6 +35,15 @@ sudo "$BS" full \
   --out-dir "${LOG_DIR}/export" \
   2>&1 | tee "${LOG_DIR}/run.log"
 
+# sudo creates root-owned DB; reclaim for user-space export/import
+if [[ -n "${SUDO_USER:-}" ]]; then
+  sudo chown "${SUDO_USER}:" "${LOG_DIR}/state.db" "${LOG_DIR}/state.db"-* 2>/dev/null || \
+    sudo chown "${SUDO_USER}:" "${LOG_DIR}/state.db" 2>/dev/null || true
+elif [[ -n "${USER:-}" ]]; then
+  sudo chown "${USER}:" "${LOG_DIR}/state.db" "${LOG_DIR}/state.db"-* 2>/dev/null || \
+    sudo chown "${USER}:" "${LOG_DIR}/state.db" 2>/dev/null || true
+fi
+
 echo "=== AQ benchmark ==="
 "$PY" scripts/aq_benchmark.py --db "${LOG_DIR}/state.db" | tee "${LOG_DIR}/aq_report.txt"
 

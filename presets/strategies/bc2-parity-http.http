@@ -1,0 +1,9 @@
+# BC2 10-http-basic + list_http parity
+http_hostcase
+http_methodeol
+http_hostcase:spell=hoSt
+http_domcase
+http_unixeol
+fake:blob=fake_default_http:tcp_ts=-1000
+fake:blob=fake_default_http:repeats=6:badsum
+fake:blob=0x00000000:repeats=6:tcp_ts=-1000

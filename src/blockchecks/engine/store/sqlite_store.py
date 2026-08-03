@@ -8,6 +8,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from blockchecks.engine.paths import reclaim_sudo_ownership
 from blockchecks.engine.store.models import Checkpoint
 from blockchecks.engine.store.schema import apply_schema
 
@@ -35,6 +36,7 @@ class SqliteRunStore:
     def __init__(self, db_path: str | Path, batch_size: int = 0):
         self._path = Path(db_path).expanduser().resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        reclaim_sudo_ownership(self._path.parent)
         self.batch_size = max(0, int(batch_size or 0))
         self._tcp_pending: list[dict] = []
         self._udp_pending: list[dict] = []
@@ -51,9 +53,11 @@ class SqliteRunStore:
     async def init(self) -> None:
         async with aiosqlite.connect(self._path) as db:
             await apply_schema(db)
+        reclaim_sudo_ownership(self._path)
 
     async def close(self) -> None:
         await self.flush()
+        reclaim_sudo_ownership(self._path)
 
     async def ensure_strategy(
         self, name: str, proto: str, config_path: str, db: aiosqlite.Connection = None

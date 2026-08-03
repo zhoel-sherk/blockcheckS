@@ -458,6 +458,9 @@ async def run_full(args) -> int:
                             done += 1
                             if r.success:
                                 passed += 1
+                            if stop.is_set():
+                                _progress(done, skipped, passed)
+                                return
                         _progress(done, skipped, passed)
 
                 tasks = [_one_strategy(item) for item in tcp_items]

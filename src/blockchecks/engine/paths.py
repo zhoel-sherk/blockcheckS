@@ -105,6 +105,38 @@ def ensure_dirs() -> None:
         PYCACHE_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
+        reclaim_sudo_ownership(path)
+
+
+def reclaim_sudo_ownership(path: Path) -> None:
+    """If running as root via sudo, chown *path* back to SUDO_UID/GID.
+
+    Prevents root-owned state.db / export dirs that user-space tools
+    (bc-nfconf, shortlist_import) cannot write.
+    """
+    if os.geteuid() != 0:
+        return
+    uid_s = os.environ.get("SUDO_UID", "").strip()
+    gid_s = os.environ.get("SUDO_GID", "").strip()
+    if not uid_s or not gid_s:
+        return
+    try:
+        uid, gid = int(uid_s), int(gid_s)
+    except ValueError:
+        return
+    try:
+        os.chown(path, uid, gid)
+    except OSError:
+        return
+    # SQLite sidecars when *path* is the db file
+    if path.is_file():
+        for suffix in ("-wal", "-shm", "-journal"):
+            side = Path(str(path) + suffix)
+            if side.exists():
+                try:
+                    os.chown(side, uid, gid)
+                except OSError:
+                    pass
 
 
 def apply_pycache_prefix() -> None:

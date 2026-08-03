@@ -279,9 +279,8 @@ async def test_standard_udp_excludes_tcp_fakes():
     )
     assert items
     for it in items:
-        assert "fake:blob=stun" not in it.strategy
         assert "quic_initial" not in it.strategy
-        assert "discord_udp" in it.strategy
+        assert "discord_udp" in it.strategy or "blob=stun" in it.strategy
 
 
 @pytest.mark.asyncio

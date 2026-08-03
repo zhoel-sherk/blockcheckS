@@ -258,19 +258,28 @@ class FakeSplitComboGenerator(StrategyGenerator):
 
 # ── Extended parameters (from blockcheck.sh def.inc + standard scripts) ──
 
-# Full foolings matching blockcheck2.sh standard tests
+# Full foolings matching blockcheck2.sh def.inc FOOLINGS46_TCP
 ALL_FOOLINGS_TCP = [
-    "tcp_ts=-1000",  # most effective on Fryazino
     "",
     "tcp_md5",
-    "tcp_ack=-66000:tcp_ts_up",
+    "badsum",
     "tcp_seq=-3000",
     "tcp_seq=1000000",
+    "tcp_ack=-66000:tcp_ts_up",
+    "tcp_ts=-1000",
     "tcp_flags_unset=ACK",
     "tcp_flags_set=SYN",
 ]
 ALL_FOOLINGS_UDP = ["badsum"]
-ALL_FOOLINGS_IPV6 = ["ip6_hopbyhop"]  # минимально, остальные 4 — низкий приоритет
+# FOOLINGS6_TCP / FOOLINGS6_UDP from def.inc
+ALL_FOOLINGS_IPV6 = [
+    "ip6_hopbyhop",
+    "ip6_hopbyhop:ip6_hopbyhop2",
+    "ip6_destopt",
+    "ip6_routing",
+    "ip6_ah",
+]
+FAST_FOOLINGS_IPV6 = ["ip6_hopbyhop", "ip6_destopt"]
 
 # Extended repeats, TTL
 ALL_REPEATS = [6, 3, 1, 8, 10, 11, 12, 2, 5, 7, 9, 15, 20]  # 100,260 only for tcpseg
@@ -306,18 +315,35 @@ TLS_MODS = [
     "rnd,dupsid,sni=ya.ru",
 ]
 
-# All TCP blobs (extended from Flowseal) — no bare tls_clienthello (ambiguous file match)
-ALL_BLOBS_TCP = ["stun", "max_ru", "google", "4pda"]
+# All TCP blobs (extended from Flowseal) + null TLS blob from BC2 25-fake.sh
+# Null blob early so capped --max scans still exercise it
+ALL_BLOBS_TCP = ["stun", "0x00000000", "max_ru", "google", "4pda"]
 
-# Foolings for fast/default scans (tcp_flags only in full)
+# Foolings for fast/default scans (flags + full seq only in full)
 FAST_FOOLINGS_TCP = [
     "tcp_ts=-1000",
     "",
     "tcp_md5",
+    "badsum",
     "tcp_ack=-66000:tcp_ts_up",
     "tcp_md5:tcp_ts=-1000",
 ]
 FAST_REPEATS = [6, 8, 3, 11, 12]
+
+
+def _with_ack_drop(core: str) -> str:
+    """BC2 ACK-drop companion: empty ACK with pktmod ttl=1 (25/30/35-fake*)."""
+    return f"{core}\n--payload=empty --out-range=s1<d1\npktmod:ip_ttl=1"
+
+
+def _with_send_md5(core: str) -> str:
+    """BC2 duplicate SYN with MD5 when fooling includes tcp_md5."""
+    return f"{core}\n--payload=empty --out-range=<s1\nsend:tcp_md5"
+
+
+def _with_ip6_send_drop(fool: str) -> str:
+    """BC2 90-quic.sh IPv6 send+drop companion."""
+    return f"send:{fool}\ndrop"
 
 
 def _blob_file(alias: str) -> str:
@@ -374,33 +400,40 @@ class StandardGenerator(StrategyGenerator):
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
             "tls_mods": TLS_MODS[:3],
+            "ack_drop": True,
+            "send_md5": True,
         },
         "hostfake": {
-            "foolings": FAST_FOOLINGS_TCP[:4],
+            "foolings": FAST_FOOLINGS_TCP[:5],
             "variants": ["base", "disorder", "nofake1", "midhost=midsld", "nodrop"],
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
+            "ack_drop": True,
+            "send_md5": True,
         },
         "multisplit": {
             "repeats": [1, 6, 11],
             "positions": ALL_SPLIT_POSITIONS,
-            "foolings": FAST_FOOLINGS_TCP[:3],
+            "foolings": FAST_FOOLINGS_TCP[:4],
             "seqovl": ALL_SEQOVL,
             "seqovl_blobs": ALL_BLOBS_TCP,
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
+            "padencap": True,
         },
         # M3: multidisorder (sonicdpi tier-1, blockcheck2 20-multi.sh)
         "multidisorder": {
             "positions": ["1", "2", "midsld", "method+2", "1,midsld"],
-            "foolings": FAST_FOOLINGS_TCP[:3],
+            "foolings": FAST_FOOLINGS_TCP[:4],
             "seqovl": [664, 681],
             "seqovl_blobs": ALL_BLOBS_TCP,
+            "padencap": True,
         },
         "syndata": {
-            "blobs": ["0x1603", "fake_default_tls"],
-            "tls_mods": ["rnd,dupsid", "rnd,dupsid,sni=www.google.com"],
+            "blobs": ["0x1603", "fake_default_tls", ""],
+            "tls_mods": ["", "rnd,dupsid", "rnd,dupsid,sni=www.google.com"],
             "plus_split": [False, True],
+            "plus_hostfake": True,
         },
         "tcpseg": {
             "positions": ["0,1", "0,midsld"],
@@ -423,7 +456,7 @@ class StandardGenerator(StrategyGenerator):
                 ("4pda", "stun"),
             ],
             "repeat_pairs": [(6, 6), (6, 3), (8, 6), (3, 6)],
-            "foolings": ["tcp_ts=-1000", "tcp_md5", ""],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
         },
         # M5: three-blob order subset (stun, max_ru, google permutations)
         "triple_fake": {
@@ -434,7 +467,7 @@ class StandardGenerator(StrategyGenerator):
                 ("google", "stun", "max_ru"),
             ],
             "repeats": [6, 3],
-            "foolings": ["tcp_ts=-1000", ""],
+            "foolings": ["tcp_ts=-1000", "badsum", ""],
         },
         # M1: fake + multisplit seqovl_pattern (blockcheck2 50-fake-multi / 55-fake-faked)
         "fake_multisplit": {
@@ -450,7 +483,7 @@ class StandardGenerator(StrategyGenerator):
             "seqovl": [664, 681, 652],
             "positions": ["2", "1,midsld", "midsld"],
             "repeats": [6, 3, 8],
-            "foolings": ["tcp_ts=-1000", "tcp_md5", ""],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
         },
         # M2: fake + multisplit + hostfakesplit triple chain (ALT12)
         "fake_multisplit_hostfake": {
@@ -463,7 +496,7 @@ class StandardGenerator(StrategyGenerator):
             "seqovl": [664, 681],
             "positions": ["1", "2"],
             "repeats": [6, 8],
-            "foolings": ["tcp_ts=-1000", "tcp_md5"],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum"],
             "hf_hosts": ["www.google.com", "fonts.google.com"],
         },
         # M3: fake + multidisorder combo (blockcheck2 50-fake-multi.sh)
@@ -471,27 +504,31 @@ class StandardGenerator(StrategyGenerator):
             "blobs": ALL_BLOBS_TCP,
             "positions": ["1", "2", "midsld", "method+2"],
             "repeats": [6, 3, 8, 11],
-            "foolings": ["tcp_ts=-1000", "tcp_md5", ""],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
         },
         # M3: fakedsplit / fakeddisorder (blockcheck2 30-faked.sh)
         "fakedsplit": {
             "positions": ["1", "midsld", "sniext+1", "method+2"],
             "pattern_blobs": ALL_BLOBS_TCP,
-            "foolings": FAST_FOOLINGS_TCP[:3],
+            "foolings": FAST_FOOLINGS_TCP[:4],
             "repeats": [6, 11],
+            "ack_drop": True,
+            "send_md5": True,
         },
         "fakeddisorder": {
             "positions": ["1", "midsld", "method+2", "1,midsld"],
             "pattern_blobs": ALL_BLOBS_TCP,
-            "foolings": FAST_FOOLINGS_TCP[:3],
+            "foolings": FAST_FOOLINGS_TCP[:4],
             "repeats": [6, 11],
+            "ack_drop": True,
+            "send_md5": True,
         },
         "fake_fakedsplit": {
             "blobs": ALL_BLOBS_TCP,
             "positions": ["1", "midsld", "method+2"],
             "pattern_blobs": ALL_BLOBS_TCP,
             "repeats": [6, 3, 8],
-            "foolings": ["tcp_ts=-1000", "tcp_md5", ""],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
         },
         # Phase 7: TCP ipfrag (complement to quic_ipfrag)
         "tcp_ipfrag": {
@@ -502,12 +539,17 @@ class StandardGenerator(StrategyGenerator):
         "fake_hostfake": {
             "blobs": ALL_BLOBS_TCP,
             "repeats": [6, 3, 8, 11, 2],
-            "foolings": ["tcp_ts=-1000", "tcp_md5"],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum"],
             "hf_variants": ["base", "disorder_after"],
+            "ack_drop": True,
+            "send_md5": True,
         },
-        # Voice UDP — lua-desync cores only (runner-compatible)
+        # Voice UDP — lua-desync cores (list_udp_voice.txt parity)
         "udp_discord": {
+            "blobs": ["discord_udp", "stun"],
             "repeats": [6, 12, 3, 2],
+            "ttl_static": [5],
+            "ttl_auto": ["-2,3-20"],
         },
         "udp_quic": {
             "port_ranges": ["443"],
@@ -540,23 +582,27 @@ class StandardGenerator(StrategyGenerator):
                 "http_hostcase",
                 "http_methodeol",
                 "http_hostcase:spell=hoSt",
+                "http_domcase",
+                "http_unixeol",
             ],
         },
         "http_fake": {
             "blobs": ["fake_default_http", "0x00000000"],
             "repeats": FAST_REPEATS[:4],
-            "foolings": FAST_FOOLINGS_TCP[:3],
+            "foolings": FAST_FOOLINGS_TCP[:4],
         },
         # M6: HTTP :80 fake (TLS side in composite preset / pair)
         "http_tls_dual": {
             "http_blobs": ["fake_default_http"],
             "repeats": [6, 3],
-            "foolings": ["tcp_ts=-1000", ""],
+            "foolings": ["tcp_ts=-1000", "badsum", ""],
         },
         # 90-quic.sh — HTTP/3 over UDP/443
         "quic_fake": {
             "blobs": ["fake_default_quic", "quic_initial", "quic_google", "quic_vk"],
-            "repeats": [1, 2, 5, 10, 11, 20],
+            "repeats": [1, 2, 5, 6, 10, 11, 20],
+            "foolings": ["", "badsum"],
+            "ip6_send_drop": True,
         },
         # GV-5: googlevideo CDN QUIC kyber blobs (HTTP/3 probe)
         "quic_gv": {
@@ -608,19 +654,42 @@ class StandardGenerator(StrategyGenerator):
 
         # Expand axes for full scan
         full = scan_level == "full"
+        n_types = max(1, len(types))
 
-        for stype in types:
+        for idx, stype in enumerate(types):
             family = self.STRATEGY_FAMILIES.get(stype)
             if not family:
                 continue
             fam = dict(family)
             if full and stype == "fake":
                 fam["repeats"] = [r for r in ALL_REPEATS if r not in (100, 260)]
-                fam["foolings"] = ALL_FOOLINGS_TCP
-            new = self._expand_family(stype, fam, scan_level, seen, known_working)
-            items.extend(new)
-            if len(items) >= max_count:
+                fam["foolings"] = ALL_FOOLINGS_TCP + ALL_FOOLINGS_IPV6
+                fam["tls_mods"] = TLS_MODS
+            elif full and stype in (
+                "hostfake",
+                "fakedsplit",
+                "fakeddisorder",
+                "fake_hostfake",
+                "http_fake",
+            ):
+                fam["foolings"] = list(
+                    dict.fromkeys(list(fam.get("foolings", [])) + ALL_FOOLINGS_TCP)
+                )
+            elif full and stype == "quic_fake":
+                fam["foolings"] = list(
+                    dict.fromkeys(list(fam.get("foolings", [""])) + ALL_FOOLINGS_UDP)
+                )
+                fam["ip6_fools"] = ALL_FOOLINGS_IPV6
+            elif scan_level == "fast" and stype == "fake":
+                # Limited IPv6 fooling axis on fast
+                fam["ipv6_extra"] = FAST_FOOLINGS_IPV6
+            room = max_count - len(items)
+            if room <= 0:
                 break
+            remaining_types = n_types - idx
+            share = max(1, room // remaining_types)
+            new = self._expand_family(stype, fam, scan_level, seen, known_working)
+            items.extend(new[:share])
 
         return items[:max_count]
 
@@ -632,6 +701,12 @@ class StandardGenerator(StrategyGenerator):
         seen: set[str] = set()
 
         if stype == "fake":
+            # IPv6 samples before TTL explosion (skip on single — one strat per family)
+            if scan_level != "single":
+                for ip6 in family.get("ipv6_extra", []):
+                    for blob_name in ("stun", "google"):
+                        strat = f"fake:blob={blob_name}:repeats=6:{ip6}"
+                        self._add(items, seen, f"std_fake_{blob_name}_r6_{ip6}", strat)
             for blob_name in family["blobs"]:
                 blob = f":blob={blob_name}"
                 for repeats in family["repeats"]:
@@ -645,6 +720,26 @@ class StandardGenerator(StrategyGenerator):
                         if scan_level == "single":
                             return items
 
+                        # BC2 companions (bounded: top blobs + key foolings)
+                        if family.get("ack_drop") and fool in ("", "tcp_ts=-1000") and blob_name in (
+                            "stun",
+                            "google",
+                            "0x00000000",
+                        ):
+                            self._add(
+                                items,
+                                seen,
+                                f"{label}_ackdrop",
+                                _with_ack_drop(strat),
+                            )
+                        if family.get("send_md5") and "tcp_md5" in (fool or ""):
+                            self._add(
+                                items,
+                                seen,
+                                f"{label}_sendmd5",
+                                _with_send_md5(strat),
+                            )
+
                         # Skip TTL if base known-working
                         if scan_level == "fast" and label in known_working:
                             continue
@@ -656,15 +751,15 @@ class StandardGenerator(StrategyGenerator):
                             self._add(
                                 items, seen, f"{label}_autottl{ttl}", f"{strat}:ip_autottl={ttl}"
                             )
-                        # TLS mods (only for google blob — most common target)
-                        if blob_name == "google" and not fool:
+                        # TLS mods (google blob + full on padencap path)
+                        if blob_name in ("google", "0x00000000") and not fool:
                             for tmod in family["tls_mods"]:
                                 if not tmod:
                                     continue
                                 for r in [6, 8]:
                                     s = f"fake:blob={blob_name}:repeats={r}:tls_mod={tmod}"
                                     self._add(
-                                        items, seen, f"std_fake_google_r{r}_tlsmod={tmod[:20]}", s
+                                        items, seen, f"std_fake_{blob_name}_r{r}_tlsmod={tmod[:20]}", s
                                     )
 
         elif stype == "hostfake":
@@ -679,11 +774,16 @@ class StandardGenerator(StrategyGenerator):
                         core = f"hostfakesplit:{variant}{fool_str}:repeats=1"
                     label = f"std_hf_{variant}_{fool or 'nofool'}"
                     self._add(items, seen, label, core)
+                    if scan_level == "single":
+                        return items
+
+                    if family.get("ack_drop") and fool in ("", "tcp_ts=-1000") and variant == "base":
+                        self._add(items, seen, f"{label}_ackdrop", _with_ack_drop(core))
+                    if family.get("send_md5") and "tcp_md5" in (fool or "") and variant == "base":
+                        self._add(items, seen, f"{label}_sendmd5", _with_send_md5(core))
 
                     if scan_level == "fast" and label in known_working:
                         continue
-                    if scan_level == "single":
-                        return items
 
                     for ttl in family["ttl_static"]:
                         self._add(items, seen, f"{label}_ttl{ttl}", f"{core}:ip_ttl={ttl}")
@@ -704,6 +804,8 @@ class StandardGenerator(StrategyGenerator):
                 for fool in family["foolings"]:
                     fool_str = f":{fool}" if fool else ""
                     for blob_name in family["seqovl_blobs"]:
+                        if blob_name == "0x00000000":
+                            continue
                         strat = (
                             f"multisplit:pos={pos}:seqovl={seqovl}"
                             f":seqovl_pattern={blob_name}{fool_str}"
@@ -718,22 +820,37 @@ class StandardGenerator(StrategyGenerator):
                             self._add(
                                 items, seen, f"{label}_autottl{ttl}", f"{strat}:ip_autottl={ttl}"
                             )
+            # BC2 23-seqovl padencap / tls_mod path via fake+multisplit
+            if family.get("padencap") and scan_level != "single":
+                for tmod in ("rnd,dupsid,padencap", "rnd,dupsid"):
+                    strat = (
+                        f"fake:blob=google:repeats=6:tls_mod={tmod}\n"
+                        f"multisplit:pos=10,sniext+1:seqovl=1"
+                    )
+                    self._add(items, seen, f"std_seqovl_pad_{tmod[:12]}", strat)
 
         elif stype == "syndata":
             for blob in family["blobs"]:
                 for tmod in family["tls_mods"]:
                     for plus in family["plus_split"]:
-                        strat = f"syndata:blob={blob}"
-                        if tmod:
-                            strat += f":tls_mod={tmod}"
+                        if blob:
+                            strat = f"syndata:blob={blob}"
+                            if tmod:
+                                strat += f":tls_mod={tmod}"
+                        else:
+                            # Bare syndata (BC2 list_https_tls13)
+                            strat = "syndata"
                         if plus:
                             strat = strat + "\nmultisplit:pos=1,midsld:seqovl=1"
-                        label = f"std_syn_{blob}_{tmod[:15] or 'nomod'}" + (
+                        label = f"std_syn_{blob or 'bare'}_{tmod[:15] or 'nomod'}" + (
                             "_split" if plus else ""
                         )
                         self._add(items, seen, label, strat)
                         if scan_level == "single":
                             return items
+            if family.get("plus_hostfake") and scan_level != "single":
+                strat = "syndata\nhostfakesplit:nofake2:tcp_ts=-1000"
+                self._add(items, seen, "std_syn_bare_hf_ts", strat)
 
         elif stype == "tcpseg":
             for pos in family["positions"]:
@@ -744,8 +861,12 @@ class StandardGenerator(StrategyGenerator):
                         return items
 
         elif stype == "oob":
+            in_range = family.get("in_range")
             for urp in family["urps"]:
-                strat = f"oob:urp={urp}"
+                if in_range:
+                    strat = f"--in-range={in_range}\noob:urp={urp}"
+                else:
+                    strat = f"oob:urp={urp}"
                 self._add(items, seen, f"std_oob_urp{urp}", strat)
                 if scan_level == "single":
                     return items
@@ -880,6 +1001,8 @@ class StandardGenerator(StrategyGenerator):
         elif stype == "fakedsplit":
             for pos in family["positions"]:
                 for blob_name in family["pattern_blobs"]:
+                    if blob_name == "0x00000000":
+                        continue
                     for fool in family["foolings"]:
                         f = f":{fool}" if fool else ""
                         for r in family["repeats"]:
@@ -888,10 +1011,16 @@ class StandardGenerator(StrategyGenerator):
                             self._add(items, seen, label, strat)
                             if scan_level == "single":
                                 return items
+                            if family.get("ack_drop") and fool in ("", "tcp_ts=-1000") and r == 6:
+                                self._add(items, seen, f"{label}_ackdrop", _with_ack_drop(strat))
+                            if family.get("send_md5") and "tcp_md5" in (fool or "") and r == 6:
+                                self._add(items, seen, f"{label}_sendmd5", _with_send_md5(strat))
 
         elif stype == "fakeddisorder":
             for pos in family["positions"]:
                 for blob_name in family["pattern_blobs"]:
+                    if blob_name == "0x00000000":
+                        continue
                     for fool in family["foolings"]:
                         f = f":{fool}" if fool else ""
                         for r in family["repeats"]:
@@ -900,6 +1029,10 @@ class StandardGenerator(StrategyGenerator):
                             self._add(items, seen, label, strat)
                             if scan_level == "single":
                                 return items
+                            if family.get("ack_drop") and fool in ("", "tcp_ts=-1000") and r == 6:
+                                self._add(items, seen, f"{label}_ackdrop", _with_ack_drop(strat))
+                            if family.get("send_md5") and "tcp_md5" in (fool or "") and r == 6:
+                                self._add(items, seen, f"{label}_sendmd5", _with_send_md5(strat))
 
         elif stype == "fake_fakedsplit":
             for blob_name in family["blobs"]:
@@ -943,12 +1076,27 @@ class StandardGenerator(StrategyGenerator):
                             return items
 
         elif stype == "udp_discord":
-            # Runner-compatible lua-desync cores only (discord_udp blob)
-            for r in family["repeats"]:
-                strat = f"fake:blob=discord_udp:repeats={r}"
-                self._add(items, seen, f"std_udp_discord_r{r}", strat)
-                if scan_level == "single":
-                    return items
+            blobs = family.get("blobs", ["discord_udp"])
+            for blob_name in blobs:
+                for r in family["repeats"]:
+                    strat = f"fake:blob={blob_name}:repeats={r}"
+                    self._add(items, seen, f"std_udp_{blob_name}_r{r}", strat)
+                    if scan_level == "single":
+                        return items
+                    for ttl in family.get("ttl_static", []):
+                        self._add(
+                            items,
+                            seen,
+                            f"std_udp_{blob_name}_r{r}_ttl{ttl}",
+                            f"{strat}:ip_ttl={ttl}",
+                        )
+                    for ttl in family.get("ttl_auto", []):
+                        self._add(
+                            items,
+                            seen,
+                            f"std_udp_{blob_name}_r{r}_autottl",
+                            f"{strat}:ip_autottl={ttl}",
+                        )
 
         elif stype == "udp_quic":
             for ports in family["port_ranges"]:
@@ -1053,11 +1201,22 @@ class StandardGenerator(StrategyGenerator):
         elif stype == "quic_fake":
             for blob_name in family["blobs"]:
                 for r in family["repeats"]:
-                    strat = f"fake:blob={blob_name}:repeats={r}"
-                    label = f"std_quic_fake_{blob_name}_r{r}"
-                    self._add(items, seen, label, strat, protocol="quic")
-                    if scan_level == "single":
-                        return items
+                    for fool in family.get("foolings", [""]):
+                        fool_str = f":{fool}" if fool else ""
+                        strat = f"fake:blob={blob_name}:repeats={r}{fool_str}"
+                        label = f"std_quic_fake_{blob_name}_r{r}_{fool or 'nofool'}"
+                        self._add(items, seen, label, strat, protocol="quic")
+                        if scan_level == "single":
+                            return items
+            if family.get("ip6_send_drop"):
+                for fool in family.get("ip6_fools", FAST_FOOLINGS_IPV6):
+                    self._add(
+                        items,
+                        seen,
+                        f"std_quic_ip6_{fool.replace(':', '_')}",
+                        _with_ip6_send_drop(fool),
+                        protocol="quic",
+                    )
 
         elif stype == "quic_gv":
             for blob_name in family["blobs"]:

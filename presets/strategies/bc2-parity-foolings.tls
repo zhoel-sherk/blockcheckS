@@ -1,0 +1,8 @@
+# BC2 FOOLINGS46_TCP samples + send:tcp_md5
+fake:blob=stun:repeats=6:badsum
+fake:blob=stun:repeats=6:tcp_seq=-3000
+fake:blob=stun:repeats=6:tcp_seq=1000000
+fake:blob=stun:repeats=6:tcp_flags_unset=ACK
+fake:blob=stun:repeats=6:tcp_flags_set=SYN
+fake:blob=stun:repeats=6:tcp_md5\n--payload=empty --out-range=<s1\nsend:tcp_md5
+fake:blob=google:repeats=6:tcp_md5:tcp_ts=-1000\n--payload=empty --out-range=<s1\nsend:tcp_md5

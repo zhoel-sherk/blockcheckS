@@ -1,0 +1,5 @@
+# BC2 25/30/35 ACK-drop companions (\n = multi-line strategy)
+fake:blob=stun:repeats=6:tcp_ts=-1000\n--payload=empty --out-range=s1<d1\npktmod:ip_ttl=1
+fake:blob=google:repeats=6\n--payload=empty --out-range=s1<d1\npktmod:ip_ttl=1
+fake:blob=0x00000000:repeats=6:tcp_ts=-1000\n--payload=empty --out-range=s1<d1\npktmod:ip_ttl=1
+hostfakesplit:nofake2:tcp_ts=-1000:repeats=1\n--payload=empty --out-range=s1<d1\npktmod:ip_ttl=1

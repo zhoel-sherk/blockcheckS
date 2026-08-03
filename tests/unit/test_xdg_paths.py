@@ -47,3 +47,36 @@ def test_subprocess_env_sets_pycache_prefix(tmp_path, monkeypatch):
 def test_expand_path_tilde(tmp_path):
     p = paths.expand_path("~/test.db", default=tmp_path / "default.db")
     assert p == (Path.home() / "test.db").resolve()
+
+
+@pytest.mark.unit
+def test_reclaim_sudo_ownership_chowns_when_root(tmp_path, monkeypatch):
+    target = tmp_path / "state.db"
+    target.write_text("x")
+    wal = tmp_path / "state.db-wal"
+    wal.write_text("w")
+    called: list[tuple] = []
+
+    def fake_chown(path, uid, gid):
+        called.append((str(path), uid, gid))
+
+    monkeypatch.setattr(paths.os, "geteuid", lambda: 0)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1000")
+    monkeypatch.setattr(paths.os, "chown", fake_chown)
+    paths.reclaim_sudo_ownership(target)
+    assert (str(target), 1000, 1000) in called
+    assert (str(wal), 1000, 1000) in called
+
+
+@pytest.mark.unit
+def test_reclaim_sudo_ownership_noop_as_user(tmp_path, monkeypatch):
+    target = tmp_path / "state.db"
+    target.write_text("x")
+    called = []
+    monkeypatch.setattr(paths.os, "geteuid", lambda: 1000)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1000")
+    monkeypatch.setattr(paths.os, "chown", lambda *a: called.append(a))
+    paths.reclaim_sudo_ownership(target)
+    assert called == []

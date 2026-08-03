@@ -49,9 +49,24 @@ def _valid_domain(domain: str) -> bool:
     return bool(domain) and len(domain) < 253 and _FQDN_RE.match(domain) is not None
 
 
-async def run(config_path: str, domains: list[str] = None, parallel: int = 2, timeout: float = 5.0):
+def normalize_domains(domains: list[str] | None) -> list[str]:
+    """Split comma-separated argv tokens and strip; drop empties; dedupe order-preserving."""
     if not domains:
-        domains = DOMAINS
+        return list(DOMAINS)
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in domains:
+        for part in str(raw).split(","):
+            d = part.strip()
+            if not d or d in seen:
+                continue
+            seen.add(d)
+            out.append(d)
+    return out
+
+
+async def run(config_path: str, domains: list[str] = None, parallel: int = 2, timeout: float = 5.0):
+    domains = normalize_domains(domains)
 
     config_abs = os.path.abspath(config_path)
     if not os.path.exists(config_abs):

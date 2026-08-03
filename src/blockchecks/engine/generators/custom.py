@@ -91,7 +91,11 @@ class ConfigFileGenerator(StrategyGenerator):
 
 
 class UserMatrixGenerator(StrategyGenerator):
-    """Load strategies from user-provided file (one per line)."""
+    """Load strategies from user-provided file (one per line).
+
+    A literal ``\\n`` sequence in a line becomes a real newline so multi-desync
+    / CLI companion strategies fit on one matrix line.
+    """
 
     def __init__(self, filepath: str):
         self.filepath = filepath
@@ -113,11 +117,11 @@ class UserMatrixGenerator(StrategyGenerator):
         with open(self.filepath) as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith("#"):
+                if not line or line.startswith("#") or line == "---":
                     continue
-                # Filter by protocol: skip UDP-only strategies for TCP generation
+                strategy = line.replace("\\n", "\n")
                 if protocol != "udp_voice":
-                    low = line.lower()
+                    low = strategy.lower()
                     if any(
                         kw in low
                         for kw in (
@@ -129,10 +133,10 @@ class UserMatrixGenerator(StrategyGenerator):
                         )
                     ):
                         continue
-                if protocol == "udp_voice" and "tcp" in line.lower() and "udp" not in line.lower():
+                if protocol == "udp_voice" and "tcp" in strategy.lower() and "udp" not in strategy.lower():
                     continue
-                label = line[:50].replace(" ", "_").replace(":", "_")
-                items.append(StrategyItem(label=label, strategy=line))
+                label = strategy.split("\n", 1)[0][:50].replace(" ", "_").replace(":", "_")
+                items.append(StrategyItem(label=label, strategy=strategy))
                 if scan_level == "single" and items:
                     break
         return items[:max_count]

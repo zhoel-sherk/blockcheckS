@@ -100,6 +100,12 @@ async def run_adaptive_tcp(
                 passed += 1
             if on_progress:
                 on_progress(done, skipped, passed)
+            # Deadline / signal may fire during a long batch — bail ASAP
+            if stop_event and stop_event.is_set():
+                break
+
+        if stop_event and stop_event.is_set():
+            break
 
     return AdaptiveRunResult(
         done=done,

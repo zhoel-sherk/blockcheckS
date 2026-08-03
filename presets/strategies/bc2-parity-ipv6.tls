@@ -1,0 +1,9 @@
+# BC2 FOOLINGS6_TCP as desync tokens + send+drop
+fake:blob=stun:repeats=6:ip6_hopbyhop
+fake:blob=stun:repeats=6:ip6_destopt
+fake:blob=google:repeats=6:ip6_routing
+fake:blob=google:repeats=6:ip6_ah
+fake:blob=stun:repeats=6:ip6_hopbyhop:ip6_hopbyhop2
+send:ip6_hopbyhop\ndrop
+send:ip6_destopt\ndrop
+send:ip6_hopbyhop:ip6_destopt\ndrop

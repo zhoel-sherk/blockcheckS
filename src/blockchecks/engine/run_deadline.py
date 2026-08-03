@@ -107,6 +107,12 @@ class RunDeadline:
             self.triggered = True
             self.reason = "time_limit"
             self.stop_event.set()
+            # Visible in campaign/smoke logs; loops poll stop_event after each job
+            print(
+                f"  [deadline] fired after {self.budget_label()} "
+                f"— stop_event set (graceful stop)",
+                flush=True,
+            )
 
     def expired(self) -> bool:
         if self._deadline is not None and time.monotonic() >= self._deadline:
