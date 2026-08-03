@@ -31,6 +31,10 @@ from blockchecks.engine.config import (
 )
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.netns_pool import NetNsPool
+from blockchecks.engine.probe import (
+    invoke_curl_probe_worker as _invoke_curl_probe_worker,
+)
+from blockchecks.engine.probe import probe_request_dict as _probe_request_dict
 from blockchecks.engine.settle_profile import SettleProfile
 from blockchecks.engine.store import RunStateStore
 
@@ -417,52 +421,6 @@ print(json.dumps({{
                 os.unlink(tmp_conf)
             except OSError:
                 pass
-
-
-def _probe_request_dict(req: CurlProbeRequest) -> dict:
-    return {
-        "domain": req.domain,
-        "timeout": req.timeout,
-        "resolved_ip": req.resolved_ip,
-        "resolve_name": req.resolve_name,
-        "curl_url": req.curl_url,
-        "disable_ech": req.disable_ech,
-        "googlevideo": req.googlevideo,
-        "protocol": req.protocol,
-    }
-
-
-def _invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: float) -> dict:
-    """Run curl probe subprocess in netns (GV-3 — no inline options= code)."""
-    r = sp.run(
-        [
-            "sudo",
-            "ip",
-            "netns",
-            "exec",
-            ns_name,
-            py,
-            "-m",
-            "blockchecks.engine._curl_probe_worker",
-        ],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        return {
-            "success": False,
-            "http_code": 0,
-            "latency_ms": 0,
-            "content_len": 0,
-            "content_ok": False,
-            "throttled": False,
-            "read_rate_bps": 0,
-            "error": f"parse: {r.stdout[:100]}",
-        }
 
 
 def _run_tcp_check(

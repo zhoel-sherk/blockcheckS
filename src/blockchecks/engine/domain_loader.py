@@ -31,9 +31,10 @@ class DomainLoadResult:
 
 
 def preset_path(name: str) -> str:
-    """Path to presets/domains/{name}.txt."""
-    base = name.removesuffix(".txt")
-    return os.path.join(DOMAINS_PRESET_DIR, f"{base}.txt")
+    """Path to presets/domains/{name}.txt (path-jailed; see cli.presets)."""
+    from blockchecks.cli.presets import resolve_domain_preset
+
+    return str(resolve_domain_preset(name))
 
 
 def is_domain_preset_file(path: str) -> bool:
@@ -107,7 +108,7 @@ def load_preset(
     *,
     allow_unsafe: bool = False,
 ) -> DomainLoadResult:
-    """Load presets/domains/{name}.txt with denylist filter."""
+    """Load presets/domains/{name}.txt with denylist filter (path-jailed)."""
     path = preset_path(name)
     return load_domains(path, allow_unsafe=allow_unsafe)
 

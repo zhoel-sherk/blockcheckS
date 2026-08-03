@@ -20,11 +20,10 @@ from blockchecks.engine.async_runner import (
     AsyncTestRunner,
     StrategyItem,
     TcpTestResult,
-    _invoke_curl_probe_worker,
-    _probe_request_dict,
+    _nfqws2_daemon as start_nfqws2,
 )
-from blockchecks.engine.async_runner import _nfqws2_daemon as start_nfqws2
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
+from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
 
 colorama_init(autoreset=True)
 
@@ -153,7 +152,7 @@ async def run(config_path: str, domains: list[str] = None, parallel: int = 2, ti
                 continue
             payload = {
                 "mode": "single",
-                "request": _probe_request_dict(
+                "request": probe_request_dict(
                     CurlProbeRequest(domain=domain, timeout=timeout)
                 ),
                 "repeats": 1,
@@ -163,7 +162,7 @@ async def run(config_path: str, domains: list[str] = None, parallel: int = 2, ti
             }
             wall = worker_wall_timeout(timeout, 1, settle_slack=10.0)
             data = await asyncio.to_thread(
-                _invoke_curl_probe_worker, ns_name, PYTHON, payload, wall
+                invoke_curl_probe_worker, ns_name, PYTHON, payload, wall
             )
 
             result = TcpTestResult(item=item, domain=domain)

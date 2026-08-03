@@ -31,9 +31,12 @@
 ### Still open (follow-up)
 
 - [ ] Unify `_nfqws2_daemon` ↔ `Nfqws2Manager` (E3)
-- [ ] Docs architecture rewrite (DoH/GV-1 as current)
-- [ ] `--preset` path jail + token file modes
-- [ ] composite_runner: stop importing private `_invoke_curl_probe_worker`
+
+### Closed in 1.1.0a1 (alpha Wave1)
+
+- [x] Docs architecture rewrite (DoH/GV-1 as current + NetNsPool scale)
+- [x] `--preset` path jail + token file modes
+- [x] composite_runner: public `engine.probe.invoke_curl_probe_worker`
 
 ---
 

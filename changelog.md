@@ -2,6 +2,10 @@
 
 ## Unreleased / HEAD
 
+### Added
+- **1.1.0a1 (alpha):** public `engine.probe.invoke_curl_probe_worker`; `--preset` / `-M` path jail; token refuse world-writable + `write_secure_text`
+- Docs: architecture rewrite (DoH → preflight → AQ → curl subprocess → store; NetNsPool scale)
+
 ### Changed
 - README: table of contents, badges, hero section, humor/jargon
 - docs: presets README counts corrected; architecture module map expanded; database refs updated; glossary +15 terms; troubleshooting added to guide; blobs tier-1 clean-up

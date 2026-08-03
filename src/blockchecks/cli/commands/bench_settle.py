@@ -10,7 +10,7 @@ from colorama import Fore, Style
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.engine.async_runner import AsyncTestRunner, _run_tcp_check
-from blockchecks.engine.config import PROJECT_DIR, SECURE_DNS_DEFAULT
+from blockchecks.engine.config import SECURE_DNS_DEFAULT
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.settle_profile import (
     DEFAULT_PROFILE_PATH,
@@ -36,19 +36,22 @@ def _parse_floats(raw: str, default: tuple[float, ...]) -> tuple[float, ...]:
 
 
 def _load_strategies(args) -> list[StrategyItem]:
+    from blockchecks.cli.presets import PresetPathError, resolve_strategy_preset
+
     preset = getattr(args, "strategy_preset", None) or "timeout-benchmark"
-    path_tls = os.path.join(PROJECT_DIR, "presets", "strategies", f"{preset}.tls")
-    path_txt = os.path.join(PROJECT_DIR, "presets", "strategies", f"{preset}.txt")
     raw: list[str] = []
-    if os.path.exists(path_tls):
-        raw = StrategyLoader.from_file(path_tls)
-    elif os.path.exists(path_txt):
-        raw = StrategyLoader.from_file(path_txt)
-    elif getattr(args, "strategy", None):
-        raw = StrategyLoader.from_string(args.strategy)
-    else:
-        print(f"{RED}ERROR: strategy preset '{preset}' not found{RESET}")
+    try:
+        path = resolve_strategy_preset(preset)
+        raw = StrategyLoader.from_file(str(path))
+    except PresetPathError as e:
+        print(f"{RED}ERROR: {e}{RESET}")
         return []
+    except FileNotFoundError:
+        if getattr(args, "strategy", None):
+            raw = StrategyLoader.from_string(args.strategy)
+        else:
+            print(f"{RED}ERROR: strategy preset '{preset}' not found{RESET}")
+            return []
     return [StrategyItem(f"bench_{i}", s) for i, s in enumerate(raw)]
 
 

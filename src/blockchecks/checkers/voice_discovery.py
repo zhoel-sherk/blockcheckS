@@ -59,6 +59,15 @@ def load_token() -> str | None:
     settings = DPI_TESTER_SETTINGS
     if not os.path.exists(settings):
         return None
+    try:
+        mode = os.stat(settings).st_mode
+    except OSError:
+        return None
+    if mode & 0o002:
+        print(
+            f"[discovery] WARNING: refusing world-writable settings file: {settings}"
+        )
+        return None
     import configparser as cp
 
     cfg = cp.ConfigParser(
@@ -70,6 +79,25 @@ def load_token() -> str | None:
     cfg.optionxform = str
     cfg.read(settings, encoding="utf-8")
     return cfg.get("discord", "token", fallback="") or None
+
+
+def write_secure_text(path: str, content: str, *, mode: int = 0o600) -> None:
+    """Write text atomically-ish with restrictive permissions (token/settings)."""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, path)
+        os.chmod(path, mode)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 async def discover_voice_endpoint() -> dict | None:

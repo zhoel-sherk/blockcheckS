@@ -32,7 +32,6 @@ from blockchecks.engine.domain_loader import (
     RESERVED_DOMAIN_FILES,
     format_skip_summary,
     load_preset,
-    preset_path,
 )
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
@@ -68,34 +67,34 @@ async def cmd_pair(args):
     preset_domains = []
     preset_name = getattr(args, "preset", None)
     if preset_name:
-        pp = preset_path(preset_name)
-        if os.path.exists(pp) and os.path.basename(pp) not in RESERVED_DOMAIN_FILES:
-            try:
-                loaded = load_preset(
-                    preset_name,
-                    allow_unsafe=getattr(args, "allow_unsafe_domains", False),
-                )
-            except FileNotFoundError:
-                print(f"  {Fore.RED}Preset '{preset_name}' not found{RESET}")
-                return 1
-            preset_domains = loaded.domains
-            print(
-                f"  {Fore.CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}"
+        from blockchecks.cli.presets import PresetPathError
+
+        try:
+            loaded = load_preset(
+                preset_name,
+                allow_unsafe=getattr(args, "allow_unsafe_domains", False),
             )
-            if loaded.skipped:
-                print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
-            if not preset_domains:
-                print(
-                    f"  {Fore.RED}ERROR: preset empty after denylist "
-                    f"(use --allow-unsafe-domains){RESET}"
-                )
-                return 1
-        else:
+        except PresetPathError as e:
+            print(f"  {Fore.RED}ERROR: {e}{RESET}")
+            return 1
+        except FileNotFoundError:
             print(f"  {Fore.YELLOW}Preset '{preset_name}' not found. Available:{RESET}")
             for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/domains", "*.txt"))):
                 if os.path.basename(f) in RESERVED_DOMAIN_FILES:
                     continue
                 print(f"    {os.path.basename(f).replace('.txt', '')}")
+            return 1
+        preset_domains = loaded.domains
+        print(
+            f"  {Fore.CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}"
+        )
+        if loaded.skipped:
+            print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
+        if not preset_domains:
+            print(
+                f"  {Fore.RED}ERROR: preset empty after denylist "
+                f"(use --allow-unsafe-domains){RESET}"
+            )
             return 1
 
     if not args.domain and not preset_domains:
@@ -286,21 +285,17 @@ async def cmd_pair(args):
 
         strategy_preset = getattr(args, "strategy_preset", None)
         if strategy_preset:
-            name = strategy_preset
-            for suffix in (".tls", ".txt"):
-                if name.endswith(suffix):
-                    name = name[: -len(suffix)]
-                    break
-            found = False
-            for ext in [".tls", ".txt"]:
-                sp = os.path.join(PROJECT_DIR, "presets", "strategies", f"{name}{ext}")
-                if os.path.exists(sp):
-                    args.user_matrix = sp
-                    found = True
-                    break
-            if not found:
+            from blockchecks.cli.presets import PresetPathError, resolve_strategy_preset
+
+            try:
+                sp_path = resolve_strategy_preset(strategy_preset)
+            except PresetPathError as e:
+                print(f"  {Fore.RED}ERROR: {e}{RESET}")
+                return 1
+            except FileNotFoundError:
                 print(f"  {Fore.RED}ERROR: strategy preset '{strategy_preset}' not found{RESET}")
                 return 1
+            args.user_matrix = str(sp_path)
 
         do_generate = getattr(args, "generate", False)
         user_matrix = getattr(args, "user_matrix", "") or ""
