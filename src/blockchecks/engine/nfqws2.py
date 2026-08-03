@@ -139,7 +139,10 @@ class Nfqws2Manager:
             start_new_session=True,
         )
         self._pid = self._proc.pid
-        time.sleep(0.8)
+        if self.ns_name:
+            wait_nfqws2_ready(self.ns_name)
+        else:
+            time.sleep(0.2)
 
         if self._proc.poll() is not None:
             hint = ""
@@ -191,22 +194,13 @@ class Nfqws2Manager:
                 lines.append(f"--lua-init=@{lua}")
 
         # Explicit blobs= plus auto-discover blob=/seqovl_pattern= from strategy
+        from blockchecks.engine.blob_aliases import append_blob_cli_lines, extract_blob_names
+
         blob_names: list[str] = list(blobs or [])
-        import re
-
-        from blockchecks.engine.blob_aliases import resolve_blob_path
-
-        for m in re.finditer(r"(?:blob|pattern|seqovl_pattern)=(\w+)", strategy):
-            if m.group(1) not in blob_names:
-                blob_names.append(m.group(1))
-        for blob_name in blob_names:
-            if blob_name == "0x00000000":
-                continue
-            if any(line.startswith(f"--blob={blob_name}:@") for line in lines):
-                continue
-            blob_path = resolve_blob_path(blob_name, BLOB_DIR)
-            if blob_path:
-                lines.append(f"--blob={blob_name}:@{blob_path}")
+        for name in extract_blob_names(strategy):
+            if name not in blob_names:
+                blob_names.append(name)
+        append_blob_cli_lines(lines, blob_names, BLOB_DIR)
 
         if hostlist:
             fd, hostlist_path = tempfile.mkstemp(prefix="bs_hostlist_", suffix=".txt")

@@ -137,21 +137,9 @@ def _sudo(*args: str) -> str:
 
 def _add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
     """Parse strategy for blob=NAME and seqovl_pattern=NAME; add --blob lines."""
-    import re
+    from blockchecks.engine.blob_aliases import append_blob_cli_lines, extract_blob_names
 
-    from blockchecks.engine.blob_aliases import resolve_blob_path
-
-    def _append_blob(name: str) -> None:
-        if name == "0x00000000":
-            return
-        if any(line.startswith(f"--blob={name}:@") for line in lines):
-            return
-        path = resolve_blob_path(name, BLOB_DIR)
-        if path:
-            lines.append(f"--blob={name}:@{path}")
-
-    for m in re.finditer(r"(?:blob|pattern|seqovl_pattern)=(\w+)", strategy):
-        _append_blob(m.group(1))
+    append_blob_cli_lines(lines, extract_blob_names(strategy), BLOB_DIR)
 
 
 def _split_cli_args(raw_line: str) -> list[str]:

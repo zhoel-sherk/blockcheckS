@@ -23,25 +23,35 @@ def cmd_tcp(args):
         return 1
 
     loader = StrategyLoader()
-    mode = None
-    if args.config:
-        strategies = loader.from_config(args.config)
-        mode = "config"
-    elif args.configs_dir:
-        strategies = loader.from_config_dir(args.configs_dir)
-        mode = CONFIGS_DIR
-    elif args.file:
-        strategies = loader.from_file(args.file)
-        mode = "string"
-    elif args.strategy:
-        strategies = loader.from_string(args.strategy)
-        mode = "string"
-    elif args.test == "custom":
-        strategies = loader.from_custom_dir(args.test_dir, args.protocol)
-        mode = "string"
-    else:
+    source_loaders = (
+        ("config", lambda: (loader.from_config(args.config), "config") if args.config else None),
+        (
+            "configs_dir",
+            lambda: (loader.from_config_dir(args.configs_dir), CONFIGS_DIR)
+            if args.configs_dir
+            else None,
+        ),
+        ("file", lambda: (loader.from_file(args.file), "string") if args.file else None),
+        (
+            "strategy",
+            lambda: (loader.from_string(args.strategy), "string") if args.strategy else None,
+        ),
+        (
+            "custom",
+            lambda: (loader.from_custom_dir(args.test_dir, args.protocol), "string")
+            if args.test == "custom"
+            else None,
+        ),
+    )
+    loaded = None
+    for _, fn in source_loaders:
+        loaded = fn()
+        if loaded is not None:
+            break
+    if loaded is None:
         print("ERROR: specify --strategy, --config, --configs-dir, --file, or --test")
         return 1
+    strategies, mode = loaded
     if not strategies:
         print("ERROR: no strategies loaded")
         return 1

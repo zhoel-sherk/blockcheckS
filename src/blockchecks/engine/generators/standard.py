@@ -701,12 +701,105 @@ class StandardGenerator(StrategyGenerator):
 
         return items[:max_count]
 
+    def _fam_udp_discord(self, items, seen, family, scan_level, known_working):
+        """Expand udp_discord family."""
+        blobs = family.get("blobs", ["discord_udp"])
+        for blob_name in blobs:
+            for r in family["repeats"]:
+                strat = f"fake:blob={blob_name}:repeats={r}"
+                self._add(items, seen, f"std_udp_{blob_name}_r{r}", strat)
+                if scan_level == "single":
+                    return items
+                for ttl in family.get("ttl_static", []):
+                    self._add(
+                        items,
+                        seen,
+                        f"std_udp_{blob_name}_r{r}_ttl{ttl}",
+                        f"{strat}:ip_ttl={ttl}",
+                    )
+                for ttl in family.get("ttl_auto", []):
+                    self._add(
+                        items,
+                        seen,
+                        f"std_udp_{blob_name}_r{r}_autottl",
+                        f"{strat}:ip_autottl={ttl}",
+                    )
+
+        return items
+
+    def _fam_udp_quic(self, items, seen, family, scan_level, known_working):
+        """Expand udp_quic family."""
+        for ports in family["port_ranges"]:
+            for blob_name in family["blobs"]:
+                for r in family["repeats"]:
+                    s = (
+                        f"--filter-udp={ports} "
+                        f"--blob=QUIC:@{_blob_abs(blob_name)} "
+                        f"--payload=quic_initial "
+                        f"--lua-desync=fake:blob=QUIC:repeats={r}"
+                    )
+                    self._add(items, seen, f"std_udp_quic_{blob_name}_r{r}", s, protocol="quic")
+                    if scan_level == "single":
+                        return items
+
+        return items
+
+    def _fam_udp_game(self, items, seen, family, scan_level, known_working):
+        """Expand udp_game family."""
+        for ports in family["port_ranges"]:
+            for blob_name in family["blobs"]:
+                for r in family["repeats"]:
+                    for orng in family["out_range"]:
+                        s = (
+                            f"--filter-udp={ports} "
+                            f"--blob=GAME:@{_blob_abs(blob_name)} "
+                            f"--payload=unknown "
+                            f"--lua-desync=fake:blob=GAME:repeats={r}"
+                            + (f" --out-range={orng}" if orng else "")
+                        )
+                        self._add(items, seen, f"std_udp_game_r{r}_{orng or 'no'}", s)
+                        if scan_level == "single":
+                            return items
+
+        return items
+
+    def _fam_udp_multiblob(self, items, seen, family, scan_level, known_working):
+        """Expand udp_multiblob family."""
+        for b1, b2 in family["profiles"]:
+            for r in family["repeats"]:
+                s = (
+                    f"--filter-udp=443 --filter-l7=stun "
+                    f"--blob=STUN:@{_blob_abs(b1)} "
+                    f"--payload=stun "
+                    f"--lua-desync=fake:blob=STUN:repeats={r}\n"
+                    f"--filter-udp=443 --filter-l7=discord "
+                    f"--blob=DISC:@{_blob_abs(b2)} "
+                    f"--payload=discord_ip_discovery "
+                    f"--lua-desync=fake:blob=DISC:repeats={r}"
+                )
+                self._add(items, seen, f"std_udp_multiblob_{b1}+{b2}_r{r}", s)
+                if scan_level == "single":
+                    return items
+
+        return items
+
+    _FAMILY_EXPANDERS = {
+        "udp_discord": "_fam_udp_discord",
+        "udp_quic": "_fam_udp_quic",
+        "udp_game": "_fam_udp_game",
+        "udp_multiblob": "_fam_udp_multiblob",
+    }
+
     def _expand_family(
         self, stype: str, family: dict, scan_level: str, seen: set, known_working: list
     ) -> list[StrategyItem]:
         """Expand one strategy family into items."""
         items = []
         seen: set[str] = set()
+
+        expander_name = self._FAMILY_EXPANDERS.get(stype)
+        if expander_name is not None:
+            return getattr(self, expander_name)(items, seen, family, scan_level, known_working)
 
         if stype == "fake":
             # IPv6 samples before TTL explosion (skip on single — one strat per family)
@@ -1082,76 +1175,6 @@ class StandardGenerator(StrategyGenerator):
                         self._add(items, seen, label, strat)
                         if scan_level == "single":
                             return items
-
-        elif stype == "udp_discord":
-            blobs = family.get("blobs", ["discord_udp"])
-            for blob_name in blobs:
-                for r in family["repeats"]:
-                    strat = f"fake:blob={blob_name}:repeats={r}"
-                    self._add(items, seen, f"std_udp_{blob_name}_r{r}", strat)
-                    if scan_level == "single":
-                        return items
-                    for ttl in family.get("ttl_static", []):
-                        self._add(
-                            items,
-                            seen,
-                            f"std_udp_{blob_name}_r{r}_ttl{ttl}",
-                            f"{strat}:ip_ttl={ttl}",
-                        )
-                    for ttl in family.get("ttl_auto", []):
-                        self._add(
-                            items,
-                            seen,
-                            f"std_udp_{blob_name}_r{r}_autottl",
-                            f"{strat}:ip_autottl={ttl}",
-                        )
-
-        elif stype == "udp_quic":
-            for ports in family["port_ranges"]:
-                for blob_name in family["blobs"]:
-                    for r in family["repeats"]:
-                        s = (
-                            f"--filter-udp={ports} "
-                            f"--blob=QUIC:@{_blob_abs(blob_name)} "
-                            f"--payload=quic_initial "
-                            f"--lua-desync=fake:blob=QUIC:repeats={r}"
-                        )
-                        self._add(items, seen, f"std_udp_quic_{blob_name}_r{r}", s, protocol="quic")
-                        if scan_level == "single":
-                            return items
-
-        elif stype == "udp_game":
-            for ports in family["port_ranges"]:
-                for blob_name in family["blobs"]:
-                    for r in family["repeats"]:
-                        for orng in family["out_range"]:
-                            s = (
-                                f"--filter-udp={ports} "
-                                f"--blob=GAME:@{_blob_abs(blob_name)} "
-                                f"--payload=unknown "
-                                f"--lua-desync=fake:blob=GAME:repeats={r}"
-                                + (f" --out-range={orng}" if orng else "")
-                            )
-                            self._add(items, seen, f"std_udp_game_r{r}_{orng or 'no'}", s)
-                            if scan_level == "single":
-                                return items
-
-        elif stype == "udp_multiblob":
-            for b1, b2 in family["profiles"]:
-                for r in family["repeats"]:
-                    s = (
-                        f"--filter-udp=443 --filter-l7=stun "
-                        f"--blob=STUN:@{_blob_abs(b1)} "
-                        f"--payload=stun "
-                        f"--lua-desync=fake:blob=STUN:repeats={r}\n"
-                        f"--filter-udp=443 --filter-l7=discord "
-                        f"--blob=DISC:@{_blob_abs(b2)} "
-                        f"--payload=discord_ip_discovery "
-                        f"--lua-desync=fake:blob=DISC:repeats={r}"
-                    )
-                    self._add(items, seen, f"std_udp_multiblob_{b1}+{b2}_r{r}", s)
-                    if scan_level == "single":
-                        return items
 
         elif stype == "fake_hostfake":
             for blob_name in family["blobs"]:

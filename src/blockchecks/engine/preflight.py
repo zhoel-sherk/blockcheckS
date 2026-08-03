@@ -34,6 +34,23 @@ class PreflightOptions:
     verify_content: bool = False
     dns_cache: DnsRunCache | None = None
 
+    @classmethod
+    def from_args(cls, args, *, dns_cache: DnsRunCache | None = None) -> PreflightOptions:
+        """Build options from CLI namespace (pair/main shared)."""
+        return cls(
+            unblocked_dom=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
+            timeout=min(getattr(args, "timeout", 5.0), 8.0),
+            skip_baseline=getattr(args, "skip_baseline", False),
+            skip_port_block=getattr(args, "skip_port_block", False),
+            skip_prolog=getattr(args, "skip_prolog", False),
+            skip_ip_block=getattr(args, "skip_ip_block", False),
+            skip_nfqws2_check=getattr(args, "skip_nfqws2_check", False),
+            abort_on_nfqws2=getattr(args, "abort_on_nfqws2", False),
+            force=getattr(args, "force", False),
+            verify_content=getattr(args, "prolog_content", False),
+            dns_cache=dns_cache,
+        )
+
 
 @dataclass
 class PreflightReport:

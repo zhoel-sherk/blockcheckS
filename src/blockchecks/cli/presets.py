@@ -79,12 +79,12 @@ def _resolve_under(root: Path, filename: str) -> Path | None:
 
 
 def resolve_domain_preset(name: str) -> Path:
-    """Resolve presets/domains/{name}.txt inside bundled or user jail."""
+    """Resolve presets/domains/{name}.txt inside user or bundled jail."""
     base = normalize_preset_name(name, strip_suffixes=(".txt",))
     filename = f"{base}.txt"
     if filename in RESERVED_DOMAIN_FILES:
         raise PresetPathError(f"reserved domain preset: {base!r}")
-    for root in (_bundled_domains_dir(), _user_domains_dir()):
+    for root in (_user_domains_dir(), _bundled_domains_dir()):
         if not root.is_dir():
             continue
         hit = _resolve_under(root, filename)
@@ -94,9 +94,9 @@ def resolve_domain_preset(name: str) -> Path:
 
 
 def resolve_strategy_preset(name: str) -> Path:
-    """Resolve presets/strategies/{name}.tls|.txt inside bundled or user jail."""
+    """Resolve presets/strategies/{name}.tls|.txt inside user or bundled jail."""
     base = normalize_preset_name(name, strip_suffixes=(".tls", ".txt", ".quic"))
-    for root in (_bundled_strategies_dir(), _user_strategies_dir()):
+    for root in (_user_strategies_dir(), _bundled_strategies_dir()):
         if not root.is_dir():
             continue
         for ext in (".tls", ".txt"):

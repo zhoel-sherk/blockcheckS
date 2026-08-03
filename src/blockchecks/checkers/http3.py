@@ -24,6 +24,16 @@ class Http3Result:
     http_version: str = ""
 
 
+def _classify_http3_error(msg: str) -> str:
+    low = msg.lower()
+    rules: tuple[tuple[bool, str], ...] = (
+        ("unknown" in low or "not supported" in low, "http3 not supported by curl"),
+        ("timeout" in low, "timeout"),
+        ("quic" in low or "http/3" in low, msg[:120]),
+    )
+    return next((label for pred, label in rules if pred), msg[:120])
+
+
 def supports_http3() -> bool:
     """Return True if curl_cffi can request HTTP/3 (blockcheck2 curl_supports_http3)."""
     try:
@@ -73,16 +83,7 @@ def check_http3(
         else:
             result.error = f"http {resp.status_code}"
     except RequestsError as exc:
-        msg = str(exc)
-        low = msg.lower()
-        if "unknown" in low or "not supported" in low:
-            result.error = "http3 not supported by curl"
-        elif "timeout" in low:
-            result.error = "timeout"
-        elif "quic" in low or "http/3" in low:
-            result.error = msg[:120]
-        else:
-            result.error = msg[:120]
+        result.error = _classify_http3_error(str(exc))
     except Exception as exc:
         result.error = str(exc)[:120]
 

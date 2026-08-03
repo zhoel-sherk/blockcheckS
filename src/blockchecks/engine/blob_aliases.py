@@ -7,6 +7,8 @@ checks ``BLOCKCHECKS_BLOBS`` then ``/opt/zapret2/files/fake``.
 from __future__ import annotations
 
 import os
+import re
+from collections.abc import Iterable
 
 from blockchecks.engine.config import BLOB_DIR
 
@@ -15,6 +17,7 @@ FAKE_FILES_DIR = os.environ.get("BLOCKCHECKS_FAKE_FILES", "/opt/zapret2/files/fa
 # Alias → filename (under blobs dir or files/fake)
 BLOB_ALIAS_MAP: dict[str, str] = {
     "google": "tls_clienthello_www_google_com.bin",
+    "tls_clienthello": "tls_clienthello_www_google_com.bin",
     "max_ru": "tls_clienthello_max_ru.bin",
     "stun": "stun.bin",
     "stun2": "stun2.bin",
@@ -39,6 +42,7 @@ BLOB_ALIAS_MAP: dict[str, str] = {
 }
 
 _BUILTIN_BLOBS = frozenset({"fake_default_tls", "fake_default_http", "fake_default_quic"})
+_BLOB_NAME_RE = re.compile(r"(?:blob|pattern|seqovl_pattern)=(\w+)")
 
 
 def resolve_blob_path(name: str, blobs_dir: str | None = None) -> str | None:
@@ -86,3 +90,48 @@ def resolve_blob_path(name: str, blobs_dir: str | None = None) -> str | None:
                     return os.path.join(base, fname)
 
     return None
+
+
+def extract_blob_names(*strategies: str) -> list[str]:
+    """Unique blob=/pattern=/seqovl_pattern= names from strategy strings."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for strat in strategies:
+        if not strat:
+            continue
+        for m in _BLOB_NAME_RE.finditer(strat):
+            n = m.group(1)
+            if n in seen or n == "0x00000000":
+                continue
+            seen.add(n)
+            names.append(n)
+    return names
+
+
+def blob_cli_line(name: str, blobs_dir: str | None = None) -> str | None:
+    """Format ``--blob=NAME:@path`` or None if unresolved / built-in."""
+    if name == "0x00000000":
+        return None
+    path = resolve_blob_path(name, blobs_dir)
+    return f"--blob={name}:@{path}" if path else None
+
+
+def append_blob_cli_lines(
+    lines: list[str],
+    names: Iterable[str],
+    blobs_dir: str | None = None,
+) -> None:
+    """Append unique ``--blob=NAME:@path`` lines for each resolvable name."""
+    for name in names:
+        if any(line.startswith(f"--blob={name}:@") for line in lines):
+            continue
+        cli = blob_cli_line(name, blobs_dir)
+        if cli:
+            lines.append(cli)
+
+
+def blob_cli_lines(names: Iterable[str], blobs_dir: str | None = None) -> list[str]:
+    """Return ``--blob=NAME:@path`` lines for resolvable names."""
+    out: list[str] = []
+    append_blob_cli_lines(out, names, blobs_dir)
+    return out

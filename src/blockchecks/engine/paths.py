@@ -121,7 +121,9 @@ def ensure_dirs() -> None:
     """Create XDG runtime directories (idempotent)."""
     for path in (
         CONFIG_DIR,
-        USER_PRESETS_DIR,  # reserved for user config presets
+        USER_PRESETS_DIR,
+        USER_PRESETS_DIR / "domains",
+        USER_PRESETS_DIR / "strategies",
         STATE_DIR,
         DATA_DIR,
         DEFAULT_OUT_DIR,

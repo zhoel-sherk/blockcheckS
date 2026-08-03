@@ -110,6 +110,19 @@ def _validate_content(data: bytes, time_for_read: float, http_status: int = 200)
     return warnings
 
 
+def _classify_tls_error(msg: str, *, elapsed: float, timeout: float) -> str:
+    """Map curl_cffi transport errors to short tls probe labels."""
+    low = msg.lower()
+    rules: tuple[tuple[bool, str], ...] = (
+        ("Timeout" in msg and elapsed < timeout * 0.6, "timeout (DPI window clamp?)"),
+        ("Timeout" in msg, "timeout"),
+        ("reset" in low, "connection reset"),
+        ("ssl" in low or "tls" in low, "TLS error"),
+        ("resolve" in low, "DNS error"),
+    )
+    return next((label for pred, label in rules if pred), msg[:120])
+
+
 def check_tls(
     domain: str,
     timeout: float = 5.0,
@@ -168,20 +181,9 @@ def check_tls(
             result.success = 200 <= resp.status_code < 400
 
     except RequestsError as e:
-        error_msg = str(e)
-        if "Timeout" in error_msg:
-            if time.perf_counter() - start < timeout * 0.6:
-                result.error = "timeout (DPI window clamp?)"
-            else:
-                result.error = "timeout"
-        elif "reset" in error_msg.lower():
-            result.error = "connection reset"
-        elif "SSL" in error_msg or "TLS" in error_msg:
-            result.error = "TLS error"
-        elif "resolve" in error_msg.lower():
-            result.error = "DNS error"
-        else:
-            result.error = error_msg[:120]
+        result.error = _classify_tls_error(
+            str(e), elapsed=time.perf_counter() - start, timeout=timeout
+        )
     except Exception as e:
         result.error = str(e)[:120]
 

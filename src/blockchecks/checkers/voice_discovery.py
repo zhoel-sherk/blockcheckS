@@ -17,8 +17,8 @@ import os
 import subprocess
 import threading
 import time
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from blockchecks.checkers.voice_dns import discover_voice_endpoints as dns_discover
 from blockchecks.engine.config import (

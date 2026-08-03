@@ -216,28 +216,29 @@ def audit_domain(
     if err:
         result.doh_error = err
 
-    if not result.udp_ips and not result.doh_ips:
-        result.verdict = "no_resolution"
-        result.description = "No DNS resolution via UDP or DoH"
-    elif not result.doh_ips:
-        result.verdict = "doh_blocked"
-        result.description = "DoH blocked — cannot verify DNS integrity"
-    elif not result.udp_ips:
-        result.verdict = "udp_blocked"
-        result.description = "UDP DNS blocked"
-    else:
-        udp_set = set(result.udp_ips)
-        doh_set = set(result.doh_ips)
-        if udp_set & doh_set:
-            result.verdict = "ok"
-            result.description = "UDP and DoH overlap — no hijack"
-        else:
-            result.tampering_detected = True
-            result.verdict = "tampered"
-            result.description = (
-                f"UDP {', '.join(result.udp_ips[:3])} vs "
-                f"DoH {', '.join(result.doh_ips[:3])}"
-            )
+    match (bool(result.udp_ips), bool(result.doh_ips)):
+        case (False, False):
+            result.verdict = "no_resolution"
+            result.description = "No DNS resolution via UDP or DoH"
+        case (True, False):
+            result.verdict = "doh_blocked"
+            result.description = "DoH blocked — cannot verify DNS integrity"
+        case (False, True):
+            result.verdict = "udp_blocked"
+            result.description = "UDP DNS blocked"
+        case _:
+            udp_set = set(result.udp_ips)
+            doh_set = set(result.doh_ips)
+            if udp_set & doh_set:
+                result.verdict = "ok"
+                result.description = "UDP and DoH overlap — no hijack"
+            else:
+                result.tampering_detected = True
+                result.verdict = "tampered"
+                result.description = (
+                    f"UDP {', '.join(result.udp_ips[:3])} vs "
+                    f"DoH {', '.join(result.doh_ips[:3])}"
+                )
     return result
 
 

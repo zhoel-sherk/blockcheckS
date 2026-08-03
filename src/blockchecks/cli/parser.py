@@ -1,9 +1,12 @@
 """blockcheckS CLI — argparse and command dispatch."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import os
 import sys
+from collections.abc import Callable
 
 from colorama import init as colorama_init
 
@@ -526,53 +529,64 @@ def dispatch(args: argparse.Namespace) -> int:
             if code:
                 return code
 
-    if args.command == "tcp":
-        return cmd_tcp(args)
-    if args.command == "udp":
-        return cmd_udp(args)
-    if args.command == "scan":
-        if getattr(args, "list_presets", False):
+    def _scan(a: argparse.Namespace) -> int:
+        if getattr(a, "list_presets", False):
             list_presets()
             return 0
-        if args.generate:
-            args.tcp_sources = (
-                args.generate
-                if args.generate != "custom,configs"
-                else args.tcp_sources or "custom,configs"
+        if a.generate:
+            a.tcp_sources = (
+                a.generate
+                if a.generate != "custom,configs"
+                else a.tcp_sources or "custom,configs"
             )
-        args.generate = bool(args.generate)
-        args.tcp_only = True
-        args.full_voice = False
-        args.udp_bypass = False
-        if not hasattr(args, "auto_discover") or args.auto_discover is False:
-            args.auto_discover = None
-        args.udp_sources = ""
-        args.configs_dir = CONFIGS_DIR
-        args.config = None
-        args.udp_config = None
-        return asyncio.run(cmd_pair(args))
-    if args.command == "pair":
-        if getattr(args, "list_presets", False):
+        a.generate = bool(a.generate)
+        a.tcp_only = True
+        a.full_voice = False
+        a.udp_bypass = False
+        if not hasattr(a, "auto_discover") or a.auto_discover is False:
+            a.auto_discover = None
+        a.udp_sources = ""
+        a.configs_dir = CONFIGS_DIR
+        a.config = None
+        a.udp_config = None
+        return asyncio.run(cmd_pair(a))
+
+    def _pair(a: argparse.Namespace) -> int:
+        if getattr(a, "list_presets", False):
             list_presets()
             return 0
-        if args.generate and args.generate != "custom,configs":
-            args.tcp_sources = args.generate
-        if getattr(args, "config", None) or getattr(args, "udp_config", None):
-            args.generate = False
+        if a.generate and a.generate != "custom,configs":
+            a.tcp_sources = a.generate
+        if getattr(a, "config", None) or getattr(a, "udp_config", None):
+            a.generate = False
         else:
-            args.generate = bool(args.generate) or bool(
-                getattr(args, "tcp_sources", "") != "custom,configs"
-                or getattr(args, "udp_sources", "") != "custom"
+            a.generate = bool(a.generate) or bool(
+                getattr(a, "tcp_sources", "") != "custom,configs"
+                or getattr(a, "udp_sources", "") != "custom"
             )
-        return asyncio.run(cmd_pair(args))
-    if args.command == "composite":
+        return asyncio.run(cmd_pair(a))
+
+    def _composite(a: argparse.Namespace) -> int:
         from blockchecks.checkers.composite_runner import run as run_composite
 
-        return asyncio.run(run_composite(args.config, args.domains, args.parallel, args.timeout))
-    if args.command == "bench-settle":
+        return asyncio.run(run_composite(a.config, a.domains, a.parallel, a.timeout))
+
+    def _bench(a: argparse.Namespace) -> int:
         from blockchecks.cli.commands.bench_settle import cmd_bench_settle
 
-        return asyncio.run(cmd_bench_settle(args))
+        return asyncio.run(cmd_bench_settle(a))
+
+    handlers: dict[str, Callable[[argparse.Namespace], int]] = {
+        "tcp": cmd_tcp,
+        "udp": cmd_udp,
+        "scan": _scan,
+        "pair": _pair,
+        "composite": _composite,
+        "bench-settle": _bench,
+    }
+    handler = handlers.get(args.command)
+    if handler is not None:
+        return handler(args)
 
     build_parser().print_help()
     return 1

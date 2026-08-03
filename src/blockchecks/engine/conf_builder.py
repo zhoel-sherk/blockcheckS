@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 import re
 import time
-from collections.abc import Iterable
 
-from blockchecks.engine.blob_aliases import resolve_blob_path as _resolve_blob_path
+from blockchecks.engine.blob_aliases import (
+    blob_cli_lines,
+    extract_blob_names,
+)
 from blockchecks.engine.config import BLOB_DIR, get_lua_init_scripts
 
 # Keenetic Entware layout (override via prefix=)
@@ -23,36 +25,6 @@ DEFAULT_UDP_PAYLOAD = (
     "wireguard_initiation,wireguard_response,wireguard_cookie,"
     "stun,discord_ip_discovery,mtproto_initial,unknown"
 )
-
-
-def extract_blob_names(*strategies: str) -> list[str]:
-    """Unique blob=/seqovl_pattern= names from strategy strings."""
-    names: list[str] = []
-    seen: set[str] = set()
-    for strat in strategies:
-        if not strat:
-            continue
-        for m in re.finditer(r"(?:blob|seqovl_pattern)=(\w+)", strat):
-            n = m.group(1)
-            if n in seen or n == "0x00000000":
-                continue
-            seen.add(n)
-            names.append(n)
-    return names
-
-
-def resolve_blob_path(name: str, blobs_dir: str) -> str | None:
-    """Map blob name → absolute .bin path under blobs_dir."""
-    return _resolve_blob_path(name, blobs_dir)
-
-
-def blob_cli_lines(names: Iterable[str], blobs_dir: str) -> list[str]:
-    lines = []
-    for name in names:
-        path = resolve_blob_path(name, blobs_dir)
-        if path:
-            lines.append(f"--blob={name}:@{path}")
-    return lines
 
 
 def _ensure_strategy_n(strategy: str, n: int) -> str:
