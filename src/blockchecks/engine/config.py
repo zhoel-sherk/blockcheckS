@@ -191,6 +191,7 @@ NFQWS2_DEBUG = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
 
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR  # noqa: E402
 
+# str alias for os.path.join / makedirs; Path source is RUNTIME_LOGS_DIR
 LOGS_DIR = str(RUNTIME_LOGS_DIR)
 
 

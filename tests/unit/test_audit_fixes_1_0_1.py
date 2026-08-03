@@ -81,6 +81,70 @@ async def test_tcp_results_from_details_throttled():
 
 
 @pytest.mark.asyncio
+async def test_get_best_pairs_includes_throttled(tmp_path):
+    db = open_run_store(tmp_path / "pairs.db")
+    await db.init()
+    await db.log_pair(
+        "tcp_a", "udp_a", "discord.com", True, True, True, 100.0, 0.0, 50.0, "THROTTLED"
+    )
+    await db.log_pair(
+        "tcp_b", "udp_b", "discord.com", True, True, True, 80.0, 0.0, 40.0, "PASS"
+    )
+    await db.log_pair(
+        "tcp_c", "udp_c", "discord.com", False, False, False, 0.0, 0.0, 0.0, "FAIL"
+    )
+    best = await db.get_best_pairs("discord.com", limit=10)
+    overalls = {r["overall"] for r in best}
+    assert "THROTTLED" in overalls
+    assert "PASS" in overalls
+    assert "FAIL" not in overalls
+
+
+@pytest.mark.asyncio
+async def test_flush_rollback_preserves_pending(tmp_path):
+    """On flush failure after BEGIN, pending buffers must not be cleared."""
+    db = open_run_store(tmp_path / "flush.db")
+    await db.init()
+    db.batch_size = 100
+    await db.log_tcp("s1", "discord.com", "PASS", 10.0, http_code=200)
+    assert len(db._tcp_pending) == 1
+
+    import blockchecks.engine.store.sqlite_store as mod
+
+    orig = mod.aiosqlite.connect
+
+    class BoomCM:
+        def __init__(self):
+            self._cm = orig(db._path)
+
+        async def __aenter__(self):
+            self._conn = await self._cm.__aenter__()
+            return self
+
+        async def __aexit__(self, *exc):
+            return await self._cm.__aexit__(*exc)
+
+        async def execute(self, sql, params=()):
+            if isinstance(sql, str) and "INSERT INTO tcp_results" in sql:
+                raise RuntimeError("inject fail")
+            return await self._conn.execute(sql, params)
+
+        async def commit(self):
+            return await self._conn.commit()
+
+        async def rollback(self):
+            return await self._conn.rollback()
+
+    mod.aiosqlite.connect = lambda *a, **k: BoomCM()  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError, match="inject fail"):
+            await db.flush()
+    finally:
+        mod.aiosqlite.connect = orig
+    assert len(db._tcp_pending) == 1
+
+
+@pytest.mark.asyncio
 async def test_completed_pair_keys(tmp_path):
     db = open_run_store(tmp_path / "p.db")
     await db.init()

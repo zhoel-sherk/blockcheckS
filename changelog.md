@@ -1,5 +1,17 @@
 # blockcheckS Changelog
 
+## 1.0.2 — 2026-08-03
+
+### Fixed
+- XDG: correct `settings.example.toml` priority docs; `finalize_store_args` always fills `out_dir`
+- Export/shortlists defaults → `~/.local/share/blockcheckS/` (legacy `state/` still used if non-empty)
+- `subprocess_env` preserves `PYTHONPYCACHEPREFIX` from caller `base`
+- DAO: `flush()` uses `BEGIN IMMEDIATE` + rollback; `get_best_pairs` includes THROTTLED
+- Removed dead `get_passing_pairs`; added indexes `(strategy_id,domain)` / `pair_results(domain)`
+
+### Changed
+- tmp-scripts cleanup: keep helpers in `dev/`, `strategy_debug_probe.py` → `scripts/`
+
 ## 1.0.1 — 2026-08-03
 
 ### Added

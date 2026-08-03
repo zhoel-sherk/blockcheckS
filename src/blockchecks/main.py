@@ -853,7 +853,7 @@ def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser
 
 def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
     from blockchecks.cli.user_config import finalize_store_args, load_user_config
-    from blockchecks.engine.paths import DEFAULT_OUT_DIR, apply_pycache_prefix, ensure_dirs
+    from blockchecks.engine.paths import apply_pycache_prefix, ensure_dirs
 
     apply_pycache_prefix()
     ensure_dirs()
@@ -861,8 +861,6 @@ def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
     p = build_arg_parser(cfg)
     args = p.parse_args(argv)
     finalize_store_args(args, cfg)
-    if args.out_dir is None:
-        args.out_dir = str(DEFAULT_OUT_DIR)
     validate_time_limit_args(p, args)
     deps_rc = ensure_system_deps_or_exit(args)
     if deps_rc:

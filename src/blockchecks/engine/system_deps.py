@@ -24,7 +24,7 @@ from blockchecks.engine.paths import CACHE_DIR, DATA_DIR, ensure_dirs
 
 ZAPRET2_REPO = "bol-van/zapret2"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{ZAPRET2_REPO}/releases/latest"
-USER_AGENT = "blockcheckS/1.0.1 (+https://github.com/zhoel-sherk/blockcheckS)"
+USER_AGENT = "blockcheckS/1.0.2 (+https://github.com/zhoel-sherk/blockcheckS)"
 
 VENDOR_ROOT = DATA_DIR / "zapret2"
 VENDOR_BIN_LINK = DATA_DIR / "bin" / "nfqws2"

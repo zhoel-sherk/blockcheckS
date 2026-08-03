@@ -1,10 +1,15 @@
 # blockcheckS user configuration (~/.config/blockcheckS/config.toml)
 # Copy to: ~/.config/blockcheckS/config.toml
-# Priority: CLI args > BLOCKCHECKS_* env > this file > XDG defaults
+#
+# Priority:
+#   [paths]  CLI args > this file > XDG / BLOCKCHECKS_*_HOME defaults
+#   [tools]  CLI / env BLOCKCHECKS_* > this file > built-in defaults
+# Note: BLOCKCHECKS_STATE_HOME only relocates STATE_DIR defaults; it does not
+# override an explicit paths.db / paths.out_dir in this file.
 
 [paths]
 db = "~/.local/state/blockcheckS/state.db"
-out_dir = "~/.local/state/blockcheckS/export"
+out_dir = "~/.local/share/blockcheckS/export"
 
 [run]
 parallel = 4
@@ -15,13 +20,10 @@ scan_level = "fast"
 [tools]
 nfqws2 = "/opt/zapret2/nfq2/nfqws2"
 blobs = "/opt/zapret2/blobs"
+# lua_dir = "/opt/zapret2/lua"
 # python = "/path/to/.venv/bin/python"
 # proxy = "socks5://127.0.0.1:11080"
 
 [secure_dns]
 # enabled = true
 # doh_server = "https://cloudflare-dns.com/dns-query"
-
-# Optional: copy ./state.db to XDG path on first run if XDG db missing
-# [paths.migrate]
-# legacy = true

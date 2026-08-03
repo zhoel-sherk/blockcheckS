@@ -60,8 +60,11 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     note TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_tcp_status ON tcp_results(status);
+CREATE INDEX IF NOT EXISTS idx_tcp_strat_domain ON tcp_results(strategy_id, domain);
 CREATE INDEX IF NOT EXISTS idx_udp_status ON udp_results(status);
+CREATE INDEX IF NOT EXISTS idx_udp_strat ON udp_results(strategy_id);
 CREATE INDEX IF NOT EXISTS idx_pair_overall ON pair_results(overall);
+CREATE INDEX IF NOT EXISTS idx_pair_domain ON pair_results(domain);
 CREATE VIEW IF NOT EXISTS v_working_tcp AS
 SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
        t.content_valid, t.timestamp, t.status
@@ -114,6 +117,15 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
             weight REAL NOT NULL DEFAULT 1.0,
             updated_at TEXT NOT NULL DEFAULT ''
         )"""
+    )
+    await db.commit()
+    # Query indexes (IF NOT EXISTS for upgrades from 1.0.x)
+    await db.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_tcp_strat_domain ON tcp_results(strategy_id, domain);
+        CREATE INDEX IF NOT EXISTS idx_udp_strat ON udp_results(strategy_id);
+        CREATE INDEX IF NOT EXISTS idx_pair_domain ON pair_results(domain);
+        """
     )
     await db.commit()
     # Recreate views so THROTTLED ∈ working (IF NOT EXISTS keeps stale defs)

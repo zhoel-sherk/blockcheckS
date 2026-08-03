@@ -71,9 +71,10 @@ def finalize_store_args(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
     elif getattr(args, "db", None):
         args.db = str(expand_path(args.db, default=DEFAULT_DB_PATH))
     if hasattr(args, "out_dir"):
+        from blockchecks.engine.paths import resolve_user_output_dir
+
+        out_default = resolve_user_output_dir(kind="export")
         if args.out_dir is None:
-            paths = cfg.get("paths") or {}
-            if isinstance(paths, dict) and paths.get("out_dir"):
-                args.out_dir = str(expand_path(paths["out_dir"], default=DEFAULT_OUT_DIR))
-        elif args.out_dir:
-            args.out_dir = str(expand_path(args.out_dir, default=DEFAULT_OUT_DIR))
+            args.out_dir = resolve_store_path(None, cfg, "out_dir", out_default)
+        else:
+            args.out_dir = str(expand_path(args.out_dir, default=out_default))

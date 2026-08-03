@@ -45,13 +45,17 @@ Entry points: `bs` → `blockchecks.bs:main`, `bc-main`, `bc-nfconf`.
 - `presets/` — repo root (shipped catalog)
 - **Runtime data (XDG):**
   - `~/.config/blockcheckS/config.toml` — user defaults
+  - `~/.config/blockcheckS/presets/` — reserved (`USER_PRESETS_DIR`)
   - `~/.local/state/blockcheckS/state.db` — run state DB (default `--db`)
-  - `~/.local/state/blockcheckS/export/` — nfconf export (default `--out-dir` for `bs full`)
-  - `~/.local/state/blockcheckS/logs/`, `shortlists/`, `presets/` — runtime artifacts
+  - `~/.local/state/blockcheckS/logs/` — runtime logs
+  - `~/.local/state/blockcheckS/presets/` — reserved (`USER_DATA_PRESETS_DIR`)
+  - `~/.local/share/blockcheckS/export/` — nfconf export (default `--out-dir`; 1.0.x legacy: `state/.../export`)
+  - `~/.local/share/blockcheckS/shortlists/` — shortlist JSON (legacy under `state/`)
+  - `~/.local/share/blockcheckS/zapret2/` — optional auto-fetched vendor tree
   - `~/.cache/blockcheckS/` — gv/voice/settle caches, blob-cache, isolated `pycache/`
-  - `~/.local/share/blockcheckS/` — reserved (`DATA_DIR`; created by `ensure_dirs()`)
 
-Override: CLI args > `BLOCKCHECKS_*` env > `config.toml` > XDG defaults.
+Override: CLI args > `config.toml` `[paths]` > XDG / `BLOCKCHECKS_*_HOME` defaults.
+For tools: CLI / env `BLOCKCHECKS_*` > `[tools]` > built-in.
 See [`engine/paths.py`](../src/blockchecks/engine/paths.py) and [`settings.example.toml`](../settings.example.toml).
 
 Legacy CWD-relative `--db state.db` still works when passed explicitly.

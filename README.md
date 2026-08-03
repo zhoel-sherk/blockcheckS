@@ -85,7 +85,7 @@ Roadmap: [docs/todo.md](docs/todo.md).
 
 ## Status
 
-Пакет `blockchecks` 1.0.1: scan/pair/async, `bs full` + nfconf export, system deps + zapret2 auto-fetch.
+Пакет `blockchecks` 1.0.2: scan/pair/async, `bs full` + nfconf export, system deps + zapret2 auto-fetch.
 Roadmap: [docs/todo.md](docs/todo.md). Layout: [docs/package.md](docs/package.md).
 
 ---

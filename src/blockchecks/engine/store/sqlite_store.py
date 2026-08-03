@@ -100,57 +100,62 @@ class SqliteRunStore:
             return
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
-            ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-            for entry in self._tcp_pending:
-                sid = await self.ensure_strategy(
-                    entry["strategy"],
-                    entry["proto"],
-                    entry["config_path"],
-                    db=db,
-                )
-                await db.execute(
-                    """INSERT INTO tcp_results
-                       (strategy_id,domain,status,http_code,latency_ms,
-                        gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
-                        resolved_ip,dns_verdict,doh_server)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        sid,
-                        entry["domain"],
-                        entry["status"],
-                        entry["http_code"],
-                        entry["latency_ms"],
-                        entry["gateway_ms"],
-                        entry["content_valid"],
-                        entry["error"],
-                        ts,
-                        entry["read_rate_bps"],
-                        entry["resolved_ip"],
-                        entry["dns_verdict"],
-                        entry["doh_server"],
-                    ),
-                )
-            for entry in self._udp_pending:
-                sid = await self.ensure_strategy(
-                    entry["strategy"],
-                    "udp",
-                    entry["config_path"],
-                    db=db,
-                )
-                await db.execute(
-                    """INSERT INTO udp_results
-                       (strategy_id,target,status,latency_ms,error,timestamp)
-                       VALUES(?,?,?,?,?,?)""",
-                    (
-                        sid,
-                        entry["target"],
-                        entry["status"],
-                        entry["latency_ms"],
-                        entry["error"],
-                        ts,
-                    ),
-                )
-            await db.commit()
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+                for entry in self._tcp_pending:
+                    sid = await self.ensure_strategy(
+                        entry["strategy"],
+                        entry["proto"],
+                        entry["config_path"],
+                        db=db,
+                    )
+                    await db.execute(
+                        """INSERT INTO tcp_results
+                           (strategy_id,domain,status,http_code,latency_ms,
+                            gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
+                            resolved_ip,dns_verdict,doh_server)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            sid,
+                            entry["domain"],
+                            entry["status"],
+                            entry["http_code"],
+                            entry["latency_ms"],
+                            entry["gateway_ms"],
+                            entry["content_valid"],
+                            entry["error"],
+                            ts,
+                            entry["read_rate_bps"],
+                            entry["resolved_ip"],
+                            entry["dns_verdict"],
+                            entry["doh_server"],
+                        ),
+                    )
+                for entry in self._udp_pending:
+                    sid = await self.ensure_strategy(
+                        entry["strategy"],
+                        "udp",
+                        entry["config_path"],
+                        db=db,
+                    )
+                    await db.execute(
+                        """INSERT INTO udp_results
+                           (strategy_id,target,status,latency_ms,error,timestamp)
+                           VALUES(?,?,?,?,?,?)""",
+                        (
+                            sid,
+                            entry["target"],
+                            entry["status"],
+                            entry["latency_ms"],
+                            entry["error"],
+                            ts,
+                        ),
+                    )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
         self._tcp_pending.clear()
         self._udp_pending.clear()
 
@@ -415,17 +420,6 @@ class SqliteRunStore:
             )
             return {(r[0], r[1]) for r in await rows.fetchall()}
 
-    async def get_passing_pairs(self, domain: str) -> list[dict]:
-        async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
-            rows = await db.execute(
-                """SELECT tcp_strategy,udp_strategy,tcp_ms,gateway_ms,udp_ms
-                   FROM pair_results WHERE domain=? AND overall='PASS'""",
-                (domain,),
-            )
-            cols = ["tcp", "udp", "tcp_ms", "gateway_ms", "udp_ms"]
-            return [dict(zip(cols, r)) for r in await rows.fetchall()]
-
     async def has_tcp_result(self, strategy: str, domain: str, proto: str = "tcp") -> bool:
         """True if any tcp_results row exists for strategy×domain (resume skip)."""
         async with aiosqlite.connect(self._path) as db:
@@ -503,13 +497,13 @@ class SqliteRunStore:
             return [dict(zip(cols, r)) for r in await rows.fetchall()]
 
     async def get_best_pairs(self, domain: str, *, limit: int = 10) -> list[dict]:
-        """PASS pairs for domain, best by tcp_ms+udp_ms."""
+        """PASS/THROTTLED pairs for domain, best by tcp_ms+udp_ms."""
         async with aiosqlite.connect(self._path) as db:
             await db.execute("PRAGMA busy_timeout = 5000")
             rows = await db.execute(
-                """SELECT tcp_strategy, udp_strategy, tcp_ms, udp_ms, overall
+                f"""SELECT tcp_strategy, udp_strategy, tcp_ms, udp_ms, overall
                    FROM pair_results
-                   WHERE domain=? AND overall='PASS'
+                   WHERE domain=? AND overall IN {_WORKING_STATUSES}
                    ORDER BY (tcp_ms + udp_ms) ASC
                    LIMIT ?""",
                 (domain, limit),

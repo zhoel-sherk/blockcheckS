@@ -73,16 +73,41 @@ DATA_DIR        = _xdg_data_home()   / "blockcheckS"
 CACHE_DIR       = _xdg_cache_home()  / "blockcheckS"
 
 DEFAULT_DB_PATH         = STATE_DIR / "state.db"
-DEFAULT_OUT_DIR         = STATE_DIR / "export"
-DEFAULT_SHORTLIST_DIR   = STATE_DIR / "shortlists"
+# User-facing outputs live under DATA (XDG data files). Legacy 1.0.x used STATE.
+_LEGACY_OUT_DIR         = STATE_DIR / "export"
+_LEGACY_SHORTLIST_DIR   = STATE_DIR / "shortlists"
+DEFAULT_OUT_DIR         = DATA_DIR / "export"
+DEFAULT_SHORTLIST_DIR   = DATA_DIR / "shortlists"
 RUNTIME_LOGS_DIR        = STATE_DIR / "logs"
-USER_DATA_PRESETS_DIR   = STATE_DIR / "presets"
+USER_DATA_PRESETS_DIR   = STATE_DIR / "presets"  # reserved (ensure_dirs); not imported yet
 
 BLOB_CACHE_DIR          = CACHE_DIR / "blob-cache"
 PYCACHE_DIR             = CACHE_DIR / "pycache"
 GV_URL_CACHE_FILE       = CACHE_DIR / "bs_gv_url_cache.json"
 VOICE_DNS_CACHE_FILE    = CACHE_DIR / "bs_voice_cache.json"
 SETTLE_PROFILE_FILE     = CACHE_DIR / "settle_profile.json"
+
+
+def _dir_nonempty(path: Path) -> bool:
+    try:
+        next(path.iterdir())
+        return True
+    except (StopIteration, OSError):
+        return False
+
+
+def resolve_user_output_dir(*, kind: str = "export") -> Path:
+    """Return DATA_DIR export/shortlists, or legacy STATE_DIR path if still in use.
+
+    Compat for 1.0.x installs that already wrote under ``~/.local/state/.../export``.
+    """
+    if kind == "shortlists":
+        new, legacy = DEFAULT_SHORTLIST_DIR, _LEGACY_SHORTLIST_DIR
+    else:
+        new, legacy = DEFAULT_OUT_DIR, _LEGACY_OUT_DIR
+    if legacy.is_dir() and _dir_nonempty(legacy) and not _dir_nonempty(new):
+        return legacy
+    return new
 
 
 def expand_path(value: str | Path | None, *, default: Path) -> Path:
@@ -96,16 +121,18 @@ def ensure_dirs() -> None:
     """Create XDG runtime directories (idempotent)."""
     for path in (
         CONFIG_DIR,
-        USER_PRESETS_DIR,
+        USER_PRESETS_DIR,  # reserved for user config presets
         STATE_DIR,
         DATA_DIR,
         DEFAULT_OUT_DIR,
         DEFAULT_SHORTLIST_DIR,
         RUNTIME_LOGS_DIR,
-        USER_DATA_PRESETS_DIR,
+        USER_DATA_PRESETS_DIR,  # reserved for runtime-imported presets
         CACHE_DIR,
         BLOB_CACHE_DIR,
         PYCACHE_DIR,
+        _LEGACY_OUT_DIR,  # still create for compat readers
+        _LEGACY_SHORTLIST_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
         reclaim_sudo_ownership(path)
@@ -154,9 +181,14 @@ def apply_pycache_prefix() -> None:
 
 
 def subprocess_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """Return env for child Python/subprocess workers with isolated pycache."""
+    """Return env for child Python/subprocess workers with isolated pycache.
+
+    If *base* already sets ``PYTHONPYCACHEPREFIX``, that value is preserved.
+    """
     env = dict(os.environ)
     if base:
         env.update(base)
+        if "PYTHONPYCACHEPREFIX" in base:
+            return env
     env["PYTHONPYCACHEPREFIX"] = str(PYCACHE_DIR)
     return env

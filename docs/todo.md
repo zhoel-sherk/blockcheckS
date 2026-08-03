@@ -1,8 +1,14 @@
 # Backlog — blockcheckS
 
-Открытые задачи после **1.0.1**. Закрытые фазы и release notes: [changelog.md](../changelog.md).
+Открытые задачи после **1.0.2**. Закрытые фазы и release notes: [changelog.md](../changelog.md).
 
 Приоритеты: **P1** = matrix/speed/protocol gaps; **P2** = voice/GP integration; **P3** = ML/hierarchy.
+
+### Closed in 1.0.2
+
+- [x] XDG audit: paths priority docs, out_dir finalize, DATA_DIR export/shortlists, subprocess_env
+- [x] DAO: flush transaction, get_best_pairs THROTTLED, indexes, remove get_passing_pairs
+- [x] tmp-scripts → `dev/` + `scripts/strategy_debug_probe.py`
 
 ### Closed in 1.0.1
 
