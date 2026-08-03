@@ -1,3 +1,3 @@
 """blockchecks — lightspeed DPI strategy tester."""
 
-__version__ = "1.0.2"
+__version__ = "1.1.0a1"
