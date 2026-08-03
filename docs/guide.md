@@ -49,6 +49,8 @@ Entry point: `bs` → `blockchecks.bs:main`.
 
 ```bash
 sudo bs scan -d discord.com --generate custom,configs --max 50 --parallel 4
+# bare --generate still means custom,configs (CliApp preprocess):
+sudo bs scan -d discord.com --generate --max 50 --parallel 4
 sudo bs pair -d discord.com --generate --scan-level fast --auto-discover 5
 sudo bs pair -d discord.com -c configs/alt__fake_fakedsplit_ts.conf -u configs/udp_voice__fake_r6.conf
 sudo bs pair -d discord.com --resume   # откажется, если matrix fingerprint сменился

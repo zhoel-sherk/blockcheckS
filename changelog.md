@@ -2,6 +2,12 @@
 
 ## Unreleased / HEAD
 
+### Fixed (CLI / CliApp)
+- **Short flags restored** on CliApp path (`-d`, `-M`, `-c`, …) via `cli_shortcuts` + `case_sensitive=True`
+- **Bare `--generate`** again expands to `custom,configs` (argv preprocess before CliApp)
+- **`bs --help`** shows one-line blurbs per subcommand (from argparse `help=`)
+- **`write_secure_text`** moved to `engine.secure_io` (no longer dead in voice_discovery)
+
 ### Fixed (dpi-stack audit DS1)
 - **Composite UDP qnum:** multiport `50000:50100` → `NFQUEUE_UDP` (Wave4 regression)
 - **`test_batch_tcp` order:** `asyncio.gather` preserves strategy input order (pair filters)

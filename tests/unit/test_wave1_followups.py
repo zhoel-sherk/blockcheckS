@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from blockchecks.checkers.curl_probe import CurlProbeRequest
-from blockchecks.checkers.voice_discovery import load_token, write_secure_text
+from blockchecks.checkers.voice_discovery import load_token
+from blockchecks.engine.secure_io import write_secure_text
 from blockchecks.cli.presets import (
     PresetPathError,
     normalize_preset_name,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import BaseModel, Field, create_model
@@ -19,6 +20,8 @@ from pydantic_settings import (
     SettingsConfigDict,
     get_subcommand,
 )
+
+_GENERATE_DEFAULT = "custom,configs"
 
 
 def _annotation_for_action(action: argparse.Action) -> Any:
@@ -51,6 +54,57 @@ def _field_default(action: argparse.Action) -> Any:
     return action.default
 
 
+def _short_letter(option: str) -> str | None:
+    """Return short flag letter from ``-d`` / ``-M`` (not ``--long``)."""
+    if len(option) == 2 and option.startswith("-") and not option.startswith("--"):
+        return option[1]
+    return None
+
+
+def collect_cli_shortcuts(*parsers: argparse.ArgumentParser) -> dict[str, str | list[str]]:
+    """Map kebab field names → short-flag letters from argparse option_strings."""
+    shortcuts: dict[str, list[str]] = {}
+    for parser in parsers:
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                continue
+            if action.dest in ("help", "command") or not action.dest:
+                continue
+            letters = [
+                letter
+                for opt in action.option_strings
+                if (letter := _short_letter(opt)) is not None
+            ]
+            if not letters:
+                continue
+            target = action.dest.replace("_", "-")
+            bucket = shortcuts.setdefault(target, [])
+            for letter in letters:
+                if letter not in bucket:
+                    bucket.append(letter)
+    return {k: (v[0] if len(v) == 1 else v) for k, v in shortcuts.items()}
+
+
+def expand_bare_generate(argv: Sequence[str]) -> list[str]:
+    """Restore argparse ``nargs='?'`` UX: bare ``--generate`` → default sources."""
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--generate":
+            out.append(tok)
+            nxt = argv[i + 1] if i + 1 < len(argv) else None
+            if nxt is None or nxt.startswith("-"):
+                out.append(_GENERATE_DEFAULT)
+            else:
+                out.append(nxt)
+                i += 1
+        else:
+            out.append(tok)
+        i += 1
+    return out
+
+
 def model_from_subparser(name: str, parser: argparse.ArgumentParser) -> type[BaseModel]:
     fields: dict[str, Any] = {}
     for action in parser._actions:
@@ -74,17 +128,41 @@ def _subparsers() -> dict[str, argparse.ArgumentParser]:
     return {}
 
 
+def _subcommand_blurbs() -> dict[str, str]:
+    """Map subcommand name → one-line help from argparse ``add_parser(..., help=)``."""
+    from blockchecks.cli.parser import build_parser
+
+    root = build_parser()
+    out: dict[str, str] = {}
+    for action in root._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for choice in action._choices_actions:
+            name = choice.dest
+            text = (choice.help or "").strip()
+            if name and text:
+                out[name] = text
+    return out
+
+
+def _parser_blurb(name: str, blurbs: dict[str, str], fallback: str) -> str:
+    return blurbs.get(name) or fallback
+
+
 def _to_namespace(model: BaseModel, **extra: Any) -> argparse.Namespace:
     data = model.model_dump()
     data.update(extra)
     return argparse.Namespace(**data)
 
 
-def _make_cmd_model(class_name: str, base: type[BaseModel], handler):
+def _make_cmd_model(class_name: str, base: type[BaseModel], handler, doc: str = ""):
     def cli_cmd(self) -> int:  # type: ignore[no-untyped-def]
         return handler(self)
 
-    return type(class_name, (base,), {"cli_cmd": cli_cmd})
+    ns: dict[str, Any] = {"cli_cmd": cli_cmd}
+    if doc:
+        ns["__doc__"] = doc
+    return type(class_name, (base,), ns)
 
 
 def _run_tcp(model: BaseModel) -> int:
@@ -119,13 +197,13 @@ def _run_pair(model: BaseModel) -> int:
         list_presets()
         return 0
     gen = getattr(ns, "generate", "")
-    if gen and gen != "custom,configs":
+    if gen and gen != _GENERATE_DEFAULT:
         ns.tcp_sources = gen
     if getattr(ns, "config", None) or getattr(ns, "udp_config", None):
         ns.generate = False
     else:
         ns.generate = bool(gen) or bool(
-            getattr(ns, "tcp_sources", "") != "custom,configs"
+            getattr(ns, "tcp_sources", "") != _GENERATE_DEFAULT
             or getattr(ns, "udp_sources", "") != "custom"
         )
     code = ensure_system_deps_or_exit(ns)
@@ -147,7 +225,7 @@ def _run_scan(model: BaseModel) -> int:
     gen = getattr(ns, "generate", "")
     if gen:
         ns.tcp_sources = (
-            gen if gen != "custom,configs" else (getattr(ns, "tcp_sources", None) or "custom,configs")
+            gen if gen != _GENERATE_DEFAULT else (getattr(ns, "tcp_sources", None) or _GENERATE_DEFAULT)
         )
     ns.generate = bool(gen)
     ns.tcp_only = True
@@ -203,18 +281,50 @@ def build_cli_root() -> type[BaseSettings]:
     subs = _subparsers()
     from blockchecks.main import build_arg_parser
 
-    TcpCmd = _make_cmd_model("TcpCmd", model_from_subparser("TcpArgs", subs["tcp"]), _run_tcp)
-    UdpCmd = _make_cmd_model("UdpCmd", model_from_subparser("UdpArgs", subs["udp"]), _run_udp)
-    ScanCmd = _make_cmd_model("ScanCmd", model_from_subparser("ScanArgs", subs["scan"]), _run_scan)
-    PairCmd = _make_cmd_model("PairCmd", model_from_subparser("PairArgs", subs["pair"]), _run_pair)
+    full_parser = build_arg_parser()
+    shortcuts = collect_cli_shortcuts(*subs.values(), full_parser)
+    raw_blurbs = _subcommand_blurbs()
+
+    blurbs = {
+        "tcp": _parser_blurb("tcp", raw_blurbs, "Single TCP strategy test (sync)"),
+        "udp": _parser_blurb("udp", raw_blurbs, "Single UDP strategy test (sync)"),
+        "scan": _parser_blurb("scan", raw_blurbs, "Async TCP strategy batch scan"),
+        "pair": _parser_blurb("pair", raw_blurbs, "TCP x UDP pair matrix (async)"),
+        "composite": _parser_blurb("composite", raw_blurbs, "Test composite nfqws2 config"),
+        "bench-settle": _parser_blurb(
+            "bench-settle", raw_blurbs, "Benchmark nfqws2 settle × curl timeout"
+        ),
+        "full": _parser_blurb(
+            "full", raw_blurbs, "Full matrix campaign (TCP/UDP/HTTP/QUIC)"
+        ),
+    }
+
+    TcpCmd = _make_cmd_model(
+        "TcpCmd", model_from_subparser("TcpArgs", subs["tcp"]), _run_tcp, blurbs["tcp"]
+    )
+    UdpCmd = _make_cmd_model(
+        "UdpCmd", model_from_subparser("UdpArgs", subs["udp"]), _run_udp, blurbs["udp"]
+    )
+    ScanCmd = _make_cmd_model(
+        "ScanCmd", model_from_subparser("ScanArgs", subs["scan"]), _run_scan, blurbs["scan"]
+    )
+    PairCmd = _make_cmd_model(
+        "PairCmd", model_from_subparser("PairArgs", subs["pair"]), _run_pair, blurbs["pair"]
+    )
     CompositeCmd = _make_cmd_model(
-        "CompositeCmd", model_from_subparser("CompositeArgs", subs["composite"]), _run_composite
+        "CompositeCmd",
+        model_from_subparser("CompositeArgs", subs["composite"]),
+        _run_composite,
+        blurbs["composite"],
     )
     BenchCmd = _make_cmd_model(
-        "BenchSettleCmd", model_from_subparser("BenchArgs", subs["bench-settle"]), _run_bench
+        "BenchSettleCmd",
+        model_from_subparser("BenchArgs", subs["bench-settle"]),
+        _run_bench,
+        blurbs["bench-settle"],
     )
     FullCmd = _make_cmd_model(
-        "FullCmd", model_from_subparser("FullArgs", build_arg_parser()), _run_full
+        "FullCmd", model_from_subparser("FullArgs", full_parser), _run_full, blurbs["full"]
     )
 
     class BlockchecksCli(BaseSettings):
@@ -224,16 +334,23 @@ def build_cli_root() -> type[BaseSettings]:
             cli_parse_args=True,
             cli_implicit_flags=True,
             cli_kebab_case=True,
+            case_sensitive=True,
+            cli_shortcuts=shortcuts,
             extra="forbid",
         )
 
-        tcp: CliSubCommand[TcpCmd]  # type: ignore[valid-type]
-        udp: CliSubCommand[UdpCmd]  # type: ignore[valid-type]
-        scan: CliSubCommand[ScanCmd]  # type: ignore[valid-type]
-        pair: CliSubCommand[PairCmd]  # type: ignore[valid-type]
-        composite: CliSubCommand[CompositeCmd]  # type: ignore[valid-type]
-        bench_settle: CliSubCommand[BenchCmd] = Field(alias="bench-settle")  # type: ignore[valid-type]
-        full: CliSubCommand[FullCmd]  # type: ignore[valid-type]
+        tcp: CliSubCommand[TcpCmd] = Field(description=blurbs["tcp"])  # type: ignore[valid-type]
+        udp: CliSubCommand[UdpCmd] = Field(description=blurbs["udp"])  # type: ignore[valid-type]
+        scan: CliSubCommand[ScanCmd] = Field(description=blurbs["scan"])  # type: ignore[valid-type]
+        pair: CliSubCommand[PairCmd] = Field(description=blurbs["pair"])  # type: ignore[valid-type]
+        composite: CliSubCommand[CompositeCmd] = Field(  # type: ignore[valid-type]
+            description=blurbs["composite"]
+        )
+        bench_settle: CliSubCommand[BenchCmd] = Field(  # type: ignore[valid-type]
+            alias="bench-settle",
+            description=blurbs["bench-settle"],
+        )
+        full: CliSubCommand[FullCmd] = Field(description=blurbs["full"])  # type: ignore[valid-type]
 
         def cli_cmd(self) -> int:
             sub = get_subcommand(self, is_required=False)
@@ -261,9 +378,16 @@ def main(argv: list[str] | None = None) -> int:
     probe = build_parser()
     apply_parser_defaults(probe, cfg)
 
+    raw = list(argv) if argv is not None else None
+    cli_args = expand_bare_generate(raw) if raw is not None else None
+    if cli_args is None:
+        import sys
+
+        cli_args = expand_bare_generate(sys.argv[1:])
+
     Root = build_cli_root()
     try:
-        result = CliApp.run(Root, cli_args=list(argv) if argv is not None else None)
+        result = CliApp.run(Root, cli_args=cli_args)
     except SystemExit as exc:
         return int(exc.code or 0)
 

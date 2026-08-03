@@ -130,7 +130,9 @@ pytest -m "not integration"
 | `bc-nfconf` | Экспорт nfqws2-конфигов из БД | `bc-nfconf --db state.db --out-dir output` |
 
 Флаги, которые стоит знать: `--resume`, `--preset`, `-M`, `--generate`,
-`--scan-level`, `--repeats`, `--disable-ech`, `--max-timeh`.
+`--tcp-sources`, `--parallel`, `--max`, `--scan-level`, `--repeats`,
+`--disable-ech`, `--max-timeh`. Bare `--generate` (без значения) =
+`custom,configs`; явно: `--generate fake,configs`.
 
 Подробный CLI reference: [docs/guide.md](docs/guide.md).
 

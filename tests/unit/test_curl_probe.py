@@ -157,3 +157,47 @@ def test_curl_probe_result_as_dict():
     d = CurlProbeResult(success=True, http_code=200, latency_ms=1.0).as_dict()
     assert d["success"] is True
     assert d["http_code"] == 200
+
+
+def test_curl_probe_worker_batch_mode():
+    """_curl_probe_worker.run_payload mode=batch builds CurlProbeBatch and returns shape."""
+    from blockchecks.engine._curl_probe_worker import run_payload
+
+    fake_out = {
+        "success": True,
+        "http_code": 200,
+        "latency_ms": 12.0,
+        "results": [{"success": True, "http_code": 200}],
+    }
+
+    with patch(
+        "blockchecks.engine._curl_probe_worker.run_curl_probe_batch",
+        return_value=fake_out,
+    ) as mock_batch:
+        out = run_payload(
+            {
+                "mode": "batch",
+                "curl_parallel": 2,
+                "repeats": 3,
+                "parallel_repeats": True,
+                "repeats_mode": "full",
+                "quick_break": True,
+                "requests": [
+                    {"domain": "discord.com", "timeout": 4.0, "resolved_ip": "1.2.3.4"},
+                    {"domain": "google.com", "timeout": 5.0},
+                ],
+            }
+        )
+
+    assert out == fake_out
+    mock_batch.assert_called_once()
+    batch = mock_batch.call_args[0][0]
+    assert batch.curl_parallel == 2
+    assert batch.repeats == 3
+    assert batch.parallel_repeats is True
+    assert batch.repeats_mode == "full"
+    assert batch.quick_break is True
+    assert len(batch.requests) == 2
+    assert batch.requests[0].domain == "discord.com"
+    assert batch.requests[0].resolved_ip == "1.2.3.4"
+    assert batch.requests[1].domain == "google.com"
