@@ -13,6 +13,7 @@ Flow (without token):
 import asyncio
 import os
 import subprocess
+import threading
 import time
 
 from blockchecks.checkers.voice_dns import discover_voice_endpoints as dns_discover
@@ -23,28 +24,31 @@ from blockchecks.engine.config import (
     SOCKS5_PROXY,
 )
 
-_singbox_proc = None
+_singbox_lock = threading.Lock()
+_singbox_proc: subprocess.Popen | None = None
 
 
 def _manage_singbox(start: bool) -> subprocess.Popen | None:
+    """Start/stop sing-box under a process-wide lock (H8 concurrent-safe)."""
     global _singbox_proc
-    if start:
-        if _singbox_proc is not None:
-            try:
-                _singbox_proc.terminate()
-                _singbox_proc.wait(timeout=2)
-            except Exception:
-                pass
-        if not os.path.exists(SING_BOX_CONFIG):
-            return None
-        _singbox_proc = subprocess.Popen(
-            [SING_BOX_BIN, "run", "-c", SING_BOX_CONFIG],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        time.sleep(2)
-        return _singbox_proc
-    else:
+    with _singbox_lock:
+        if start:
+            if _singbox_proc is not None:
+                try:
+                    _singbox_proc.terminate()
+                    _singbox_proc.wait(timeout=2)
+                except Exception:
+                    pass
+                _singbox_proc = None
+            if not os.path.exists(SING_BOX_CONFIG):
+                return None
+            _singbox_proc = subprocess.Popen(
+                [SING_BOX_BIN, "run", "-c", SING_BOX_CONFIG],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(2)
+            return _singbox_proc
         if _singbox_proc is not None:
             try:
                 _singbox_proc.terminate()

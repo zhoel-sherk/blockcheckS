@@ -304,6 +304,16 @@ class DnsRunCache:
         ips, err, _ = doh_query(domain, url, timeout=timeout)
         if ips and not err:
             self.set(domain, ips)
+            return ips
+        # H6: rotate DoH server on failure (skip the one that just failed)
+        for alt, _name in DOH_SERVERS:
+            if alt == url:
+                continue
+            ips2, err2, _ = doh_query(domain, alt, timeout=timeout)
+            if ips2 and not err2:
+                self.doh_server = alt
+                self.set(domain, ips2)
+                return ips2
         return ips
 
     def primary_ip(self, domain: str, doh_url: str | None = None) -> str | None:

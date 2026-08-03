@@ -172,6 +172,11 @@ def add_secure_dns_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--skip-port-block", action="store_true", help="Skip TCP port probes")
     g.add_argument("--skip-prolog", action="store_true", help="Skip no-bypass prolog curl")
     g.add_argument(
+        "--prolog-content",
+        action="store_true",
+        help="Validate HTTP body content during prolog (stricter than TLS-only)",
+    )
+    g.add_argument(
         "--force",
         action="store_true",
         help="Run strategy tests even if prolog passes",
@@ -579,6 +584,11 @@ def main(argv: list[str] | None = None) -> int:
     apply_pycache_prefix()
     ensure_dirs()
     user_cfg = load_user_config()
+    paths_cfg = user_cfg.get("paths") if isinstance(user_cfg.get("paths"), dict) else {}
+    migrate_on = True if paths_cfg.get("migrate") is None else bool(paths_cfg.get("migrate"))
+    from blockchecks.engine.paths import migrate_legacy_state_db
+
+    migrate_legacy_state_db(enabled=migrate_on)
 
     if argv is None:
         argv = sys.argv[1:]

@@ -10,6 +10,8 @@
 [paths]
 db = "~/.local/state/blockcheckS/state.db"
 out_dir = "~/.local/share/blockcheckS/export"
+# First-run: copy ./state.db → XDG db when XDG db is missing (default on)
+migrate = true
 
 [run]
 parallel = 4

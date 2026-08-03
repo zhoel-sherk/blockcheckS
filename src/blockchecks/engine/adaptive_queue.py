@@ -334,10 +334,18 @@ class AdaptiveJobQueue:
 
     async def filter_resume(self, check) -> int:
         """Drop pending jobs where *check(job)* is True. Returns skip count."""
+        import asyncio
+
+        keys = list(self._pending.keys())
+        if not keys:
+            return 0
+        jobs = [self._pending[k] for k in keys]
+        flags = await asyncio.gather(*(check(j) for j in jobs))
         skipped = 0
-        for key in list(self._pending.keys()):
-            job = self._pending[key]
-            if await check(job):
+        for key, drop in zip(keys, flags, strict=True):
+            if not drop:
+                continue
+            if key in self._pending:
                 self._done.add(key)
                 del self._pending[key]
                 skipped += 1

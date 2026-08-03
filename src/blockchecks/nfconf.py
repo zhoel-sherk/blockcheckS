@@ -82,6 +82,7 @@ async def collect_export_strategies(
 async def export_configs(
     *,
     db_path: str | None = None,
+    store: RunStateStore | None = None,
     domain: str = "discord.com",
     limit: int = 3,
     out_dir: str | None = None,
@@ -92,9 +93,19 @@ async def export_configs(
     timestamp: str | None = None,
     common_only: bool = True,
 ) -> dict:
-    """Write keenetic + raw conf (+ user.list). Returns paths dict."""
-    db = open_run_store(db_path)
-    await db.init()
+    """Write keenetic + raw conf (+ user.list). Returns paths dict.
+
+    Prefer *store* (already-open DAO) over opening a second connection via *db_path*.
+    """
+    own_store = False
+    if store is None:
+        db = open_run_store(db_path)
+        await db.init()
+        own_store = True
+    else:
+        db = store
+        await db.flush()
+
     out_dir = str(expand_path(out_dir, default=DEFAULT_OUT_DIR))
 
     if domains_file and os.path.exists(domains_file):
@@ -140,6 +151,9 @@ async def export_configs(
     with open(raw_path, "w", encoding="utf-8") as f:
         f.write(raw)
     write_user_list(user_list, domains)
+
+    if own_store:
+        await db.close()
 
     return {
         "keenetic": keenetic_path,

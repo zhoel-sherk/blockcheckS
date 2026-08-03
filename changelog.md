@@ -5,6 +5,7 @@
 ### Added
 - **1.1.0a1 (alpha):** public `engine.probe.invoke_curl_probe_worker`; `--preset` / `-M` path jail; token refuse world-writable + `write_secure_text`
 - **E3:** `engine.nfqws2.start_daemon` (+ `inject_debug_and_daemon`); async/composite use public API; `Nfqws2Manager` remains for sync/foreground
+- **H2–H8 / migrate:** export reuses open store; AQ `filter_resume` gather; `--prolog-content`; DoH rotate; sing-box lock; `./state.db` → XDG migrate
 - Docs: architecture rewrite (DoH → preflight → AQ → curl subprocess → store; NetNsPool scale)
 
 ### Changed

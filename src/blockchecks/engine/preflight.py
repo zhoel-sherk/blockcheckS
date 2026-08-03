@@ -31,6 +31,7 @@ class PreflightOptions:
     skip_nfqws2_check: bool = False
     abort_on_nfqws2: bool = False
     force: bool = False
+    verify_content: bool = False
     dns_cache: DnsRunCache | None = None
 
 
@@ -83,10 +84,17 @@ def run_prolog(
     domain: str,
     timeout: float = 5.0,
     dns_cache: DnsRunCache | None = None,
+    *,
+    verify_content: bool = False,
 ) -> bool:
     """Curl domain without nfqws2 — works without DPI bypass? (BC2-5)."""
     resolved_ip = dns_cache.primary_ip(domain) if dns_cache else None
-    r = check_tls(domain, timeout=timeout, pre_resolved_ip=resolved_ip, verify_content=False)
+    r = check_tls(
+        domain,
+        timeout=timeout,
+        pre_resolved_ip=resolved_ip,
+        verify_content=verify_content,
+    )
     return r.success
 
 
@@ -138,7 +146,12 @@ def run_preflight(
             print_port_block_report(pr)
 
         if not o.skip_prolog:
-            works = run_prolog(domain, timeout=o.timeout, dns_cache=cache)
+            works = run_prolog(
+                domain,
+                timeout=o.timeout,
+                dns_cache=cache,
+                verify_content=o.verify_content,
+            )
             report.prolog_ok[domain] = works
             tag = "AVAILABLE (no bypass needed)" if works else "blocked or unreachable"
             print(f"\n  Prolog {domain}: {tag}")

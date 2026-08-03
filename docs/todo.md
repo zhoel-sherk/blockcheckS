@@ -106,10 +106,10 @@ _(none — E3 closed in Wave2)_
 
 ## 1.1.0 — tech debt (audit backlog)
 
-- [ ] **H2** `run_finalize.py` — `count_tcp_passes` открывает свежий коннект к БД
-- [ ] **H3** `adaptive_queue.py` — sequential await'ы в `filter_resume`
-- [ ] **H4** `preflight.py` — prolog-проверка только TLS (не контент)
-- [ ] **H6** `dns_secure.py` — `DnsRunCache` не ротирует DoH-сервер
-- [ ] **H8** `voice_discovery.py` — глобальный `_singbox_proc` не concurrent-safe
-- [ ] **E3** два competing nfqws2 lifecycle-подхода (daemon vs foreground)
-- [ ] `[paths.migrate]` — авто-миграция legacy `./state.db` → XDG при первом запуске
+- [x] **H2** `run_finalize` / `export_configs(store=)` — reuse open DAO; flush before count
+- [x] **H3** `adaptive_queue.filter_resume` — `asyncio.gather`
+- [x] **H4** preflight `--prolog-content` / `verify_content`
+- [x] **H6** `DnsRunCache` rotates DoH server on failure
+- [x] **H8** `voice_discovery` sing-box under threading.Lock
+- [x] **E3** `nfqws2.start_daemon` (Wave2)
+- [x] `[paths.migrate]` — `./state.db` → XDG on first run (`migrate = true` in example)

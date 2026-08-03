@@ -134,6 +134,7 @@ async def cmd_pair(args):
             skip_nfqws2_check=getattr(args, "skip_nfqws2_check", False),
             abort_on_nfqws2=getattr(args, "abort_on_nfqws2", False),
             force=getattr(args, "force", False),
+            verify_content=getattr(args, "prolog_content", False),
             dns_cache=dns_cache,
         ),
     )

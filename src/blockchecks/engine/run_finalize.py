@@ -37,11 +37,12 @@ async def maybe_export_configs(
     stop_set: bool,
     deadline: RunDeadline | None,
 ) -> dict[str, Any] | None:
+    await store.flush()
     passes = await store.count_tcp_passes()
     if not should_export(args, stop_set=stop_set, deadline=deadline, pass_count=passes):
         return None
     return await export_configs(
-        db_path=str(store.path),
+        store=store,
         domain=primary,
         limit=getattr(args, "export_limit", 3),
         out_dir=args.out_dir,

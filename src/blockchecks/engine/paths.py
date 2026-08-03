@@ -180,6 +180,36 @@ def apply_pycache_prefix() -> None:
     os.environ.setdefault("PYTHONPYCACHEPREFIX", prefix)
 
 
+def migrate_legacy_state_db(
+    *,
+    cwd: Path | None = None,
+    enabled: bool = True,
+) -> Path | None:
+    """Copy ``./state.db`` → XDG DEFAULT_DB_PATH when the XDG db is missing.
+
+    Controlled by *enabled* (config ``[paths] migrate = true`` default).
+    Returns destination path if a copy was performed, else None.
+    """
+    if not enabled:
+        return None
+    if DEFAULT_DB_PATH.is_file():
+        return None
+    legacy = (cwd or Path.cwd()) / "state.db"
+    if not legacy.is_file():
+        return None
+    ensure_dirs()
+    try:
+        import shutil
+
+        shutil.copy2(legacy, DEFAULT_DB_PATH)
+        reclaim_sudo_ownership(DEFAULT_DB_PATH)
+        log.info("migrated legacy %s → %s", legacy, DEFAULT_DB_PATH)
+        return DEFAULT_DB_PATH
+    except OSError as e:
+        log.warning("legacy state.db migrate failed: %s", e)
+        return None
+
+
 def subprocess_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """Return env for child Python/subprocess workers with isolated pycache.
 

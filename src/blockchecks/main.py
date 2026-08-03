@@ -141,6 +141,7 @@ async def run_full(args) -> int:
             skip_nfqws2_check=getattr(args, "skip_nfqws2_check", False),
             abort_on_nfqws2=getattr(args, "abort_on_nfqws2", False),
             force=getattr(args, "force", False),
+            verify_content=getattr(args, "prolog_content", False),
             dns_cache=dns_cache,
         ),
     )
@@ -858,6 +859,11 @@ def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
     apply_pycache_prefix()
     ensure_dirs()
     cfg = user_config if user_config is not None else load_user_config()
+    paths_cfg = cfg.get("paths") if isinstance(cfg.get("paths"), dict) else {}
+    migrate_on = True if paths_cfg.get("migrate") is None else bool(paths_cfg.get("migrate"))
+    from blockchecks.engine.paths import migrate_legacy_state_db
+
+    migrate_legacy_state_db(enabled=migrate_on)
     p = build_arg_parser(cfg)
     args = p.parse_args(argv)
     finalize_store_args(args, cfg)
