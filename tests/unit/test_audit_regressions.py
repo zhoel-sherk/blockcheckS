@@ -221,6 +221,28 @@ def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
     assert "resp.status_code == 206 and clen < 300" in probe
 
 
+def test_nfqws2_daemon_unlinks_temp_conf(tmp_path, monkeypatch):
+    """C1: daemon mkstemp copy must not leak in /tmp after settle."""
+    src = tmp_path / "src.conf"
+    src.write_text("--filter-tcp=443\n", encoding="utf-8")
+    seen: list[str] = []
+
+    def fake_popen(cmd, **kwargs):
+        for part in cmd:
+            if isinstance(part, str) and part.startswith("@") and "bs_nfq_" in part:
+                seen.append(part[1:])
+        return None
+
+    monkeypatch.setattr(ar.sp, "Popen", fake_popen)
+    monkeypatch.setattr(ar.sp, "run", lambda *a, **k: None)
+    monkeypatch.setattr(ar, "wait_nfqws2_ready", lambda *a, **k: 0.01)
+    monkeypatch.setattr(ar, "_inject_debug_and_daemon", lambda *a, **k: None)
+
+    ar._nfqws2_daemon("mock-ns", str(src), kill_existing=False)
+    assert seen, "expected @bs_nfq_* path in Popen cmd"
+    assert not Path(seen[0]).exists(), f"leaked temp conf: {seen[0]}"
+
+
 @pytest.mark.asyncio
 async def test_user_matrix_skips_udp_cli_on_tcp(tmp_path):
     path = tmp_path / "m.txt"

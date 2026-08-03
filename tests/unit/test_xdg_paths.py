@@ -80,3 +80,20 @@ def test_reclaim_sudo_ownership_noop_as_user(tmp_path, monkeypatch):
     monkeypatch.setattr(paths.os, "chown", lambda *a: called.append(a))
     paths.reclaim_sudo_ownership(target)
     assert called == []
+
+
+@pytest.mark.unit
+def test_reclaim_sudo_ownership_warns_on_oserror(tmp_path, monkeypatch, caplog):
+    target = tmp_path / "state.db"
+    target.write_text("x")
+    monkeypatch.setattr(paths.os, "geteuid", lambda: 0)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1000")
+
+    def boom(_path, _uid, _gid):
+        raise OSError("Operation not permitted")
+
+    monkeypatch.setattr(paths.os, "chown", boom)
+    with caplog.at_level("WARNING", logger="blockchecks.engine.paths"):
+        paths.reclaim_sudo_ownership(target)
+    assert any("chown failed" in r.message and str(target) in r.message for r in caplog.records)

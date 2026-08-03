@@ -17,9 +17,12 @@ over the standard XDG vars when present and non-empty.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 def _resolve_xdg(
@@ -126,7 +129,8 @@ def reclaim_sudo_ownership(path: Path) -> None:
         return
     try:
         os.chown(path, uid, gid)
-    except OSError:
+    except OSError as e:
+        log.warning("chown failed for %s: %s", path, e)
         return
     # SQLite sidecars when *path* is the db file
     if path.is_file():
@@ -135,8 +139,8 @@ def reclaim_sudo_ownership(path: Path) -> None:
             if side.exists():
                 try:
                     os.chown(side, uid, gid)
-                except OSError:
-                    pass
+                except OSError as e:
+                    log.warning("chown failed for %s: %s", side, e)
 
 
 def apply_pycache_prefix() -> None:

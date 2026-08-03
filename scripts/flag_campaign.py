@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from getpass import getuser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +50,10 @@ def pkill_nfqws2() -> None:
 
 
 def chown_db(path: Path) -> None:
-    user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "zhoel"
+    user = os.environ.get("SUDO_USER") or os.environ.get("USER") or getuser()
+    if not user:
+        print(f"WARN: chown_db skip (no user) for {path}", flush=True)
+        return
     paths = [path]
     for suf in ("-wal", "-shm", "-journal"):
         side = Path(str(path) + suf)

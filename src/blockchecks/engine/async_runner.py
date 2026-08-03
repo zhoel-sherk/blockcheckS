@@ -154,18 +154,25 @@ def _nfqws2_daemon(
 
     _fd, tmp_conf = _tf.mkstemp(prefix="bs_nfq_", suffix=".conf")
     os.close(_fd)
-    shutil.copy2(config_path, tmp_conf)
-    _inject_debug_and_daemon(tmp_conf, tag=ns_name)
-    if kill_existing:
-        sp.run(
-            ["sudo", "ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2"],
-            stdout=sp.DEVNULL,
-            stderr=sp.DEVNULL,
-        )
-    # @config must be the only argument; daemon/debug are inside the file
-    cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN, f"@{tmp_conf}"]
-    sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
-    return wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
+    try:
+        shutil.copy2(config_path, tmp_conf)
+        _inject_debug_and_daemon(tmp_conf, tag=ns_name)
+        if kill_existing:
+            sp.run(
+                ["sudo", "ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2"],
+                stdout=sp.DEVNULL,
+                stderr=sp.DEVNULL,
+            )
+        # @config must be the only argument; daemon/debug are inside the file
+        cmd = ["sudo", "ip", "netns", "exec", ns_name, NFQWS2_BIN, f"@{tmp_conf}"]
+        sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+        return wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
+    finally:
+        # Daemon has read @config into memory by settle; do not leak /tmp/bs_nfq_*
+        try:
+            os.unlink(tmp_conf)
+        except OSError:
+            pass
 
 
 def _inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:

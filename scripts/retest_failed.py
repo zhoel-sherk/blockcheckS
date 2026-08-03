@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from getpass import getuser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,14 +51,20 @@ def pkill_nfqws2() -> None:
 
 def chown_db(path: Path) -> None:
     """Reclaim root-owned sqlite files for user-space tools."""
-    user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "zhoel"
+    user = os.environ.get("SUDO_USER") or os.environ.get("USER") or getuser()
+    if not user:
+        print(f"WARN: chown_db skip (no user) for {path}", flush=True)
+        return
     paths = [path]
     for suf in ("-wal", "-shm", "-journal"):
         side = Path(str(path) + suf)
         if side.exists():
             paths.append(side)
+    existing = [str(p) for p in paths if p.exists()]
+    if not existing:
+        return
     subprocess.run(
-        ["sudo", "-n", "chown", f"{user}:", *[str(p) for p in paths if p.exists()]],
+        ["sudo", "-n", "chown", f"{user}:", *existing],
         capture_output=True,
         text=True,
     )
