@@ -10,6 +10,8 @@ HOURS="${1:-20}"
 SESSION="${TMUX_SESSION:-bs-full-20h}"
 export BLOCKCHECKS_BLOBS="${BLOCKCHECKS_BLOBS:-$ROOT/blobs}"
 export BLOCKCHECKS_SETTINGS="${BLOCKCHECKS_SETTINGS:-$ROOT/../dpi-tester/settings.ini}"
+# Dead/RKN-blocked SOCKS must not stall googlevideo URL fetch (empty = no fallback).
+export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
 export PYTHONUNBUFFERED=1
 export PATH="$ROOT/.venv/bin:$PATH"
 
@@ -41,6 +43,7 @@ export PATH="$ROOT/.venv/bin:\$PATH"
 export HOME="$HOME"
 export BLOCKCHECKS_BLOBS="$BLOCKCHECKS_BLOBS"
 export BLOCKCHECKS_SETTINGS="$BLOCKCHECKS_SETTINGS"
+export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
 export PYTHONUNBUFFERED=1
 exec bs full \\
   --max-timeh $HOURS \\
@@ -58,9 +61,10 @@ chmod 700 "$RUNNER"
 tmux new-session -d -s "$SESSION" -c "$ROOT" bash -lc "
 set -o pipefail
 source .venv/bin/activate
+export BLOCKCHECKS_PROXY=\"\${BLOCKCHECKS_PROXY-}\"
 LOG='$LOG'
-echo \"=== START \$(date -Is) ulimit_nofile=\$(ulimit -n) ===\" | tee -a \"\$LOG\"
-sudo -E \"$RUNNER\" 2>&1 | tee -a \"\$LOG\"
+echo \"=== START \$(date -Is) ulimit_nofile=\$(ulimit -n) proxy=\${BLOCKCHECKS_PROXY:-none} ===\" | tee -a \"\$LOG\"
+sudo -E env BLOCKCHECKS_PROXY=\"\${BLOCKCHECKS_PROXY-}\" \"$RUNNER\" 2>&1 | tee -a \"\$LOG\"
 ec=\${PIPESTATUS[0]}
 rm -f \"$RUNNER\"
 echo \"=== END \$(date -Is) exit=\$ec ===\" | tee -a \"\$LOG\"

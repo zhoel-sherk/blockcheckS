@@ -12,6 +12,9 @@ import time
 from blockchecks.engine.paths import GV_URL_CACHE_FILE
 
 CACHE_TTL = 3 * 3600  # 3 hours (googlevideo URLs expire in ~6 hours)
+_YTDLP_TIMEOUT = 20  # seconds — dead SOCKS/DPI must not stall the matrix
+_FETCH_FAIL_COOLDOWN = 30 * 60  # after a failed fetch, reuse expired cache
+_fetch_fail_until = 0.0
 
 
 def _signed_url_ip_family(url: str) -> str | None:
@@ -39,6 +42,25 @@ def _cache_path() -> str:
     return str(GV_URL_CACHE_FILE)
 
 
+def _read_cache() -> dict | None:
+    cache_file = _cache_path()
+    if not os.path.exists(cache_file):
+        return None
+    try:
+        with open(cache_file) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError, KeyError):
+        return None
+
+
+def _expired_cache_url() -> str | None:
+    data = _read_cache() or {}
+    url = data.get("url") or ""
+    if url and "googlevideo.com" in url and _signed_url_ip_family(url) != "v6":
+        return url
+    return None
+
+
 def get_fresh_url(
     video_id: str = "dQw4w9WgXcQ",
     format_code: str = "18",
@@ -56,6 +78,8 @@ def get_fresh_url(
     Returns:
         Fresh googlevideo.com URL or None if unavailable.
     """
+    global _fetch_fail_until
+
     cache_file = _cache_path()
 
     # Check cache
@@ -68,6 +92,10 @@ def get_fresh_url(
         except (json.JSONDecodeError, KeyError):
             pass
 
+    # After a failed fetch (dead proxy / DPI), do not re-block the matrix
+    if time.time() < _fetch_fail_until:
+        return _expired_cache_url()
+
     # Fetch fresh URL
     import shutil
 
@@ -79,9 +107,7 @@ def get_fresh_url(
         if os.path.exists(candidate):
             ytdlp = candidate
     if not ytdlp:
-        return None
-    if not ytdlp:
-        return None
+        return _expired_cache_url()
 
     from blockchecks.engine.config import SOCKS5_PROXY
 
@@ -90,6 +116,7 @@ def get_fresh_url(
         proxies.append(proxy)
     else:
         proxies.append(None)
+        # Empty BLOCKCHECKS_PROXY="" disables the default SOCKS fallback
         if SOCKS5_PROXY:
             proxies.append(SOCKS5_PROXY)
 
@@ -106,20 +133,11 @@ def get_fresh_url(
                     },
                     f,
                 )
+            _fetch_fail_until = 0.0
             return url
 
-    # Fallback: return cached URL even if expired (skip IPv6-bound entries)
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file) as f:
-                data = json.load(f)
-            url = data.get("url")
-            if url and _signed_url_ip_family(url) != "v6":
-                return url
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-    return None
+    _fetch_fail_until = time.time() + _FETCH_FAIL_COOLDOWN
+    return _expired_cache_url()
 
 
 def _fetch_ytdlp_url(
@@ -141,7 +159,7 @@ def _fetch_ytdlp_url(
         cmd[1:1] = ["--proxy", proxy]
 
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=_YTDLP_TIMEOUT)
         urls = [
             line.strip()
             for line in r.stdout.splitlines()
