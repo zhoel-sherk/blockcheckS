@@ -142,8 +142,11 @@ async def _audit_domains_parallel(
     """Resolve all domains via UDP+DoH in parallel; return tampered entries."""
     from blockchecks.checkers.dns_secure import audit_domain
 
+    doh = await asyncio.to_thread(pick_working_doh, timeout=timeout)
+
     async def _one(domain: str) -> dict:
-        result = await audit_domain(domain, cache=cache, timeout=timeout)
+        # audit_domain is sync I/O — run off the event loop
+        result = await asyncio.to_thread(audit_domain, domain, doh, timeout)
         return {
             "domain": domain,
             "tampered": result.tampering_detected,
@@ -153,8 +156,7 @@ async def _audit_domains_parallel(
             "doh_server": result.doh_server or "",
         }
 
-    tasks = [_one(d) for d in domains]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*(_one(d) for d in domains))
     tampered = [r for r in results if r["tampered"]]
 
     if store and tampered:
