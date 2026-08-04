@@ -239,3 +239,246 @@ _(see Deferred)_
 | Family gating | `skip_strategy()` = O(1) string checks |
 | Settle profile | `_timing_for()` = dict lookup |
 | Fan-out serialization | JSON ~200 байт, микросекунды |
+
+---
+
+## P0 — Tier 1: Hardcoded timeouts + SQLite прагмы (однодневные)
+
+> **Цель:** понизить все завышенные таймауты и оптимизировать SQLite.
+> **Ожидаемый эффект:** ~4.5 часов экономии на full-скане (100 стратегий × 6 доменов).
+> **Трудозатраты:** ~20 строк кода, 1 час.
+>
+> Бюджет времени (исследование 2026-08-04, субагент `deepseekv4pro_audit`):
+> `settle_slack=15s` — крупнейший единичный потребитель (2ч на full-скан).
+> См. `docs/todo.md#P0-performance-regression` для контекста.
+
+### T1-1 — `settle_slack` в `worker_wall_timeout` (15.0 → 3.0)
+**Файл:** `src/blockchecks/checkers/curl_probe.py:320`  
+**Текущее:** `def worker_wall_timeout(..., settle_slack: float = 15.0)`  
+**Проблема:** Каждый сабпроцесс-проб получает +15s к таймауту «на всякий случай». Python стартует за 0.3-0.8s, nfqws2 селится за 0.05-0.5s. 15s — запас с пятикратным превышением.  
+**Экономия:** 12s × 600 вызовов = **7200s (2ч)** на full-скан.  
+**Что сделать:**
+- [ ] `settle_slack: float = 3.0` в сигнатуре
+- [ ] `max(3.0, float(settle_slack))` вместо `max(5.0, float(settle_slack))` в теле
+- [ ] Проверить что `test_runner.py:140` (settle_slack=5.0) тоже снижен до 3.0
+- [ ] Проверить что `composite_runner.py:168` (settle_slack=10.0) снижен до 3.0
+- [ ] Прогнать 10 стратегий на discord.com — убедиться что нет false-timeout
+
+### T1-2 — nfqws2 settle + stop wait
+**Файлы:** `src/blockchecks/engine/config.py:225-227`, `src/blockchecks/engine/nfqws2.py:260,264`  
+**Текущее:**
+```
+NFQWS2_SETTLE_MAX  = 2.0
+NFQWS2_SETTLE_POLL = 0.1
+NFQWS2_SETTLE_MIN  = 0.05
+# Stop: wait(timeout=3) + sleep(0.3) + wait(timeout=2)
+```
+**Проблема:** nfqws2 в daemon-режиме с `@config` стартует мгновенно (~50-200ms). 2s max + 5s stop wait = 7s оверхеда на каждый цикл стратегии.  
+**Экономия:** 1.5s (settle) + 2.3s (stop) × 400 циклов = **~1520s** на full-скан.  
+**Что сделать:**
+- [ ] `NFQWS2_SETTLE_MAX = 0.5` (вместо 2.0) — env override `BLOCKCHECKS_NFQWS2_SETTLE_MAX` сохранён
+- [ ] `NFQWS2_SETTLE_POLL = 0.05` (вместо 0.1)
+- [ ] `NFQWS2_SETTLE_MIN = 0.0` (вместо 0.05) — nfqws2 не нужен min wait
+- [ ] Stop: `wait(timeout=1)` + `sleep(0.1)` + `wait(timeout=1)` (вместо 3+0.3+2)
+- [ ] Проверить на slow-машине (Pi/ARM) что nfqws2 успевает стартовать за 0.5s
+
+### T1-3 — SQLite performance pragmas
+**Файл:** `src/blockchecks/engine/store/sqlite_store.py` (все `_wrap_connection` и `async with connect` места)  
+**Текущее:** Только `PRAGMA busy_timeout=5000` и `PRAGMA journal_mode=WAL` (в init)  
+**Проблема:** Без `synchronous=OFF` каждый INSERT ждёт fsync. Без `mmap_size` каждый read идёт через read(). Без `cache_size` страничный кеш tiny (2MB default).  
+**Экономия:** **5-10×** на запись в SQLite при батч-режиме.  
+**Что сделать:**
+- [ ] Добавить в `_wrap_connection()` (sqlite_store.py) или в отдельную функцию `_apply_pragmas()`:
+  ```python
+  PRAGMA synchronous = OFF;          # не ждать fsync (безопасно на tmpfs/ramdisk)
+  PRAGMA journal_mode = MEMORY;      # журнал в памяти (не на диске)
+  PRAGMA mmap_size = 268435456;      # 256MB memory-mapped I/O
+  PRAGMA cache_size = -64000;        # 64MB page cache
+  PRAGMA temp_store = MEMORY;        # временные таблицы в памяти
+  ```
+- [ ] Оставить WAL mode в `init()` (нужен для concurrent reads)
+- [ ] Добавить `PRAGMA synchronous=OFF` после WAL в `schema.py:apply_schema()`
+- [ ] Проверить что при краше данные не теряются (flush перед stop)
+
+### T1-4 — Probe timeout: CLI default 5.0 → 3.0
+**Файл:** `src/blockchecks/cli/parser.py:262,344,382,415`  
+**Текущее:** `--timeout default=5.0` на всех командах (tcp, scan, composite, pair)  
+**Проблема:** DPI-блокировка детектируется за 2-3s (SYN+ClientHello либо проходит, либо silent-drop). 5s — запас, который умножается на количество FAIL-тестов.  
+**Экономия:** 2s × 600 FAIL-проб = **~1200s** на full-скан.  
+**Что сделать:**
+- [ ] `default=3.0` в parser.py (4 места)
+- [ ] Оставить `--timeout` флаг для ручного оверрайда (медленные сети, VPN)
+- [ ] Проверить на гео-удалённых серверах (US из РФ через VPN): 3s хватает?
+
+### T1-5 — Subprocess padding: QUIC +10→+5, TCP/UDP +5→+3
+**Файлы:** `src/blockchecks/engine/async_runner.py:318,707`, `src/blockchecks/engine/test_runner.py:296`  
+**Текущее:** QUIC сабпроцесс: `timeout=timeout+10`, TCP/UDP: `timeout=timeout+5`  
+**Проблема:** Python стартует за 0.3-0.8s. +10s для QUIC — двойной запас относительно 8s probe timeout. +5s для TCP/UDP при 3-5s probe — тройной запас.  
+**Экономия:** 5s × 80 QUIC + 2s × 200 TCP/UDP = **~800s** на full-скан.  
+**Что сделать:**
+- [ ] `timeout=timeout+5` для QUIC (вместо +10)
+- [ ] `timeout=timeout+3` для TCP/UDP (вместо +5)
+- [ ] Убедиться что `worker_wall_timeout` перекрывает оставшийся зазор
+
+### T1-6 — Верификационный прогон после T1
+- [ ] `sudo bs full --max-timeh 4 --parallel 4 --fan-out --resume --skip-prolog --skip-ip-block --no-wssize --db-batch 500`
+- [ ] Замерить тест/сек (цель: 0.6-1.0 тест/сек — 3-5× быстрее текущих 0.20)
+- [ ] Проверить что нет false-timeout на медленных стратегиях
+- [ ] Записать результаты в `docs/todo.md` (строка с датой и скоростью)
+
+---
+
+## P1 — Tier 2: TLS-handshake-only + DPI aggression detector + byedpi (недельные)
+
+> **Цель:** структурные ускорения без потери качества.
+> **Ожидаемый эффект:** 10-20× общее ускорение (в комбинации с Tier 1).
+> **Трудозатраты:** ~300 строк кода, 3-4 часа.
+
+### T2-1 — `--head` / `--no-body` флаг: TLS-handshake-only probing
+**Идея:** Для проверки DPI-обхода не нужно скачивать тело ответа. Достаточно TCP connect + TLS handshake + HTTP response headers.  
+**Экономия:** 50-500ms на пробу (загрузка HTML-тела не нужна).  
+**Реализация:**
+- [ ] Добавить `--no-body` / `--head` флаг в CLI parser (scan, pair, full)
+- [ ] В `curl_probe.py:CurlProbeRequest` добавить поле `head_only: bool = False`
+- [ ] В `run_curl_probe()`: если `head_only=True` → `session.head(url)` вместо `session.get(url)`
+- [ ] Content validation: для HEAD запросов `content_ok` всегда True (тела нет)
+- [ ] `read_rate_bps` = 0 для HEAD (нет тела для измерения скорости)
+- [ ] Статус-коды: HEAD возвращает те же 200/301/403 что и GET, проверка не меняется
+- [ ] Совместимость с googlevideo: HEAD не работает для GV (нужен Range), авто-disable для `is_googlevideo_domain()`
+
+### T2-2 — DPI aggression detector: rolling PASS rate + авто-пауза
+**Файл:** новый модуль `src/blockchecks/engine/dpi_throttle.py` (~50 строк)  
+**Идея:** Если DPI (ТСПУ) замечает слишком быстрый поток проб и включает агрессивный режим, ранее-PASS стратегии начинают FAIL'ить. Детектор отслеживает rolling PASS rate и при падении ниже порога — авто-пауза.  
+**Реализация:**
+- [ ] Класс `DpiThrottleDetector`:
+  ```python
+  @dataclass
+  class DpiThrottleDetector:
+      window_size: int = 50          # скользящее окно (последние N проб)
+      pass_rate_threshold: float = 0.3  # порог: если <30% PASS — агрессия
+      pause_seconds: float = 30.0    # пауза при детекте
+      cooldown_multiplier: float = 2.0  # множитель паузы при повторном детекте
+  
+      _history: list[bool] = field(default_factory=list)  # True=PASS, False=FAIL
+      _paused_until: float = 0.0
+      _aggression_count: int = 0
+  
+      def record(self, passed: bool) -> bool:
+          """Записать результат пробы. Вернуть True если нужна пауза."""
+  
+      def should_pause(self) -> bool:
+          """Проверить текущее состояние."""
+  ```
+- [ ] Интеграция в `AsyncTestRunner.test_tcp()`: после каждого `log_tcp()` → `detector.record(success)`
+- [ ] Если `detector.should_pause()` → `log.warning("[DPI AGGRESSION] pausing for %ds", pause)` → `await asyncio.sleep(pause)`
+- [ ] Сброс детектора при ручном `--resume` (новая сессия = новый контекст)
+- [ ] CLI флаг `--dpi-throttle` (bool, default=True) — можно отключить
+- [ ] CLI флаг `--dpi-throttle-window` (int, default=50)
+- [ ] CLI флаг `--dpi-throttle-pause` (float, default=30.0)
+
+**Эвристика:** DPI-агрессия маловероятна на 1-4 проб/сек (см. исследование в T2-3). Детектор — safety net при экспериментах с повышенной скоростью.
+
+### T2-3 — byedpi как опциональный движок (`--engine byedpi`)
+**Идея:** byedpi (ciadpi) поддерживает `--auto` режим: один процесс, все стратегии последовательно на каждом соединении. Не нужен netns, iptables, root. Работает как SOCKS5-прокси.  
+**Скорость:** 10-20× быстрее nfqws2 на переборе стратегий (нет process spawn/settle/teardown).  
+**Архитектура:**
+```
+blockcheckS → старт byedpi ОДИН раз (SOCKS5 на localhost: порт)
+           → для каждой стратегии: curl через прокси
+           → стоп byedpi
+Ноль netns, ноль iptables, ноль root.
+```
+
+**Что сделать:**
+- [ ] Новый модуль `src/blockchecks/engine/byedpi.py` (~200 строк)
+- [ ] Класс `ByedpiManager`:
+  ```python
+  @dataclass
+  class ByedpiManager:
+      port: int                      # SOCKS5 порт (авто-выбор свободного)
+      strategies: list[str]          # список lua-desync строк
+      _proc: subprocess.Popen | None
+      _proxy_url: str                # socks5://127.0.0.1:{port}
+  
+      def start(self) -> str:
+          """Запустить byedpi, вернуть proxy_url."""
+          args = ["byedpi", "-s", str(self.port)]
+          for s in self.strategies:
+              args.extend(["--auto=torst", "--fake", "-1", "--ttl", s])
+          self._proc = subprocess.Popen(args, ...)
+          return f"socks5://127.0.0.1:{self.port}"
+  
+      def stop(self):
+          """Остановить byedpi."""
+  ```
+- [ ] `curl_probe.py:CurlProbeRequest` — добавить поле `proxy: str | None = None`
+- [ ] `run_curl_probe()` — если `proxy` задан, `session.get(url, proxies={"https": proxy})`
+- [ ] CLI флаг `--engine nfqws2|byedpi` (default: nfqws2)
+- [ ] CLI флаг `--byedpi-bin` (путь к бинарнику, default: `which byedpi` или `~/.local/bin/byedpi`)
+- [ ] Проверить что byedpi доступен в system deps check: `ensure_system_deps_or_exit()`
+- [ ] Интеграция в `async_runner.py`:
+  - `_run_tcp_check()` — если engine=byedpi, вместо nfqws2+netns → `asyncio.to_thread(curl с прокси)`
+- [ ] Бенчмарк: `bs scan -d discord.com --generate standard --max 100 --engine nfqws2` vs `--engine byedpi`
+  - Ожидание: nfqws2 ~80s, byedpi ~8s
+
+**Ограничения byedpi:**
+- Только TCP стратегии (fake, hostfake, split). QUIC и UDP — по-прежнему nfqws2.
+- Не все foolings поддерживаются (badsum — нет, tcp_md5 — да, tcp_ts — да)
+- Нужна валидация что стратегия в nfqws2-синтаксисе корректно транслируется в byedpi-аргументы
+- Не тестировался на Fryazino.net — нужен живой прогон
+
+---
+
+## Исследовать (Research / Tier 3)
+
+> **Цель:** долгосрочные идеи, требующие изучения, прототипирования или внешних зависимостей.
+> **Не в спринте.** Может быть переведено в P2/P3 при появлении ресурсов.
+
+### T3-1 — C raw-socket TLS probe (200 строк)
+**Идея:** Вместо curl_cffi → TCP connect + TLS ClientHello + ServerHello detection на сырых сокетах.
+- Без HTTP, без curl, без Python
+- Скорость: **50-100×** на пробу (микросекунды вместо миллисекунд)
+- Ограничение: только packet-level стратегии (fake). Split-based стратегии требуют полного TCP-потока.
+- Язык: C (200 строк), компилируется в ~50KB бинарник
+- Интеграция: subprocess как `probe_tcp_raw <ip> <port> <sni>`
+- **Не сделано:** нужен прототип, замер скорости, сравнение с curl_cffi
+
+### T3-2 — Rust rewrite probe engine (reqwest + tokio)
+**Идея:** Заменить Python probe-слой на Rust.
+- `reqwest` — HTTP-клиент с нативным TLS (rustls/openssl)
+- `tokio` — async runtime
+- Скорость: **50-200×** на пробу (нет GIL, нет интерпретатора)
+- Интеграция: subprocess как `bs-probe --domain X --strategy Y`
+- **Не сделано:** требует отдельного Cargo-проекта, CI интеграции, кросс-компиляции
+
+### T3-3 — eBPF/XDP packet modification
+**Идея:** Модификация пакетов на уровне драйвера (XDP) или TC (eBPF).
+- Полностью в ядре, ноль userspace/kernel переключений
+- Теоретический предел скорости — line rate (гигабиты в секунду)
+- **Не сделано:** требует rewrite всей логики nfqws2 на eBPF (C-подобный, но ограниченный язык). Сложность: месяцы.
+
+### T3-4 — nfqws2 hot-reload патч
+**Идея:** Пропатчить nfqws2 для поддержки смены `--lua-desync=` без рестарта.
+- Текущий SIGHUP перегружает только hostlists/ipsets
+- Нужен Unix-сокет, HTTP API или file-watch для реконфигурации
+- Устранил бы settle overhead per strategy целиком
+- **Не сделано:** требует форка nfqws2, C-разработки, тестирования
+
+### T3-5 — kernel module (youtubeUnblock kmod approach)
+**Идея:** Встроить модификацию пакетов в kernel module.
+- Все стратегии в одном модуле, переключение через /proc или /sys
+- Полное устранение userspace overhead
+- **Не сделано:** kernel-разработка, security review, поддержка разных ядер
+
+### T3-6 — QUIC/HTTP3 probe через встроенный curl
+**Идея:** Текущий QUIC probe использует отдельный сабпроцесс с curl_cffi. Можно ли использовать системный curl с HTTP/3 поддержкой напрямую?
+- `curl --http3-only -o /dev/null -s -w '%{http_code}' https://domain`
+- Без Python, без импорта curl_cffi, чистый subprocess
+- **Не сделано:** проверить доступность `curl --http3` на системе, сравнить скорость
+
+### T3-7 — Multi-queue nfqws2 (pipelining)
+**Идея:** Пока стратегия S тестируется в netns с qnum=200, стратегия S+1 уже стартует в другом netns с qnum=200.
+- Каждый netns изолирован — qnum'ы не конфликтуют между netns
+- Текущая имплементация ждёт завершения ВСЕХ доменов для стратегии S перед стартом S+1
+- Pipelining: overlap settle времени стратегии S+1 с curl-пробами стратегии S
+- **Не сделано:** переписать `_run_tcp_fanout()` на конвейерную обработку
