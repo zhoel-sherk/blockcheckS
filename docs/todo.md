@@ -141,3 +141,101 @@ _(see Deferred)_
 - [x] **H8** `voice_discovery` sing-box under threading.Lock
 - [x] **E3** `nfqws2.start_daemon` (Wave2)
 - [x] `[paths.migrate]` — `./state.db` → XDG on first run (`migrate = true` in example)
+
+---
+
+## P0 — Performance regression (alpha → 1.1.0)
+
+> **Диагноз (deepseekv4pro_audit + subagent, 2026-08-04):**
+> `bs full --max-timeh 20 --parallel 4 --fan-out` даёт 0.20 тест/сек
+> (4,100 тестов за 5.7ч, ETA 22 дня на 379K тестов). Причина —
+> **не изменение per-test hot path** (он идентичен 1.0.2), а комбинация
+> факторов, главный из которых — **wssize retry** удваивает время каждого
+> FAIL-теста (каждый FAIL → второй полный цикл: nfqws2 + subprocess + curl + DB).
+> Остальные факторы — сабпроцесс на каждый тест, per-test DB-коннект,
+> settle-оверхед — добавляют ещё 1.2-1.5× замедления.
+
+### Бюджет времени на один FAIL-тест (TLS 1.2, wssize active)
+
+| Фаза | Время | Cumulative |
+|------|-------|------------|
+| nfqws2 daemon start + settle | 0.15–0.25s | 0.25s |
+| iptables NFQUEUE rule | 0.05–0.10s | 0.35s |
+| Python subprocess + import chain | 1–3s | 2.35s |
+| curl probe (timeout 5s на blocked host) | 5.0s | 7.35s |
+| **wssize retry:** nfqws2 + settle | 0.20s | 7.55s |
+| **wssize retry:** Python subprocess | 1–3s | 9.55s |
+| **wssize retry:** curl probe timeout | 5.0s | 14.55s |
+| DB write (`log_tcp`, ×2 с retry) | 0.2–0.5s | 15.05s |
+| Netns cleanup (`pkill` + `iptables -F`) | 0.1–0.2s | 15.25s |
+| **Total** | **~15–18s** | |
+
+С 4 параллельными воркерами: **4 / 16 = 0.25 тест/сек** — совпадает с наблюдаемыми 0.20.
+
+### Fixes (priority order)
+
+#### P0-1 — Disable wssize retry by default for full scans
+**Файл:** `src/blockchecks/engine/async_runner.py:821-845`  
+**Влияние:** **1.7–2.0×** (каждый FAIL-тест идёт один раз, а не два)  
+**План:**
+- [ ] Добавить `--no-wssize` / `--wssize` флаг в CLI parser (оба `pair` и `full`)
+- [ ] В `async_runner.py` guard: `if try_wssize and not args.no_wssize: ...`
+- [ ] В `main_phases.py:413` и `pair_phases.py:186`: `try_wssize = not getattr(args, "no_wssize", False) and protocol == "tls12"`
+- [ ] Дефолт для `bs full`: `--no-wssize` (без retry — full-скану важна скорость, wssize можно протестировать отдельным скан-левелом)
+- [ ] Дефолт для `bs pair` / `bs scan`: `--wssize` оставить (короткие сканы, качество важнее скорости)
+
+#### P0-2 — Inline curl probe вместо subprocess
+**Файлы:** `src/blockchecks/engine/probe.py:29-62`, `async_runner.py:444,576`  
+**Влияние:** **1.2–1.5×** (убирает `sudo ip netns exec python -m ...` — 1-3s overhead per test)  
+**План:**
+- [ ] Заменить `invoke_curl_probe_worker()` subprocess на `asyncio.to_thread(run_curl_probe, ...)`
+- [ ] `run_curl_probe` уже импортируется в main process (`curl_cffi` загружен)
+- [ ] Graceful fallback: если inline не работает (падение curl_cffi в том же процессе), возвращать subprocess
+- [ ] `_run_tcp_check()` вызывает probe напрямую, а не `sp.run(["sudo", "ip", "netns", "exec", ns, py, "-c", ...])`
+- [ ] Netns isolation не нужна — `_run_tcp_check` и так вызывается через `asyncio.to_thread` внутри контекста netns (iptables уже настроен, nfqws2 уже запущен)
+
+#### P0-3 — DB write batching по умолчанию
+**Файл:** `src/blockchecks/engine/store/sqlite_store.py:167-232`  
+**Влияние:** **1.05–1.10×** (убирает `connect → PRAGMA → COMMIT` per test)  
+**План:**
+- [ ] Сменить дефолт `--db-batch` с `0` на `500` (или `200` для меньшей потери данных при краше)
+- [ ] При batch>0 внутри `flush()` уже есть `BEGIN IMMEDIATE` + rollback — атомарность сохранена
+- [ ] Проверить что `flush()` вызывается в `run_finalize.py` при остановке по таймауту/SIGINT
+
+#### P0-4 — Settle overhead
+**Файл:** `src/blockchecks/engine/nfqws2_settle.py:29-53`, `config.py:224-226`  
+**Влияние:** **1.02–1.05×** (убирает 0.05s sleep + 1-2 pgrep = 0.15-0.25s per test)  
+**План:**
+- [ ] `BLOCKCHECKS_NFQWS2_SETTLE_MIN=0` (nfqws2 в daemon-режиме с `@config` стартует мгновенно)
+- [ ] `BLOCKCHECKS_NFQWS2_SETTLE_POLL=0.05` (вместо 0.1)
+- [ ] Проверить что `wait_nfqws2_ready` при min_wait=0 всё ещё корректно ждёт если nfqws2 ещё не запущен
+
+#### P0-5 — Preflight skip флаги для повторных full-сканов
+**Файл:** `src/blockchecks/engine/preflight.py:118-189`, `main_phases.py:182-204`  
+**Влияние:** стартовое время (10-20 минут на 100+ доменах)  
+**План:**
+- [ ] `--skip-prolog` уже есть ✅
+- [ ] `--skip-port-block` уже есть ✅
+- [ ] `--skip-ip-block` уже есть ✅
+- [ ] `--skip-dns-audit` уже есть ✅
+- [ ] `--skip-baseline` уже есть ✅
+- [ ] Все вместе при повторном full-скане: старт < 5 секунд
+
+#### P0-6 — Быстрый прогон после всех фиксов
+**План:**
+- [ ] `sudo bs full --max-timeh 8 --parallel 4 --fan-out --resume --skip-prolog --skip-ip-block --no-wssize --db-batch 500`
+- [ ] Ожидаемая скорость: **0.6–1.0 тест/сек** (3-5× быстрее текущего)
+- [ ] ETA для 379K тестов при 8ч лимите: ~72K тестов пройдено (19% coverage) — приемлемо для 8ч прогона
+
+### Не-NOT-проблемы (проверено, не являются причиной замедления)
+
+| Фактор | Почему не виноват |
+|--------|-------------------|
+| Preflight | Запускается **один раз** при старте скана, не per-test |
+| CliApp / `build_parser()` ×3 | Только при старте, не per-test |
+| Settings / TOML loading | `@lru_cache(maxsize=1)`, кешируется |
+| DNS resolution | In-memory dict с TTL 3600s, не per-test |
+| ThreadPool conflicts | `ThreadPoolExecutor` только при `repeats > 1 AND parallel_repeats=True` (не default) |
+| Family gating | `skip_strategy()` = O(1) string checks |
+| Settle profile | `_timing_for()` = dict lookup |
+| Fan-out serialization | JSON ~200 байт, микросекунды |
