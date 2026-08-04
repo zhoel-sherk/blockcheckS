@@ -64,6 +64,14 @@ class SqliteRunStore:
         await self.flush()
         reclaim_sudo_ownership(self._path)
 
+    @staticmethod
+    async def _apply_pragmas(db: aiosqlite.Connection) -> None:
+        await db.execute("PRAGMA busy_timeout = 5000")
+        await db.execute("PRAGMA synchronous = OFF")
+        await db.execute("PRAGMA mmap_size = 268435456")
+        await db.execute("PRAGMA cache_size = -64000")
+        await db.execute("PRAGMA temp_store = MEMORY")
+
     async def ensure_strategy(
         self, name: str, proto: str, config_path: str, db: aiosqlite.Connection = None
     ) -> int:
@@ -96,7 +104,7 @@ class SqliteRunStore:
         if db is not None:
             return await _body(db, commit=False)
         async with aiosqlite.connect(self._path) as conn:
-            await conn.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(conn)
             return await _body(conn, commit=True)
 
     async def flush(self) -> None:
@@ -104,7 +112,7 @@ class SqliteRunStore:
         if not self._tcp_pending and not self._udp_pending:
             return
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             await db.execute("BEGIN IMMEDIATE")
             try:
                 ts = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -204,7 +212,7 @@ class SqliteRunStore:
                 await self.flush()
             return
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             sid = await self.ensure_strategy(strategy, proto, config_path or strategy, db=db)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
@@ -255,7 +263,7 @@ class SqliteRunStore:
                 await self.flush()
             return
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             sid = await self.ensure_strategy(strategy, "udp", config_path or strategy, db=db)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
@@ -280,7 +288,7 @@ class SqliteRunStore:
         overall: str,
     ) -> None:
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
                 """INSERT INTO pair_results
@@ -314,7 +322,7 @@ class SqliteRunStore:
         udp_label: str = "",
     ) -> None:
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
                 "INSERT INTO checkpoints(tcp_idx,udp_idx,fingerprint,"
@@ -326,7 +334,7 @@ class SqliteRunStore:
     async def latest_checkpoint(self) -> Checkpoint | None:
         """Return latest Checkpoint or None."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             row = await db.execute(
                 "SELECT tcp_idx,udp_idx,timestamp,note,fingerprint,"
                 "tcp_label,udp_label FROM checkpoints ORDER BY id DESC LIMIT 1"
@@ -355,7 +363,7 @@ class SqliteRunStore:
             return {"total": 0, "passed": 0}
         placeholders = ",".join("?" * len(protos))
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             row = await db.execute(
                 f"""SELECT COUNT(*),
                            SUM(CASE WHEN t.status IN {_WORKING_STATUSES} THEN 1 ELSE 0 END)
@@ -378,7 +386,7 @@ class SqliteRunStore:
             stats = await self.domain_pass_stats(domain, protos=("tcp",))
             return int(stats.get("passed", 0))
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             row = await (
                 await db.execute(
                     f"""SELECT COUNT(*) FROM tcp_results t
@@ -411,7 +419,7 @@ class SqliteRunStore:
 
     async def get_working_proto_details(self, domain: str, proto: str) -> list[dict]:
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.status, t.latency_ms FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
@@ -428,7 +436,7 @@ class SqliteRunStore:
     async def get_completed_pair_keys(self, domain: str) -> set[tuple[str, str]]:
         """All (tcp, udp) pairs already logged for domain (any overall) — resume skip."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 "SELECT DISTINCT tcp_strategy, udp_strategy FROM pair_results WHERE domain=?",
                 (domain,),
@@ -438,7 +446,7 @@ class SqliteRunStore:
     async def has_tcp_result(self, strategy: str, domain: str, proto: str = "tcp") -> bool:
         """True if any tcp_results row exists for strategy×domain (resume skip)."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             row = await db.execute(
                 """SELECT 1 FROM tcp_results t
                    JOIN strategies s ON t.strategy_id = s.id
@@ -451,7 +459,7 @@ class SqliteRunStore:
     async def get_completed_tcp_keys(self, proto: str = "tcp") -> set[tuple[str, str]]:
         """All (strategy_name, domain) pairs already in tcp_results — bulk resume skip."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 """SELECT DISTINCT s.name, t.domain
                    FROM tcp_results t
@@ -464,7 +472,7 @@ class SqliteRunStore:
     async def get_best_tcp(self, domain: str, *, limit: int = 5) -> list[dict]:
         """Latest PASS/THROTTLED per strategy for domain, ordered by latency_ms ASC."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.latency_ms, t.http_code, t.timestamp
                    FROM strategies s
@@ -485,7 +493,7 @@ class SqliteRunStore:
     async def get_best_quic(self, domain: str, *, limit: int = 5) -> list[dict]:
         """Latest PASS/THROTTLED per QUIC strategy for domain, ordered by latency_ms ASC."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.latency_ms, t.http_code, t.timestamp
                    FROM strategies s
@@ -506,7 +514,7 @@ class SqliteRunStore:
     async def get_best_udp(self, *, limit: int = 5) -> list[dict]:
         """Latest PASS/THROTTLED UDP strategies, ordered by latency."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.target, t.latency_ms, t.timestamp
                    FROM strategies s
@@ -527,7 +535,7 @@ class SqliteRunStore:
     async def get_best_pairs(self, domain: str, *, limit: int = 10) -> list[dict]:
         """Latest PASS/THROTTLED pair per (tcp,udp,domain), best by tcp_ms+udp_ms."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 f"""SELECT tcp_strategy, udp_strategy, tcp_ms, udp_ms, overall
                    FROM pair_results p
@@ -549,7 +557,7 @@ class SqliteRunStore:
     async def coverage_score(self, strategy: str) -> dict:
         """PASS domain count + avg latency for a TCP strategy (latest per domain)."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 f"""SELECT t.domain, t.latency_ms FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
@@ -581,7 +589,7 @@ class SqliteRunStore:
     async def get_best_by_coverage(self, *, limit: int = 5) -> list[dict]:
         """TCP strategies ranked by domains_passed DESC, then avg latency ASC."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             # Distinct strategy names that have at least one PASS
             rows = await db.execute(
                 f"""SELECT DISTINCT s.name FROM strategies s
@@ -632,7 +640,7 @@ class SqliteRunStore:
     async def get_strategy_config(self, name: str, proto: str = "tcp") -> str | None:
         """Return stored config_path/strategy string for name."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             row = await db.execute(
                 "SELECT config_path FROM strategies WHERE name=? AND proto=?",
                 (name, proto),
@@ -643,7 +651,7 @@ class SqliteRunStore:
     async def load_scan_weights(self) -> list[tuple[str, float]]:
         """Load AQ4 weight rows (key, weight)."""
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute("SELECT key, weight FROM scan_weights ORDER BY key")
             return [(r[0], float(r[1])) for r in await rows.fetchall()]
 
@@ -651,7 +659,7 @@ class SqliteRunStore:
         """Persist AQ4 weight rows (upsert)."""
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
         async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA busy_timeout = 5000")
+            await SqliteRunStore._apply_pragmas(db)
             for key, weight in rows:
                 await db.execute(
                     """INSERT INTO scan_weights(key, weight, updated_at) VALUES(?,?,?)

@@ -317,7 +317,7 @@ def worker_wall_timeout(
     n_domains: int = 1,
     curl_parallel: int = 1,
     parallel_repeats: bool = False,
-    settle_slack: float = 15.0,
+    settle_slack: float = 3.0,
 ) -> float:
     """Subprocess wall-clock budget for curl probe worker (repeats-aware).
 
@@ -331,7 +331,7 @@ def worker_wall_timeout(
     par = max(1, int(curl_parallel))
     waves = math.ceil(n / par)
     per_wave = float(probe_timeout) if parallel_repeats and r > 1 else float(probe_timeout) * r
-    return per_wave * waves + max(5.0, float(settle_slack))
+    return per_wave * waves + max(3.0, float(settle_slack))
 
 
 def run_curl_probe_with_repeats(

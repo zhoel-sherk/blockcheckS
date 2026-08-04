@@ -259,7 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
     tcp.add_argument(
         "--protocol", default="tls12", choices=["http", "tls12", "tls13", "quic", "udp_voice"]
     )
-    tcp.add_argument("--timeout", type=float, default=5.0)
+    tcp.add_argument("--timeout", type=float, default=3.0)
     tcp.add_argument("--no-hostlist", action="store_true")
     tcp.add_argument("--qnum", type=int, default=200)
     tcp.add_argument("--ns")
@@ -331,6 +331,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable Encrypted Client Hello (force plaintext SNI)",
     )
+    scan.add_argument(
+        "--no-wssize",
+        action="store_true",
+        default=False,
+        help="Skip wssize fallback on TLS 1.2 FAIL (faster, lower coverage)",
+    )
     scan.add_argument("--list-presets", action="store_true", help="List available presets and exit")
     scan.add_argument(
         "--protocol",
@@ -341,14 +347,13 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
     scan.add_argument("--parallel", type=int, default=effective_default_pool_size())
     scan.add_argument("--max", type=int, default=100)
-    scan.add_argument("--timeout", type=float, default=5.0)
+    scan.add_argument("--timeout", type=float, default=3.0)
     scan.add_argument("--user-matrix", default="")
     add_store_args(scan)
     scan.add_argument(
         "--db-batch",
         type=int,
-        default=0,
-        metavar="N",
+        default=500,
         help="Buffer N DB writes before flush (0=immediate, default)",
     )
     scan.add_argument("--resume", action="store_true")
@@ -379,7 +384,7 @@ def build_parser() -> argparse.ArgumentParser:
     composite.add_argument("-c", "--config", required=True, help="Path to composite .conf file")
     composite.add_argument("-d", "--domains", nargs="+", help="Domains to test (default: Discord set)")
     composite.add_argument("--parallel", type=int, default=effective_default_pool_size())
-    composite.add_argument("--timeout", type=float, default=5.0)
+    composite.add_argument("--timeout", type=float, default=3.0)
     add_system_deps_args(composite)
 
     pair = sub.add_parser("pair", help="TCP x UDP pair matrix (async)")
@@ -399,6 +404,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable Encrypted Client Hello (force plaintext SNI)",
     )
+    pair.add_argument(
+        "--no-wssize",
+        action="store_true",
+        default=False,
+        help="Skip wssize fallback on TLS 1.2 FAIL (faster, lower coverage)",
+    )
     pair.add_argument("--list-presets", action="store_true", help="List available presets and exit")
     pair.add_argument(
         "-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})"
@@ -412,7 +423,7 @@ def build_parser() -> argparse.ArgumentParser:
     pair.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
     pair.add_argument("--parallel", type=int, default=effective_default_pool_size())
     pair.add_argument("--max", type=int, default=100)
-    pair.add_argument("--timeout", type=float, default=5.0)
+    pair.add_argument("--timeout", type=float, default=3.0)
     pair.add_argument("--udp-timeout", type=float, default=3.0)
     pair.add_argument("--tcp-only", action="store_true", help="Skip UDP pair testing (TCP scan only)")
     pair.add_argument("-c", "--config", help="Single TCP .conf file")
@@ -448,8 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
     pair.add_argument(
         "--db-batch",
         type=int,
-        default=0,
-        metavar="N",
+        default=500,
         help="Buffer N DB writes before flush (0=immediate, default)",
     )
     pair.add_argument("--resume", action="store_true")

@@ -315,7 +315,7 @@ print(json.dumps({{
             ["sudo", "ip", "netns", "exec", ns_name, py, "-c", check_code],
             capture_output=True,
             text=True,
-            timeout=timeout + 10,
+            timeout=timeout + 5,
         )
         try:
             return json.loads(r.stdout)
@@ -704,7 +704,7 @@ print(json.dumps({{"success": ok, "latency_ms": lat,
             ["sudo", "ip", "netns", "exec", ns_name, py, "-c", probe_code],
             capture_output=True,
             text=True,
-            timeout=timeout + 5,
+            timeout=timeout + 3,
         )
         try:
             return json.loads(r.stdout)

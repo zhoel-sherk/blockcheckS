@@ -293,7 +293,7 @@ class TestRunner:
         if self.ns_name:
             cmd = ["sudo", "ip", "netns", "exec", self.ns_name, *cmd]
 
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 3)
         try:
             return json.loads(r.stdout)
         except json.JSONDecodeError:

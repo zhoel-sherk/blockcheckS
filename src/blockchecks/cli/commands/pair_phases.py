@@ -183,7 +183,7 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         parallel_repeats=parallel_repeats,
         repeats_mode=repeats_mode,
         quick_break=quick_break,
-        try_wssize=getattr(args, "protocol", "tls12") == "tls12",
+        try_wssize=not getattr(args, "no_wssize", False) and getattr(args, "protocol", "tls12") == "tls12",
     )
 
 

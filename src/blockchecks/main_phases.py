@@ -410,7 +410,7 @@ def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
         parallel_repeats=ctx.parallel_repeats,
         repeats_mode=ctx.repeats_mode,
         quick_break=ctx.quick_break,
-        try_wssize=getattr(args, "protocol", "tls12") == "tls12",
+        try_wssize=not getattr(args, "no_wssize", False) and getattr(args, "protocol", "tls12") == "tls12",
         settle_profile=ctx.settle_profile,
     )
 

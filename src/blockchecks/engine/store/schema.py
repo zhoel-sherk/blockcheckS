@@ -120,6 +120,10 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
             await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")
     await db.commit()
     await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA synchronous=OFF")
+    await db.execute("PRAGMA mmap_size=268435456")
+    await db.execute("PRAGMA cache_size=-64000")
+    await db.execute("PRAGMA temp_store=MEMORY")
     await db.execute("PRAGMA busy_timeout=5000")
     await db.execute(
         """CREATE TABLE IF NOT EXISTS scan_weights (

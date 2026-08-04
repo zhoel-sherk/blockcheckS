@@ -120,7 +120,7 @@ def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser
     p.add_argument(
         "--db-batch",
         type=int,
-        default=0,
+        default=500,
         metavar="N",
         help="Buffer N DB writes before flush (0=immediate, default)",
     )
@@ -152,6 +152,8 @@ def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser
     p.add_argument("--timeout", type=float, default=5.0)
     p.add_argument("--udp-timeout", type=float, default=3.0)
     p.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"])
+    p.add_argument("--no-wssize", action="store_true", default=True,
+                   help="Skip wssize fallback on TLS 1.2 FAIL. Default ON for bs full (speed).")
     p.add_argument("--resume", action="store_true", help="Skip strategy x domain already in DB")
     p.add_argument("--tcp-only", action="store_true")
     p.add_argument("--no-quic", action="store_true")

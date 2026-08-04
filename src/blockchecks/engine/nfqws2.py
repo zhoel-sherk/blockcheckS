@@ -246,7 +246,7 @@ class Nfqws2Manager:
         if self._pid is not None:
             try:
                 os.killpg(os.getpgid(self._pid), signal.SIGTERM)
-                time.sleep(0.3)
+                time.sleep(0.1)
                 try:
                     os.killpg(os.getpgid(self._pid), signal.SIGKILL)
                 except (ProcessLookupError, OSError):
@@ -257,11 +257,11 @@ class Nfqws2Manager:
 
         if self._proc is not None:
             try:
-                self._proc.wait(timeout=3)
+                self._proc.wait(timeout=1)
             except Exception:
                 try:
                     self._proc.kill()
-                    self._proc.wait(timeout=2)
+                    self._proc.wait(timeout=1)
                 except Exception:
                     pass
             self._proc = None
