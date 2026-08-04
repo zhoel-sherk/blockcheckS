@@ -391,11 +391,11 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
+    # CliApp.run already dispatched via _run_cli_cmd → command(model) → root.cli_cmd().
     if isinstance(result, int):
         return result
     sub = get_subcommand(result, is_required=False)
     if sub is None:
         print("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full")
         return 2
-    code = result.cli_cmd()
-    return int(code) if code is not None else 0
+    return 0
