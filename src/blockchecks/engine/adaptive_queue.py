@@ -332,15 +332,23 @@ class AdaptiveJobQueue:
             self._rebuild_heap()
         return batch
 
-    async def filter_resume(self, check) -> int:
-        """Drop pending jobs where *check(job)* is True. Returns skip count."""
+    async def filter_resume(self, check, *, chunk_size: int = 512) -> int:
+        """Drop pending jobs where *check(job)* is True. Returns skip count.
+
+        Checks run in chunks — unbounded gather over 100k+ jobs exhausts
+        threads/FDs when *check* opens SQLite (EMFILE / can't start new thread).
+        """
         import asyncio
 
         keys = list(self._pending.keys())
         if not keys:
             return 0
         jobs = [self._pending[k] for k in keys]
-        flags = await asyncio.gather(*(check(j) for j in jobs))
+        step = max(1, int(chunk_size))
+        flags: list[bool] = []
+        for i in range(0, len(jobs), step):
+            chunk = jobs[i : i + step]
+            flags.extend(await asyncio.gather(*(check(j) for j in chunk)))
         skipped = 0
         for key, drop in zip(keys, flags, strict=True):
             if not drop:

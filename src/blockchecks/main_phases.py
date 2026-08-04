@@ -451,8 +451,14 @@ def print_optional_phases_skip(ctx: FullRunContext) -> None:
 async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     args = ctx.args
 
+    # Bulk-load completed keys once — per-job has_tcp_result × 100k+ jobs
+    # opens that many aiosqlite threads and hits RLIMIT (EMFILE / can't start thread).
+    completed_tcp: set[tuple[str, str]] = set()
+    if args.resume and ctx.db is not None:
+        completed_tcp = await ctx.db.get_completed_tcp_keys()
+
     async def _resume_job(job):
-        return bool(args.resume and await ctx.db.has_tcp_result(job.item.label, job.domain))
+        return (job.item.label, job.domain) in completed_tcp
 
     queue, skipped = await build_adaptive_queue(
         ctx.tcp_items,

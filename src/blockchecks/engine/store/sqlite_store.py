@@ -448,6 +448,19 @@ class SqliteRunStore:
             )
             return await row.fetchone() is not None
 
+    async def get_completed_tcp_keys(self, proto: str = "tcp") -> set[tuple[str, str]]:
+        """All (strategy_name, domain) pairs already in tcp_results — bulk resume skip."""
+        async with aiosqlite.connect(self._path) as db:
+            await db.execute("PRAGMA busy_timeout = 5000")
+            rows = await db.execute(
+                """SELECT DISTINCT s.name, t.domain
+                   FROM tcp_results t
+                   JOIN strategies s ON t.strategy_id = s.id
+                   WHERE s.proto=?""",
+                (proto,),
+            )
+            return {(r[0], r[1]) for r in await rows.fetchall()}
+
     async def get_best_tcp(self, domain: str, *, limit: int = 5) -> list[dict]:
         """Latest PASS/THROTTLED per strategy for domain, ordered by latency_ms ASC."""
         async with aiosqlite.connect(self._path) as db:
