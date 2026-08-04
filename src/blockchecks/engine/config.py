@@ -154,15 +154,25 @@ def effective_default_pool_size(*, mem_soft_cap_kb: int = 1_500_000) -> int:
     except (OSError, ValueError):
         avail = None
     if avail is not None and avail < mem_soft_cap_kb and base > 1:
-        import sys
-
-        print(
-            f"  WARNING: MemAvailable={avail} kB < {mem_soft_cap_kb}; "
-            f"default --parallel capped {base} → 1 (override with --parallel)",
-            file=sys.stderr,
-        )
+        _warn_mem_low(avail, mem_soft_cap_kb, base)
         return 1
     return base
+
+
+_mem_warned: bool = False
+
+
+def _warn_mem_low(avail: int, cap: int, base: int) -> None:
+    global _mem_warned
+    if _mem_warned:
+        return
+    _mem_warned = True
+    import sys
+    print(
+        f"  WARNING: MemAvailable={avail} kB < {cap}; "
+        f"default --parallel capped {base} → 1 (override with --parallel)",
+        file=sys.stderr,
+    )
 
 # Sing-box SOCKS5 proxy
 SOCKS5_PROXY = _env_or("BLOCKCHECKS_PROXY", "socks5://127.0.0.1:11080")

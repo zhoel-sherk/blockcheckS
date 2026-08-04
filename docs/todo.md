@@ -482,3 +482,23 @@ blockcheckS → старт byedpi ОДИН раз (SOCKS5 на localhost: пор
 - Текущая имплементация ждёт завершения ВСЕХ доменов для стратегии S перед стартом S+1
 - Pipelining: overlap settle времени стратегии S+1 с curl-пробами стратегии S
 - **Не сделано:** переписать `_run_tcp_fanout()` на конвейерную обработку
+
+---
+
+## Alpha VPS regressions (Selectel 111.88.227.92, 2026-08-04)
+
+Обнаружено при установке и тестовых прогонах на чистом Ubuntu 24.04 x86_64.
+
+### Fixed (in-tree)
+
+- [x] **VPS-1** `MemAvailable` warning spam — `effective_default_pool_size()` печатал предупреждение при КАЖДОМ вызове (8-10 раз за `bs scan`). Добавлен `_mem_warned` флаг в `config.py`. Файл: `src/blockchecks/engine/config.py:158-168`.
+- [ ] **VPS-2** Scan duplication — `bs scan` выполняет два полных прохода (стратегии генерируются дважды, TCP Phase дважды). Причина: `_run_scan` → `asyncio.run(cmd_pair(ns))` вызывается дважды через CliApp dispatch. Нужен фикс в `cliapp.py`.
+
+### Observations
+
+- **curl-cffi 0.16.0** на VPS (новее локальной 0.15.0) — тесты зелёные, совместимость OK
+- **python3-venv** на Ubuntu 24.04 требует `--upgrade-deps` флаг (иначе pip не ставится)
+- **Selectel IP** — чистый, DPI не блокирует (youtube.com 3/3 PASS, discord.com 3/3 PASS)
+- **web.telegram.org** — IP-блокировка (0/3 PASS, все timeout 8s)
+- **460/465 тестов** зелёные на VPS (5 skipped — sudo/netns related)
+- **zapret2 auto-fetch** — скачал `v1.0.4` с GitHub, установил в `~/.local/share/blockcheckS/zapret2/`
