@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from dataclasses import dataclass, field
 
@@ -30,12 +31,15 @@ class PreflightOptions:
     skip_ip_block: bool = False
     skip_nfqws2_check: bool = False
     abort_on_nfqws2: bool = False
+    skip_dns_audit: bool = False
     force: bool = False
     verify_content: bool = False
     dns_cache: DnsRunCache | None = None
+    store: object = None
 
     @classmethod
-    def from_args(cls, args, *, dns_cache: DnsRunCache | None = None) -> PreflightOptions:
+    def from_args(cls, args, *, dns_cache: DnsRunCache | None = None,
+                  store: object = None) -> PreflightOptions:
         """Build options from CLI namespace (pair/main shared)."""
         return cls(
             unblocked_dom=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
@@ -46,9 +50,11 @@ class PreflightOptions:
             skip_ip_block=getattr(args, "skip_ip_block", False),
             skip_nfqws2_check=getattr(args, "skip_nfqws2_check", False),
             abort_on_nfqws2=getattr(args, "abort_on_nfqws2", False),
+            skip_dns_audit=getattr(args, "skip_dns_audit", False),
             force=getattr(args, "force", False),
             verify_content=getattr(args, "prolog_content", False),
             dns_cache=dns_cache,
+            store=store,
         )
 
 
@@ -119,7 +125,62 @@ def run_preflight(
     domains: list[str],
     opts: PreflightOptions | None = None,
 ) -> PreflightReport:
-    """Run startup preflight chain; set ``exit_code`` on hard failures."""
+    """Run startup preflight chain (sync wrapper for non-async callers).
+
+    Prefer ``await run_preflight_async()`` in async contexts.
+    """
+    import asyncio
+    return asyncio.run(run_preflight_async(domains, opts))
+
+
+async def _audit_domains_parallel(
+    domains: list[str],
+    cache: Any,
+    timeout: float,
+    store: Any = None,
+) -> list[dict]:
+    """Resolve all domains via UDP+DoH in parallel; return tampered entries."""
+    from blockchecks.checkers.dns_secure import audit_domain
+
+    async def _one(domain: str) -> dict:
+        result = await audit_domain(domain, cache=cache, timeout=timeout)
+        return {
+            "domain": domain,
+            "tampered": result.tampering_detected,
+            "udp_ips": ", ".join(result.udp_ips) if result.udp_ips else "",
+            "doh_ips": ", ".join(result.doh_ips) if result.doh_ips else "",
+            "verdict": result.verdict,
+            "doh_server": result.doh_server or "",
+        }
+
+    tasks = [_one(d) for d in domains]
+    results = await asyncio.gather(*tasks)
+    tampered = [r for r in results if r["tampered"]]
+
+    if store and tampered:
+        for r in tampered:
+            await store.write_dns_audit_log(
+                r["domain"], r["udp_ips"], r["doh_ips"],
+                r["verdict"], r["doh_server"],
+            )
+        # Overwrite cache entries with real DoH IPs
+        for r in tampered:
+            ips = [ip.strip() for ip in r["doh_ips"].split(",") if ip.strip()]
+            if ips and cache:
+                cache.set(r["domain"], ips)
+
+        print(f"\n  [DNS TAMPERED] {len(tampered)}/{len(domains)} domains:")
+        for r in tampered:
+            print(f"    {r['domain']}: UDP={r['udp_ips'] or '-'}  →  DoH={r['doh_ips']}")
+
+    return tampered
+
+
+async def run_preflight_async(
+    domains: list[str],
+    opts: PreflightOptions | None = None,
+) -> PreflightReport:
+    """Run startup preflight chain including parallel DNS audit."""
     o = opts or PreflightOptions()
     report = PreflightReport(baseline_domain=o.unblocked_dom or UNBLOCKED_DOM)
     cache = o.dns_cache
@@ -147,6 +208,10 @@ def run_preflight(
             report.exit_code = 1
             report.error = detail
             return report
+
+    # ── One-time parallel DNS audit (UDP vs DoH) ──
+    if not o.skip_dns_audit and cache and o.store:
+        await _audit_domains_parallel(domains, cache, o.timeout, store=o.store)
 
     ref = (o.unblocked_dom or UNBLOCKED_DOM).rstrip(".")
     for domain in domains:

@@ -53,7 +53,7 @@ async def cmd_pair(args):
         return domain_rc
 
     pool_size = args.parallel or effective_default_pool_size()
-    dns_result = prepare_dns_and_preflight(args, preset_domains)
+    dns_result = await prepare_dns_and_preflight(args, preset_domains)
     if dns_result.exit_code is not None:
         return dns_result.exit_code
 

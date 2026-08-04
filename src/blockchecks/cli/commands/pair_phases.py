@@ -35,7 +35,7 @@ from blockchecks.engine.domain_loader import (
 )
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
-from blockchecks.engine.preflight import PreflightOptions, run_preflight
+from blockchecks.engine.preflight import PreflightOptions
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.run_finalize import (
     maybe_export_configs,
@@ -135,7 +135,7 @@ class DnsPreflightResult:
     exit_code: int | None = None
 
 
-def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPreflightResult:
+async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPreflightResult:
     """DNS + preflight; exit_code set on failure or prolog skip."""
     domains_for_dns = list(
         dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))
@@ -154,9 +154,11 @@ def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPreflightRe
     test_domains = list(
         dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))
     )
-    preflight = run_preflight(
+    from blockchecks.engine.preflight import run_preflight_async
+
+    preflight = await run_preflight_async(
         test_domains,
-        PreflightOptions.from_args(args, dns_cache=dns_cache),
+        PreflightOptions.from_args(args, dns_cache=dns_cache, store=None),
     )
     if preflight.exit_code:
         print(f"{Fore.RED}ERROR: preflight failed: {preflight.error}{RESET}")

@@ -99,6 +99,16 @@ WHERE t.id = (
 )
 GROUP BY domain
 ORDER BY last_test DESC;
+
+CREATE TABLE IF NOT EXISTS dns_audit_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain TEXT NOT NULL,
+    udp_ips TEXT NOT NULL DEFAULT '',
+    doh_ips TEXT NOT NULL DEFAULT '',
+    verdict TEXT NOT NULL DEFAULT '',
+    doh_server TEXT DEFAULT '',
+    timestamp TEXT NOT NULL DEFAULT ''
+);
 """
 
 

@@ -65,7 +65,7 @@ async def run_full(args) -> int:
     if dns_rc:
         return dns_rc
 
-    domains, primary, preflight_rc = run_preflight_filter(args, domains, args.domain or domains[0], dns_cache)
+    domains, primary, preflight_rc = await run_preflight_filter(args, domains, args.domain or domains[0], dns_cache, db)
     if preflight_rc is not None:
         return preflight_rc
 

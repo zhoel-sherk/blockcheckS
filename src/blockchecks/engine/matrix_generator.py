@@ -73,12 +73,15 @@ class MatrixGenerator:
             self.register("user", UserMatrixGenerator(user_matrix))
             sources = ["user"]
 
+        import time as _time
+
         all_items = []
         for src_name in sources:
             self._ensure_registered(src_name)
             gen = self._generators.get(src_name)
             if not gen:
                 continue
+            t1 = _time.perf_counter()
             items = await gen.generate(
                 protocol=protocol,
                 state_db=state_db,
@@ -87,6 +90,8 @@ class MatrixGenerator:
                 max_count=max_count // len(sources) or max_count,
                 run_set=run_set,
             )
+            dt = _time.perf_counter() - t1
+            print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
         # Dedup by strategy string while preserving order
@@ -131,6 +136,8 @@ class MatrixGenerator:
         user_matrix: str = "",
     ) -> list[StrategyItem]:
         """Generate UDP strategies."""
+        import time as _time
+
         if not sources:
             sources = ["custom", "standard_udp"]
 
@@ -148,6 +155,7 @@ class MatrixGenerator:
             if not gen:
                 continue
             proto = "udp_voice"
+            t1 = _time.perf_counter()
             items = await gen.generate(
                 protocol=proto,
                 state_db=state_db,
@@ -156,6 +164,8 @@ class MatrixGenerator:
                 max_count=max_count // len(sources) or max_count,
                 run_set=None,
             )
+            dt = _time.perf_counter() - t1
+            print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
         seen: set[str] = set()
@@ -178,6 +188,8 @@ class MatrixGenerator:
         run_set: set = None,
     ) -> list[StrategyItem]:
         """Generate HTTP/3 QUIC strategies (BC2-10)."""
+        import time as _time
+
         if not sources:
             sources = ["custom", "standard_quic"]
 
@@ -191,6 +203,7 @@ class MatrixGenerator:
             gen = self._generators.get(src_name)
             if not gen:
                 continue
+            t1 = _time.perf_counter()
             items = await gen.generate(
                 protocol="quic",
                 state_db=state_db,
@@ -199,6 +212,8 @@ class MatrixGenerator:
                 max_count=max_count // len(sources) or max_count,
                 run_set=run_set,
             )
+            dt = _time.perf_counter() - t1
+            print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
         seen: set[str] = set()

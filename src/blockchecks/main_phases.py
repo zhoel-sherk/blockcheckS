@@ -34,7 +34,7 @@ from blockchecks.engine.domain_loader import (
 )
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
-from blockchecks.engine.preflight import PreflightOptions, run_preflight
+from blockchecks.engine.preflight import PreflightOptions
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.run_finalize import (
     finalize_db_and_weights,
@@ -179,15 +179,18 @@ def prepare_run_dns(args, domains: list[str]) -> tuple[Any, list[Any], int | Non
     return dns_cache, dns_audits, None
 
 
-def run_preflight_filter(
+async def run_preflight_filter(
     args,
     domains: list[str],
     primary: str,
     dns_cache: Any,
+    store: Any = None,
 ) -> tuple[list[str], str, int | None]:
-    preflight = run_preflight(
+    from blockchecks.engine.preflight import run_preflight_async
+
+    preflight = await run_preflight_async(
         domains,
-        PreflightOptions.from_args(args, dns_cache=dns_cache),
+        PreflightOptions.from_args(args, dns_cache=dns_cache, store=store),
     )
     if preflight.exit_code:
         print(f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")

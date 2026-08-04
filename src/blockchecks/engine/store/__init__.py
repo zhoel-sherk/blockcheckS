@@ -29,6 +29,10 @@ class RunStateStore(Protocol):
     async def log_udp(
         self, strategy: str, target: str, status: str, latency_ms: float = 0, **kwargs: Any
     ) -> None: ...
+    async def write_dns_audit_log(
+        self, domain: str, udp_ips: str, doh_ips: str, verdict: str,
+        doh_server: str = "", timestamp: str = "",
+    ) -> None: ...
     async def log_pair(
         self,
         tcp: str,
