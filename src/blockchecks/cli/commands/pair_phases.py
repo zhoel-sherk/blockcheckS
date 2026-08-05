@@ -110,10 +110,7 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
     if loaded.skipped:
         print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
     if not preset_domains:
-        print(
-            f"  {Fore.RED}ERROR: preset empty after denylist "
-            f"(use --allow-unsafe-domains){RESET}"
-        )
+        print(f"  {Fore.RED}ERROR: preset empty after denylist (use --allow-unsafe-domains){RESET}")
         return preset_domains, 1
     return preset_domains, None
 
@@ -185,7 +182,8 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         parallel_repeats=parallel_repeats,
         repeats_mode=repeats_mode,
         quick_break=quick_break,
-        try_wssize=not getattr(args, "no_wssize", False) and getattr(args, "protocol", "tls12") == "tls12",
+        try_wssize=not getattr(args, "no_wssize", False)
+        and getattr(args, "protocol", "tls12") == "tls12",
     )
 
 
@@ -228,9 +226,7 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
     from blockchecks.checkers.voice_dns import (
         check_discover_mutex,
         discover_dns_alive,
-        pair_log_domain,
         positive_discover_count,
-        resolve_voice_targets,
     )
 
     mutex_err = check_discover_mutex(
@@ -408,9 +404,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
         loader = StrategyLoader()
         tcp_configs = loader.from_config_dir(args.configs_dir or CONFIGS_DIR)
         tcp_items = [
-            StrategyItem(
-                label=os.path.basename(c).replace(".conf", ""), strategy=c, is_config=True
-            )
+            StrategyItem(label=os.path.basename(c).replace(".conf", ""), strategy=c, is_config=True)
             for c in tcp_configs
             if "udp_voice" not in c.lower()
         ]
@@ -446,8 +440,7 @@ def print_pair_banner(
 
     print(f"\n  {CYAN}blockcheckS — {'Pair Matrix' if not args.tcp_only else 'TCP Scan'}{RESET}")
     print(
-        f"  Domain:     {', '.join(domains_to_test[:5])}"
-        f"{'...' if len(domains_to_test) > 5 else ''}"
+        f"  Domain:     {', '.join(domains_to_test[:5])}{'...' if len(domains_to_test) > 5 else ''}"
     )
     print(f"  TCP:        {len(tcp_items)} strategies")
     print(f"  UDP:        {len(udp_items)} strategies")
@@ -473,8 +466,7 @@ async def resolve_resume_checkpoint(args, db, fp: str) -> tuple[Any | None, int 
                 print(f"  checkpoint fp={resume_from.fingerprint} current fp={fp}")
                 return None, 1
             print(
-                f"  {YELLOW}Resuming after "
-                f"{resume_from.tcp_label}+{resume_from.udp_label}{RESET}"
+                f"  {YELLOW}Resuming after {resume_from.tcp_label}+{resume_from.udp_label}{RESET}"
             )
         else:
             print(f"  {YELLOW}No checkpoint found — starting fresh{RESET}")
@@ -577,8 +569,7 @@ async def run_adaptive_pair_phase(
     m = aq_result.metrics
     if m.time_to_first_pass is not None:
         print(
-            f"  AQ first PASS: {m.time_to_first_pass:.1f}s  "
-            f"fan-out enqueued: {m.fanout_enqueued}"
+            f"  AQ first PASS: {m.time_to_first_pass:.1f}s  fan-out enqueued: {m.fanout_enqueued}"
         )
 
     pairs: list = []

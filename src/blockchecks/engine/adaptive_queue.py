@@ -360,4 +360,3 @@ class AdaptiveJobQueue:
         if skipped:
             self._rebuild_heap()
         return skipped
-

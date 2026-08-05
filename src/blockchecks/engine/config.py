@@ -57,6 +57,7 @@ SING_BOX_CONFIG = os.environ.get(
     "BLOCKCHECKS_SINGBOX_CONFIG", os.path.expanduser("~/.config/sing-box/config.json")
 )
 
+
 # Python interpreter for netns subprocess probes
 def _resolve_python() -> str:
     explicit = os.environ.get("BLOCKCHECKS_PYTHON")
@@ -130,6 +131,7 @@ def apply_tool_paths(
 
     LUA_INIT_SCRIPTS = [os.path.join(LUA_INIT_DIR, f) for f in _LUA_SCRIPT_NAMES]
 
+
 # Network isolation
 NFQUEUE_TCP = int(_env_or("BLOCKCHECKS_QNUM_TCP", "200"))
 NFQUEUE_UDP = int(_env_or("BLOCKCHECKS_QNUM_UDP", "201"))
@@ -168,14 +170,17 @@ def _warn_mem_low(avail: int, cap: int, base: int) -> None:
         return
     _mem_warned = True
     import sys
+
     print(
         f"  WARNING: MemAvailable={avail} kB < {cap}; "
         f"default --parallel capped {base} → 1 (override with --parallel)",
         file=sys.stderr,
     )
 
+
 # Sing-box SOCKS5 proxy
 SOCKS5_PROXY = _env_or("BLOCKCHECKS_PROXY", "socks5://127.0.0.1:11080")
+
 
 # Secure DNS (Phase 9 SD)
 def _env_bool(key: str, default: bool) -> bool:
@@ -195,6 +200,7 @@ def refresh_secure_dns_from_env() -> None:
     global SECURE_DNS_DEFAULT, DEFAULT_DOH_SERVER
     SECURE_DNS_DEFAULT = _env_bool("BLOCKCHECKS_SECURE_DNS", True)
     DEFAULT_DOH_SERVER = os.environ.get("BLOCKCHECKS_DOH_SERVER", "").strip()
+
 
 DOH_SERVERS = [
     ("https://cloudflare-dns.com/dns-query", "Cloudflare"),

@@ -41,7 +41,9 @@ async def test_export_shortlist_json_file(tmp_path):
     out_path = tmp_path / "shortlist.json"
     db = StateDB(str(db_path))
     await db.init()
-    await db.log_tcp("s1", "discord.com", "PASS", 100.0, 200, config_path="fake:blob=stun:repeats=6")
+    await db.log_tcp(
+        "s1", "discord.com", "PASS", 100.0, 200, config_path="fake:blob=stun:repeats=6"
+    )
     await export_shortlist_json(db_path=str(db_path), domain="discord.com", output=str(out_path))
     data = json.loads(out_path.read_text())
     assert data["schema"] == SCHEMA

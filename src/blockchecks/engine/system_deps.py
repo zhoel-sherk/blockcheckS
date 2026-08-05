@@ -469,9 +469,7 @@ def verify_system_dependencies(
             except Exception as e:
                 report.warnings.append(f"lua missing {missing_lua}; fetch failed: {e}")
         if missing_lua:
-            report.warnings.append(
-                f"lua scripts missing under {lua_dir}: {', '.join(missing_lua)}"
-            )
+            report.warnings.append(f"lua scripts missing under {lua_dir}: {', '.join(missing_lua)}")
 
     # Blobs
     blobs_dir = os.environ.get("BLOCKCHECKS_BLOBS") or cfg.BLOB_DIR

@@ -10,7 +10,9 @@ from blockchecks.engine._probe_worker import main, run_probe
 
 @pytest.mark.unit
 def test_run_probe_returns_json_shape():
-    with patch("blockchecks.checkers.udp_voice.voice_udp_probe", return_value=(True, 12.3, "ok", "stun")):
+    with patch(
+        "blockchecks.checkers.udp_voice.voice_udp_probe", return_value=(True, 12.3, "ok", "stun")
+    ):
         data = run_probe("1.2.3.4", 50004, 1.0)
     assert data == {
         "success": True,

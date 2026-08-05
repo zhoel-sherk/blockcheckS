@@ -59,7 +59,9 @@ def _read_bundle(paths: list[str]) -> str:
     return "\n".join(chunks)
 
 
-@pytest.mark.parametrize("command", ["tcp", "udp", "scan", "pair", "composite", "bench-settle", "stop"])
+@pytest.mark.parametrize(
+    "command", ["tcp", "udp", "scan", "pair", "composite", "bench-settle", "stop"]
+)
 def test_no_dead_cli_flags(command: str) -> None:
     from blockchecks.cli.parser import build_parser
 
@@ -74,9 +76,7 @@ def test_no_dead_cli_flags(command: str) -> None:
     dests = _subparser_dests(build_parser()).get(command, set())
     src = _read_bundle(readers)
     dead = sorted(
-        d
-        for d in dests
-        if d not in ignore and d not in allow and not _dest_mentioned(src, d)
+        d for d in dests if d not in ignore and d not in allow and not _dest_mentioned(src, d)
     )
     assert not dead, (
         f"dead CLI dests on `{command}` (declared but never read in readers):\n"

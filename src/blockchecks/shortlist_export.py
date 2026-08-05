@@ -93,9 +93,14 @@ async def build_shortlist_entries(
         tcp_s, udp_s, quic_s = await collect_export_strategies(
             db, domain=primary, limit=limit, domains=domains, common_only=len(domains) > 1
         )
-        tcp_rows = [{"label": f"export_{i}", "strategy": s, "domains_pass": []} for i, s in enumerate(tcp_s)]
+        tcp_rows = [
+            {"label": f"export_{i}", "strategy": s, "domains_pass": []} for i, s in enumerate(tcp_s)
+        ]
         udp_rows = [{"label": f"export_{i}", "strategy": s} for i, s in enumerate(udp_s)]
-        quic_rows = [{"label": f"export_{i}", "strategy": s, "domains_pass": []} for i, s in enumerate(quic_s)]
+        quic_rows = [
+            {"label": f"export_{i}", "strategy": s, "domains_pass": []}
+            for i, s in enumerate(quic_s)
+        ]
 
     return {
         "schema": SCHEMA,

@@ -104,8 +104,7 @@ class CodeQualityVisitor(ast.NodeVisitor):
             self._emit(
                 CQ_NEST,
                 node,
-                f"глубина вложенности {self._depth}/{MAX_NESTING} — "
-                "Guard Clauses / вынеси функцию",
+                f"глубина вложенности {self._depth}/{MAX_NESTING} — Guard Clauses / вынеси функцию",
             )
 
     def _leave_block(self) -> None:
@@ -225,8 +224,7 @@ class CodeQualityVisitor(ast.NodeVisitor):
             self._emit(
                 CQ_ELIF,
                 node,
-                f"цепочка if/elif из {elif_count + 1} веток — "
-                "match/case или Mapping-диспетчер",
+                f"цепочка if/elif из {elif_count + 1} веток — match/case или Mapping-диспетчер",
             )
 
     def _check_collapsible_if(self, node: ast.If) -> None:

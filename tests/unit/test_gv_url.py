@@ -8,10 +8,7 @@ from blockchecks.checkers.youtube_url import (
 
 
 def test_videoplayback_host():
-    url = (
-        "https://rr3---sn-abc.googlevideo.com/videoplayback?"
-        "expire=123&sig=xyz"
-    )
+    url = "https://rr3---sn-abc.googlevideo.com/videoplayback?expire=123&sig=xyz"
     assert videoplayback_host(url) == "rr3---sn-abc.googlevideo.com"
 
 
@@ -30,4 +27,3 @@ def test_cache_rejects_ipv6_bound_url():
 
     url = "https://rr3---sn-abc.googlevideo.com/videoplayback?ip=2a0c%3A1%3A2%3A3"
     assert not _cache_entry_valid({"timestamp": time.time(), "url": url})
-

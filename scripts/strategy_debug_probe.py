@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Probe nfqws2 strategy execution with --debug=@logfile (no full scan)."""
+
 from __future__ import annotations
 
 import os
@@ -42,14 +43,12 @@ def build_conf(strategy: str, debug_log: Path) -> Path:
     for m in re.finditer(r"blob=(\w+)", strategy):
         name = m.group(1)
         cand = sorted(
-            f for f in os.listdir(BLOB_DIR)
+            f
+            for f in os.listdir(BLOB_DIR)
             if name in f and f.endswith(".bin") and "quic_initial" not in f
         )
         if not cand:
-            cand = sorted(
-                f for f in os.listdir(BLOB_DIR)
-                if name in f and f.endswith(".bin")
-            )
+            cand = sorted(f for f in os.listdir(BLOB_DIR) if name in f and f.endswith(".bin"))
         if cand:
             lines.append(f"--blob={name}:@{BLOB_DIR}/{cand[0]}")
     lines.append(f"--lua-desync={strategy}")
@@ -70,9 +69,23 @@ def run_one(strategy: str) -> dict:
 
     # iptables + nfqws2
     subprocess.run(
-        ["sudo", "-n", "iptables", "-I", "OUTPUT", "1",
-         "-p", "tcp", "--dport", "443", "-j", "NFQUEUE",
-         "--queue-num", str(QNUM), "--queue-bypass"],
+        [
+            "sudo",
+            "-n",
+            "iptables",
+            "-I",
+            "OUTPUT",
+            "1",
+            "-p",
+            "tcp",
+            "--dport",
+            "443",
+            "-j",
+            "NFQUEUE",
+            "--queue-num",
+            str(QNUM),
+            "--queue-bypass",
+        ],
         check=False,
     )
     proc = subprocess.Popen(
@@ -85,7 +98,8 @@ def run_one(strategy: str) -> dict:
     alive = proc.poll() is None
     curl = subprocess.run(
         [
-            "sudo", "-n",
+            "sudo",
+            "-n",
             os.environ.get(
                 "BLOCKCHECKS_PYTHON",
                 "/home/zhoel/workspace/blockcheckS/.venv/bin/python",
@@ -108,9 +122,22 @@ def run_one(strategy: str) -> dict:
     except ProcessLookupError:
         pass
     subprocess.run(
-        ["sudo", "-n", "iptables", "-D", "OUTPUT",
-         "-p", "tcp", "--dport", "443", "-j", "NFQUEUE",
-         "--queue-num", str(QNUM), "--queue-bypass"],
+        [
+            "sudo",
+            "-n",
+            "iptables",
+            "-D",
+            "OUTPUT",
+            "-p",
+            "tcp",
+            "--dport",
+            "443",
+            "-j",
+            "NFQUEUE",
+            "--queue-num",
+            str(QNUM),
+            "--queue-bypass",
+        ],
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

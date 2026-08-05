@@ -147,9 +147,7 @@ def _doh_wire_query(
         return [], str(e)[:80], (time.perf_counter() - start) * 1000
 
 
-def doh_query(
-    domain: str, doh_url: str, timeout: float = 5.0
-) -> tuple[list[str], str, float]:
+def doh_query(domain: str, doh_url: str, timeout: float = 5.0) -> tuple[list[str], str, float]:
     """DoH resolve: JSON first, wire POST fallback."""
     ips, err, lat = _doh_json_query(domain, doh_url, timeout)
     if ips:
@@ -236,8 +234,7 @@ def audit_domain(
                 result.tampering_detected = True
                 result.verdict = "tampered"
                 result.description = (
-                    f"UDP {', '.join(result.udp_ips[:3])} vs "
-                    f"DoH {', '.join(result.doh_ips[:3])}"
+                    f"UDP {', '.join(result.udp_ips[:3])} vs DoH {', '.join(result.doh_ips[:3])}"
                 )
     return result
 
@@ -363,4 +360,3 @@ def prepare_dns_for_run(
 
     cache.prime(domains, doh_url=url)
     return cache, results, 0
-

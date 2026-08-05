@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Minimal OpenCode serve client smoke test."""
+
 import json
-import urllib.request
-import urllib.error
 import sys
+import urllib.error
+import urllib.request
 
 BASE = "http://127.0.0.1:4096"
 DIR = "/home/zhoel/workspace/blockcheckS"
@@ -55,8 +56,22 @@ def main():
     # send message - try a few endpoint shapes
     msg = {"parts": [{"type": "text", "text": "Say only the word pong. Do not use tools."}]}
     candidates = [
-        ("POST", f"/session/{sid}/message", {"message": msg, "model": {"providerID": "opencode-go", "modelID": "deepseek-v4-flash"}}),
-        ("POST", f"/session/{sid}/prompt", {"parts": [{"type": "text", "text": "Say only: pong"}], "model": {"providerID": "opencode-go", "modelID": "deepseek-v4-flash"}}),
+        (
+            "POST",
+            f"/session/{sid}/message",
+            {
+                "message": msg,
+                "model": {"providerID": "opencode-go", "modelID": "deepseek-v4-flash"},
+            },
+        ),
+        (
+            "POST",
+            f"/session/{sid}/prompt",
+            {
+                "parts": [{"type": "text", "text": "Say only: pong"}],
+                "model": {"providerID": "opencode-go", "modelID": "deepseek-v4-flash"},
+            },
+        ),
         ("POST", f"/session/{sid}/message", msg),
     ]
     for method, path, body in candidates:

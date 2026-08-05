@@ -88,9 +88,7 @@ def load_token() -> str | None:
     except OSError:
         return None
     if mode & 0o002:
-        print(
-            f"[discovery] WARNING: refusing world-writable settings file: {settings}"
-        )
+        print(f"[discovery] WARNING: refusing world-writable settings file: {settings}")
         return None
     import configparser as cp
 
@@ -289,8 +287,7 @@ async def _discover_via_gateway(token: str) -> dict | None:
 
         if result:
             print(
-                f"[discovery] Voice server: {result['ip']}:{result['port']} "
-                f"(SSRC={result['ssrc']})"
+                f"[discovery] Voice server: {result['ip']}:{result['port']} (SSRC={result['ssrc']})"
             )
         return result or None
 

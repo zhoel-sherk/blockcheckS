@@ -29,9 +29,7 @@ def test_parse_sha256sum():
 def test_sha256_file(tmp_path):
     p = tmp_path / "f.bin"
     p.write_bytes(b"hello")
-    assert sd.sha256_file(p) == (
-        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-    )
+    assert sd.sha256_file(p) == ("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
 
 
 def test_resolve_nfqws2_order(tmp_path, monkeypatch):

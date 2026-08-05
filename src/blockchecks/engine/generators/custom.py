@@ -56,7 +56,6 @@ class CustomListGenerator(StrategyGenerator):
         return items[:max_count]
 
 
-
 class ConfigFileGenerator(StrategyGenerator):
     """Load pre-built .conf files."""
 
@@ -92,7 +91,6 @@ class ConfigFileGenerator(StrategyGenerator):
             if scan_level == "single" and items:
                 break
         return items[:max_count]
-
 
 
 class UserMatrixGenerator(StrategyGenerator):
@@ -138,12 +136,14 @@ class UserMatrixGenerator(StrategyGenerator):
                         )
                     ):
                         continue
-                if protocol == "udp_voice" and "tcp" in strategy.lower() and "udp" not in strategy.lower():
+                if (
+                    protocol == "udp_voice"
+                    and "tcp" in strategy.lower()
+                    and "udp" not in strategy.lower()
+                ):
                     continue
                 label = strategy.split("\n", 1)[0][:50].replace(" ", "_").replace(":", "_")
-                items.append(
-                    StrategyItem(label=label, strategy=strategy, protocol=protocol)
-                )
+                items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
                 if scan_level == "single" and items:
                     break
         return items[:max_count]

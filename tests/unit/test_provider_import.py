@@ -56,7 +56,9 @@ def test_shortlist_v1_import_presets(tmp_path):
     shortlist = {
         "schema": "blockchecks.shortlist/v1",
         "domains": ["discord.com"],
-        "tcp": [{"label": "w", "strategy": "fake:blob=stun:repeats=6", "domains_pass": ["discord.com"]}],
+        "tcp": [
+            {"label": "w", "strategy": "fake:blob=stun:repeats=6", "domains_pass": ["discord.com"]}
+        ],
         "udp": [],
         "quic": [],
     }
@@ -64,4 +66,3 @@ def test_shortlist_v1_import_presets(tmp_path):
     path.write_text(json.dumps(shortlist))
     result = import_shortlist(path, out_dir=tmp_path, prefix="provider")
     assert "tls12" in result["presets"]
-

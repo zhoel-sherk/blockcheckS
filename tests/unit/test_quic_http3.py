@@ -47,7 +47,9 @@ def test_build_quic_nfqws_config_inline():
 
 
 def test_build_quic_nfqws_config_cli():
-    strat = "--filter-udp=443 --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
+    strat = (
+        "--filter-udp=443 --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
+    )
     lines = _build_quic_nfqws_lines(strat)
     text = "\n".join(lines)
     assert "--filter-udp=443" in text

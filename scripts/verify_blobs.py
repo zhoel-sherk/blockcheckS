@@ -22,7 +22,7 @@ def main() -> int:
     blobs_dir = os.environ.get("BLOCKCHECKS_BLOBS", BLOB_DIR)
     ok = fail = skip = 0
     print(f"verify_blobs: {blobs_dir} ({len(BLOB_ALIAS_MAP)} aliases)")
-    for alias, fname in sorted(BLOB_ALIAS_MAP.items()):
+    for alias, _fname in sorted(BLOB_ALIAS_MAP.items()):
         path = resolve_blob_path(alias, blobs_dir)
         if not path or not os.path.isfile(path):
             if alias in _OPTIONAL:

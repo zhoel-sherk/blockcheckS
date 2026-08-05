@@ -49,9 +49,7 @@ def test_fanout_batches_chunk_size():
 
 
 def test_fanout_allowed_family_gates():
-    ok, reason = fanout_allowed(
-        curl_parallel=4, use_family_gates=True, domains=["discord.com"]
-    )
+    ok, reason = fanout_allowed(curl_parallel=4, use_family_gates=True, domains=["discord.com"])
     assert ok is False
     assert "family" in reason
 

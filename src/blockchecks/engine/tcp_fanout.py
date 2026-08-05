@@ -91,11 +91,7 @@ def fanout_allowed(
         return False, "curl_parallel<=1"
     if use_family_gates:
         return False, "family_gates active (per-domain need_* chain)"
-    special = [
-        d
-        for d in domains
-        if curl_profile(d, protocol=protocol).special
-    ]
+    special = [d for d in domains if curl_profile(d, protocol=protocol).special]
     if special:
         return True, (
             f"special domains run solo: {', '.join(special[:3])}"

@@ -34,4 +34,3 @@ class StrategyGenerator(ABC):
         max_count: int = 100,
         run_set: set = None,
     ) -> list[StrategyItem]: ...
-

@@ -58,9 +58,7 @@ async def test_checkpoint_roundtrip_labels_and_fingerprint(temp_db: StateDB):
 @pytest.mark.asyncio
 async def test_resume_skip_uses_completed_pair_keys(mock_runner, temp_db):
     """Resume skips only pairs already logged; checkpoint idx is UX-only."""
-    await temp_db.log_pair(
-        "tcp_a", "u_a", "d", True, False, True, 10, 0, 8, "PASS"
-    )
+    await temp_db.log_pair("tcp_a", "u_a", "d", True, False, True, 10, 0, 8, "PASS")
     cp = Checkpoint(
         tcp_idx=0,
         udp_idx=0,

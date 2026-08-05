@@ -13,6 +13,7 @@ DEFAULT_DOMAINS_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage-tcp.txt")
 FULL_COVERAGE_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage.txt")
 DENYLIST_FILE = os.path.join(DOMAINS_PRESET_DIR, "denylist.txt")
 
+
 @dataclass(frozen=True)
 class DenylistEntry:
     domain: str

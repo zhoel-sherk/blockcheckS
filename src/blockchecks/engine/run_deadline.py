@@ -55,7 +55,10 @@ def add_time_limit_args(parser: argparse.ArgumentParser, *, include_export: bool
 
 def validate_time_limit_args(parser: argparse.ArgumentParser, args) -> None:
     """Exit with parser error if both time flags are set."""
-    if getattr(args, "max_timeh", None) is not None and getattr(args, "max_timem", None) is not None:
+    if (
+        getattr(args, "max_timeh", None) is not None
+        and getattr(args, "max_timem", None) is not None
+    ):
         parser.error("use only one of --max-timeh or --max-timem")
 
 
@@ -109,8 +112,7 @@ class RunDeadline:
             self.stop_event.set()
             # Visible in campaign/smoke logs; loops poll stop_event after each job
             print(
-                f"  [deadline] fired after {self.budget_label()} "
-                f"— stop_event set (graceful stop)",
+                f"  [deadline] fired after {self.budget_label()} — stop_event set (graceful stop)",
                 flush=True,
             )
 

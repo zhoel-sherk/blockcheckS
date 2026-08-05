@@ -164,7 +164,9 @@ def test_preset_domains_used():
 
 def test_disable_ech_in_curl_probe_source():
     """GV-3: ECH off via Session.curl.setopt, never options= kwarg."""
-    probe = Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "checkers" / "curl_probe.py"
+    probe = (
+        Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "checkers" / "curl_probe.py"
+    )
     src = probe.read_text(encoding="utf-8")
     assert "CURLOPT_ECH" in src
     assert "CurlOpt.ECH" in src
@@ -436,7 +438,9 @@ async def test_multi_fake_m5_reverse_and_repeat_pairs():
     gen = StandardGenerator(strategy_types=["multi_fake"])
     items = await gen.generate("tls12", scan_level="fast", max_count=500)
     strategies = {i.strategy for i in items}
-    assert any("fake:blob=max_ru:repeats=6" in s and "fake:blob=stun:repeats=6" in s for s in strategies)
+    assert any(
+        "fake:blob=max_ru:repeats=6" in s and "fake:blob=stun:repeats=6" in s for s in strategies
+    )
     assert any(
         "fake:blob=stun:repeats=6" in s and "fake:blob=max_ru:repeats=3" in s for s in strategies
     )
@@ -486,4 +490,3 @@ async def test_db_batch_flush(temp_db: SqliteRunStore):
     await temp_db.flush()
     stats = await temp_db.domain_pass_stats("discord.com")
     assert stats["passed"] == 5
-

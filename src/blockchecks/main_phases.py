@@ -164,8 +164,7 @@ def load_run_domains(args) -> tuple[list[str], str, int | None]:
     domains = loaded.domains
     if not domains:
         print(
-            f"{RED}ERROR: no domains left after denylist filter "
-            f"(use --allow-unsafe-domains){RESET}"
+            f"{RED}ERROR: no domains left after denylist filter (use --allow-unsafe-domains){RESET}"
         )
         return [], domains_file, 1
     if loaded.skipped:
@@ -241,9 +240,7 @@ def build_full_run_context(
         tcp_sources=split_sources(args.tcp_sources),
         udp_sources=split_sources(args.udp_sources),
         quic_sources=split_sources(args.quic_sources),
-        http_sources=split_sources(
-            getattr(args, "http_sources", "custom,standard_http")
-        ),
+        http_sources=split_sources(getattr(args, "http_sources", "custom,standard_http")),
         max_n=cap_strategy_count(args.max),
         scan_level=args.scan_level,
         parallel=args.parallel,
@@ -260,9 +257,7 @@ def print_full_run_banner(ctx: FullRunContext) -> None:
     print(f"\n  {CYAN}blockcheckS — FULL run{RESET}")
     print(f"  Domains:    {len(ctx.domains)} from {ctx.domains_file}")
     print(f"  Primary:    {ctx.primary}")
-    print(
-        f"  TCP src:    {ctx.tcp_sources}  level={ctx.scan_level}  max={args.max or 'uncapped'}"
-    )
+    print(f"  TCP src:    {ctx.tcp_sources}  level={ctx.scan_level}  max={args.max or 'uncapped'}")
     if not getattr(args, "no_http", False):
         print(f"  HTTP src:   {ctx.http_sources}")
     print(f"  UDP src:    {ctx.udp_sources}")
@@ -421,7 +416,8 @@ def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
         parallel_repeats=ctx.parallel_repeats,
         repeats_mode=ctx.repeats_mode,
         quick_break=ctx.quick_break,
-        try_wssize=not getattr(args, "no_wssize", False) and getattr(args, "protocol", "tls12") == "tls12",
+        try_wssize=not getattr(args, "no_wssize", False)
+        and getattr(args, "protocol", "tls12") == "tls12",
         settle_profile=ctx.settle_profile,
     )
 
@@ -504,8 +500,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     m = ctx.aq_result.metrics
     if m.time_to_first_pass is not None:
         print(
-            f"  AQ first PASS: {m.time_to_first_pass:.1f}s  "
-            f"fan-out enqueued: {m.fanout_enqueued}"
+            f"  AQ first PASS: {m.time_to_first_pass:.1f}s  fan-out enqueued: {m.fanout_enqueued}"
         )
     if m.half_mark_jobs and ctx.aq_result.passed:
         pct = 100.0 * m.passes_before_half / ctx.aq_result.passed
@@ -620,9 +615,7 @@ async def run_tcp_coverage_phase(ctx: FullRunContext) -> None:
         print(f"\n  {CYAN}[2/{ctx.steps}] TCP × coverage skipped{RESET}")
         return
 
-    print(
-        f"\n  {CYAN}[2/{ctx.steps}] TCP × coverage ({len(ctx.domains)} domains)...{RESET}"
-    )
+    print(f"\n  {CYAN}[2/{ctx.steps}] TCP × coverage ({len(ctx.domains)} domains)...{RESET}")
     progress = TcpProgress(total=ctx.total_tcp_jobs)
 
     if ctx.use_adaptive:
@@ -645,8 +638,7 @@ async def run_tcp_coverage_phase(ctx: FullRunContext) -> None:
         )
         if zero_domains:
             print(
-                f"  {YELLOW}WARN: 0% PASS after {zero_warn}+ runs: "
-                f"{', '.join(zero_domains)}{RESET}"
+                f"  {YELLOW}WARN: 0% PASS after {zero_warn}+ runs: {', '.join(zero_domains)}{RESET}"
             )
 
 
@@ -732,12 +724,7 @@ async def discover_voice_endpoint(ctx: FullRunContext) -> tuple[str, int]:
 async def run_quic_phase(ctx: FullRunContext) -> None:
     args = ctx.args
     quic_step = _quic_step(ctx)
-    if (
-        not ctx.stop.is_set()
-        and ctx.quic_items
-        and not args.tcp_only
-        and not args.no_quic
-    ):
+    if not ctx.stop.is_set() and ctx.quic_items and not args.tcp_only and not args.no_quic:
         quic_timeout = getattr(args, "quic_timeout", args.timeout)
         print(
             f"\n  {CYAN}[{quic_step}/{ctx.steps}] HTTP/3 QUIC "
@@ -753,9 +740,7 @@ async def run_quic_phase(ctx: FullRunContext) -> None:
             nonlocal quic_done, quic_skipped, quic_passed
             if ctx.stop.is_set():
                 return
-            if args.resume and await ctx.db.has_tcp_result(
-                item.label, domain, proto="quic"
-            ):
+            if args.resume and await ctx.db.has_tcp_result(item.label, domain, proto="quic"):
                 quic_skipped += 1
                 quic_done += 1
                 return
@@ -791,9 +776,7 @@ async def run_pairs_phase(
         covered = await ctx.db.get_best_by_coverage(limit=args.pair_max)
         if covered:
             labels = {c["strategy"] for c in covered}
-            selected = [
-                i for i in ctx.tcp_items if i.label in labels or i.strategy in labels
-            ]
+            selected = [i for i in ctx.tcp_items if i.label in labels or i.strategy in labels]
             details = [
                 by_status.get(
                     i.label,
@@ -804,9 +787,7 @@ async def run_pairs_phase(
         by_label = {i.label: i for i in ctx.tcp_items}
         for i in ctx.tcp_items:
             by_label.setdefault(i.strategy, i)
-        tcp_results = tcp_results_from_details(by_label, details, ctx.primary)[
-            : args.pair_max
-        ]
+        tcp_results = tcp_results_from_details(by_label, details, ctx.primary)[: args.pair_max]
         if tcp_results:
             resume_from = None
             if args.resume:
@@ -822,9 +803,7 @@ async def run_pairs_phase(
             targets = resolve_voice_targets(voice_ip, voice_port, ctx.voice_eps)
             multi = len(targets) > 1
             if multi:
-                print(
-                    f"  {YELLOW}Multi-EP fan-out: {len(targets)} endpoints{RESET}"
-                )
+                print(f"  {YELLOW}Multi-EP fan-out: {len(targets)} endpoints{RESET}")
             pairs = []
             for ip, port in targets:
                 log_dom = pair_log_domain(ctx.primary, ip, port, multi=multi)
@@ -914,9 +893,7 @@ async def export_and_summarize(ctx: FullRunContext) -> int:
             "passes_before_half": ctx.aq_result.metrics.passes_before_half,
             "half_mark_jobs": ctx.aq_result.metrics.half_mark_jobs,
         }
-    summary_path = write_run_summary(
-        getattr(ctx.args, "out_dir", None) or "logs", summary_payload
-    )
+    summary_path = write_run_summary(getattr(ctx.args, "out_dir", None) or "logs", summary_payload)
     print(f"  Run summary: {summary_path}")
 
     return run_exit_code(ctx.stop.is_set(), ctx.deadline, ctx.signal_interrupted)

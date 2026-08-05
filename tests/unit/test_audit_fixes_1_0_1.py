@@ -87,12 +87,8 @@ async def test_get_best_pairs_includes_throttled(tmp_path):
     await db.log_pair(
         "tcp_a", "udp_a", "discord.com", True, True, True, 100.0, 0.0, 50.0, "THROTTLED"
     )
-    await db.log_pair(
-        "tcp_b", "udp_b", "discord.com", True, True, True, 80.0, 0.0, 40.0, "PASS"
-    )
-    await db.log_pair(
-        "tcp_c", "udp_c", "discord.com", False, False, False, 0.0, 0.0, 0.0, "FAIL"
-    )
+    await db.log_pair("tcp_b", "udp_b", "discord.com", True, True, True, 80.0, 0.0, 40.0, "PASS")
+    await db.log_pair("tcp_c", "udp_c", "discord.com", False, False, False, 0.0, 0.0, 0.0, "FAIL")
     best = await db.get_best_pairs("discord.com", limit=10)
     overalls = {r["overall"] for r in best}
     assert "THROTTLED" in overalls

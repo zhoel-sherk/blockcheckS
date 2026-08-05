@@ -275,8 +275,13 @@ class SqliteRunStore:
             await db.commit()
 
     async def write_dns_audit_log(
-        self, domain: str, udp_ips: str, doh_ips: str, verdict: str,
-        doh_server: str = "", timestamp: str = "",
+        self,
+        domain: str,
+        udp_ips: str,
+        doh_ips: str,
+        verdict: str,
+        doh_server: str = "",
+        timestamp: str = "",
     ) -> None:
         ts = timestamp or time.strftime("%Y-%m-%dT%H:%M:%S")
         async with aiosqlite.connect(self._path) as db:

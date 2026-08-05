@@ -105,7 +105,10 @@ def test_provider_summary_to_shortlist_shape():
     sl = provider_summary_to_shortlist(
         {
             "provider_id": "x",
-            "custom_strategies": {"tls12": ["fake:repeats=6"], "udp_voice": ["fake:blob=discord_udp:repeats=6"]},
+            "custom_strategies": {
+                "tls12": ["fake:repeats=6"],
+                "udp_voice": ["fake:blob=discord_udp:repeats=6"],
+            },
         }
     )
     assert sl["schema"] == "blockchecks.shortlist/v1"

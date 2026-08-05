@@ -157,18 +157,14 @@ async def run(
                 continue
             payload = {
                 "mode": "single",
-                "request": probe_request_dict(
-                    CurlProbeRequest(domain=domain, timeout=timeout)
-                ),
+                "request": probe_request_dict(CurlProbeRequest(domain=domain, timeout=timeout)),
                 "repeats": 1,
                 "parallel_repeats": False,
                 "repeats_mode": "fast",
                 "quick_break": False,
             }
             wall = worker_wall_timeout(timeout, 1, settle_slack=3.0)
-            data = await asyncio.to_thread(
-                invoke_curl_probe_worker, ns_name, PYTHON, payload, wall
-            )
+            data = await asyncio.to_thread(invoke_curl_probe_worker, ns_name, PYTHON, payload, wall)
 
             result = TcpTestResult(item=item, domain=domain)
             result.success = data.get("success", False)

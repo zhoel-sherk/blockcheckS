@@ -72,11 +72,7 @@ def apply_parser_defaults(parser: argparse.ArgumentParser, cfg: dict[str, Any]) 
         apply_tool_paths()
     # Apply secure_dns defaults onto argparse when flags absent
     secure = cfg.get("secure_dns") or {}
-    if (
-        isinstance(secure, dict)
-        and secure.get("doh_server")
-        and "doh_server" not in defaults
-    ):
+    if isinstance(secure, dict) and secure.get("doh_server") and "doh_server" not in defaults:
         defaults["doh_server"] = str(secure["doh_server"])
     if defaults:
         parser.set_defaults(**defaults)

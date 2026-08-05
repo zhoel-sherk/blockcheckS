@@ -49,6 +49,7 @@ def _cache_file_path() -> str:
 def _ensure_cache_dir() -> None:
     VOICE_DNS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+
 # Parallel probes through host NFQUEUE+bootstrap; >4 tends to queue-bypass
 # drop replies (remote Fryazino: 8→0/64 alive, 4→3/4 ip_discovery).
 STUN_PROBE_CONCURRENCY = 4
@@ -93,7 +94,9 @@ async def _resolve_host(host: str, sem: asyncio.Semaphore | None = None) -> str 
         if sem:
             async with sem:
                 loop = asyncio.get_event_loop()
-                addrs = await loop.getaddrinfo(host, 0, family=socket.AF_INET, type=socket.SOCK_DGRAM)
+                addrs = await loop.getaddrinfo(
+                    host, 0, family=socket.AF_INET, type=socket.SOCK_DGRAM
+                )
         else:
             loop = asyncio.get_event_loop()
             addrs = await loop.getaddrinfo(host, 0, family=socket.AF_INET, type=socket.SOCK_DGRAM)
@@ -105,7 +108,8 @@ async def _resolve_host(host: str, sem: asyncio.Semaphore | None = None) -> str 
 
 
 async def resolve_finland_range(
-    start: int = DNS_RANGE[0], end: int = DNS_RANGE[1],
+    start: int = DNS_RANGE[0],
+    end: int = DNS_RANGE[1],
     max_concurrent: int = 32,
 ) -> dict[str, list[str]]:
     """Bulk-resolve finland{N}.discord.gg in parallel.

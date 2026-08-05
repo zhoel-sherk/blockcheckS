@@ -71,10 +71,7 @@ def cmd_udp(args):
                     f"({multi_eps[0].get('hostname', '')}){RESET}"
                 )
                 for ep in multi_eps[1:3]:
-                    print(
-                        f"  {GREEN}  + {ep['ip']}:{ep['port']} "
-                        f"({ep.get('hostname', '')}){RESET}"
-                    )
+                    print(f"  {GREEN}  + {ep['ip']}:{ep['port']} ({ep.get('hostname', '')}){RESET}")
                 if len(multi_eps) > 3:
                     print(f"  {GREEN}  ... and {len(multi_eps) - 3} more{RESET}")
             else:
@@ -105,9 +102,7 @@ def cmd_udp(args):
 
     targets = resolve_voice_targets(voice_ip, voice_port, multi_eps)
     print("\n  blockcheckS — UDP Voice test")
-    print(
-        f"  Targets: {len(targets)}  Items: {len(configs)}  Timeout: {args.timeout}s\n"
-    )
+    print(f"  Targets: {len(targets)}  Items: {len(configs)}  Timeout: {args.timeout}s\n")
     runner = TestRunner(ns_name=args.ns)
     passed_any = 0
     total_time = 0.0

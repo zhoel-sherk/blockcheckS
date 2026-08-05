@@ -52,9 +52,7 @@ def test_elf_machine_reads_local_python():
     import sys
 
     tag = _elf_machine(sys.executable)
-    assert tag in {"x86_64", "aarch64", "arm", "x86", None} or (
-        tag and tag.startswith("em_")
-    )
+    assert tag in {"x86_64", "aarch64", "arm", "x86", None} or (tag and tag.startswith("em_"))
 
 
 @pytest.mark.unit
@@ -110,6 +108,7 @@ def test_composite_has_queue_bypass():
             break
     else:
         raise AssertionError("multiport 50000:50100 not found")
+
 
 @pytest.mark.unit
 def test_pi2_preset_exists():

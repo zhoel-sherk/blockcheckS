@@ -102,9 +102,7 @@ async def test_adaptive_pass_boosts_family_weight():
 
 @pytest.mark.asyncio
 async def test_run_adaptive_tcp_stops_on_stop_event():
-    items = [
-        StrategyItem(label=f"s{i}", strategy=f"fake:blob=stun:repeats={i}") for i in range(5)
-    ]
+    items = [StrategyItem(label=f"s{i}", strategy=f"fake:blob=stun:repeats={i}") for i in range(5)]
     queue = AdaptiveJobQueue.build(items, ["discord.com"], epsilon=0.0)
     runner = _FakeRunner()
     stop = asyncio.Event()

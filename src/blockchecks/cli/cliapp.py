@@ -30,6 +30,7 @@ def normalize_cli_args(argv: list[str]) -> list[str]:
         return ["stop", *argv[1:]]
     return argv
 
+
 # Handler registry — subcommand models intentionally have no cli_cmd (VPS-2).
 _CMD_HANDLERS: dict[str, Any] = {}
 _CLI_EXIT_CODE: int = 0
@@ -247,7 +248,9 @@ def _run_scan(model: BaseModel) -> int:
     gen = getattr(ns, "generate", "")
     if gen:
         ns.tcp_sources = (
-            gen if gen != _GENERATE_DEFAULT else (getattr(ns, "tcp_sources", None) or _GENERATE_DEFAULT)
+            gen
+            if gen != _GENERATE_DEFAULT
+            else (getattr(ns, "tcp_sources", None) or _GENERATE_DEFAULT)
         )
     ns.generate = bool(gen)
     ns.tcp_only = True
@@ -275,7 +278,9 @@ def _run_composite(model: BaseModel) -> int:
     if code:
         return code
     return asyncio.run(
-        run_composite(ns.config, getattr(ns, "domains", None), getattr(ns, "parallel", 2), ns.timeout)
+        run_composite(
+            ns.config, getattr(ns, "domains", None), getattr(ns, "parallel", 2), ns.timeout
+        )
     )
 
 
@@ -333,12 +338,8 @@ def build_cli_root() -> type[BaseSettings]:
         "bench-settle": _parser_blurb(
             "bench-settle", raw_blurbs, "Benchmark nfqws2 settle × curl timeout"
         ),
-        "full": _parser_blurb(
-            "full", raw_blurbs, "Full matrix campaign (TCP/UDP/HTTP/QUIC)"
-        ),
-        "stop": _parser_blurb(
-            "stop", raw_blurbs, "Gracefully stop active full/scan/pair run"
-        ),
+        "full": _parser_blurb("full", raw_blurbs, "Full matrix campaign (TCP/UDP/HTTP/QUIC)"),
+        "stop": _parser_blurb("stop", raw_blurbs, "Gracefully stop active full/scan/pair run"),
     }
 
     TcpCmd = _make_cmd_model(

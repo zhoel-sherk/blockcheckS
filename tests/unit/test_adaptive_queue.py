@@ -46,9 +46,7 @@ def test_adaptive_queue_priority_boost_aq1_aq4():
     # Fresh queue with pre-boosted weights: boosted family must pop first (ε=0)
     w = ScanWeights()
     w.family[fam] = 5.0
-    q2 = AdaptiveJobQueue.build(
-        [item_a, item_b], ["discord.com"], weights=w, epsilon=0.0, seed=1
-    )
+    q2 = AdaptiveJobQueue.build([item_a, item_b], ["discord.com"], weights=w, epsilon=0.0, seed=1)
     nxt = q2.pop()
     assert nxt is not None
     assert nxt.family == fam

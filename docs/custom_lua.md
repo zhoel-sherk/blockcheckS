@@ -795,11 +795,12 @@ lines.append("--lua-desync=scan_pick")
 class Nfqws2Ipc:
     def __init__(self, ns_name: str):
         self.base = Path(f"/dev/shm/blockchecks/{ns_name}")
+
     def set_strategy(self, id: int, lua_line: str, gen: int):
         (self.base / "strategy.id").write_text(f"{id}\n{gen}\n")
         (self.base / "strategy.cmd").write_text(lua_line)
-    def drain_events(self) -> list[dict]:
-        ...
+
+    def drain_events(self) -> list[dict]: ...
 ```
 
 ### 9.3 async_runner branch

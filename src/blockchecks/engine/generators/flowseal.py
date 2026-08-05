@@ -106,22 +106,27 @@ class FlowsealGenerator(StrategyGenerator):
         pat0 = pats[0]
 
         # Seeds — one of each technique so low max_count still covers families
-        yield "flw_multi_seed", (
-            f"fake:blob={b0}:repeats=6:tcp_ts=-1000\nfake:blob={b1}:repeats=6:tcp_ts=-1000"
+        yield (
+            "flw_multi_seed",
+            (f"fake:blob={b0}:repeats=6:tcp_ts=-1000\nfake:blob={b1}:repeats=6:tcp_ts=-1000"),
         )
         yield "flw_split_seed", f"multisplit:pos=1:seqovl=568:seqovl_pattern={pat0}"
         yield "flw_exp_seqovl480", f"multisplit:pos=1:seqovl=480:seqovl_pattern={pat0}"
         yield "flw_fds_seed", "fakedsplit:pos=1:pattern=0x00000000:tcp_ts=-1000:repeats=1"
         yield "flw_hf_seed", "hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=1"
-        yield "flw_md_seed", (
-            "fake:blob=0x00000000:repeats=11:badsid:tls_mod=rnd,dupsid,sni=www.google.com\n"
-            "multidisorder:pos=1,midsld"
+        yield (
+            "flw_md_seed",
+            (
+                "fake:blob=0x00000000:repeats=11:badsid:tls_mod=rnd,dupsid,sni=www.google.com\n"
+                "multidisorder:pos=1,midsld"
+            ),
         )
         yield "flw_syndata", "syndata"
         yield "flw_syndata_md", "syndata\nmultidisorder:pos=1,midsld"
         yield "flw_fake_seed", f"fake:blob={b0}:repeats=6:tcp_ts=-1000"
-        yield "flw_tlsmod_seed", (
-            f"fake:blob={b0}:repeats=6:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=www.google.com"
+        yield (
+            "flw_tlsmod_seed",
+            (f"fake:blob={b0}:repeats=6:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=www.google.com"),
         )
         yield "flw_ipid_seed", f"fake:blob={b0}:repeats=6:tcp_ts=-1000:ip_id=zero"
         yield "flw_null_seed", "fake:blob=0x00000000:repeats=6:tcp_ts=-1000"
@@ -161,9 +166,7 @@ class FlowsealGenerator(StrategyGenerator):
                                     ),
                                 )
 
-    def _expand_multisplit(
-        self, blobs: list[str], pats: list[str]
-    ) -> Iterator[tuple[str, str]]:
+    def _expand_multisplit(self, blobs: list[str], pats: list[str]) -> Iterator[tuple[str, str]]:
         for pos in SPLIT_POS:
             for seqovl in SEQOVL:
                 for pat in pats:
@@ -219,8 +222,7 @@ class FlowsealGenerator(StrategyGenerator):
                     for r in (11, 8, 6):
                         for blob in ("0x00000000", *blobs[:2]):
                             fake = (
-                                f"fake:blob={blob}:repeats={r}:{fool}:"
-                                f"tls_mod=rnd,dupsid,sni={sni}"
+                                f"fake:blob={blob}:repeats={r}:{fool}:tls_mod=rnd,dupsid,sni={sni}"
                             )
                             yield (
                                 f"flw_md_{blob}_r{r}_p{pos}_{fool}_sni={sni}",

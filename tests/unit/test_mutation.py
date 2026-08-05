@@ -46,8 +46,5 @@ def test_mutmut_no_survivors() -> None:
     low = out.lower()
     if "survived" in low and "0 survived" not in low and "survived: 0" not in low:
         # Heuristic — CI job also checks mutmut results explicitly.
-        if any(
-            tok in low
-            for tok in ("survived mutants", " mutants survived", "survivor")
-        ):
+        if any(tok in low for tok in ("survived mutants", " mutants survived", "survivor")):
             pytest.fail(f"mutmut reported survivors:\n{out}")

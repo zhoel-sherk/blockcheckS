@@ -43,50 +43,48 @@ def _resolve_xdg(
 
 
 def _xdg_config_home() -> Path:
-    return _resolve_xdg("BLOCKCHECKS_CONFIG_HOME", "XDG_CONFIG_HOME",
-                        Path.home() / ".config")
+    return _resolve_xdg("BLOCKCHECKS_CONFIG_HOME", "XDG_CONFIG_HOME", Path.home() / ".config")
 
 
 def _xdg_data_home() -> Path:
-    return _resolve_xdg("BLOCKCHECKS_DATA_HOME", "XDG_DATA_HOME",
-                        Path.home() / ".local" / "share")
+    return _resolve_xdg("BLOCKCHECKS_DATA_HOME", "XDG_DATA_HOME", Path.home() / ".local" / "share")
 
 
 def _xdg_state_home() -> Path:
-    return _resolve_xdg("BLOCKCHECKS_STATE_HOME", "XDG_STATE_HOME",
-                        Path.home() / ".local" / "state")
+    return _resolve_xdg(
+        "BLOCKCHECKS_STATE_HOME", "XDG_STATE_HOME", Path.home() / ".local" / "state"
+    )
 
 
 def _xdg_cache_home() -> Path:
-    return _resolve_xdg("BLOCKCHECKS_CACHE_HOME", "XDG_CACHE_HOME",
-                        Path.home() / ".cache")
+    return _resolve_xdg("BLOCKCHECKS_CACHE_HOME", "XDG_CACHE_HOME", Path.home() / ".cache")
 
 
 # ── module-level constants ────────────────────────────────────────────
 
-CONFIG_DIR      = _xdg_config_home() / "blockcheckS"
-CONFIG_FILE     = CONFIG_DIR / "config.toml"
+CONFIG_DIR = _xdg_config_home() / "blockcheckS"
+CONFIG_FILE = CONFIG_DIR / "config.toml"
 USER_PRESETS_DIR = CONFIG_DIR / "presets"
 
-STATE_DIR       = _xdg_state_home() / "blockcheckS"
-DATA_DIR        = _xdg_data_home()   / "blockcheckS"
-CACHE_DIR       = _xdg_cache_home()  / "blockcheckS"
+STATE_DIR = _xdg_state_home() / "blockcheckS"
+DATA_DIR = _xdg_data_home() / "blockcheckS"
+CACHE_DIR = _xdg_cache_home() / "blockcheckS"
 
-DEFAULT_DB_PATH         = STATE_DIR / "state.db"
+DEFAULT_DB_PATH = STATE_DIR / "state.db"
 # User-facing outputs live under DATA (XDG data files). Legacy 1.0.x used STATE.
-_LEGACY_OUT_DIR         = STATE_DIR / "export"
-_LEGACY_SHORTLIST_DIR   = STATE_DIR / "shortlists"
-DEFAULT_OUT_DIR         = DATA_DIR / "export"
-DEFAULT_SHORTLIST_DIR   = DATA_DIR / "shortlists"
-RUNTIME_LOGS_DIR        = STATE_DIR / "logs"
-RUN_LOCK_FILE           = STATE_DIR / "run.lock"
-USER_DATA_PRESETS_DIR   = STATE_DIR / "presets"  # reserved (ensure_dirs); not imported yet
+_LEGACY_OUT_DIR = STATE_DIR / "export"
+_LEGACY_SHORTLIST_DIR = STATE_DIR / "shortlists"
+DEFAULT_OUT_DIR = DATA_DIR / "export"
+DEFAULT_SHORTLIST_DIR = DATA_DIR / "shortlists"
+RUNTIME_LOGS_DIR = STATE_DIR / "logs"
+RUN_LOCK_FILE = STATE_DIR / "run.lock"
+USER_DATA_PRESETS_DIR = STATE_DIR / "presets"  # reserved (ensure_dirs); not imported yet
 
-BLOB_CACHE_DIR          = CACHE_DIR / "blob-cache"
-PYCACHE_DIR             = CACHE_DIR / "pycache"
-GV_URL_CACHE_FILE       = CACHE_DIR / "bs_gv_url_cache.json"
-VOICE_DNS_CACHE_FILE    = CACHE_DIR / "bs_voice_cache.json"
-SETTLE_PROFILE_FILE     = CACHE_DIR / "settle_profile.json"
+BLOB_CACHE_DIR = CACHE_DIR / "blob-cache"
+PYCACHE_DIR = CACHE_DIR / "pycache"
+GV_URL_CACHE_FILE = CACHE_DIR / "bs_gv_url_cache.json"
+VOICE_DNS_CACHE_FILE = CACHE_DIR / "bs_voice_cache.json"
+SETTLE_PROFILE_FILE = CACHE_DIR / "settle_profile.json"
 
 
 def _dir_nonempty(path: Path) -> bool:

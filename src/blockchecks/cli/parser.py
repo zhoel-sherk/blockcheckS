@@ -339,7 +339,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Use matrix generator (sources: custom,configs,fake,faked,...)",
     )
-    scan.add_argument("--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)")
+    scan.add_argument(
+        "--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)"
+    )
     scan.add_argument(
         "-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})"
     )
@@ -399,7 +401,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     composite = sub.add_parser("composite", help="Test composite nfqws2 config")
     composite.add_argument("-c", "--config", required=True, help="Path to composite .conf file")
-    composite.add_argument("-d", "--domains", nargs="+", help="Domains to test (default: Discord set)")
+    composite.add_argument(
+        "-d", "--domains", nargs="+", help="Domains to test (default: Discord set)"
+    )
     composite.add_argument("--parallel", type=int, default=effective_default_pool_size())
     composite.add_argument("--timeout", type=float, default=3.0)
     add_system_deps_args(composite)
@@ -415,7 +419,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="TCP sources: custom,configs,fake,faked (fakedsplit),hostfake,fake_multi,fake_faked (fake+fakedsplit)",
     )
     pair.add_argument("--udp-sources", default="custom", help="UDP sources: custom,configs")
-    pair.add_argument("--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)")
+    pair.add_argument(
+        "--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)"
+    )
     pair.add_argument(
         "--disable-ech",
         action="store_true",
@@ -442,7 +448,9 @@ def build_parser() -> argparse.ArgumentParser:
     pair.add_argument("--max", type=int, default=100)
     pair.add_argument("--timeout", type=float, default=3.0)
     pair.add_argument("--udp-timeout", type=float, default=3.0)
-    pair.add_argument("--tcp-only", action="store_true", help="Skip UDP pair testing (TCP scan only)")
+    pair.add_argument(
+        "--tcp-only", action="store_true", help="Skip UDP pair testing (TCP scan only)"
+    )
     pair.add_argument("-c", "--config", help="Single TCP .conf file")
     pair.add_argument("-u", "--udp-config", help="Single UDP .conf file")
     pair.add_argument("-C", "--configs-dir", default=CONFIGS_DIR)
@@ -561,9 +569,7 @@ def dispatch(args: argparse.Namespace) -> int:
             return 0
         if a.generate:
             a.tcp_sources = (
-                a.generate
-                if a.generate != "custom,configs"
-                else a.tcp_sources or "custom,configs"
+                a.generate if a.generate != "custom,configs" else a.tcp_sources or "custom,configs"
             )
         a.generate = bool(a.generate)
         a.tcp_only = True

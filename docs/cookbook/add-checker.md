@@ -18,8 +18,7 @@ class MyResult:
 ## 2. Implement check function
 
 ```python
-def check_my_thing(target: str, timeout: float = 5.0) -> MyResult:
-    ...
+def check_my_thing(target: str, timeout: float = 5.0) -> MyResult: ...
 ```
 
 Keep I/O in the checker; runners only orchestrate netns/nfqueue.

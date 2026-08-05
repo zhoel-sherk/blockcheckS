@@ -27,9 +27,11 @@ def cmd_tcp(args):
         ("config", lambda: (loader.from_config(args.config), "config") if args.config else None),
         (
             "configs_dir",
-            lambda: (loader.from_config_dir(args.configs_dir), CONFIGS_DIR)
-            if args.configs_dir
-            else None,
+            lambda: (
+                (loader.from_config_dir(args.configs_dir), CONFIGS_DIR)
+                if args.configs_dir
+                else None
+            ),
         ),
         ("file", lambda: (loader.from_file(args.file), "string") if args.file else None),
         (
@@ -38,9 +40,11 @@ def cmd_tcp(args):
         ),
         (
             "custom",
-            lambda: (loader.from_custom_dir(args.test_dir, args.protocol), "string")
-            if args.test == "custom"
-            else None,
+            lambda: (
+                (loader.from_custom_dir(args.test_dir, args.protocol), "string")
+                if args.test == "custom"
+                else None
+            ),
         ),
     )
     loaded = None

@@ -3,6 +3,7 @@
 
 Writes logs/retest_<TS>/results.json + DELTA.md vs campaign baseline.
 """
+
 from __future__ import annotations
 
 import json
@@ -176,8 +177,7 @@ def run_test(
     rows.append(row)
     save_results(rows)
     print(
-        f"→ {tid} exit={exit_code} wall={wall}s status={status} "
-        f"notes={row['notes'][:140]}",
+        f"→ {tid} exit={exit_code} wall={wall}s status={status} notes={row['notes'][:140]}",
         flush=True,
     )
     return row
@@ -210,7 +210,11 @@ def write_delta(rows: list[dict]) -> None:
         bid = r["id"]
         b = baseline_rows.get(bid, {})
         b_ex = b.get("exit", "?")
-        b_st = "OK" if b_ex == 0 else ("TIMEOUT" if b_ex == 124 else ("INT" if b_ex == 130 else "FAIL"))
+        b_st = (
+            "OK"
+            if b_ex == 0
+            else ("TIMEOUT" if b_ex == 124 else ("INT" if b_ex == 130 else "FAIL"))
+        )
         st = r.get("status", "FAIL" if r["exit"] else "OK")
         if st == "OK":
             ok += 1

@@ -49,9 +49,7 @@ def test_wait_nfqws2_ready_timeout():
                 "blockchecks.engine.nfqws2_settle.time.perf_counter",
                 side_effect=fake_perf,
             ):
-                elapsed = wait_nfqws2_ready(
-                    "bs-p0", max_wait=0.3, poll_interval=0.1, min_wait=0
-                )
+                elapsed = wait_nfqws2_ready("bs-p0", max_wait=0.3, poll_interval=0.1, min_wait=0)
     assert running.call_count >= 2
     assert elapsed >= 0.3
     assert sleep.call_count >= 2 or running.call_count >= 3

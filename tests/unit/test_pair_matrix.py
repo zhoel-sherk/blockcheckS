@@ -123,9 +123,7 @@ async def test_pair_udp_bypass(mock_runner):
 @pytest.mark.asyncio
 async def test_pair_resume_completed_set(mock_runner, temp_db):
     """Pairs already in DB are skipped; checkpoint idx alone must not skip others."""
-    await temp_db.log_pair(
-        "tcp_a", "u_a", "d", True, False, True, 10, 0, 8, "PASS"
-    )
+    await temp_db.log_pair("tcp_a", "u_a", "d", True, False, True, 10, 0, 8, "PASS")
     tcp_a = TcpTestResult(
         item=StrategyItem(label="tcp_a", strategy="f"),
         domain="d",

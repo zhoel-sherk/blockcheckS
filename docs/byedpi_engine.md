@@ -211,13 +211,12 @@ class ByedpiManager:
     port: int
     proxy_url: str
     bin_path: str
-    strategy: str             # original nfqws2 strategy string (for DB logging)
-    byedpi_flags: list[str]   # translated CLI args
+    strategy: str  # original nfqws2 strategy string (for DB logging)
+    byedpi_flags: list[str]  # translated CLI args
     _proc: subprocess.Popen | None = None
 
     @classmethod
-    def from_strategy(cls, strategy: str, bin_path: str,
-                      port: int = 0) -> ByedpiManager:
+    def from_strategy(cls, strategy: str, bin_path: str, port: int = 0) -> ByedpiManager:
         """Parse strategy, translate to byedpi flags, find free port."""
         if port == 0:
             port = _find_free_port()
@@ -232,11 +231,12 @@ class ByedpiManager:
 
     def start(self) -> str:
         """Launch ciadpi, wait for port, return proxy_url."""
-        args = [self.bin_path, "-p", str(self.port), "-i", "127.0.0.1",
-                "-K", "tls"]
+        args = [self.bin_path, "-p", str(self.port), "-i", "127.0.0.1", "-K", "tls"]
         args.extend(self.byedpi_flags)
         self._proc = subprocess.Popen(
-            args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         _wait_port(self.port, timeout=3.0)
         return self.proxy_url
@@ -254,16 +254,37 @@ class ByedpiManager:
 
 # ── Strategy parser ────────────────────────────────────────────────
 
-_UNMAPPED_FOOLINGS = frozenset({
-    "badsum", "badseq", "tcp_ack", "tcp_seq", "tcp_flags_unset",
-    "tcp_flags_set", "ip_autottl", "ip6_", "seqovl", "seqovl_pattern",
-    "ipfrag", "tcpseg", "padencap",
-})
+_UNMAPPED_FOOLINGS = frozenset(
+    {
+        "badsum",
+        "badseq",
+        "tcp_ack",
+        "tcp_seq",
+        "tcp_flags_unset",
+        "tcp_flags_set",
+        "ip_autottl",
+        "ip6_",
+        "seqovl",
+        "seqovl_pattern",
+        "ipfrag",
+        "tcpseg",
+        "padencap",
+    }
+)
 
-_SUPPORTED_FAMILIES = frozenset({
-    "fake", "hostfakesplit", "fakedsplit", "fakeddisorder",
-    "multisplit", "multidisorder", "tlsrec", "oob", "syndata",
-})
+_SUPPORTED_FAMILIES = frozenset(
+    {
+        "fake",
+        "hostfakesplit",
+        "fakedsplit",
+        "fakeddisorder",
+        "multisplit",
+        "multidisorder",
+        "tlsrec",
+        "oob",
+        "syndata",
+    }
+)
 
 _BYEDPI_POS_MAP = {
     "midsld": "0+sm",
@@ -272,9 +293,7 @@ _BYEDPI_POS_MAP = {
     "end": "-1+e",
     "host": "0+s",
 }
-_BYEDPI_POS_MAP_PAT = re.compile(
-    r"pos=([^:\]]+)(?::(\d+))?(?::(\d+))?"
-)
+_BYEDPI_POS_MAP_PAT = re.compile(r"pos=([^:\]]+)(?::(\d+))?(?::(\d+))?")
 _BLOB_PAT = re.compile(r"blob=([a-zA-Z0-9_]+)")
 _REPEATS_PAT = re.compile(r"repeats=(\d+)")
 
@@ -374,6 +393,7 @@ def parse_strategy_to_byedpi(strategy: str) -> list[str]:
 
 # ── Utility ────────────────────────────────────────────────────────
 
+
 def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -417,9 +437,16 @@ CREATE TABLE IF NOT EXISTS byedpi_results (
 
 ```python
 async def log_byedpi(
-    self, strategy: str, domain: str, status: str, latency_ms: float = 0,
-    byedpi_flags: str = "", nfqws2_original: str = "",
-    http_code: int = 0, proxy_port: int = 0, error: str = "",
+    self,
+    strategy: str,
+    domain: str,
+    status: str,
+    latency_ms: float = 0,
+    byedpi_flags: str = "",
+    nfqws2_original: str = "",
+    http_code: int = 0,
+    proxy_port: int = 0,
+    error: str = "",
 ) -> None:
     """Persist one byedpi probe result."""
 ```
@@ -427,8 +454,9 @@ async def log_byedpi(
 **Файл:** `src/blockchecks/engine/store/__init__.py` (+3 строки в Protocol)
 
 ```python
-async def log_byedpi(self, strategy: str, domain: str, status: str,
-                     latency_ms: float = 0, **kwargs) -> None: ...
+async def log_byedpi(
+    self, strategy: str, domain: str, status: str, latency_ms: float = 0, **kwargs
+) -> None: ...
 ```
 
 ### 4.4. `curl_probe.py` — `proxy` field
@@ -440,6 +468,7 @@ async def log_byedpi(self, strategy: str, domain: str, status: str,
 class CurlProbeRequest:
     # ... existing fields ...
     proxy: str | None = None  # socks5://127.0.0.1:PORT
+
 
 # В run_curl_probe():
 if req.proxy:
@@ -500,8 +529,12 @@ def resolve_byedpi_bin() -> str | None:
     if env and os.path.isfile(env):
         return env
     vendor = os.path.join(PROJECT_DIR, "../patches/byedpi-ideas/ciadpi")
-    for path in (vendor, "ciadpi", "/usr/local/bin/ciadpi",
-                 os.path.expanduser("~/.local/bin/ciadpi")):
+    for path in (
+        vendor,
+        "ciadpi",
+        "/usr/local/bin/ciadpi",
+        os.path.expanduser("~/.local/bin/ciadpi"),
+    ):
         if os.path.isfile(path) or shutil.which(path):
             return path
     return None

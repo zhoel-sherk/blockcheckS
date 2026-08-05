@@ -12,10 +12,12 @@ In [`generators/standard.py`](../src/blockchecks/engine/generators/standard.py)
 def my_family(self, scan_level: str, max_count: int) -> list[StrategyItem]:
     items = []
     for blob in ("stun", "max_ru"):
-        items.append(StrategyItem(
-            label=f"my_fake_{blob}",
-            strategy=f"fake:blob={blob}:repeats=6:tcp_ts=-1000",
-        ))
+        items.append(
+            StrategyItem(
+                label=f"my_fake_{blob}",
+                strategy=f"fake:blob={blob}:repeats=6:tcp_ts=-1000",
+            )
+        )
     return items[:max_count] if max_count else items
 ```
 

@@ -66,7 +66,9 @@ def run_ip_block_cross_test(
     report.baseline_ok = baseline.success
     if not baseline.success:
         report.skipped = True
-        report.skip_reason = f"{unblocked} baseline failed: {baseline.error or baseline.http_status}"
+        report.skip_reason = (
+            f"{unblocked} baseline failed: {baseline.error or baseline.http_status}"
+        )
         return report
 
     cache = dns_cache or DnsRunCache(doh_server=pick_working_doh(timeout=timeout))
@@ -125,7 +127,15 @@ def print_ip_block_report(report: IpBlockReport) -> None:
             print(f"    ⚠  {cdn_hint}")
 
 
-_CDN_OCTETS: tuple[str, ...] = ("104.", "162.158.", "162.159.", "172.64.", "172.65.", "172.66.", "172.67.")
+_CDN_OCTETS: tuple[str, ...] = (
+    "104.",
+    "162.158.",
+    "162.159.",
+    "172.64.",
+    "172.65.",
+    "172.66.",
+    "172.67.",
+)
 _CDN_NAMES: str = "Cloudflare"
 
 

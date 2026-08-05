@@ -10,7 +10,6 @@ import pytest
 
 from blockchecks.checkers.curl_probe import CurlProbeRequest
 from blockchecks.checkers.voice_discovery import load_token
-from blockchecks.engine.secure_io import write_secure_text
 from blockchecks.cli.presets import (
     PresetPathError,
     normalize_preset_name,
@@ -18,6 +17,7 @@ from blockchecks.cli.presets import (
     resolve_strategy_preset,
 )
 from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
+from blockchecks.engine.secure_io import write_secure_text
 
 
 @pytest.mark.unit
@@ -104,9 +104,7 @@ def test_load_token_refuses_world_writable(tmp_path: Path, monkeypatch):
     settings = tmp_path / "settings.ini"
     settings.write_text("[discord]\ntoken=sekret\n", encoding="utf-8")
     settings.chmod(0o666)
-    monkeypatch.setattr(
-        "blockchecks.checkers.voice_discovery.DPI_TESTER_SETTINGS", str(settings)
-    )
+    monkeypatch.setattr("blockchecks.checkers.voice_discovery.DPI_TESTER_SETTINGS", str(settings))
     assert load_token() is None
 
 

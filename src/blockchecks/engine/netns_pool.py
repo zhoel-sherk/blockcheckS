@@ -21,9 +21,7 @@ _NETNS_BASE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 class NetNsPool:
     def __init__(self, size: int = 4, base: str = "bs-p"):
         if not _NETNS_BASE_RE.match(base):
-            raise ValueError(
-                f"invalid netns base {base!r}: must match ^[A-Za-z0-9_-]+$"
-            )
+            raise ValueError(f"invalid netns base {base!r}: must match ^[A-Za-z0-9_-]+$")
         self.size = size
         self.base = base
         self._queue: asyncio.Queue | None = None

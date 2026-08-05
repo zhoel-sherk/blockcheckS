@@ -42,9 +42,7 @@ def test_unblocked_baseline_fail():
 
     with patch(
         "blockchecks.engine.preflight.check_tls",
-        return_value=TlsResult(
-            domain="iana.org", success=False, http_status=0, error="timeout"
-        ),
+        return_value=TlsResult(domain="iana.org", success=False, http_status=0, error="timeout"),
     ):
         ok, msg = run_unblocked_baseline("iana.org")
     assert ok is False

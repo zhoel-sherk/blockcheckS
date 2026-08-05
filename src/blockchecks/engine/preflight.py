@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 from dataclasses import dataclass, field
+from typing import Any
 
 from blockchecks.checkers.dns_secure import DnsRunCache, doh_query, pick_working_doh
 from blockchecks.checkers.ip_block import (
@@ -38,8 +39,9 @@ class PreflightOptions:
     store: object = None
 
     @classmethod
-    def from_args(cls, args, *, dns_cache: DnsRunCache | None = None,
-                  store: object = None) -> PreflightOptions:
+    def from_args(
+        cls, args, *, dns_cache: DnsRunCache | None = None, store: object = None
+    ) -> PreflightOptions:
         """Build options from CLI namespace (pair/main shared)."""
         return cls(
             unblocked_dom=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
@@ -130,6 +132,7 @@ def run_preflight(
     Prefer ``await run_preflight_async()`` in async contexts.
     """
     import asyncio
+
     return asyncio.run(run_preflight_async(domains, opts))
 
 
@@ -162,8 +165,11 @@ async def _audit_domains_parallel(
     if store and tampered:
         for r in tampered:
             await store.write_dns_audit_log(
-                r["domain"], r["udp_ips"], r["doh_ips"],
-                r["verdict"], r["doh_server"],
+                r["domain"],
+                r["udp_ips"],
+                r["doh_ips"],
+                r["verdict"],
+                r["doh_server"],
             )
         # Overwrite cache entries with real DoH IPs
         for r in tampered:

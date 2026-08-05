@@ -28,12 +28,15 @@ def test_sni_block_detected():
             _tls(True, 301),  # discord SNI on iana IP
             _tls(False, 0),  # iana SNI on discord IP
         ]
-        with patch(
-            "blockchecks.checkers.ip_block.DnsRunCache.primary_ip",
-            return_value="93.184.216.34",
-        ), patch(
-            "blockchecks.checkers.ip_block.DnsRunCache.resolve",
-            return_value=["162.159.1.1"],
+        with (
+            patch(
+                "blockchecks.checkers.ip_block.DnsRunCache.primary_ip",
+                return_value="93.184.216.34",
+            ),
+            patch(
+                "blockchecks.checkers.ip_block.DnsRunCache.resolve",
+                return_value=["162.159.1.1"],
+            ),
         ):
             r = run_ip_block_cross_test("discord.com", unblocked_domain="iana.org")
     assert not r.skipped

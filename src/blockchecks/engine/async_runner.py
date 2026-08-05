@@ -575,10 +575,7 @@ def _run_tcp_check_multi(
         )
         raw = _invoke_curl_probe_worker(ns_name, py, payload, wall)
         settle_ms = round(settle_elapsed * 1000, 1)
-        out = {
-            d: {**raw.get(d, {}), "settle_ms": settle_ms}
-            for d in domains_active
-        }
+        out = {d: {**raw.get(d, {}), "settle_ms": settle_ms} for d in domains_active}
         out.update(gv_fail)
         return out
     finally:
@@ -950,9 +947,7 @@ class AsyncTestRunner:
                 doh_server = audit.doh_server or self.dns_cache.doh_server
         return resolved_ip, dns_verdict, doh_server
 
-    def _tcp_result_from_data(
-        self, item: StrategyItem, domain: str, data: dict
-    ) -> TcpTestResult:
+    def _tcp_result_from_data(self, item: StrategyItem, domain: str, data: dict) -> TcpTestResult:
         result = TcpTestResult(item=item, domain=domain)
         result.success = data.get("success", False)
         result.http_code = data.get("http_code", 0)
@@ -1132,9 +1127,7 @@ class AsyncTestRunner:
         if not strategies:
             return []
 
-        results = await asyncio.gather(
-            *(self.test_tcp(s, domain, timeout) for s in strategies)
-        )
+        results = await asyncio.gather(*(self.test_tcp(s, domain, timeout) for s in strategies))
         for r in results:
             if r.throttled:
                 tag = f"{YELLOW}THROTTLED{RESET}"

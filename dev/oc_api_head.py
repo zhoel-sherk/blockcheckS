@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json
-import urllib.request
 import sys
+import urllib.request
 
 BASE = "http://127.0.0.1:4096"
 DIR = "/home/zhoel/workspace/blockcheckS"

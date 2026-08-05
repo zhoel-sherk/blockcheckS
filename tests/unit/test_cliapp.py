@@ -43,9 +43,10 @@ def test_expand_bare_generate_keeps_explicit_value():
 
 @pytest.mark.unit
 def test_collect_cli_shortcuts_includes_domain_and_strategy_preset():
+    import argparse
+
     from blockchecks.cli.parser import build_parser
     from blockchecks.main import build_arg_parser
-    import argparse
 
     root = build_parser()
     subs = {}
@@ -147,7 +148,5 @@ def test_cli_main_returns_handler_exit_code():
 
     with patch("blockchecks.cli.cliapp._run_scan", return_value=7):
         with patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0):
-            code = ca.main(
-                ["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"]
-            )
+            code = ca.main(["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"])
     assert code == 7

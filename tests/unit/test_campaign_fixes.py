@@ -72,9 +72,7 @@ async def test_adaptive_stops_mid_batch_when_deadline_sets_stop():
                 out.append(_FakeResult(success=True, item=item, domain=d))
             return out
 
-    result = await run_adaptive_tcp(
-        Runner(), queue, curl_parallel=3, stop_event=stop
-    )
+    result = await run_adaptive_tcp(Runner(), queue, curl_parallel=3, stop_event=stop)
     # Stop fires mid-batch; we still mark the jobs already returned, but
     # must not drain the rest of the matrix.
     assert result.done >= 1

@@ -258,7 +258,6 @@ class FakeSplitComboGenerator(StrategyGenerator):
         return items[:max_count]
 
 
-
 # ── Extended parameters (from blockcheck.sh def.inc + standard scripts) ──
 
 # Full foolings matching blockcheck2.sh def.inc FOOLINGS46_TCP
@@ -814,10 +813,15 @@ class StandardGenerator(StrategyGenerator):
                     if scan_level == "single":
                         return items
 
-                    if family.get("ack_drop") and fool in ("", "tcp_ts=-1000") and blob_name in (
-                        "stun",
-                        "google",
-                        "0x00000000",
+                    if (
+                        family.get("ack_drop")
+                        and fool in ("", "tcp_ts=-1000")
+                        and blob_name
+                        in (
+                            "stun",
+                            "google",
+                            "0x00000000",
+                        )
                     ):
                         self._add(items, seen, f"{label}_ackdrop", _with_ack_drop(strat))
                     if family.get("send_md5") and "tcp_md5" in (fool or ""):
@@ -829,9 +833,7 @@ class StandardGenerator(StrategyGenerator):
                     for ttl in family["ttl_static"]:
                         self._add(items, seen, f"{label}_ttl{ttl}", f"{strat}:ip_ttl={ttl}")
                     for ttl in family["ttl_auto"]:
-                        self._add(
-                            items, seen, f"{label}_autottl{ttl}", f"{strat}:ip_autottl={ttl}"
-                        )
+                        self._add(items, seen, f"{label}_autottl{ttl}", f"{strat}:ip_autottl={ttl}")
                     if blob_name in ("google", "0x00000000") and not fool:
                         for tmod in family["tls_mods"]:
                             if not tmod:
@@ -893,8 +895,7 @@ class StandardGenerator(StrategyGenerator):
                     if blob_name == "0x00000000":
                         continue
                     strat = (
-                        f"multisplit:pos={pos}:seqovl={seqovl}"
-                        f":seqovl_pattern={blob_name}{fool_str}"
+                        f"multisplit:pos={pos}:seqovl={seqovl}:seqovl_pattern={blob_name}{fool_str}"
                     )
                     label = f"std_split_{pos}_s{seqovl}_{blob_name}_{fool or 'nofool'}"
                     self._add(items, seen, label, strat)
@@ -903,9 +904,7 @@ class StandardGenerator(StrategyGenerator):
                     for ttl in family["ttl_static"]:
                         self._add(items, seen, f"{label}_ttl{ttl}", f"{strat}:ip_ttl={ttl}")
                     for ttl in family["ttl_auto"]:
-                        self._add(
-                            items, seen, f"{label}_autottl{ttl}", f"{strat}:ip_autottl={ttl}"
-                        )
+                        self._add(items, seen, f"{label}_autottl{ttl}", f"{strat}:ip_autottl={ttl}")
         if family.get("padencap") and scan_level != "single":
             for tmod in ("rnd,dupsid,padencap", "rnd,dupsid"):
                 strat = (
@@ -972,10 +971,7 @@ class StandardGenerator(StrategyGenerator):
             for r1, r2 in repeat_pairs:
                 for fool in family["foolings"]:
                     f = f":{fool}" if fool else ""
-                    strat = (
-                        f"fake:blob={b1}:repeats={r1}{f}\n"
-                        f"fake:blob={b2}:repeats={r2}{f}"
-                    )
+                    strat = f"fake:blob={b1}:repeats={r1}{f}\nfake:blob={b2}:repeats={r2}{f}"
                     self._add(
                         items,
                         seen,
@@ -1045,8 +1041,7 @@ class StandardGenerator(StrategyGenerator):
                         return items
                     for seqovl in family["seqovl"]:
                         strat = (
-                            f"multidisorder:pos={pos}:seqovl={seqovl}"
-                            f":seqovl_pattern={blob_name}{f}"
+                            f"multidisorder:pos={pos}:seqovl={seqovl}:seqovl_pattern={blob_name}{f}"
                         )
                         label = f"std_mdis_{pos}_s{seqovl}_{blob_name}_{fool or 'nofool'}"
                         self._add(items, seen, label, strat)
@@ -1087,10 +1082,7 @@ class StandardGenerator(StrategyGenerator):
                 for r in family["repeats"]:
                     for fool in family["foolings"]:
                         f = f":{fool}" if fool else ""
-                        strat = (
-                            f"fake:blob={blob_name}:repeats={r}{f}\n"
-                            f"multidisorder:pos={pos}{f}"
-                        )
+                        strat = f"fake:blob={blob_name}:repeats={r}{f}\nmultidisorder:pos={pos}{f}"
                         label = f"std_fmd_{blob_name}_p{pos}_r{r}_{fool or 'nofool'}"
                         self._add(items, seen, label, strat)
                         if scan_level == "single":
@@ -1186,11 +1178,7 @@ class StandardGenerator(StrategyGenerator):
                         opts = f"ipfrag_pos_tcp={pos}"
                         if disorder:
                             opts += ":ipfrag_disorder"
-                        strat = (
-                            f"fake:blob={blob_name}:repeats={r}\n"
-                            f"send:ipfrag:{opts}\n"
-                            f"drop"
-                        )
+                        strat = f"fake:blob={blob_name}:repeats={r}\nsend:ipfrag:{opts}\ndrop"
                         label = f"std_tcp_fake_ipfrag_{blob_name}_r{r}_pos{pos}"
                         if disorder:
                             label += "_disorder"
@@ -1315,11 +1303,7 @@ class StandardGenerator(StrategyGenerator):
                     opts = f"ipfrag_pos_udp={pos}"
                     if disorder:
                         opts += ":ipfrag_disorder"
-                    strat = (
-                        f"fake:blob=fake_default_quic:repeats={r}\n"
-                        f"send:ipfrag:{opts}\n"
-                        f"drop"
-                    )
+                    strat = f"fake:blob=fake_default_quic:repeats={r}\nsend:ipfrag:{opts}\ndrop"
                     label = f"std_quic_fake_ipfrag_r{r}_pos{pos}"
                     if disorder:
                         label += "_disorder"
@@ -1386,4 +1370,3 @@ class StandardGenerator(StrategyGenerator):
         if key not in seen:
             seen.add(key)
             items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
-

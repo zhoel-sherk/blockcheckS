@@ -275,9 +275,7 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
 
     # Tiny 206 is OK for ordinary sites; googlevideo Range must meet size budget
     small_206 = resp.status_code == 206 and clen < 300 and not req.googlevideo
-    small_body_ok = (not dpi_fake) and (
-        resp.status_code in _SMALL_BODY_STATUSES or small_206
-    )
+    small_body_ok = (not dpi_fake) and (resp.status_code in _SMALL_BODY_STATUSES or small_206)
     status_ok = 200 <= resp.status_code < 400
     throttled = False
     success = False

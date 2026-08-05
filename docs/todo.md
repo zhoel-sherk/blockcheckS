@@ -346,18 +346,18 @@ NFQWS2_SETTLE_MIN  = 0
   ```python
   @dataclass
   class DpiThrottleDetector:
-      window_size: int = 50          # скользящее окно (последние N проб)
+      window_size: int = 50  # скользящее окно (последние N проб)
       pass_rate_threshold: float = 0.3  # порог: если <30% PASS — агрессия
-      pause_seconds: float = 30.0    # пауза при детекте
+      pause_seconds: float = 30.0  # пауза при детекте
       cooldown_multiplier: float = 2.0  # множитель паузы при повторном детекте
-  
+
       _history: list[bool] = field(default_factory=list)  # True=PASS, False=FAIL
       _paused_until: float = 0.0
       _aggression_count: int = 0
-  
+
       def record(self, passed: bool) -> bool:
           """Записать результат пробы. Вернуть True если нужна пауза."""
-  
+
       def should_pause(self) -> bool:
           """Проверить текущее состояние."""
   ```

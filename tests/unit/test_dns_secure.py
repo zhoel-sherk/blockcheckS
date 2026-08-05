@@ -71,12 +71,15 @@ def test_audit_ok_when_overlap():
 
 @pytest.mark.unit
 def test_doh_query_json_then_wire():
-    with patch(
-        "blockchecks.checkers.dns_secure._doh_json_query",
-        return_value=([], "fail", 1.0),
-    ), patch(
-        "blockchecks.checkers.dns_secure._doh_wire_query",
-        return_value=(["9.9.9.9"], "", 2.0),
+    with (
+        patch(
+            "blockchecks.checkers.dns_secure._doh_json_query",
+            return_value=([], "fail", 1.0),
+        ),
+        patch(
+            "blockchecks.checkers.dns_secure._doh_wire_query",
+            return_value=(["9.9.9.9"], "", 2.0),
+        ),
     ):
         ips, err, _ = doh_query("x.com", "https://doh/")
     assert ips == ["9.9.9.9"]

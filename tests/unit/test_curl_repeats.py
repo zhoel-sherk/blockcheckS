@@ -54,9 +54,7 @@ def test_stable_quick_break_on_fail():
         return CurlProbeResult(success=False, error="timeout")
 
     with patch("blockchecks.checkers.curl_probe.run_curl_probe", side_effect=fake_probe):
-        out = run_curl_probe_with_repeats(
-            req, repeats=5, repeats_mode="stable", quick_break=True
-        )
+        out = run_curl_probe_with_repeats(req, repeats=5, repeats_mode="stable", quick_break=True)
     assert out["success"] is False
     assert calls["n"] == 1
 
