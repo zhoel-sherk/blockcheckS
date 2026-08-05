@@ -18,7 +18,7 @@ class TestPackageImport:
         """blockchecks.__version__ is a non-empty string."""
         import blockchecks
 
-        assert blockchecks.__version__ == "1.1.0a1"
+        assert blockchecks.__version__ == "1.1.0"
         assert isinstance(blockchecks.__version__, str)
 
 

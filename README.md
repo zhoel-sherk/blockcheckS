@@ -1,9 +1,9 @@
 # blockcheckS — lightspeed DPI strategy tester
 
-[![version](https://img.shields.io/badge/version-1.1.0a1-blue)](#)
+[![version](https://img.shields.io/badge/version-1.1.0-blue)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-284%20passed-success)](#)
+[![tests](https://img.shields.io/badge/tests-389%20passed-success)](#)
 
 **Твой провайдер режет YouTube, Discord и Telegram через DPI?**
 *blockcheckS за 10 минут найдёт работающий обход из 10 000+ комбинаций,

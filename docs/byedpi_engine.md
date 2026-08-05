@@ -1,6 +1,6 @@
 # ByeDPI Engine — план интеграции в blockcheckS
 
-> **Версия:** 1.1.0-alpha (target 1.1.0 release)  
+> **Версия:** 1.1.0  
 > **Бинарник:** `ciadpi` (byedpi) v0.17.3 — `/home/zhoel/workspace/patches/byedpi-ideas/ciadpi`  
 > **Upstream:** [hufrea/byedpi](https://github.com/hufrea/byedpi) (MIT, ~3.3k★)  
 > **Android client:** [romanvht/ByeByeDPI](https://github.com/romanvht/ByeByeDPI) — встроенный **подборщик стратегий** (autotest)  

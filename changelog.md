@@ -1,6 +1,12 @@
 # blockcheckS Changelog
 
-## Unreleased / HEAD
+## Unreleased
+
+---
+
+## 1.1.0 — 2026-08-05
+
+First stable release after alpha (`1.1.0a1`). Quality gates, CliApp CLI, baked blobs, Flowseal matrix expansion, `bs stop`, P0 perf defaults.
 
 ### Added (Flowseal unified + baked blobs)
 - **Repo `blobs/`:** Flowseal+custom binaries committed; default `BLOB_DIR` prefers in-repo path (no download)
@@ -50,6 +56,12 @@
 ### Changed
 - README: table of contents, badges, hero section, humor/jargon
 - docs: presets README counts corrected; architecture module map expanded; database refs updated; glossary +15 terms; troubleshooting added to guide; blobs tier-1 clean-up
+
+### Release polish (1.1.0 final)
+- **`bs stop`** / `--stop`: graceful shutdown via `run.lock` (SIGTERM → flush → export)
+- **VPS-2:** single CliApp subcommand dispatch (fixes accidental double `full` run)
+- **P0 perf:** default `db_batch=500`, `settle_slack=3s`, nfqws2 foreground sleep 0.1s
+- **Packaging:** repo `blobs/*.bin` included in sdist via `MANIFEST.in`
 
 ---
 
