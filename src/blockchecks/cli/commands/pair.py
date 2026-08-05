@@ -29,7 +29,7 @@ from blockchecks.engine.config import (
 )
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.run_finalize import finalize_db_and_weights, run_exit_code
-from blockchecks.engine.store import matrix_fingerprint, open_run_store
+from blockchecks.engine.store import DEFAULT_DB_BATCH, matrix_fingerprint, open_run_store
 
 YELLOW = Fore.YELLOW
 RESET = Style.RESET_ALL
@@ -41,7 +41,18 @@ async def cmd_pair(args):
         list_presets()
         return 0
 
-    db = open_run_store(args.db, batch_size=getattr(args, "db_batch", 0) or 0)
+    from blockchecks.engine.run_control import run_session
+
+    cmd = "scan" if getattr(args, "tcp_only", False) else "pair"
+    async with run_session(cmd, db_path=getattr(args, "db", None)):
+        return await _cmd_pair_run(args)
+
+
+async def _cmd_pair_run(args):
+    db = open_run_store(
+        args.db,
+        batch_size=int(getattr(args, "db_batch", DEFAULT_DB_BATCH)),
+    )
     await db.init()
 
     preset_domains, preset_rc = resolve_preset_domains(args)

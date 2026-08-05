@@ -29,7 +29,7 @@ pip install -e ".[dev,discovery]"
 
 Документация для разработчиков: [CONTRIBUTING.md](../CONTRIBUTING.md),
 [architecture.md](architecture.md), [database.md](database.md),
-[cookbook/](cookbook/).
+[custom_lua.md](custom_lua.md), [cookbook/](cookbook/).
 
 ## CLI
 

@@ -79,6 +79,7 @@ _LEGACY_SHORTLIST_DIR   = STATE_DIR / "shortlists"
 DEFAULT_OUT_DIR         = DATA_DIR / "export"
 DEFAULT_SHORTLIST_DIR   = DATA_DIR / "shortlists"
 RUNTIME_LOGS_DIR        = STATE_DIR / "logs"
+RUN_LOCK_FILE           = STATE_DIR / "run.lock"
 USER_DATA_PRESETS_DIR   = STATE_DIR / "presets"  # reserved (ensure_dirs); not imported yet
 
 BLOB_CACHE_DIR          = CACHE_DIR / "blob-cache"

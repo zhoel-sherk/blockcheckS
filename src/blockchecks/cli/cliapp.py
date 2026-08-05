@@ -24,6 +24,18 @@ from pydantic_settings import (
 _GENERATE_DEFAULT = "custom,configs"
 
 
+def normalize_cli_args(argv: list[str]) -> list[str]:
+    """Map ``bs --stop`` → ``bs stop`` (global graceful-stop alias)."""
+    if argv and argv[0] == "--stop":
+        return ["stop", *argv[1:]]
+    return argv
+
+# Handler registry — subcommand models intentionally have no cli_cmd (VPS-2).
+_CMD_HANDLERS: dict[str, Any] = {}
+_CLI_EXIT_CODE: int = 0
+_FULL_RUN_ACTIVE: bool = False
+
+
 def _annotation_for_action(action: argparse.Action) -> Any:
     if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
         return bool
@@ -156,13 +168,23 @@ def _to_namespace(model: BaseModel, **extra: Any) -> argparse.Namespace:
 
 
 def _make_cmd_model(class_name: str, base: type[BaseModel], handler, doc: str = ""):
-    def cli_cmd(self) -> int:  # type: ignore[no-untyped-def]
-        return handler(self)
-
-    ns: dict[str, Any] = {"cli_cmd": cli_cmd}
+    """Parse-only subcommand model; handler runs via root ``cli_cmd`` (single dispatch)."""
+    _CMD_HANDLERS[class_name] = handler
+    ns: dict[str, Any] = {}
     if doc:
         ns["__doc__"] = doc
     return type(class_name, (base,), ns)
+
+
+def _dispatch_subcommand(root: BaseModel) -> int:
+    """Run one subcommand handler — never call sub.cli_cmd() (avoids CliApp double dispatch)."""
+    sub = get_subcommand(root, is_required=False)
+    if sub is None:
+        return 2
+    handler = _CMD_HANDLERS.get(type(sub).__name__)
+    if handler is None:
+        return 2
+    return int(handler(sub))
 
 
 def _run_tcp(model: BaseModel) -> int:
@@ -268,13 +290,30 @@ def _run_bench(model: BaseModel) -> int:
 
 
 def _run_full(model: BaseModel) -> int:
+    global _FULL_RUN_ACTIVE
     from blockchecks.cli.parser import ensure_system_deps_or_exit
     from blockchecks.main import run_full
+
+    if _FULL_RUN_ACTIVE:
+        print("ERROR: nested bs full invocation blocked (VPS-2 guard)")
+        return 2
 
     ns = _to_namespace(model)
     ns.command = "full"
     code = ensure_system_deps_or_exit(ns)
-    return code or asyncio.run(run_full(ns))
+    if code:
+        return code
+    _FULL_RUN_ACTIVE = True
+    try:
+        return asyncio.run(run_full(ns))
+    finally:
+        _FULL_RUN_ACTIVE = False
+
+
+def _run_stop(model: BaseModel) -> int:
+    from blockchecks.cli.commands.stop import cmd_stop
+
+    return cmd_stop(_to_namespace(model))
 
 
 def build_cli_root() -> type[BaseSettings]:
@@ -296,6 +335,9 @@ def build_cli_root() -> type[BaseSettings]:
         ),
         "full": _parser_blurb(
             "full", raw_blurbs, "Full matrix campaign (TCP/UDP/HTTP/QUIC)"
+        ),
+        "stop": _parser_blurb(
+            "stop", raw_blurbs, "Gracefully stop active full/scan/pair run"
         ),
     }
 
@@ -326,6 +368,9 @@ def build_cli_root() -> type[BaseSettings]:
     FullCmd = _make_cmd_model(
         "FullCmd", model_from_subparser("FullArgs", full_parser), _run_full, blurbs["full"]
     )
+    StopCmd = _make_cmd_model(
+        "StopCmd", model_from_subparser("StopArgs", subs["stop"]), _run_stop, blurbs["stop"]
+    )
 
     class BlockchecksCli(BaseSettings):
         """bs — lightspeed DPI strategy tester (CliApp)."""
@@ -351,12 +396,12 @@ def build_cli_root() -> type[BaseSettings]:
             description=blurbs["bench-settle"],
         )
         full: CliSubCommand[FullCmd] = Field(description=blurbs["full"])  # type: ignore[valid-type]
+        stop: CliSubCommand[StopCmd] = Field(description=blurbs["stop"])  # type: ignore[valid-type]
 
         def cli_cmd(self) -> int:
-            sub = get_subcommand(self, is_required=False)
-            if sub is None:
-                return 2
-            return int(sub.cli_cmd())
+            global _CLI_EXIT_CODE
+            _CLI_EXIT_CODE = _dispatch_subcommand(self)
+            return _CLI_EXIT_CODE
 
     return BlockchecksCli
 
@@ -379,11 +424,11 @@ def main(argv: list[str] | None = None) -> int:
     apply_parser_defaults(probe, cfg)
 
     raw = list(argv) if argv is not None else None
-    cli_args = expand_bare_generate(raw) if raw is not None else None
+    cli_args = expand_bare_generate(normalize_cli_args(raw)) if raw is not None else None
     if cli_args is None:
         import sys
 
-        cli_args = expand_bare_generate(sys.argv[1:])
+        cli_args = expand_bare_generate(normalize_cli_args(sys.argv[1:]))
 
     Root = build_cli_root()
     try:
@@ -391,11 +436,13 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
-    # CliApp.run already dispatched via _run_cli_cmd → command(model) → root.cli_cmd().
+    # CliApp.run dispatches via _run_cli_cmd → root.cli_cmd → _dispatch_subcommand (once).
     if isinstance(result, int):
         return result
+    if _CLI_EXIT_CODE:
+        return _CLI_EXIT_CODE
     sub = get_subcommand(result, is_required=False)
     if sub is None:
-        print("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full")
+        print("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full|stop")
         return 2
     return 0

@@ -55,6 +55,13 @@ colorama_init(autoreset=True)
 
 
 async def run_full(args) -> int:
+    from blockchecks.engine.run_control import run_session
+
+    async with run_session("full", db_path=getattr(args, "db", None)):
+        return await _run_full_campaign(args)
+
+
+async def _run_full_campaign(args) -> int:
     db = await open_full_run_db(args)
 
     domains, domains_file, domains_rc = load_run_domains(args)

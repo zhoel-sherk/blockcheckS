@@ -165,7 +165,7 @@ async def run(
                 "repeats_mode": "fast",
                 "quick_break": False,
             }
-            wall = worker_wall_timeout(timeout, 1, settle_slack=10.0)
+            wall = worker_wall_timeout(timeout, 1, settle_slack=3.0)
             data = await asyncio.to_thread(
                 invoke_curl_probe_worker, ns_name, PYTHON, payload, wall
             )

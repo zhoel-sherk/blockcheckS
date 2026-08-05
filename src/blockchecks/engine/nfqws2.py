@@ -142,7 +142,7 @@ class Nfqws2Manager:
         if self.ns_name:
             wait_nfqws2_ready(self.ns_name)
         else:
-            time.sleep(0.2)
+            time.sleep(0.1)
 
         if self._proc.poll() is not None:
             hint = ""

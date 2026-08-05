@@ -137,7 +137,7 @@ class TestRunner:
             n_domains=1,
             curl_parallel=1,
             parallel_repeats=self.parallel_repeats,
-            settle_slack=5.0,
+            settle_slack=3.0,
         )
         r = subprocess.run(
             cmd,

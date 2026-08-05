@@ -42,7 +42,12 @@ from blockchecks.engine.run_finalize import (
     write_run_summary,
 )
 from blockchecks.engine.settle_profile import auto_load_profile, load_profile
-from blockchecks.engine.store import fingerprint_mismatch, matrix_fingerprint, open_run_store
+from blockchecks.engine.store import (
+    DEFAULT_DB_BATCH,
+    fingerprint_mismatch,
+    matrix_fingerprint,
+    open_run_store,
+)
 from blockchecks.engine.tcp_fanout import fanout_allowed, fanout_batches
 
 CYAN = Fore.CYAN
@@ -138,7 +143,10 @@ class TcpProgress:
 
 
 async def open_full_run_db(args) -> Any:
-    db = open_run_store(args.db, batch_size=getattr(args, "db_batch", 0) or 0)
+    db = open_run_store(
+        args.db,
+        batch_size=int(getattr(args, "db_batch", DEFAULT_DB_BATCH)),
+    )
     await db.init()
     return db
 

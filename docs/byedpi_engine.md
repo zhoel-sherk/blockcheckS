@@ -1,15 +1,26 @@
 # ByeDPI Engine — план интеграции в blockcheckS
 
 > **Версия:** 1.1.0-alpha (target 1.1.0 release)  
-> **Бинарник:** `ciadpi` (byedpi), `/home/zhoel/workspace/patches/byedpi-ideas/ciadpi`  
-> **GitHub:** https://github.com/hufrea/byedpi (3.3k stars, MIT)  
-> **Статус:** Plan (не реализовано)
+> **Бинарник:** `ciadpi` (byedpi) v0.17.3 — `/home/zhoel/workspace/patches/byedpi-ideas/ciadpi`  
+> **Upstream:** [hufrea/byedpi](https://github.com/hufrea/byedpi) (MIT, ~3.3k★)  
+> **Android client:** [romanvht/ByeByeDPI](https://github.com/romanvht/ByeByeDPI) — встроенный **подборщик стратегий** (autotest)  
+> **Статус:** Plan (не реализовано)  
+> **Анализ:** 2026-08-05 (upstream README + ByeByeDPI `proxytest_strategies.list`)
 
 ---
 
 ## 1. Зачем нужен byedpi
 
-nfqws2 требует root, netns, iptables и ~3s старта на каждую стратегию. Byedpi — SOCKS5-прокси на C (~96KB), стартует за ~50ms, не требует root. Даже без `--auto` mode даёт 3-5× ускорение per-strategy.
+nfqws2 требует root, netns, iptables и ~3s старта на каждую стратегию. Byedpi — SOCKS5-прокси на C (~96KB), стартует за ~50ms, **не требует root**. Даже без `--auto` mode даёт 3–5× ускорение per-strategy.
+
+**Два режима тестирования:**
+
+| Режим | Когда | blockcheckS |
+|-------|--------|-------------|
+| **Process-per-strategy** | Нужен детерминизм: одна стратегия = один результат в DB | **Phase 1** (основной) |
+| **`--auto` chains** | Production proxy: триггеры `torst`/`ssl_err`/`redirect` переключают группы | §10 / production only |
+
+ByeByeDPI autotest использует process-per-strategy (рестарт ciadpi на каждую строку каталога) — тот же подход, что в §2.
 
 ### Сравнение
 
@@ -17,11 +28,12 @@ nfqws2 требует root, netns, iptables и ~3s старта на кажду�
 |---|---|---|
 | Механизм | NFQUEUE (kernel packet interception) | SOCKS5 proxy (userspace) |
 | Root | Да (iptables/netns) | Нет |
+| Default listen | — | `127.0.0.1:1080` (`-p`) |
 | Старт процесса | ~3s (netns + settle) | ~50ms |
-| Per-strategy аргументы | `--lua-desync=...` | `--fake`, `--split`, `--disorder`, etc. |
-| Custom blobs | `--blob=NAME:@path` | `--fake-data @path/to/file.bin` |
+| Per-strategy аргументы | `--lua-desync=...` | `-f`, `-s`, `-d`, `-o`, `-A`, … |
+| Custom blobs | `--blob=NAME:@path` | `-l` / `--fake-data @path` |
 | Multi-strategy | `--new` profiles или restart | `--auto=trigger` groups (1 процесс) |
-| IP кеширование | Нет | `--cache-ttl N` + `--cache-file` |
+| IP кеширование | Нет | `--cache-ttl` + `--cache-dump` |
 
 ---
 
@@ -50,9 +62,9 @@ blockcheckS (Python)
 
 | nfqws2 стратегия | byedpi CLI | Статус |
 |---|---|---|
-| `fake:blob=stun:repeats=6:tcp_ts=-1000` | `--fake -1 --fake-data @stun.bin --ttl 8` | ✅ Mapped |
-| `fake:blob=max_ru:repeats=6:tcp_ts=-1000` | `--fake -1 --fake-data @max_ru.bin --ttl 8` | ✅ |
-| `fake:blob=google:repeats=6:tcp_ts=-1000` | `--fake -1 --fake-data @google.bin --ttl 8` | ✅ |
+| `fake:blob=stun:repeats=6:tcp_ts=-1000` | `-f -1 -l @stun.bin -t 8` | ⚠️ PARTIAL — **нет TCP repeats=6** (один fake-send; UDP: `-a 6`) |
+| `fake:blob=max_ru:repeats=6:tcp_ts=-1000` | `-f -1 -l @max_ru.bin -t 8` | ⚠️ PARTIAL |
+| `fake:blob=google:repeats=6:tcp_ts=-1000` | `-f -1 -l @google.bin -t 8` | ⚠️ PARTIAL |
 | `fake:blob=X:repeats=N:tcp_md5` | `--fake -1 --fake-data @X.bin --md5sig` | ✅ |
 | `fake:blob=X:repeats=N:badsum` | — | ❌ byedpi без badsum |
 | `hostfakesplit:nofake2` | `--split 1+sm` | ✅ |
@@ -65,10 +77,16 @@ blockcheckS (Python)
 | `fakeddisorder:pos=1:pattern=google` | `--disorder 1 --fake 1` | ✅ |
 | `multisplit:pos=1,midsld` | `--split 1 --split 0+sm` | ✅ |
 | `multisplit:pos=1:seqovl=68` | — | ❌ byedpi без seqovl |
-| `tlsrec:pos=3+s` | `--tlsrec 3+s` | ✅ |
-| `oob:urp=b` | `--oob 0` | ✅ |
-| `syndata` (bare) | `--fake -1 --fake-tls-mod rand` | ✅ |
-| `syndata:blob=discord_udp` | — | ❌ UDP only, byedpi только TCP |
+| `tlsrec:pos=3+s` | `-r 3+s` | ✅ |
+| `oob:urp=b` | `-o 0` (OOB URG byte) | ✅ |
+| `oob:urp=s` | `-o 0+sm` | ✅ |
+| — (нет в nfqws2) | `-q` / `--disoob` (disorder + OOB) | byedpi-only |
+| — | `-n {sni}` / `--fake-sni` | byedpi-only (динамический fake SNI) |
+| — | `-A torst,ssl_err,redirect` | ≈ `circular` + event triggers |
+| — | `-M h,d,r` / `--mod-http` | byedpi-only (HTTP header case) |
+| — | `-Y` / `--drop-sack` | byedpi-only (Linux) |
+| — | `-a N` / `--udp-fake` | partial UDP (≠ nfqws2 voice UDP) |
+| `syndata` (bare) | `-f -1` + `-Q rand` | ✅ (`--fake-tls-mod`) |
 
 ### Позиционная магия byedpi
 
@@ -96,21 +114,73 @@ blockcheckS (Python)
 | `tcp_flags_set/unset` | ❌ |
 | `ip_ttl=N` | `--ttl N` ✅ |
 | `ip_autottl=...` | ❌ |
-| `drop-sack` | `--drop-sack` ✅ |
-| `hostspell=hoSt` | `--mod-http hcsmix` ✅ |
+| `drop-sack` | `-Y` / `--drop-sack` ✅ (Linux) |
+| `hostspell=hoSt` | `-M h` / `--mod-http h` ✅ |
+| `tls_mod=rnd` | `-Q rand` / `--fake-tls-mod rand` ✅ |
+
+**Примечание:** nfqws2 `tcp_ts=-1000` и byedpi `--ttl 8` / `--md5sig` — разные механизмы (timestamp vs TTL/md5 на fake). На Fryazino оба часто работают как «fake не доходит до сервера».
 
 ### Blob-маппинг
 
-| nfqws2 blob alias | byedpi |
-|-------------------|--------|
-| `stun` | `--fake-data @/opt/zapret2/blobs/stun.bin` |
-| `max_ru` | `--fake-data @/opt/zapret2/blobs/tls_clienthello_max_ru.bin` |
-| `google` | `--fake-data @/opt/zapret2/blobs/tls_clienthello_www_google_com.bin` |
-| `4pda` | `--fake-data @/opt/zapret2/blobs/tls_clienthello_4pda_to.bin` |
+| nfqws2 blob alias | byedpi (`-l` / `--fake-data`) |
+|-------------------|-------------------------------|
+| `stun` | `@blobs/stun.bin` (repo `blobs/` или `BLOB_DIR`) |
+| `max_ru` | `@blobs/tls_clienthello_max_ru.bin` |
+| `google` | `@blobs/tls_clienthello_www_google_com.bin` |
+| `4pda` | `@blobs/tls_clienthello_4pda_to.bin` |
 | `discord_udp` | ❌ (UDP only) |
 | `quic_*` | ❌ (QUIC only) |
 
-Используется существующая `BLOB_ALIAS_MAP` из `engine/blob_aliases.py` для резолва alias → файл.
+Используется `resolve_blob_path()` из `engine/blob_aliases.py` (приоритет: repo `blobs/`).
+
+**Строковый fake без файла:** `-l ':HEX'` или `-e` / `--oob-data` для OOB байта (см. upstream README).
+
+### Cross-translator: нужен ли?
+
+**Вердикт: partial translator + отдельный native каталог.** Единый синтаксис невозможен.
+
+| Подход | Решение |
+|--------|---------|
+| nfqws2 lua-desync → ciadpi argv | ✅ `parse_strategy_to_byedpi()` для ~8 семейств; `SKIP` на unmappable |
+| Native ciadpi one-liners (ByeByeDPI 60) | ✅ Matrix source `byedpi`, без reverse-маппинга |
+| byedpi → nfqws2 reverse | ⚠️ Low priority (`-q`, `-n`, `-A`, `-M`, `-Y` слабо мапятся) |
+| Один процесс `--auto` для matrix | ❌ Недетерминизм; только process-per-strategy |
+
+**Критическая семантика:** nfqws2 `repeats=N` = N× rawsend одного пакета. byedpi `offset:repeats:skip` = несколько **позиций split**, не repeat-send. **Не путать.** Fryazino winners с `repeats=6` — эмпирическая валидация обязательна.
+
+### Оценка покрытия nfqws2 → byedpi (blockcheckS, 2026-08-05)
+
+Метод: классификация по §3–7 (FULL / PARTIAL / NO) на реальных генераторах и `configs/`.
+
+| Источник | STRICT FULL | FULL + PARTIAL (usable) |
+|----------|-------------|-------------------------|
+| **configs/** (23 TCP из 28) | **13%** (3/23) | **30%** (7/23) |
+| **Standard TCP families** (17 семейств) | 18% (3/17) | 59% (10/17) |
+| **Standard enumerated** (8 341 стратегий) | **21%** | **35%** |
+| **Flowseal TCP** (6 338) | **2%** | **10%** |
+| **Fooling strings** (16 уникальных) | 25% (4/16) | — |
+| **QUIC + UDP + HTTP** | **0%** | **0%** |
+
+**Итого для пары nfqws2+byedpi:** ~**30–35%** стратегий имеют путь перевода; strict 1:1 — ~**20–22%**.
+
+**Лучший слайс (Fryazino-confirmed):** single-line `fake:blob=X:tcp_ts=-1000`, `fakedsplit`, `fakeddisorder`, `hostfakesplit` без seqovl — `simple_fake_alt2`, `alt9`, `FakedTcpGenerator` (100% FULL).
+
+**Структурные блокеры (не случайность):**
+
+1. **seqovl** — ~40% TCP семейств, ~65% enumerated output (`multisplit` largest family)
+2. **Unmapped foolings** — `badsum`, `badsid`, `tcp_ack:tcp_ts_up` в fast-scan axes
+3. **Non-TCP** — QUIC/UDP voice/HTTP целиком nfqws2-only
+4. **Multiline lua-desync** — dual/triple fake → PARTIAL даже когда строки мапятся
+5. **TCP `repeats=N`** — нет аналога в ciadpi
+
+**Dual-engine routing:**
+
+```
+TCP/TLS prescreen → --engine byedpi (fast, no root)
+  → top-N confirm → nfqws2 netns (ground truth)
+UDP / QUIC / voice → nfqws2 only
+Native byedpi catalog → byedpi only (OOB, -A, -n, -M)
+```
 
 ---
 
@@ -163,7 +233,7 @@ class ByedpiManager:
     def start(self) -> str:
         """Launch ciadpi, wait for port, return proxy_url."""
         args = [self.bin_path, "-p", str(self.port), "-i", "127.0.0.1",
-                "--proto", "tls"]
+                "-K", "tls"]
         args.extend(self.byedpi_flags)
         self._proc = subprocess.Popen(
             args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -425,13 +495,14 @@ else:
 
 ```python
 def resolve_byedpi_bin() -> str | None:
-    """Find ciadpi binary. Order: env → PATH → ~/.local/bin → vendor."""
+    """Find ciadpi binary. Order: env → patches → PATH → ~/.local/bin."""
     env = os.environ.get("BLOCKCHECKS_BYEDPI", "")
     if env and os.path.isfile(env):
         return env
-    for path in ("ciadpi", "/usr/local/bin/ciadpi",
+    vendor = os.path.join(PROJECT_DIR, "../patches/byedpi-ideas/ciadpi")
+    for path in (vendor, "ciadpi", "/usr/local/bin/ciadpi",
                  os.path.expanduser("~/.local/bin/ciadpi")):
-        if shutil.which(path) or os.path.isfile(path):
+        if os.path.isfile(path) or shutil.which(path):
             return path
     return None
 ```
@@ -472,7 +543,20 @@ def resolve_byedpi_bin() -> str | None:
 
 - [ ] `bs scan -d discord.com --generate standard --max 100 --engine nfqws2` (baseline)
 - [ ] `bs scan -d discord.com --generate standard --max 100 --engine byedpi` (comparison)
-- [ ] Записать `test/sec` в `docs/byedpi_engine.md`
+- [ ] Записать `test/sec` в этот документ
+
+### Phase 7 — ByeByeDPI catalog import (~2 часа)
+
+- [ ] `presets/byedpi/proxytest_strategies.list` — vendor 60 строк из [ByeByeDPI](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/assets/proxytest_strategies.list)
+- [ ] `CiadpiLineParser` — short/long flags, `{sni}` placeholder
+- [ ] Matrix source `byedpi` → `StrategyItem(strategy=ciadpi_line, protocol=tcp)`
+- [ ] `presets/domains/byedpi_*.txt` из `proxytest_*.sites`
+
+### Phase 8 — Probe enhancements (~1–2 часа)
+
+- [ ] Optional `PARTIAL_BLOCK` — truncated Content-Length (SiteCheckUtils parity)
+- [ ] Success-rate scoring mode для `--engine byedpi`
+- [ ] `BLOCKCHECKS_BYEDPI_SNI` env
 
 ---
 
@@ -496,19 +580,173 @@ def resolve_byedpi_bin() -> str | None:
 | `tcp_ack=-66000:tcp_ts_up` | byedpi не модифицирует TCP timestamp/ACK |
 | `seqovl`, `padencap`, `tcpseg` | byedpi не делает sequence overlap / padding / segmentation |
 | `ipfrag`, `ip6_*` | byedpi работает выше IP-уровня |
-| `ip_autottl` | byedpi использует фиксированный TTL (`--ttl N`) |
-| UDP `fake:blob=discord_udp:repeats=6` | `--udp-fake N` есть, но не эквивалентно nfqws2 |
-| QUIC `fake:blob=quic_initial:repeats=11` | byedpi не трогает QUIC Initial |
-| `--lua-desync=` multiline | Только первая строка маппится |
-| `circular:fails=` | Нет аналога, process-per-strategy |
+| `ip_autottl` | byedpi использует фиксированный TTL (`-t` / `--ttl`) |
+| UDP `fake:blob=discord_udp:repeats=6` | `-a N` есть, но не эквивалентно nfqws2 UDP voice |
+| QUIC `fake:blob=quic_initial:repeats=11` | byedpi не трогает QUIC Initial (`-K tls,http,udp`) |
+| `--lua-desync=` multiline | Одна строка → ciadpi one-liner; multiline nfqws2 не 1:1 |
+| `circular:fails=` | Нет аналога; есть `-A` auto-chains |
+| **disorder на Windows** | Ретрансмиссия с max ACK — нужен `-s 1+s -d 3+s` (upstream README) |
 
-**Для неподдерживаемых foolings возвращается пустой список аргументов → статус `SKIP` в результатах.**
+**Для неподдерживаемых foolings парсер возвращает пустой список → статус `SKIP`.**
 
 ---
 
-## 8. Расширение стратегий на будущее
+## 8. ByeByeDPI Android — подборщик стратегий (autotest)
 
-- **`--auto=torst` для sequential testing** — один процесс, несколько `--auto` групп. Требует поочерёдного курла через разные группы с проверкой какая именно сработала. Оставим на future work.
-- **`--auto-mode=2` (swop)** — сортировка стратегий по частоте срабатывания. Полезно для production proxy, не для тестирования.
-- **`--cache-ttl` + `--cache-file`** — кеширование успешных стратегий по IP. Production feature.
-- **byedpi-only strategy families** — `--tlsrec`, `--fake-sni`, `--mod-http hcsmix` — стратегии которых нет в nfqws2. Могут быть добавлены как отдельное семейство генератора (`byedpi` source в matrix_generator).
+Репозиторий: [romanvht/ByeByeDPI](https://github.com/romanvht/ByeByeDPI). Обёртка вокруг **ciadpi** (submodule byedpi). **Не** combinatorial generator — статический каталог + sequential restart.
+
+### 8.1 Два UI-потока
+
+| Поток | Где | Что делает |
+|-------|-----|------------|
+| **Pinned strategy picker** | `MainActivity.showStrategyPicker()` | Закреплённые команды из history → apply → restart VPN/Proxy |
+| **Autotest («Подбор стратегий»)** | `TestActivity` | Перебор каталога → score по доменам → JSON |
+
+Autotest требует **CMD mode** (`byedpi_enable_cmd_settings=true`).
+
+### 8.2 Autotest flow
+
+```
+proxytest_strategies.list (60) OR user commands
+        ↓
+union(active domain lists)
+        ↓
+FOR EACH strategy (sequential):
+    updateCmdArgs — {sni} → google.com (configurable)
+    stop ciadpi → start Proxy → wait ≤3s
+    delay(delaySec × 500ms)
+    checkSitesAsync(sites, parallel≤20) via SOCKS5 127.0.0.1:1080
+    success% = successCount / (sites × requestsPerSite)
+        ↓
+sort: completed → success% → successCount → proxy_test_results.json
+```
+
+Стратегии **sequential**; домены **parallel** (default 20).
+
+### 8.3 Каталог (`proxytest_strategies.list`)
+
+60 curated one-liners (asset lines 1–60). Загрузка: `TestActivity.loadCmds()`; `{sni}` → pref `byedpi_proxytest_sni` (default `google.com`). Override: pref `byedpi_proxytest_usercommands` (multiline).
+
+**Универсальный суффикс:** все 60 строк заканчиваются на `-a1` (1 UDP fake).
+
+| Паттерн | Strategies |
+|---------|------------|
+| `-a1` UDP fake | 60/60 |
+| `-d` disorder | 39 |
+| `-s` split | 37 |
+| `-o` OOB | 33 |
+| `-f` fake | 33 |
+| `-r` TLS record split | 33 |
+| `-q` / `-Qr` disoob / fake-tls-mod rand | 28 |
+| `-A` auto-chains | 23 |
+| `-n {sni}` fake-sni | 17 |
+| `-t` fake TTL | 15 |
+| `-S` md5sig | 7 |
+| `-M` mod-http | 5 |
+| `-m` tlsminor | 4 |
+
+**Позиционные модификаторы** (`+s`, `+sm`, `+se`, `+sh`, `+h`, `+nme`, `+hm`, `+nr`, `+sn`): offset[:repeats:skip][+flags]. Примеры: `s3:5+sm`, `r-5+se`, `d2:5:2+h`.
+
+**Профили:** fake-SNI chains (~13), OOB-heavy (~12), `-A` auto (~11), disorder/split ladders (~7), minimal 1–5 flags (строки 46–60).
+
+Примеры:
+
+```text
+-o1 -a1 -r-5+se                    ← default app cmd (PreferencesUtils)
+-o1 -a1 -r-5+se
+--fake -1 --ttl 8 --split 1+s --disorder 3+s -a1   ← line 22 GNU long form
+-n {sni} -Qr -f-1 -r1+s -a1
+```
+
+**ciadpi flags в каталоге, но не в nfqws2:** `-q`, `-Q`/`-Qr`, `-n`, `-A`, `-M`, `-m`, `-O`, `-e`, pos_t `+h`/`:repeats:skip`.
+
+**В ciadpi есть, но не в 60-strategy каталоге:** `-Y` drop-sack, `-F` TFO, `-g` def-ttl, `-K` proto, `-H` hosts, `-R` round, `-L` auto-mode, `-T` timeout-auto, `-u/-y` cache, `-l` fake-data file, `-N` no-domain.
+
+### 8.4 Domain presets (assets)
+
+`DomainListUtils` → `filesDir/domain_lists.json`; built-in sync из assets unless user-edited.
+
+| File | ID | Domains |
+|------|----|---------|
+| `proxytest_youtube.sites` | youtube | 13 |
+| `proxytest_googlevideo.sites` | googlevideo | 19 |
+| `proxytest_discord.sites` | discord | 21 |
+| `proxytest_telegram.sites` | telegram | 52 |
+| `proxytest_social.sites` | social | 16 |
+| `proxytest_general.sites` | general | 6 |
+| `proxytest_cloudflare.sites` | cloudflare | 4 |
+| `proxytest_türkiye.sites` | türkiye | 8 |
+
+**Default active lists:** `lang != tr` → youtube + googlevideo (**32** hosts); `lang == tr` → türkiye + discord (**29**).
+
+### 8.5 Pass/fail — отличие от blockcheckS
+
+`SiteCheckUtils`: SOCKS5 + `HttpURLConnection`, read до `Content-Length` (cap 1 MiB), `Connection: close`.
+
+- **PASS:** HTTP response received AND (`declaredLength ≤ 0` OR `actualLength ≥ declaredLength`)
+- **FAIL (block):** truncated body → "Block detected"; exception → 0 для attempt
+- **Нет проверки HTTP status** — non-2xx с полным body = success
+
+blockcheckS: `curl_cffi` + HTTP code — truncation **не** детектируется → идея `PARTIAL_BLOCK` probe (§9).
+
+### 8.6 Scoring & timing defaults
+
+| Setting | Pref key | Default | Effect |
+|---------|----------|---------|--------|
+| Inter-strategy delay | `byedpi_proxytest_delay` | 1 (0–10) | `delay × 500ms` around each strategy |
+| Requests/domain | `byedpi_proxytest_requests` | 1 (1–20) | repeats per domain |
+| Timeout | `byedpi_proxytest_timeout` | 5s (1–15) | connect + read |
+| Parallel sites | `byedpi_proxytest_limit` | 20 (1–50) | `Semaphore` in SiteCheckUtils |
+| Proxy wait | hardcoded | 3s max | poll `appStatus` every 100ms |
+| Post-running settle | hardcoded | +500ms | after Running |
+
+Score: `successCount / (sites × requests)`; sort completed → success% → count. Results: `filesDir/proxy_test_results.json`. Crash recovery: pref `is_test_running`.
+
+### 8.7 Ключевые файлы
+
+- [TestActivity.kt](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/java/io/github/romanvht/byedpi/activities/TestActivity.kt)
+- [SiteCheckUtils.kt](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/java/io/github/romanvht/byedpi/utility/SiteCheckUtils.kt)
+- [DomainListUtils.kt](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/java/io/github/romanvht/byedpi/utility/DomainListUtils.kt)
+- [PreferencesUtils.kt](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/java/io/github/romanvht/byedpi/utility/PreferencesUtils.kt) — default cmd `-o1 -a1 -r-5+se`
+- [proxytest_strategies.list](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/assets/proxytest_strategies.list)
+- [StrategyResultAdapter.kt](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/java/io/github/romanvht/byedpi/adapters/StrategyResultAdapter.kt) — apply result → pinned strategy
+
+---
+
+## 9. Идеи для blockcheckS
+
+### Каталог
+
+1. Vendor `presets/byedpi/proxytest_strategies.list` (60 seeds).
+2. Matrix source `byedpi` — curated list, не combinatorics.
+3. Domain bundles из `proxytest_*.sites`.
+
+### Probe / scoring
+
+4. Status `PARTIAL_BLOCK` (truncated Content-Length).
+5. Success-rate ranking primary для `--engine byedpi`.
+6. Sequential strategies × parallel domains (как ByeByeDPI).
+
+### byedpi-only generator axes
+
+7. OOB / disoob (`-o`, `-q`).
+8. Auto-chain (`-A torst,ssl_err`).
+9. fake-sni (`-n`, `{sni}`).
+10. HTTP mod (`-M h,d,r`).
+11. drop-sack (`-Y`, Linux).
+
+### CLI
+
+12. `BLOCKCHECKS_PROXY=` empty — не использовать dead SOCKS (RKN-blocked VLESS).
+13. `CiadpiParser` — short (`-f-1`) + long (`--fake -1`) flags.
+14. Export pinned shortlist top-N после scan.
+15. `SCAN_PROFILE=ru|tr` для default domain lists.
+
+---
+
+## 10. Расширение на будущее
+
+- **`--auto` chains** — production SOCKS, не matrix A/B (нужна атрибуция группы).
+- **`--auto-mode=2`**, **`--cache-ttl`** — production only.
+- **byedpi-only families** в `matrix_generator` source `byedpi`.
+- **`{list:Name}` macro** — runtime expand hosts into `-H` (ByeByeDPI CMD).

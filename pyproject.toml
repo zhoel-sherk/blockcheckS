@@ -221,6 +221,7 @@ pair = [
 composite = ["src/blockchecks/checkers/composite_runner.py", "src/blockchecks/cli/parser.py"]
 bench-settle = ["src/blockchecks/cli/commands/bench_settle.py"]
 full = ["src/blockchecks/main.py", "src/blockchecks/main_phases.py"]
+stop = ["src/blockchecks/cli/commands/stop.py"]
 
 [tool.blockchecks.settings]
 env_prefix = "BLOCKCHECKS_"

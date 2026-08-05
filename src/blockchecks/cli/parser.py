@@ -248,6 +248,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Mass strategy×coverage test + nfqws2 conf export (see: bs full -h)",
     )
 
+    stop = sub.add_parser(
+        "stop",
+        help="Gracefully stop active full/scan/pair run (SIGTERM → flush → export)",
+    )
+    stop.add_argument(
+        "--force",
+        action="store_true",
+        help="SIGKILL if graceful shutdown exceeds --wait",
+    )
+    stop.add_argument(
+        "--wait",
+        type=float,
+        default=120.0,
+        metavar="SEC",
+        help="Seconds to wait for graceful shutdown (default 120)",
+    )
+
     tcp = sub.add_parser("tcp", help="Single TCP strategy test (sync)")
     tcp.add_argument("-d", "--domain", required=True)
     tcp.add_argument("-s", "--strategy")
@@ -588,6 +605,11 @@ def dispatch(args: argparse.Namespace) -> int:
 
         return asyncio.run(cmd_bench_settle(a))
 
+    def _stop(a: argparse.Namespace) -> int:
+        from blockchecks.cli.commands.stop import cmd_stop
+
+        return cmd_stop(a)
+
     handlers: dict[str, Callable[[argparse.Namespace], int]] = {
         "tcp": cmd_tcp,
         "udp": cmd_udp,
@@ -595,6 +617,7 @@ def dispatch(args: argparse.Namespace) -> int:
         "pair": _pair,
         "composite": _composite,
         "bench-settle": _bench,
+        "stop": _stop,
     }
     handler = handlers.get(args.command)
     if handler is not None:

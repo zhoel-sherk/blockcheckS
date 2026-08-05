@@ -178,11 +178,11 @@ _(see Deferred)_
 **Файл:** `src/blockchecks/engine/async_runner.py:821-845`  
 **Влияние:** **1.7–2.0×** (каждый FAIL-тест идёт один раз, а не два)  
 **План:**
-- [ ] Добавить `--no-wssize` / `--wssize` флаг в CLI parser (оба `pair` и `full`)
-- [ ] В `async_runner.py` guard: `if try_wssize and not args.no_wssize: ...`
-- [ ] В `main_phases.py:413` и `pair_phases.py:186`: `try_wssize = not getattr(args, "no_wssize", False) and protocol == "tls12"`
-- [ ] Дефолт для `bs full`: `--no-wssize` (без retry — full-скану важна скорость, wssize можно протестировать отдельным скан-левелом)
-- [ ] Дефолт для `bs pair` / `bs scan`: `--wssize` оставить (короткие сканы, качество важнее скорости)
+- [x] Добавить `--no-wssize` / `--wssize` флаг в CLI parser (оба `pair` и `full`)
+- [x] В `async_runner.py` guard: `if try_wssize and not args.no_wssize: ...`
+- [x] В `main_phases.py:413` и `pair_phases.py:186`: `try_wssize = not getattr(args, "no_wssize", False) and protocol == "tls12"`
+- [x] Дефолт для `bs full`: `--no-wssize` (без retry — full-скану важна скорость, wssize можно протестировать отдельным скан-левелом)
+- [x] Дефолт для `bs pair` / `bs scan`: `--wssize` оставить (короткие сканы, качество важнее скорости)
 
 #### P0-2 — Inline curl probe вместо subprocess
 **Файлы:** `src/blockchecks/engine/probe.py:29-62`, `async_runner.py:444,576`  
@@ -198,28 +198,28 @@ _(see Deferred)_
 **Файл:** `src/blockchecks/engine/store/sqlite_store.py:167-232`  
 **Влияние:** **1.05–1.10×** (убирает `connect → PRAGMA → COMMIT` per test)  
 **План:**
-- [ ] Сменить дефолт `--db-batch` с `0` на `500` (или `200` для меньшей потери данных при краше)
-- [ ] При batch>0 внутри `flush()` уже есть `BEGIN IMMEDIATE` + rollback — атомарность сохранена
-- [ ] Проверить что `flush()` вызывается в `run_finalize.py` при остановке по таймауту/SIGINT
+- [x] Сменить дефолт `--db-batch` с `0` на `500` (parser + `DEFAULT_DB_BATCH` fallback в full/pair)
+- [x] При batch>0 внутри `flush()` уже есть `BEGIN IMMEDIATE` + rollback — атомарность сохранена
+- [x] `flush()` вызывается в `run_finalize.py` при остановке по таймауту/SIGINT
 
 #### P0-4 — Settle overhead
 **Файл:** `src/blockchecks/engine/nfqws2_settle.py:29-53`, `config.py:224-226`  
 **Влияние:** **1.02–1.05×** (убирает 0.05s sleep + 1-2 pgrep = 0.15-0.25s per test)  
 **План:**
-- [ ] `BLOCKCHECKS_NFQWS2_SETTLE_MIN=0` (nfqws2 в daemon-режиме с `@config` стартует мгновенно)
-- [ ] `BLOCKCHECKS_NFQWS2_SETTLE_POLL=0.05` (вместо 0.1)
-- [ ] Проверить что `wait_nfqws2_ready` при min_wait=0 всё ещё корректно ждёт если nfqws2 ещё не запущен
+- [x] `BLOCKCHECKS_NFQWS2_SETTLE_MIN=0` (nfqws2 в daemon-режиме с `@config` стартует мгновенно)
+- [x] `BLOCKCHECKS_NFQWS2_SETTLE_POLL=0.05` (вместо 0.1)
+- [x] `wait_nfqws2_ready` при min_wait=0 корректно ждёт если nfqws2 ещё не запущен
 
 #### P0-5 — Preflight skip флаги для повторных full-сканов
 **Файл:** `src/blockchecks/engine/preflight.py:118-189`, `main_phases.py:182-204`  
 **Влияние:** стартовое время (10-20 минут на 100+ доменах)  
 **План:**
-- [ ] `--skip-prolog` уже есть ✅
-- [ ] `--skip-port-block` уже есть ✅
-- [ ] `--skip-ip-block` уже есть ✅
-- [ ] `--skip-dns-audit` уже есть ✅
-- [ ] `--skip-baseline` уже есть ✅
-- [ ] Все вместе при повторном full-скане: старт < 5 секунд
+- [x] `--skip-prolog` уже есть ✅
+- [x] `--skip-port-block` уже есть ✅
+- [x] `--skip-ip-block` уже есть ✅
+- [x] `--skip-dns-audit` уже есть ✅
+- [x] `--skip-baseline` уже есть ✅
+- [x] `scripts/run_full_20h.sh`: `--skip-prolog --skip-ip-block --skip-port-block`
 
 #### P0-6 — Быстрый прогон после всех фиксов
 **План:**
@@ -254,51 +254,43 @@ _(see Deferred)_
 
 ### T1-1 — `settle_slack` в `worker_wall_timeout` (15.0 → 3.0)
 **Файл:** `src/blockchecks/checkers/curl_probe.py:320`  
-**Текущее:** `def worker_wall_timeout(..., settle_slack: float = 15.0)`  
+**Текущее:** `def worker_wall_timeout(..., settle_slack: float = 3.0)`  
 **Проблема:** Каждый сабпроцесс-проб получает +15s к таймауту «на всякий случай». Python стартует за 0.3-0.8s, nfqws2 селится за 0.05-0.5s. 15s — запас с пятикратным превышением.  
 **Экономия:** 12s × 600 вызовов = **7200s (2ч)** на full-скан.  
 **Что сделать:**
-- [ ] `settle_slack: float = 3.0` в сигнатуре
-- [ ] `max(3.0, float(settle_slack))` вместо `max(5.0, float(settle_slack))` в теле
-- [ ] Проверить что `test_runner.py:140` (settle_slack=5.0) тоже снижен до 3.0
-- [ ] Проверить что `composite_runner.py:168` (settle_slack=10.0) снижен до 3.0
+- [x] `settle_slack: float = 3.0` в сигнатуре
+- [x] `max(3.0, float(settle_slack))` вместо `max(5.0, float(settle_slack))` в теле
+- [x] `test_runner.py` settle_slack=3.0
+- [x] `composite_runner.py` settle_slack=3.0
 - [ ] Прогнать 10 стратегий на discord.com — убедиться что нет false-timeout
 
 ### T1-2 — nfqws2 settle + stop wait
 **Файлы:** `src/blockchecks/engine/config.py:225-227`, `src/blockchecks/engine/nfqws2.py:260,264`  
 **Текущее:**
 ```
-NFQWS2_SETTLE_MAX  = 2.0
-NFQWS2_SETTLE_POLL = 0.1
-NFQWS2_SETTLE_MIN  = 0.05
-# Stop: wait(timeout=3) + sleep(0.3) + wait(timeout=2)
+NFQWS2_SETTLE_MAX  = 0.5
+NFQWS2_SETTLE_POLL = 0.05
+NFQWS2_SETTLE_MIN  = 0
+# Stop: wait(timeout=1) + sleep(0.1) + wait(timeout=1)
 ```
 **Проблема:** nfqws2 в daemon-режиме с `@config` стартует мгновенно (~50-200ms). 2s max + 5s stop wait = 7s оверхеда на каждый цикл стратегии.  
 **Экономия:** 1.5s (settle) + 2.3s (stop) × 400 циклов = **~1520s** на full-скан.  
 **Что сделать:**
-- [ ] `NFQWS2_SETTLE_MAX = 0.5` (вместо 2.0) — env override `BLOCKCHECKS_NFQWS2_SETTLE_MAX` сохранён
-- [ ] `NFQWS2_SETTLE_POLL = 0.05` (вместо 0.1)
-- [ ] `NFQWS2_SETTLE_MIN = 0.0` (вместо 0.05) — nfqws2 не нужен min wait
-- [ ] Stop: `wait(timeout=1)` + `sleep(0.1)` + `wait(timeout=1)` (вместо 3+0.3+2)
+- [x] `NFQWS2_SETTLE_MAX = 0.5` (вместо 2.0) — env override `BLOCKCHECKS_NFQWS2_SETTLE_MAX` сохранён
+- [x] `NFQWS2_SETTLE_POLL = 0.05` (вместо 0.1)
+- [x] `NFQWS2_SETTLE_MIN = 0.0` (вместо 0.05) — nfqws2 не нужен min wait
+- [x] Stop: `wait(timeout=1)` + `sleep(0.1)` + `wait(timeout=1)` (вместо 3+0.3+2)
 - [ ] Проверить на slow-машине (Pi/ARM) что nfqws2 успевает стартовать за 0.5s
 
 ### T1-3 — SQLite performance pragmas
 **Файл:** `src/blockchecks/engine/store/sqlite_store.py` (все `_wrap_connection` и `async with connect` места)  
-**Текущее:** Только `PRAGMA busy_timeout=5000` и `PRAGMA journal_mode=WAL` (в init)  
+**Текущее:** `PRAGMA busy_timeout`, WAL в init, `_apply_pragmas`: synchronous=OFF, mmap, cache, temp_store  
 **Проблема:** Без `synchronous=OFF` каждый INSERT ждёт fsync. Без `mmap_size` каждый read идёт через read(). Без `cache_size` страничный кеш tiny (2MB default).  
 **Экономия:** **5-10×** на запись в SQLite при батч-режиме.  
 **Что сделать:**
-- [ ] Добавить в `_wrap_connection()` (sqlite_store.py) или в отдельную функцию `_apply_pragmas()`:
-  ```python
-  PRAGMA synchronous = OFF;          # не ждать fsync (безопасно на tmpfs/ramdisk)
-  PRAGMA journal_mode = MEMORY;      # журнал в памяти (не на диске)
-  PRAGMA mmap_size = 268435456;      # 256MB memory-mapped I/O
-  PRAGMA cache_size = -64000;        # 64MB page cache
-  PRAGMA temp_store = MEMORY;        # временные таблицы в памяти
-  ```
-- [ ] Оставить WAL mode в `init()` (нужен для concurrent reads)
-- [ ] Добавить `PRAGMA synchronous=OFF` после WAL в `schema.py:apply_schema()`
-- [ ] Проверить что при краше данные не теряются (flush перед stop)
+- [x] `_apply_pragmas()` в sqlite_store.py (synchronous=OFF, mmap 256MB, cache 64MB, temp_store=MEMORY)
+- [x] WAL mode в `init()` через schema
+- [x] `flush()` перед stop в run_finalize
 
 ### T1-4 — Probe timeout: CLI default 5.0 → 3.0
 **Файл:** `src/blockchecks/cli/parser.py:262,344,382,415`  
@@ -312,13 +304,13 @@ NFQWS2_SETTLE_MIN  = 0.05
 
 ### T1-5 — Subprocess padding: QUIC +10→+5, TCP/UDP +5→+3
 **Файлы:** `src/blockchecks/engine/async_runner.py:318,707`, `src/blockchecks/engine/test_runner.py:296`  
-**Текущее:** QUIC сабпроцесс: `timeout=timeout+10`, TCP/UDP: `timeout=timeout+5`  
+**Текущее:** QUIC: `timeout+5`, TCP/UDP: `timeout+3`  
 **Проблема:** Python стартует за 0.3-0.8s. +10s для QUIC — двойной запас относительно 8s probe timeout. +5s для TCP/UDP при 3-5s probe — тройной запас.  
 **Экономия:** 5s × 80 QUIC + 2s × 200 TCP/UDP = **~800s** на full-скан.  
 **Что сделать:**
-- [ ] `timeout=timeout+5` для QUIC (вместо +10)
-- [ ] `timeout=timeout+3` для TCP/UDP (вместо +5)
-- [ ] Убедиться что `worker_wall_timeout` перекрывает оставшийся зазор
+- [x] `timeout=timeout+5` для QUIC (вместо +10)
+- [x] `timeout=timeout+3` для TCP/UDP (вместо +5)
+- [x] `worker_wall_timeout` default settle_slack=3.0 перекрывает зазор
 
 ### T1-6 — Верификационный прогон после T1
 - [ ] `sudo bs full --max-timeh 4 --parallel 4 --fan-out --resume --skip-prolog --skip-ip-block --no-wssize --db-batch 500`
@@ -380,54 +372,22 @@ NFQWS2_SETTLE_MIN  = 0.05
 
 ### T2-3 — byedpi как опциональный движок (`--engine byedpi`)
 
-> **Полный план:** [docs/byedpi_engine.md](docs/byedpi_engine.md) — архитектура, маппинг стратегий, roadmap, 6 фаз.
-**Идея:** byedpi (ciadpi) поддерживает `--auto` режим: один процесс, все стратегии последовательно на каждом соединении. Не нужен netns, iptables, root. Работает как SOCKS5-прокси.  
-**Скорость:** 10-20× быстрее nfqws2 на переборе стратегий (нет process spawn/settle/teardown).  
+> **Полный план:** [docs/byedpi_engine.md](byedpi_engine.md) — архитектура, маппинг, ByeByeDPI autotest, roadmap 8 фаз.
+
+**Идея:** ciadpi — SOCKS5 без root/netns. Для **тестирования** — **process-per-strategy** (как ByeByeDPI autotest): один ciadpi на стратегию, curl через прокси, ~50ms старт. `--auto` chains — только production (§10 byedpi_engine.md).
+
 **Архитектура:**
 ```
-blockcheckS → старт byedpi ОДИН раз (SOCKS5 на localhost: порт)
-           → для каждой стратегии: curl через прокси
-           → стоп byedpi
-Ноль netns, ноль iptables, ноль root.
+blockcheckS → для каждой стратегии:
+              ByedpiManager.from_strategy() → ciadpi -p N -K tls …flags
+              curl через socks5://127.0.0.1:N
+              stop ciadpi
+Параллельно: N стратегий = N ciadpi на разных портах.
 ```
 
-**Что сделать:**
-- [ ] Новый модуль `src/blockchecks/engine/byedpi.py` (~200 строк)
-- [ ] Класс `ByedpiManager`:
-  ```python
-  @dataclass
-  class ByedpiManager:
-      port: int                      # SOCKS5 порт (авто-выбор свободного)
-      strategies: list[str]          # список lua-desync строк
-      _proc: subprocess.Popen | None
-      _proxy_url: str                # socks5://127.0.0.1:{port}
-  
-      def start(self) -> str:
-          """Запустить byedpi, вернуть proxy_url."""
-          args = ["byedpi", "-s", str(self.port)]
-          for s in self.strategies:
-              args.extend(["--auto=torst", "--fake", "-1", "--ttl", s])
-          self._proc = subprocess.Popen(args, ...)
-          return f"socks5://127.0.0.1:{self.port}"
-  
-      def stop(self):
-          """Остановить byedpi."""
-  ```
-- [ ] `curl_probe.py:CurlProbeRequest` — добавить поле `proxy: str | None = None`
-- [ ] `run_curl_probe()` — если `proxy` задан, `session.get(url, proxies={"https": proxy})`
-- [ ] CLI флаг `--engine nfqws2|byedpi` (default: nfqws2)
-- [ ] CLI флаг `--byedpi-bin` (путь к бинарнику, default: `which byedpi` или `~/.local/bin/byedpi`)
-- [ ] Проверить что byedpi доступен в system deps check: `ensure_system_deps_or_exit()`
-- [ ] Интеграция в `async_runner.py`:
-  - `_run_tcp_check()` — если engine=byedpi, вместо nfqws2+netns → `asyncio.to_thread(curl с прокси)`
-- [ ] Бенчмарк: `bs scan -d discord.com --generate standard --max 100 --engine nfqws2` vs `--engine byedpi`
-  - Ожидание: nfqws2 ~80s, byedpi ~8s
+**Что сделать:** см. Phase 1–8 в [byedpi_engine.md](byedpi_engine.md) (§5 Roadmap).
 
-**Ограничения byedpi:**
-- Только TCP стратегии (fake, hostfake, split). QUIC и UDP — по-прежнему nfqws2.
-- Не все foolings поддерживаются (badsum — нет, tcp_md5 — да, tcp_ts — да)
-- Нужна валидация что стратегия в nfqws2-синтаксисе корректно транслируется в byedpi-аргументы
-- Не тестировался на Fryazino.net — нужен живой прогон
+**Ограничения:** см. §7 byedpi_engine.md. `badsum`/`tcp_ts_up` — SKIP. UDP/QUIC — nfqws2. Не тестировался на Fryazino — нужен живой прогон.
 
 ---
 
@@ -465,6 +425,7 @@ blockcheckS → старт byedpi ОДИН раз (SOCKS5 на localhost: пор
 - Нужен Unix-сокет, HTTP API или file-watch для реконфигурации
 - Устранил бы settle overhead per strategy целиком
 - **Не сделано:** требует форка nfqws2, C-разработки, тестирования
+- **Промежуточный путь без fork:** [custom_lua.md](custom_lua.md) — `/dev/shm` + `scan_pick` + timer poll (L1–L4)
 
 ### T3-5 — kernel module (youtubeUnblock kmod approach)
 **Идея:** Встроить модификацию пакетов в kernel module.
@@ -494,7 +455,7 @@ blockcheckS → старт byedpi ОДИН раз (SOCKS5 на localhost: пор
 ### Fixed (in-tree)
 
 - [x] **VPS-1** `MemAvailable` warning spam — `effective_default_pool_size()` печатал предупреждение при КАЖДОМ вызове (8-10 раз за `bs scan`). Добавлен `_mem_warned` флаг в `config.py`. Файл: `src/blockchecks/engine/config.py:158-168`.
-- [ ] **VPS-2** Scan duplication — `bs scan` выполняет два полных прохода (стратегии генерируются дважды, TCP Phase дважды). Причина: `_run_scan` → `asyncio.run(cmd_pair(ns))` вызывается дважды через CliApp dispatch. Нужен фикс в `cliapp.py`.
+- [x] **VPS-2** Scan/full duplication — `sub.cli_cmd()` + handler dispatch caused double `asyncio.run` via CliApp. Fix: subcommand models parse-only, `_dispatch_subcommand()` from root `cli_cmd`, `_FULL_RUN_ACTIVE` guard on `bs full`. Файл: `src/blockchecks/cli/cliapp.py`.
 
 ### Observations
 

@@ -80,6 +80,9 @@ class RunStateStore(Protocol):
     async def save_scan_weights(self, rows: list[tuple[str, float]]) -> None: ...
 
 
+DEFAULT_DB_BATCH = 500
+
+
 def open_run_store(
     db_path: str | Path | None = None,
     *,
@@ -98,6 +101,7 @@ __all__ = [
     "fingerprint_mismatch",
     "matrix_fingerprint",
     "open_run_store",
+    "DEFAULT_DB_BATCH",
 ]
 
 StateDB: type[SqliteRunStore] = SqliteRunStore  # backward compat alias

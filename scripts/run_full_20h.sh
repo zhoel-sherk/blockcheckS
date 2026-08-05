@@ -54,7 +54,10 @@ exec bs full \\
   --allow-dns-hijack \\
   --resume \\
   --skip-prolog \\
+  --skip-ip-block \\
+  --skip-port-block \\
   --isp-interface eth3
+# Graceful stop from another terminal: bs stop  (or: bs --stop; sudo if run via sudo)
 EOF
 chmod 700 "$RUNNER"
 

@@ -112,3 +112,42 @@ def test_scan_help_shows_short_flags():
     help_text = buf.getvalue()
     assert "-d" in help_text
     assert "-M" in help_text or "strategy-preset" in help_text
+
+
+@pytest.mark.unit
+def test_subcommand_models_have_no_cli_cmd():
+    """VPS-2: subcommand parse models must not expose cli_cmd (single root dispatch)."""
+    Root = build_cli_root()
+    model = Root(_cli_parse_args=["scan", "--max", "1"])
+    sub = get_subcommand(model, is_required=True)
+    assert not callable(getattr(type(sub), "cli_cmd", None))
+
+
+@pytest.mark.unit
+def test_cli_dispatches_scan_handler_once():
+    """VPS-2: CliApp.run must invoke scan handler exactly once."""
+    from blockchecks.cli import cliapp as ca
+
+    calls: list[int] = []
+
+    def trace_scan(_model):
+        calls.append(1)
+        return 0
+
+    Root = build_cli_root()
+    ca._CMD_HANDLERS["ScanCmd"] = trace_scan
+    with patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0):
+        CliApp.run(Root, cli_args=["scan", "--max", "1", "--skip-deps-check"])
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+def test_cli_main_returns_handler_exit_code():
+    from blockchecks.cli import cliapp as ca
+
+    with patch("blockchecks.cli.cliapp._run_scan", return_value=7):
+        with patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0):
+            code = ca.main(
+                ["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"]
+            )
+    assert code == 7
