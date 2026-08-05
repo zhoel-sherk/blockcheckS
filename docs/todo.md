@@ -504,3 +504,17 @@ blockcheckS → для каждой стратегии:
 - **web.telegram.org** — IP-блокировка (0/3 PASS, все timeout 8s)
 - **460/465 тестов** зелёные на VPS (5 skipped — sudo/netns related)
 - **zapret2 auto-fetch** — скачал `v1.0.4` с GitHub, установил в `~/.local/share/blockcheckS/zapret2/`
+
+### Closed in 1.2.1a (lua bridge)
+
+- [x] Version 1.2.1a bump
+- [x] changelog: full lua bridge entry (1.1.0 feature documented)
+- [x] T2.1 integration test: lua_bridge_compare_no_drift
+- [x] T2.2 integration test: lua_bridge_batch_windows
+- [x] T2.3 unit test: drift detection edge cases
+- [x] T3: DB schema bridge_batch_id + bridge_gen in tcp_results
+- [x] T4: smart_fallback Lua hook (retrans + inbound RST detector)
+- [x] T4: build_bridge_conf adds smart_fallback before scan_pick
+- [x] 14 new unit tests (lua_bridge_edge_cases.py)
+- [x] 4 new integration tests (test_lua_bridge_compare.py)
+- [x] Live smoke: 200 strategies × 6 domains via --lua-bridge (317s total)
