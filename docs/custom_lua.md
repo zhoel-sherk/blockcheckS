@@ -779,37 +779,56 @@ Preset: `presets/strategies/gp-custom-dupfake.tls` (comments only today).
 
 ## 9. Интеграция в blockcheckS (чеклист)
 
-### 9.1 nfqws2.conf generation
+### 9.1 ProbeBatchService (`engine/batch_probe.py`)
+
+Единый сервис batch-прогона: **boot batch → probe ×N → shutdown**.
+
+| Backend | Когда | nfqws2 lifecycle |
+|---------|-------|------------------|
+| `classic` | default, fan-out, pair UDP bootstrap | restart per probe (внутри batch — sequential) |
+| `lua_bridge` | `--lua-bridge` | один daemon на batch N (`scan_pick` + shm) |
 
 ```python
-# future: conf_builder / async_runner
+# BatchContext + ProbeBatchService
+ctx = BatchContext(ns_name="", items=batch, domain=domain, batch_id=id)
+result = await probe_batch_service.run_batch(ctx, timeout)
+# result: results, settle_ms, batch_wall_ms, backend, batch_fill_ratio
+```
+
+CLI: `scan`/`pair`/`full` — `--lua-bridge`, `--bridge-batch`, `--lua-bridge-compare`, `--lua-extra`.
+
+`bs full`: sequential + adaptive AQ используют batch service при `--lua-bridge`; fan-out остаётся classic (WARN once).
+
+Поэтапный flip default → `lua_bridge`: см. `docs/todo.md` (L-transition-*).
+
+### 9.2 nfqws2.conf generation (lua_bridge)
+
+```python
 lines.append("--writable=/dev/shm/blockchecks/{ns}")
 lines.append("--lua-init=@lua/blockchecks/init.lua")
 lines.append("--lua-desync=scan_pick")
 # ... strategy=1..N groups
 ```
 
-### 9.2 Python IPC helpers
+Реализовано в `lua_bridge.build_bridge_conf()`.
+
+### 9.3 Python IPC helpers
 
 ```python
-class Nfqws2Ipc:
-    def __init__(self, ns_name: str):
-        self.base = Path(f"/dev/shm/blockchecks/{ns_name}")
-
-    def set_strategy(self, id: int, lua_line: str, gen: int):
-        (self.base / "strategy.id").write_text(f"{id}\n{gen}\n")
-        (self.base / "strategy.cmd").write_text(lua_line)
-
-    def drain_events(self) -> list[dict]: ...
+class LuaBridge:
+    def publish(self, id: int, gen: int, cmd: str | None = None): ...
+    def drain_events(self, since_gen: int = 0) -> list[BridgeEvent]: ...
 ```
 
-### 9.3 async_runner branch
+Реализовано в `engine/lua_bridge.py` (`BridgeSession.boot` / `shutdown`).
 
-- `--persistent-nfqws2` / `--lua-bridge` flag
-- Skip `pkill nfqws2` between strategies in same netns worker
-- On worker release: still `pkill` + shm cleanup
+### 9.4 async_runner branch
 
-### 9.4 DB schema extensions
+- `--lua-bridge` → `ProbeBatchService` backend `lua_bridge`
+- default → `classic` (или per-probe `test_tcp` вне batch paths)
+- shm cleanup: `netns_pool`, `run_control.run_session`
+
+### 9.5 DB schema extensions (deferred)
 
 | Column | Source |
 |--------|--------|
@@ -817,11 +836,14 @@ class Nfqws2Ipc:
 | `tamper_reason` | `TAMPER` event |
 | `mut_seed` | lua_state log |
 | `probe_gen` | `strategy.gen` mismatch detection |
+| `batch_id`, `batch_wall_ms` | batch service logs (v1: log only) |
 
-### 9.5 Тесты
+### 9.6 Тесты
 
-- Unit: mock `WRITABLE` dir, parse `events.ndjson`
-- Integration: netns + inbound rule + synthetic RST → `TAMPER`
+- `tests/unit/test_lua_bridge.py` — IPC/conf
+- `tests/unit/test_batch_probe.py` — scheduler, accumulator, service mocks
+- `tests/unit/test_batch_probe_runner.py` — runner delegation
+- Integration: `sudo bs scan --lua-bridge --max 10`
 - **Не** ломать default path без `--lua-bridge`
 
 ---

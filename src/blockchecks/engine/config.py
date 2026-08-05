@@ -6,6 +6,7 @@ Uses BLOCKCHECKS_* env vars for portable paths. Falls back to sensible defaults.
 import os
 import sys
 import time
+from pathlib import Path
 
 # ── Resolvable paths ─────────────────────────────
 
@@ -30,6 +31,8 @@ PROJECT_DIR = _resolve_project_dir()
 PACKAGE_DIR = _PACKAGE_DIR
 CONFIGS_DIR = os.path.join(PROJECT_DIR, "configs")
 REPO_BLOBS_DIR = os.path.join(PROJECT_DIR, "blobs")
+REPO_LUA_DIR = os.path.join(PROJECT_DIR, "lua", "blockchecks")
+_BLOCKCHECKS_LUA_NAMES = ("write_ipc.lua", "scan_bridge.lua", "init.lua")
 
 
 def _env_or(key, default: str) -> str:
@@ -89,9 +92,39 @@ LUA_INIT_DIR = _env_or("BLOCKCHECKS_LUA_DIR", _DEFAULT_LUA)
 LUA_INIT_SCRIPTS = [os.path.join(LUA_INIT_DIR, f) for f in _LUA_SCRIPT_NAMES]
 
 
-def get_lua_init_scripts() -> list[str]:
-    """Return current lua-init paths (honours apply_tool_paths / env)."""
-    return [os.path.join(LUA_INIT_DIR, f) for f in _LUA_SCRIPT_NAMES]
+def get_lua_init_scripts(extra: list[str] | None = None) -> list[str]:
+    """Return zapret lua-init paths plus optional extras and BLOCKCHECKS_LUA_EXTRA."""
+    paths = [os.path.join(LUA_INIT_DIR, f) for f in _LUA_SCRIPT_NAMES]
+    if extra:
+        paths.extend(extra)
+    extra_env = os.environ.get("BLOCKCHECKS_LUA_EXTRA", "").strip()
+    if extra_env:
+        for part in extra_env.split(":"):
+            p = part.strip()
+            if p:
+                paths.append(p)
+    return paths
+
+
+def get_blockchecks_lua_scripts(extra: list[str] | None = None) -> list[Path]:
+    """Paths to repo lua/blockchecks/*.lua for bridge init chain."""
+    out: list[Path] = []
+    for name in _BLOCKCHECKS_LUA_NAMES:
+        p = Path(REPO_LUA_DIR) / name
+        if p.is_file():
+            out.append(p)
+    if extra:
+        for e in extra:
+            ep = Path(e)
+            if ep.is_file():
+                out.append(ep)
+    extra_env = os.environ.get("BLOCKCHECKS_LUA_EXTRA", "").strip()
+    if extra_env:
+        for part in extra_env.split(":"):
+            p = Path(part.strip())
+            if p.is_file():
+                out.append(p)
+    return out
 
 
 def get_nfqws2_bin() -> str:
@@ -137,6 +170,11 @@ NFQUEUE_TCP = int(_env_or("BLOCKCHECKS_QNUM_TCP", "200"))
 NFQUEUE_UDP = int(_env_or("BLOCKCHECKS_QNUM_UDP", "201"))
 NETNS_BASE = _env_or("BLOCKCHECKS_NETNS_BASE", "bs-p")
 DEFAULT_POOL_SIZE = int(_env_or("BLOCKCHECKS_POOL", "4"))
+
+# Lua bridge (/dev/shm IPC)
+SHM_BASE = _env_or("BLOCKCHECKS_SHM_BASE", "/dev/shm/blockchecks")
+DEFAULT_BRIDGE_BATCH = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH", "500"))
+DEFAULT_BRIDGE_BATCH_MAX = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH_MAX", "2000"))
 
 
 def effective_default_pool_size(*, mem_soft_cap_kb: int = 1_500_000) -> int:

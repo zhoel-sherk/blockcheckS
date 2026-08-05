@@ -171,6 +171,7 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
     """Construct AsyncTestRunner with probe repeat settings from args."""
     secure_dns = SECURE_DNS_DEFAULT and not getattr(args, "no_secure_dns", False)
     repeats, parallel_repeats, repeats_mode, quick_break = repeats_from_args(args)
+    lua_extra = list(getattr(args, "lua_extra", None) or [])
     return AsyncTestRunner(
         pool_size=pool_size,
         db=db,
@@ -184,6 +185,10 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         quick_break=quick_break,
         try_wssize=not getattr(args, "no_wssize", False)
         and getattr(args, "protocol", "tls12") == "tls12",
+        lua_bridge=bool(getattr(args, "lua_bridge", False)),
+        bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
+        lua_bridge_compare=bool(getattr(args, "lua_bridge_compare", False)),
+        lua_extra=lua_extra,
     )
 
 

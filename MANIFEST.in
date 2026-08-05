@@ -6,6 +6,8 @@ include presets/voice/gcp-hamina.txt
 include presets/blobs/README.md
 recursive-include blobs *.bin
 include blobs/README.md
+recursive-include lua/blockchecks *.lua
+include lua/README.md
 include presets/README.md
 include LICENSE
 include README.md

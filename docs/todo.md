@@ -74,7 +74,46 @@ _(none — E3 closed in Wave2)_
 
 ### Phase 11 — Speed / throughput
 
-_(see Deferred)_
+#### L-bridge — lua_bridge + ProbeBatchService (batch N strategies / one nfqws2)
+
+**Статус:** `lua_bridge` + ProbeBatchService в 1.1.x (opt-in `--lua-bridge`); flip default — L-transition-*.
+
+**Сделано (1.1.0):**
+- [x] **L-bridge-1** `engine/lua_bridge.py` — shm IPC, `build_bridge_conf`, `BridgeSession`, `scan_pick` Lua (`lua/blockchecks/`)
+- [x] **L-bridge-2** CLI `scan`/`pair`: `--lua-bridge`, `--bridge-batch`, `--lua-bridge-compare`, `--lua-extra`
+- [x] **L-bridge-3** `AsyncTestRunner._test_batch_tcp_bridge` (batch hot-swap для `test_batch_tcp`)
+- [x] **L-bridge-4** Unit tests (`test_lua_bridge.py`, `test_lua_bridge_runner.py`); `netns_pool` + `run_control` shm cleanup
+
+**ProbeBatchService (текущий спринт):**
+- [x] **L-batch-1** `engine/batch_probe.py` — `BatchScheduler`, `ProbeBatchService`, backends `classic` | `lua_bridge`
+- [x] **L-batch-2** `AsyncTestRunner.test_batch_tcp` → делегирует в сервис (убрать `_run_bridge_batch` из runner)
+- [x] **L-batch-3** `bs full` sequential + AQ: batch service при `--lua-bridge`; CLI flags на `full`
+- [x] **L-batch-4** Fan-out: classic per-strategy + one-time warning при `--lua-bridge` (bridge внутри fan-out wave не совместим)
+- [x] **L-batch-5** Тесты `test_batch_probe.py`, dead_flags для `full`; docs `custom_lua.md` §9
+
+**Статус:** ProbeBatchService готов (1.1.x); T-L1 короткие прогоны на Fryazino — в работе.
+
+**Поэтапный переход default → lua_bridge (не сейчас):**
+
+Сейчас **default = classic** (restart nfqws2 per probe). Bridge — явный `--lua-bridge`. Не удалять classic path (pair UDP bootstrap, fan-out, отладка).
+
+| Этап | Gate | Действие |
+|------|------|----------|
+| **T-L1** | ProbeBatchService + full sequential/AQ на Fryazino | `--lua-bridge` на `scan`/`full`; `--lua-bridge-compare` без drift |
+| **T-L2** | smart-fallback (§6 custom_lua) или P0-2 inline curl | снизить FAIL timeout wall на full matrix |
+| **T-L3** | 2× full run PASS rate ±1% vs classic baseline | **flip default:** `probe_backend=lua_bridge` без флага |
+| **T-L4** | после T-L3 | CLI `--classic` / `--probe-backend classic` — явный legacy; deprecate `--lua-bridge` (alias) |
+| **T-L5** | optional | env `BLOCKCHECKS_PROBE_BACKEND`; CI gate только `--lua-bridge-compare` на subset |
+
+- [ ] **L-transition-1** (T-L1) Fryazino: `bs scan --lua-bridge --max 200` + `bs full --lua-bridge` subset, compare green — smoke 2026-08-05: scan/compare/full OK, 0 PASS на random custom (ожидаемо); drift 0
+- [ ] **L-transition-2** (T-L2) smart-fallback NDJSON poll → early curl abort в `ProbeBatchService`
+- [ ] **L-transition-3** (T-L3) Flip default backend to `lua_bridge` в `BatchProbeConfig` / parser defaults
+- [ ] **L-transition-4** (T-L4) Добавить `--classic` и `--probe-backend {classic,lua_bridge}`; документировать в `guide.md`
+- [ ] **L-transition-5** (T-L5) Убрать `--lua-bridge-compare` из user path; оставить в `scripts/release_smoke.sh` / CI
+
+**Не смешивать с `--classic`:**
+- `classic_persistent` (daemon без shm) — отдельный backend, низкий ROI; не alias для `--classic`
+- UDP voice q201, T3-4 unix socket — отдельные треки ([custom_lua.md](custom_lua.md), T3-4)
 
 ### YouTube / External
 

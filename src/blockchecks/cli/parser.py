@@ -18,6 +18,7 @@ from blockchecks.cli.commands.udp import cmd_udp
 from blockchecks.cli.presets import list_presets
 from blockchecks.engine.config import (
     CONFIGS_DIR,
+    DEFAULT_BRIDGE_BATCH,
     DEFAULT_VOICE_IP,
     DEFAULT_VOICE_PORT,
     effective_default_pool_size,
@@ -118,6 +119,35 @@ def add_curl_repeats_args(
             default=8.0,
             help="HTTP/3 curl timeout (BC2-10, default 8s)",
         )
+
+
+def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
+    """nfqws2 Lua bridge: /dev/shm IPC + scan_pick batch (no per-strategy restart)."""
+    g = parser.add_argument_group("lua bridge (scan_pick IPC)")
+    g.add_argument(
+        "--lua-bridge",
+        action="store_true",
+        help="Hot-swap strategies via WRITABLE/shm (persistent nfqws2 per batch)",
+    )
+    g.add_argument(
+        "--bridge-batch",
+        type=int,
+        default=DEFAULT_BRIDGE_BATCH,
+        metavar="N",
+        help=f"Strategies per bridge conf window (default {DEFAULT_BRIDGE_BATCH})",
+    )
+    g.add_argument(
+        "--lua-bridge-compare",
+        action="store_true",
+        help="Run classic + bridge paths and log verdict drift",
+    )
+    g.add_argument(
+        "--lua-extra",
+        nargs="*",
+        default=[],
+        metavar="PATH",
+        help="Extra --lua-init=@ paths after zapret-auto (custom Lua hooks)",
+    )
 
 
 def add_domain_filter_args(parser: argparse.ArgumentParser) -> None:
@@ -383,6 +413,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_domain_filter_args(scan)
     add_adaptive_args(scan)
     add_curl_fanout_args(scan)
+    add_lua_bridge_args(scan)
     add_time_limit_args(scan, include_export=True)
     scan.add_argument("--export-limit", type=int, default=3)
     scan.add_argument(
@@ -495,6 +526,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_domain_filter_args(pair)
     add_adaptive_args(pair)
     add_curl_fanout_args(pair)
+    add_lua_bridge_args(pair)
     add_time_limit_args(pair, include_export=True)
     pair.add_argument("--export-limit", type=int, default=3)
     pair.add_argument(

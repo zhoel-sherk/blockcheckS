@@ -14,6 +14,7 @@ from blockchecks.cli.parser import (
     add_curl_repeats_args,
     add_domain_filter_args,
     add_family_gate_args,
+    add_lua_bridge_args,
     add_protocol_phase_args,
     add_secure_dns_args,
     add_store_args,
@@ -202,6 +203,7 @@ def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser
         help="Ignore settle profile even if logs/settle_profile.json exists",
     )
     add_adaptive_args(p)
+    add_lua_bridge_args(p)
     add_time_limit_args(p, include_export=True)
     return p
 

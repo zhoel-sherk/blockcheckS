@@ -12,6 +12,7 @@ from blockchecks.engine.adaptive_queue import (
     AdaptiveMetrics,
     ScanWeights,
 )
+from blockchecks.engine.batch_probe import BatchJobAccumulator
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.store import RunStateStore
 
@@ -51,6 +52,164 @@ async def build_adaptive_queue(
     return queue, skipped
 
 
+async def _run_single_adaptive_job(
+    runner,
+    job: AdaptiveJob,
+    queue: AdaptiveJobQueue,
+    *,
+    timeout: float,
+    done: int,
+    passed: int,
+    skipped: int,
+    on_progress: ProgressCb | None,
+) -> tuple[int, int]:
+    results = [await runner.test_tcp(job.item, job.domain, timeout=timeout)]
+    for result in results:
+        ok = bool(result.success)
+        queue.mark_done(job, passed=ok)
+        done += 1
+        if ok:
+            passed += 1
+        if on_progress:
+            on_progress(done, skipped, passed)
+    return done, passed
+
+
+async def _flush_bridge_accumulator(
+    runner,
+    acc: BatchJobAccumulator,
+    queue: AdaptiveJobQueue,
+    *,
+    timeout: float,
+    done: int,
+    passed: int,
+    skipped: int,
+    on_progress: ProgressCb | None,
+) -> tuple[int, int]:
+    jobs = acc.flush()
+    if not jobs:
+        return done, passed
+    items = [j.item for j in jobs]
+    domain = jobs[0].domain
+    results = await runner._run_probe_batch(items, domain, timeout, "lua_bridge")
+    for job, result in zip(jobs, results, strict=False):
+        ok = bool(result.success)
+        queue.mark_done(job, passed=ok)
+        done += 1
+        if ok:
+            passed += 1
+        if on_progress:
+            on_progress(done, skipped, passed)
+    return done, passed
+
+
+async def run_adaptive_tcp_bridge(
+    runner,
+    queue: AdaptiveJobQueue,
+    *,
+    timeout: float = 5.0,
+    bridge_batch: int = 500,
+    stop_event: asyncio.Event | None = None,
+    on_progress: ProgressCb | None = None,
+) -> AdaptiveRunResult:
+    """AQ bridge mode: accumulate same-domain jobs → ProbeBatchService batch flush."""
+    done = 0
+    skipped = 0
+    passed = 0
+    acc = BatchJobAccumulator(bridge_batch)
+
+    while True:
+        if stop_event and stop_event.is_set():
+            break
+        job = queue.pop()
+        if job is None:
+            done, passed = await _flush_bridge_accumulator(
+                runner,
+                acc,
+                queue,
+                timeout=timeout,
+                done=done,
+                passed=passed,
+                skipped=skipped,
+                on_progress=on_progress,
+            )
+            break
+
+        if job.fanout:
+            done, passed = await _flush_bridge_accumulator(
+                runner,
+                acc,
+                queue,
+                timeout=timeout,
+                done=done,
+                passed=passed,
+                skipped=skipped,
+                on_progress=on_progress,
+            )
+            done, passed = await _run_single_adaptive_job(
+                runner,
+                job,
+                queue,
+                timeout=timeout,
+                done=done,
+                passed=passed,
+                skipped=skipped,
+                on_progress=on_progress,
+            )
+            if stop_event and stop_event.is_set():
+                break
+            continue
+
+        if not acc.push(job):
+            done, passed = await _flush_bridge_accumulator(
+                runner,
+                acc,
+                queue,
+                timeout=timeout,
+                done=done,
+                passed=passed,
+                skipped=skipped,
+                on_progress=on_progress,
+            )
+            if not acc.push(job):
+                done, passed = await _run_single_adaptive_job(
+                    runner,
+                    job,
+                    queue,
+                    timeout=timeout,
+                    done=done,
+                    passed=passed,
+                    skipped=skipped,
+                    on_progress=on_progress,
+                )
+                if stop_event and stop_event.is_set():
+                    break
+                continue
+
+        if acc.is_full():
+            done, passed = await _flush_bridge_accumulator(
+                runner,
+                acc,
+                queue,
+                timeout=timeout,
+                done=done,
+                passed=passed,
+                skipped=skipped,
+                on_progress=on_progress,
+            )
+
+        if stop_event and stop_event.is_set():
+            break
+
+    return AdaptiveRunResult(
+        done=done,
+        skipped=skipped,
+        passed=passed,
+        metrics=queue.metrics,
+        weights=queue.weights,
+    )
+
+
 async def run_adaptive_tcp(
     runner,
     queue: AdaptiveJobQueue,
@@ -61,8 +220,20 @@ async def run_adaptive_tcp(
     disable_ech: bool = False,
     stop_event: asyncio.Event | None = None,
     on_progress: ProgressCb | None = None,
+    lua_bridge: bool = False,
+    bridge_batch: int = 500,
 ) -> AdaptiveRunResult:
     """Run TCP jobs from *queue* until empty or stopped (AQ5)."""
+    if lua_bridge:
+        return await run_adaptive_tcp_bridge(
+            runner,
+            queue,
+            timeout=timeout,
+            bridge_batch=bridge_batch,
+            stop_event=stop_event,
+            on_progress=on_progress,
+        )
+
     done = 0
     skipped = 0
     passed = 0
@@ -100,7 +271,6 @@ async def run_adaptive_tcp(
                 passed += 1
             if on_progress:
                 on_progress(done, skipped, passed)
-            # Deadline / signal may fire during a long batch — bail ASAP
             if stop_event and stop_event.is_set():
                 break
 

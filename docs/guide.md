@@ -60,6 +60,12 @@ sudo bs pair -d discord.com --resume   # откажется, если matrix fin
 sudo bs full
 sudo bs full --parallel 2 --resume
 sudo bs full --max 500 --domains-file presets/domains/critical.txt
+
+# Lua bridge: one nfqws2 per batch of N strategies (scan/pair/full):
+sudo bs scan -d discord.com --generate --lua-bridge --bridge-batch 500 --max 50
+sudo bs full -d discord.com --max 100 --lua-bridge --tcp-only --no-http --no-quic --no-voice
+# Fan-out + --lua-bridge: classic per-strategy (WARN once); sequential/AQ use bridge.
+sudo bs scan -d discord.com --generate --lua-bridge-compare --max 20  # A/B drift log
 bc-nfconf --db state.db --limit 3 --out-dir output
 
 # Voice UDP smoke (sudo + nfqws2 + discord_udp blob):

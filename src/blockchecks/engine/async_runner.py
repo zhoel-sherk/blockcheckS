@@ -22,6 +22,13 @@ from blockchecks.checkers.curl_probe import (
     worker_wall_timeout,
 )
 from blockchecks.checkers.dns_secure import DnsRunCache
+from blockchecks.engine.batch_probe import (
+    BatchContext,
+    BatchProbeConfig,
+    BatchScheduler,
+    ProbeBatchService,
+    RunnerProbeDeps,
+)
 from blockchecks.engine.config import (
     BLOB_DIR,
     NFQUEUE_TCP,
@@ -736,6 +743,10 @@ class AsyncTestRunner:
         quick_break: bool = False,
         try_wssize: bool = False,
         settle_profile: SettleProfile | None = None,
+        lua_bridge: bool = False,
+        bridge_batch: int = 500,
+        lua_bridge_compare: bool = False,
+        lua_extra: list[str] | None = None,
     ):
         self.pool = NetNsPool(size=pool_size)
         self.semaphore = asyncio.Semaphore(pool_size)
@@ -754,6 +765,71 @@ class AsyncTestRunner:
         self.quick_break = quick_break
         self.try_wssize = try_wssize
         self.settle_profile = settle_profile
+        self.lua_bridge = lua_bridge
+        self.bridge_batch = max(1, bridge_batch)
+        self.lua_bridge_compare = lua_bridge_compare
+        self.lua_extra = list(lua_extra or [])
+        self._probe_gen = 0
+        self._batch_id = 0
+
+    def _next_batch_id(self) -> int:
+        self._batch_id += 1
+        return self._batch_id
+
+    def _make_probe_deps(self) -> RunnerProbeDeps:
+        return RunnerProbeDeps(
+            python=self.python,
+            disable_ech=self.disable_ech,
+            repeats=self.repeats,
+            parallel_repeats=self.parallel_repeats,
+            repeats_mode=self.repeats_mode,
+            quick_break=self.quick_break,
+            try_wssize=self.try_wssize,
+            lua_extra=list(self.lua_extra),
+            timing_for=self._timing_for,
+            resolve_domain_dns=self._resolve_domain_dns,
+            tcp_result_from_data=self._tcp_result_from_data,
+            log_tcp_result=self._log_tcp_result,
+            next_probe_gen=self._next_probe_gen,
+            run_tcp_check=_run_tcp_check,
+            acquire_ns=self.pool.acquire,
+            release_ns=self.pool.release,
+        )
+
+    def _probe_service(self, backend: str) -> ProbeBatchService:
+        return ProbeBatchService(
+            BatchProbeConfig(
+                backend=backend,
+                batch_size=self.bridge_batch,
+                lua_extra=tuple(self.lua_extra),
+            ),
+            self._make_probe_deps(),
+        )
+
+    async def _run_probe_batch(
+        self,
+        items: list[StrategyItem],
+        domain: str,
+        timeout: float,
+        backend: str,
+    ) -> list[TcpTestResult]:
+        if not items:
+            return []
+        protocol = getattr(items[0], "protocol", "tls12") or "tls12"
+        ctx = BatchContext(
+            ns_name="",
+            items=items,
+            domain=domain,
+            batch_id=self._next_batch_id(),
+            protocol=protocol,
+        )
+        async with self.semaphore:
+            result = await self._probe_service(backend).run_batch(ctx, timeout)
+        return list(result.results)
+
+    def _next_probe_gen(self) -> int:
+        self._probe_gen += 1
+        return self._probe_gen
 
     def _timing_for(self, item: StrategyItem, timeout: float) -> tuple[float, float | None]:
         """Return (curl_timeout, settle_max override) from B11 profile if set."""
@@ -1127,7 +1203,51 @@ class AsyncTestRunner:
         if not strategies:
             return []
 
-        results = await asyncio.gather(*(self.test_tcp(s, domain, timeout) for s in strategies))
+        if self.lua_bridge_compare:
+            classic = await self._test_batch_tcp_classic(strategies, domain, timeout)
+            bridge = await self._test_batch_tcp_bridge(strategies, domain, timeout)
+            for c, b in zip(classic, bridge, strict=False):
+                if c.success != b.success or c.http_code != b.http_code:
+                    print(
+                        f"  {RED}BRIDGE_COMPARE drift: {c.item.label[:24]} "
+                        f"classic={c.success}/{c.http_code} bridge={b.success}/{b.http_code}{RESET}"
+                    )
+            return bridge
+
+        if self.lua_bridge:
+            return await self._test_batch_tcp_bridge(strategies, domain, timeout)
+
+        return await self._test_batch_tcp_classic(strategies, domain, timeout)
+
+    async def _test_batch_tcp_classic(
+        self, strategies: list[StrategyItem], domain: str, timeout: float = 5.0
+    ) -> list[TcpTestResult]:
+        if not strategies:
+            return []
+        scheduler = BatchScheduler(self.bridge_batch)
+        batches = scheduler.iter_batches(strategies)
+        nested = await asyncio.gather(
+            *(self._run_probe_batch(batch, domain, timeout, "classic") for batch in batches)
+        )
+        all_results = [r for batch_out in nested for r in batch_out]
+        self._print_tcp_batch_results(all_results)
+        return all_results
+
+    async def _test_batch_tcp_bridge(
+        self, strategies: list[StrategyItem], domain: str, timeout: float = 5.0
+    ) -> list[TcpTestResult]:
+        scheduler = BatchScheduler(self.bridge_batch)
+        batches = scheduler.iter_batches(strategies)
+        if not batches:
+            return []
+        nested = await asyncio.gather(
+            *(self._run_probe_batch(batch, domain, timeout, "lua_bridge") for batch in batches)
+        )
+        all_results = [r for batch_out in nested for r in batch_out]
+        self._print_tcp_batch_results(all_results)
+        return all_results
+
+    def _print_tcp_batch_results(self, results: list[TcpTestResult]) -> None:
         for r in results:
             if r.throttled:
                 tag = f"{YELLOW}THROTTLED{RESET}"
@@ -1140,7 +1260,6 @@ class AsyncTestRunner:
             err = f" — {r.error[:40]}" if r.error else ""
             label = r.item.label[:30]
             print(f"  [{tag}] {lat:>6s}  {status:>8s}  {label}{err}")
-        return list(results)
 
     async def test_pair_matrix(
         self,

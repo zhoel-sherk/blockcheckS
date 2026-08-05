@@ -419,6 +419,10 @@ def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
         try_wssize=not getattr(args, "no_wssize", False)
         and getattr(args, "protocol", "tls12") == "tls12",
         settle_profile=ctx.settle_profile,
+        lua_bridge=bool(getattr(args, "lua_bridge", False)),
+        bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
+        lua_bridge_compare=bool(getattr(args, "lua_bridge_compare", False)),
+        lua_extra=list(getattr(args, "lua_extra", None) or []),
     )
 
 
@@ -492,6 +496,8 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         disable_ech=bool(getattr(args, "disable_ech", False)),
         stop_event=ctx.stop,
         on_progress=_progress,
+        lua_bridge=bool(getattr(args, "lua_bridge", False)),
+        bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
     )
     progress.done = skipped + ctx.aq_result.done
     progress.passed = ctx.aq_result.passed
@@ -543,6 +549,10 @@ async def _run_tcp_family_gates(ctx: FullRunContext, progress: TcpProgress) -> N
 
 async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
     args = ctx.args
+    if getattr(args, "lua_bridge", False):
+        from blockchecks.engine.batch_probe import warn_fanout_bridge_once
+
+        warn_fanout_bridge_once()
 
     async def _one_strategy(item: StrategyItem):
         if ctx.stop.is_set():
@@ -587,6 +597,9 @@ async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
 
 async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> None:
     args = ctx.args
+    if getattr(args, "lua_bridge", False):
+        await _run_tcp_sequential_bridge(ctx, progress)
+        return
 
     async def _one(item: StrategyItem, domain: str):
         if ctx.stop.is_set():
@@ -608,6 +621,39 @@ async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> Non
             print(f"  {YELLOW}Stopped by signal{RESET}")
             break
         await asyncio.gather(*tasks[i : i + chunk])
+
+
+async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress) -> None:
+    """Sequential domain×strategy with lua_bridge batch service."""
+    from blockchecks.engine.batch_probe import BatchScheduler
+
+    args = ctx.args
+    scheduler = BatchScheduler(ctx.runner.bridge_batch)
+
+    for domain in ctx.domains:
+        if ctx.stop.is_set():
+            print(f"  {YELLOW}Stopped by signal{RESET}")
+            break
+        pending: list[StrategyItem] = []
+        for item in ctx.tcp_items:
+            if args.resume and await ctx.db.has_tcp_result(item.label, domain):
+                progress.skipped += 1
+                progress.done += 1
+                continue
+            pending.append(item)
+        progress.report()
+        for batch in scheduler.iter_batches(pending):
+            if ctx.stop.is_set():
+                print(f"  {YELLOW}Stopped by signal{RESET}")
+                break
+            results = await ctx.runner._run_probe_batch(
+                batch, domain, args.timeout, "lua_bridge"
+            )
+            for r in results:
+                progress.done += 1
+                if r.success:
+                    progress.passed += 1
+            progress.report()
 
 
 async def run_tcp_coverage_phase(ctx: FullRunContext) -> None:
