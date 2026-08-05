@@ -219,6 +219,7 @@ def build_bridge_conf(
         lines.append(f"--lua-init=@{path}")
     lines.extend(_strategy_filter_lines(protocol))
     lines.append("--lua-desync=bs_poll_strategy")
+    lines.append("--lua-desync=smart_fallback")
     lines.append("--lua-desync=scan_pick")
 
     all_blob_names: list[str] = []

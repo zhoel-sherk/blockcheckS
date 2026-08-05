@@ -125,6 +125,8 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         ("resolved_ip", "TEXT DEFAULT ''"),
         ("dns_verdict", "TEXT DEFAULT ''"),
         ("doh_server", "TEXT DEFAULT ''"),
+        ("bridge_batch_id", "INTEGER DEFAULT 0"),
+        ("bridge_gen", "INTEGER DEFAULT 0"),
     ):
         if col not in col_names:
             await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")
