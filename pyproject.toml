@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blockchecks"
-version = "1.1.0"
+version = "1.2.1a"
 description = "Lightspeed DPI strategy tester for zapret2/nfqws2"
 readme = "README.md"
 license = {text = "MIT"}

@@ -1,6 +1,39 @@
 # blockcheckS Changelog
 
-## Unreleased
+## 1.2.1a — unreleased
+
+### Added — Lua bridge (hot-swap nfqws2 per batch)
+
+- **`--lua-bridge`** — persistent nfqws2 daemon per netns worker. Strategies hot-swapped
+  via `/dev/shm` IPC (`strategy.id` + `strategy.gen` atomically published by Python,
+  read by `scan_pick` Lua orchestrator on each ClientHello). Eliminates per-strategy
+  `pkill`/`start_daemon`/`settle` cycle — amortized from 0.2s/test to 0.0004s/test.
+- **`--bridge-batch N`** (default 500, max 2000) — strategies per bridge conf window
+- **`--lua-bridge-compare`** — dual-run classic + bridge, log verdict drift
+- **`--lua-extra`** — extra `--lua-init=@` paths for custom Lua hooks
+- **`ProbeBatchService`** (`engine/batch_probe.py`, 484 lines) — unified batch-probing
+  engine with two backends: `classic` (per-strategy daemon) and `lua_bridge`
+  (persistent daemon with shm IPC)
+- **Lua scripts** (`lua/blockchecks/`):
+  - `init.lua` — 50ms timer fallback poll
+  - `scan_bridge.lua` — `scan_pick` orchestrator (deterministic strategy-by-id)
+  - `write_ipc.lua` — NDJSON event writer (`APPLIED`, future `STRATEGY_FAIL`)
+- **Python IPC** (`engine/lua_bridge.py`, 413 lines):
+  - `LuaBridge` — atomic publish/drain/teardown per netns
+  - `BridgeSession` — boot → probe N strategies → shutdown lifecycle
+- **Tests:** `test_lua_bridge.py` (96 lines), `test_lua_bridge_runner.py` (23 lines),
+  `test_batch_probe.py` (169 lines), `test_batch_probe_runner.py` (54 lines)
+
+### Changed
+
+- `netns_pool.py` + `run_control.py` — teardown bridge shm on worker release / campaign stop
+- `config.py` — `get_blockchecks_lua_scripts()`, `SHM_BASE`, `DEFAULT_BRIDGE_BATCH`
+- `MANIFEST.in` — include `lua/blockchecks/*.lua`
+
+### Fixed
+
+- `async_runner.py` — `test_batch_tcp` delegates to `ProbeBatchService` (classic or bridge)
+- `main_phases.py` — `_run_tcp_sequential_bridge()` for bridge path
 
 ---
 
