@@ -20,7 +20,7 @@ from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.config import DEFAULT_BRIDGE_BATCH_MAX
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.lua_bridge import BridgeSession, LuaBridge, strategy_text_from_item
-from blockchecks.engine.lua_bridge import _netns_tcp_probe_cleanup
+from blockchecks.engine.lua_bridge import NetnsGoneError, _netns_tcp_probe_cleanup
 from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
 
 CYAN = Fore.CYAN + Style.BRIGHT
@@ -252,13 +252,24 @@ class ProbeBatchService:
         try:
             resolved_ip, dns_verdict, doh_server = await self.deps.resolve_domain_dns(ctx.domain)
             wall_start = time.monotonic()
-            result = await asyncio.to_thread(
-                self._run_batch_sync,
-                ctx,
-                timeout,
-                ns,
-                resolved_ip,
-            )
+            try:
+                result = await asyncio.to_thread(
+                    self._run_batch_sync,
+                    ctx,
+                    timeout,
+                    ns,
+                    resolved_ip,
+                )
+            except NetnsGoneError as e:
+                failed = self._batch_fail_results(ctx, str(e))
+                result = BatchProbeResult(
+                    results=failed,
+                    settle_ms=0,
+                    backend="lua_bridge",
+                    batch_wall_ms=(time.monotonic() - wall_start) * 1000,
+                    batch_fill_ratio=0,
+                )
+                return result
             result.batch_wall_ms = (time.monotonic() - wall_start) * 1000
             result.batch_fill_ratio = len(ctx.items) / max(1, self.config.batch_size)
             for item, probe_result in zip(ctx.items, result.results, strict=False):
@@ -327,6 +338,14 @@ class ProbeBatchService:
             settle_ms=0.0,
             backend="classic",
         )
+
+    def _batch_fail_results(self, ctx: BatchContext, error: str) -> list:
+        results = []
+        for item in ctx.items:
+            data = {"success": False, "error": error, "batch_id": ctx.batch_id}
+            result = self.deps.tcp_result_from_data(item, ctx.domain, data)
+            results.append(result)
+        return results
 
     def _run_lua_bridge_batch(
         self,

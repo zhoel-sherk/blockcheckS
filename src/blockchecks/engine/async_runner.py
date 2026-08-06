@@ -748,7 +748,12 @@ class AsyncTestRunner:
         lua_bridge_compare: bool = False,
         lua_extra: list[str] | None = None,
     ):
-        self.pool = NetNsPool(size=pool_size)
+        from blockchecks.engine.config import NETNS_BASE
+
+        self.pool = NetNsPool(
+            size=pool_size,
+            base=f"{NETNS_BASE}-{os.getpid() % 10000:04d}",
+        )
         self.semaphore = asyncio.Semaphore(pool_size)
         self.db = db
         self.python = python_path or PYTHON_BIN

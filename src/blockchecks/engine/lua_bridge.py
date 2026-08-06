@@ -266,6 +266,7 @@ class BridgeSession:
     def boot(self) -> float:
         from blockchecks.engine.nfqws2 import start_daemon
 
+        _check_netns_exists(self.ns_name)
         self.bridge.setup()
         if self.conf_path:
             try:
@@ -345,6 +346,7 @@ def strategy_text_from_item(item: StrategyItem) -> str:
 def _bridge_iptables_add(ns_name: str, dport: str) -> None:
     import subprocess as sp
 
+    _check_netns_exists(ns_name)
     sp.run(
         ["sudo", "ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT"],
         capture_output=True,
@@ -375,6 +377,28 @@ def _bridge_iptables_add(ns_name: str, dport: str) -> None:
         check=True,
         timeout=15,
     )
+
+
+def _check_netns_exists(ns_name: str) -> None:
+    import subprocess as sp
+
+    r = sp.run(
+        ["sudo", "ip", "netns", "list"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    for line in r.stdout.splitlines():
+        if line.strip() == ns_name or line.strip().startswith(ns_name + " "):
+            return
+    raise NetnsGoneError(
+        f"netns {ns_name!r} no longer exists — pool may have been destroyed "
+        f"by a concurrent process. Retry or restart the scan."
+    )
+
+
+class NetnsGoneError(RuntimeError):
+    """Netns was destroyed while in use by another process."""
 
 
 def teardown_all_bridge_shm(shm_base: Path | None = None) -> None:
