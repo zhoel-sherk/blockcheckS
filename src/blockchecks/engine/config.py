@@ -258,7 +258,7 @@ DEFAULT_VOICE_IP = "35.217.5.42"
 DEFAULT_VOICE_PORT = 50006
 
 # IP-block cross-test reference host (blockcheck2 UNBLOCKED_DOM)
-UNBLOCKED_DOM = _env_or("BLOCKCHECKS_UNBLOCKED_DOM", "iana.org")
+UNBLOCKED_DOM = _env_or("BLOCKCHECKS_UNBLOCKED_DOM", "ripe.net")
 
 # Content validation thresholds
 MIN_CONTENT_LENGTH = 300  # bytes — minimum for a real web page (aligned with tcp_tls)

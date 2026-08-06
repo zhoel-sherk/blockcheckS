@@ -52,57 +52,6 @@ async def build_adaptive_queue(
     return queue, skipped
 
 
-async def _run_single_adaptive_job(
-    runner,
-    job: AdaptiveJob,
-    queue: AdaptiveJobQueue,
-    *,
-    timeout: float,
-    done: int,
-    passed: int,
-    skipped: int,
-    on_progress: ProgressCb | None,
-) -> tuple[int, int]:
-    results = [await runner.test_tcp(job.item, job.domain, timeout=timeout)]
-    for result in results:
-        ok = bool(result.success)
-        queue.mark_done(job, passed=ok)
-        done += 1
-        if ok:
-            passed += 1
-        if on_progress:
-            on_progress(done, skipped, passed)
-    return done, passed
-
-
-async def _flush_bridge_accumulator(
-    runner,
-    acc: BatchJobAccumulator,
-    queue: AdaptiveJobQueue,
-    *,
-    timeout: float,
-    done: int,
-    passed: int,
-    skipped: int,
-    on_progress: ProgressCb | None,
-) -> tuple[int, int]:
-    jobs = acc.flush()
-    if not jobs:
-        return done, passed
-    items = [j.item for j in jobs]
-    domain = jobs[0].domain
-    results = await runner._run_probe_batch(items, domain, timeout, "lua_bridge")
-    for job, result in zip(jobs, results, strict=False):
-        ok = bool(result.success)
-        queue.mark_done(job, passed=ok)
-        done += 1
-        if ok:
-            passed += 1
-        if on_progress:
-            on_progress(done, skipped, passed)
-    return done, passed
-
-
 async def run_adaptive_tcp_bridge(
     runner,
     queue: AdaptiveJobQueue,
@@ -111,103 +60,122 @@ async def run_adaptive_tcp_bridge(
     bridge_batch: int = 500,
     stop_event: asyncio.Event | None = None,
     on_progress: ProgressCb | None = None,
+    workers: int = 4,
 ) -> AdaptiveRunResult:
-    """AQ bridge mode: accumulate same-domain jobs → ProbeBatchService batch flush."""
-    done = 0
-    skipped = 0
-    passed = 0
-    acc = BatchJobAccumulator(bridge_batch)
+    """AQ bridge mode: N concurrent accumulators → ProbeBatchService batch flush.
 
-    while True:
-        if stop_event and stop_event.is_set():
-            break
-        job = queue.pop()
-        if job is None:
-            done, passed = await _flush_bridge_accumulator(
+    Each worker accumulates jobs (cross-domain; the bridge is domain-agnostic)
+    and flushes up to ``bridge_batch`` jobs per netns, so the whole netns pool is
+    used in parallel instead of one serial batch at a time.
+    """
+    stats = _RunStats()
+    tasks = [
+        asyncio.create_task(
+            _bridge_worker(
                 runner,
-                acc,
                 queue,
+                stats,
                 timeout=timeout,
-                done=done,
-                passed=passed,
-                skipped=skipped,
+                bridge_batch=bridge_batch,
+                stop_event=stop_event,
                 on_progress=on_progress,
             )
-            break
-
-        if job.fanout:
-            done, passed = await _flush_bridge_accumulator(
-                runner,
-                acc,
-                queue,
-                timeout=timeout,
-                done=done,
-                passed=passed,
-                skipped=skipped,
-                on_progress=on_progress,
-            )
-            done, passed = await _run_single_adaptive_job(
-                runner,
-                job,
-                queue,
-                timeout=timeout,
-                done=done,
-                passed=passed,
-                skipped=skipped,
-                on_progress=on_progress,
-            )
-            if stop_event and stop_event.is_set():
-                break
-            continue
-
-        if not acc.push(job):
-            done, passed = await _flush_bridge_accumulator(
-                runner,
-                acc,
-                queue,
-                timeout=timeout,
-                done=done,
-                passed=passed,
-                skipped=skipped,
-                on_progress=on_progress,
-            )
-            if not acc.push(job):
-                done, passed = await _run_single_adaptive_job(
-                    runner,
-                    job,
-                    queue,
-                    timeout=timeout,
-                    done=done,
-                    passed=passed,
-                    skipped=skipped,
-                    on_progress=on_progress,
-                )
-                if stop_event and stop_event.is_set():
-                    break
-                continue
-
-        if acc.is_full():
-            done, passed = await _flush_bridge_accumulator(
-                runner,
-                acc,
-                queue,
-                timeout=timeout,
-                done=done,
-                passed=passed,
-                skipped=skipped,
-                on_progress=on_progress,
-            )
-
-        if stop_event and stop_event.is_set():
-            break
+        )
+        for _ in range(max(1, int(workers)))
+    ]
+    await asyncio.gather(*tasks)
 
     return AdaptiveRunResult(
-        done=done,
-        skipped=skipped,
-        passed=passed,
+        done=stats.done,
+        skipped=stats.skipped,
+        passed=stats.passed,
         metrics=queue.metrics,
         weights=queue.weights,
     )
+
+
+class _RunStats:
+    """Mutable shared counters updated between awaits (event-loop thread only)."""
+
+    __slots__ = ("done", "skipped", "passed")
+
+    def __init__(self) -> None:
+        self.done = 0
+        self.skipped = 0
+        self.passed = 0
+
+
+async def _bridge_worker(
+    runner,
+    queue: AdaptiveJobQueue,
+    stats: _RunStats,
+    *,
+    timeout: float,
+    bridge_batch: int,
+    stop_event: asyncio.Event | None,
+    on_progress: ProgressCb | None,
+) -> None:
+    acc = BatchJobAccumulator(bridge_batch)
+
+    async def flush() -> None:
+        nonlocal acc
+        jobs = acc.flush()
+        if not jobs:
+            return
+        items = [j.item for j in jobs]
+        domains = [j.domain for j in jobs]
+        results = await runner._run_probe_batch(
+            items, domains[0], timeout, "lua_bridge", domains=domains
+        )
+        for job, result in zip(jobs, results, strict=False):
+            ok = bool(result.success)
+            queue.mark_done(job, passed=ok)
+            stats.done += 1
+            if ok:
+                stats.passed += 1
+            if on_progress:
+                on_progress(stats.done, stats.skipped, stats.passed)
+
+    async def run_single(job: AdaptiveJob) -> None:
+        results = [await runner.test_tcp(job.item, job.domain, timeout=timeout)]
+        for result in results:
+            ok = bool(result.success)
+            queue.mark_done(job, passed=ok)
+            stats.done += 1
+            if ok:
+                stats.passed += 1
+            if on_progress:
+                on_progress(stats.done, stats.skipped, stats.passed)
+
+    while True:
+        if stop_event and stop_event.is_set():
+            await flush()
+            return
+        job = queue.pop()
+        if job is None:
+            await flush()
+            return
+
+        if job.fanout:
+            await flush()
+            await run_single(job)
+            if stop_event and stop_event.is_set():
+                return
+            continue
+
+        if not acc.push(job):
+            await flush()
+            if not acc.push(job):
+                await run_single(job)
+                if stop_event and stop_event.is_set():
+                    return
+                continue
+
+        if acc.is_full():
+            await flush()
+
+        if stop_event and stop_event.is_set():
+            return
 
 
 async def run_adaptive_tcp(
@@ -222,6 +190,7 @@ async def run_adaptive_tcp(
     on_progress: ProgressCb | None = None,
     lua_bridge: bool = False,
     bridge_batch: int = 500,
+    workers: int = 4,
 ) -> AdaptiveRunResult:
     """Run TCP jobs from *queue* until empty or stopped (AQ5)."""
     if lua_bridge:
@@ -232,6 +201,7 @@ async def run_adaptive_tcp(
             bridge_batch=bridge_batch,
             stop_event=stop_event,
             on_progress=on_progress,
+            workers=workers,
         )
 
     done = 0

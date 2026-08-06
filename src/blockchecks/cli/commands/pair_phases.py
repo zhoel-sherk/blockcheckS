@@ -567,6 +567,9 @@ async def run_adaptive_pair_phase(
         curl_parallel=curl_parallel,
         protocol=protocol,
         stop_event=stop_event,
+        lua_bridge=bool(getattr(args, "lua_bridge", False)),
+        bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
+        workers=max(1, int(getattr(args, "parallel", 4) or 4)),
     )
     tcp_passed = aq_result.passed
     if not getattr(args, "no_adaptive_weights", False):

@@ -36,6 +36,12 @@ class BatchContext:
     domain: str
     batch_id: int
     protocol: str = "tls12"
+    domains: list[str] | None = None  # parallel to items; defaults to domain
+
+    def item_domains(self) -> list[str]:
+        if self.domains is not None and len(self.domains) == len(self.items):
+            return list(self.domains)
+        return [self.domain] * len(self.items)
 
 
 @dataclass(frozen=True)
@@ -129,46 +135,47 @@ class BatchScheduler:
 
 
 class BatchJobAccumulator:
-    """AQ bridge mode: accumulate same-domain jobs until batch_size unique strategies."""
+    """AQ bridge mode: accumulate jobs until batch_size unique (label, domain) keys.
+
+    The bridge is domain-agnostic (netns iptables redirects all :443 traffic to
+    nfqws2; strategy selected by published id), so jobs from *different* domains
+    can share one batch. Only fan-out waves are excluded (classic per-strategy).
+    """
 
     def __init__(self, batch_size: int) -> None:
         self.batch_size = max(1, batch_size)
-        self._domain: str | None = None
         self._jobs: list[AdaptiveJob] = []
-        self._labels: set[str] = set()
+        self._keys: set[tuple[str, str]] = set()
 
     def __len__(self) -> int:
         return len(self._jobs)
 
     @property
     def domain(self) -> str | None:
-        return self._domain
+        return self._jobs[0].domain if self._jobs else None
+
+    @property
+    def domains(self) -> list[str]:
+        return [j.domain for j in self._jobs]
 
     def flush(self) -> list[AdaptiveJob]:
         jobs = self._jobs
         self._jobs = []
-        self._labels = set()
-        self._domain = None
+        self._keys = set()
         return jobs
 
     def can_accept(self, job: AdaptiveJob) -> bool:
         if job.fanout:
             return False
-        if not self._jobs:
-            return True
-        if job.domain != self._domain:
-            return False
-        if job.item.label in self._labels:
+        if job.key in self._keys:
             return False
         return len(self._jobs) < self.batch_size
 
     def push(self, job: AdaptiveJob) -> bool:
         if not self.can_accept(job):
             return False
-        if not self._jobs:
-            self._domain = job.domain
         self._jobs.append(job)
-        self._labels.add(job.item.label)
+        self._keys.add(job.key)
         return True
 
     def is_full(self) -> bool:
@@ -250,7 +257,10 @@ class ProbeBatchService:
     async def run_batch(self, ctx: BatchContext, timeout: float) -> BatchProbeResult:
         ns = await self.deps.acquire_ns()
         try:
-            resolved_ip, dns_verdict, doh_server = await self.deps.resolve_domain_dns(ctx.domain)
+            domains = ctx.item_domains()
+            resolved_by_domain: dict[str, tuple[str | None, str, str]] = {}
+            for d in dict.fromkeys(domains):
+                resolved_by_domain[d] = await self.deps.resolve_domain_dns(d)
             wall_start = time.monotonic()
             try:
                 result = await asyncio.to_thread(
@@ -258,7 +268,7 @@ class ProbeBatchService:
                     ctx,
                     timeout,
                     ns,
-                    resolved_ip,
+                    resolved_by_domain,
                 )
             except NetnsGoneError as e:
                 failed = self._batch_fail_results(ctx, str(e))
@@ -272,10 +282,11 @@ class ProbeBatchService:
                 return result
             result.batch_wall_ms = (time.monotonic() - wall_start) * 1000
             result.batch_fill_ratio = len(ctx.items) / max(1, self.config.batch_size)
-            for item, probe_result in zip(ctx.items, result.results, strict=False):
+            for item, dom, probe_result in zip(ctx.items, domains, result.results, strict=False):
+                resolved_ip, dns_verdict, doh_server = resolved_by_domain[dom]
                 await self.deps.log_tcp_result(
                     item,
-                    ctx.domain,
+                    dom,
                     probe_result,
                     resolved_ip=resolved_ip,
                     dns_verdict=dns_verdict,
@@ -291,27 +302,28 @@ class ProbeBatchService:
         ctx: BatchContext,
         timeout: float,
         ns_name: str,
-        resolved_ip: str | None,
+        resolved_by_domain: dict[str, tuple[str | None, str, str]],
     ) -> BatchProbeResult:
         if self.config.backend == "lua_bridge":
-            return self._run_lua_bridge_batch(ctx, timeout, ns_name, resolved_ip)
-        return self._run_classic_batch(ctx, timeout, ns_name, resolved_ip)
+            return self._run_lua_bridge_batch(ctx, timeout, ns_name, resolved_by_domain)
+        return self._run_classic_batch(ctx, timeout, ns_name, resolved_by_domain)
 
     def _run_classic_batch(
         self,
         ctx: BatchContext,
         timeout: float,
         ns_name: str,
-        resolved_ip: str | None,
+        resolved_by_domain: dict[str, tuple[str | None, str, str]],
     ) -> BatchProbeResult:
         results: list = []
-        for item in ctx.items:
+        for item, dom in zip(ctx.items, ctx.item_domains(), strict=False):
             timeout_i, settle_max = self.deps.timing_for(item, timeout)
             protocol = getattr(item, "protocol", ctx.protocol) or ctx.protocol
+            resolved_ip, _, _ = resolved_by_domain[dom]
             data = self.deps.run_tcp_check(
                 ns_name,
                 item.strategy,
-                ctx.domain,
+                dom,
                 timeout_i,
                 item.is_config,
                 self.deps.python,
@@ -330,7 +342,7 @@ class ProbeBatchService:
                 item, ctx, timeout_i, ns_name, resolved_ip, protocol, settle_max, data
             )
             data["batch_id"] = ctx.batch_id
-            result = self.deps.tcp_result_from_data(item, ctx.domain, data)
+            result = self.deps.tcp_result_from_data(item, dom, data)
             results.append(result)
         _netns_tcp_probe_cleanup(ns_name)
         return BatchProbeResult(
@@ -341,9 +353,9 @@ class ProbeBatchService:
 
     def _batch_fail_results(self, ctx: BatchContext, error: str) -> list:
         results = []
-        for item in ctx.items:
+        for item, dom in zip(ctx.items, ctx.item_domains(), strict=False):
             data = {"success": False, "error": error, "batch_id": ctx.batch_id}
-            result = self.deps.tcp_result_from_data(item, ctx.domain, data)
+            result = self.deps.tcp_result_from_data(item, dom, data)
             results.append(result)
         return results
 
@@ -352,7 +364,7 @@ class ProbeBatchService:
         ctx: BatchContext,
         timeout: float,
         ns_name: str,
-        resolved_ip: str | None,
+        resolved_by_domain: dict[str, tuple[str | None, str, str]],
     ) -> BatchProbeResult:
         protocol = ctx.protocol
         if ctx.items:
@@ -369,16 +381,19 @@ class ProbeBatchService:
         settle_ms = 0.0
         try:
             settle_ms = session.boot() * 1000
-            for idx, item in enumerate(ctx.items, start=1):
+            for idx, (item, dom) in enumerate(
+                zip(ctx.items, ctx.item_domains(), strict=False), start=1
+            ):
                 gen = self.deps.next_probe_gen()
                 timeout_i, _ = self.deps.timing_for(item, timeout)
                 item_proto = getattr(item, "protocol", protocol) or protocol
+                resolved_ip, _, _ = resolved_by_domain[dom]
                 data = run_tcp_check_bridge(
                     session,
                     idx,
                     gen,
                     item.strategy,
-                    ctx.domain,
+                    dom,
                     timeout_i,
                     self.deps.python,
                     self.deps.disable_ech,
@@ -391,10 +406,10 @@ class ProbeBatchService:
                     self.deps.quick_break,
                 )
                 data = self._maybe_wssize_bridge_retry(
-                    session, idx, item, ctx, timeout_i, resolved_ip, item_proto, data
+                    session, idx, item, ctx, timeout_i, resolved_ip, item_proto, data, domain=dom
                 )
                 data["batch_id"] = ctx.batch_id
-                result = self.deps.tcp_result_from_data(item, ctx.domain, data)
+                result = self.deps.tcp_result_from_data(item, dom, data)
                 results.append(result)
         finally:
             session.shutdown()
@@ -451,6 +466,8 @@ class ProbeBatchService:
         resolved_ip: str | None,
         protocol: str,
         data: dict,
+        *,
+        domain: str | None = None,
     ) -> dict:
         if (
             not data.get("success")
@@ -464,7 +481,7 @@ class ProbeBatchService:
                 idx,
                 gen,
                 item.strategy,
-                ctx.domain,
+                domain or ctx.domain,
                 timeout_i,
                 self.deps.python,
                 self.deps.disable_ech,

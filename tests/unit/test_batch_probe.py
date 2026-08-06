@@ -36,14 +36,26 @@ def test_batch_scheduler_iter_batches() -> None:
 
 
 @pytest.mark.unit
-def test_batch_job_accumulator_same_domain() -> None:
+def test_batch_job_accumulator_cross_domain() -> None:
     acc = BatchJobAccumulator(3)
     assert acc.push(_job("a", "discord.com"))
     assert acc.push(_job("b", "discord.com"))
-    assert not acc.can_accept(_job("c", "youtube.com"))
+    assert acc.push(_job("c", "youtube.com"))
+    assert len(acc) == 3
+    assert acc.is_full()
+    assert not acc.can_accept(_job("d", "signal.org"))
     jobs = acc.flush()
-    assert len(jobs) == 2
+    assert len(jobs) == 3
     assert acc.domain is None
+    assert acc.domains == []
+
+
+@pytest.mark.unit
+def test_batch_job_accumulator_dup_key_rejected() -> None:
+    acc = BatchJobAccumulator(10)
+    assert acc.push(_job("a", "discord.com"))
+    assert not acc.can_accept(_job("a", "discord.com"))
+    assert acc.push(_job("a", "youtube.com"))
 
 
 @pytest.mark.unit

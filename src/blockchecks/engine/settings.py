@@ -40,7 +40,7 @@ class BlockchecksSettings(BaseSettings):
     secure_dns: bool = True
     doh_server: str = ""
     proxy: str = "socks5://127.0.0.1:11080"
-    unblocked_dom: str = "iana.org"
+    unblocked_dom: str = "ripe.net"
     curl_parallel: int = 1
 
 

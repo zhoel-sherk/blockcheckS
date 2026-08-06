@@ -211,7 +211,7 @@ def add_secure_dns_args(
     g.add_argument(
         "--unblocked-dom",
         default=None,
-        help="Reference unblocked domain (default: iana.org)",
+        help="Reference unblocked domain (default: ripe.net)",
     )
     g.add_argument("--skip-baseline", action="store_true", help="Skip unblocked baseline check")
     g.add_argument("--skip-port-block", action="store_true", help="Skip TCP port probes")

@@ -498,6 +498,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         on_progress=_progress,
         lua_bridge=bool(getattr(args, "lua_bridge", False)),
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
+        workers=max(1, int(getattr(args, "parallel", 4) or 4)),
     )
     progress.done = skipped + ctx.aq_result.done
     progress.passed = ctx.aq_result.passed

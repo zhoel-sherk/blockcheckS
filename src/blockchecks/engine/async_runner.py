@@ -817,6 +817,7 @@ class AsyncTestRunner:
         domain: str,
         timeout: float,
         backend: str,
+        domains: list[str] | None = None,
     ) -> list[TcpTestResult]:
         if not items:
             return []
@@ -827,6 +828,7 @@ class AsyncTestRunner:
             domain=domain,
             batch_id=self._next_batch_id(),
             protocol=protocol,
+            domains=domains,
         )
         async with self.semaphore:
             result = await self._probe_service(backend).run_batch(ctx, timeout)
