@@ -313,6 +313,13 @@ class DnsRunCache:
                 self.doh_server = alt
                 self.set(domain, ips2)
                 return ips2
+        # Fallback: verified DoH records cached in data_block (anti-hijack).
+        # When live DoH is blocked (doh_blocked / no_resolution), trust the last
+        # known-good IPs instead of tampered UDP answers.
+        cached_ips = _data_block_dns_ips(domain)
+        if cached_ips:
+            self.set(domain, cached_ips)
+            return cached_ips
         return ips
 
     def primary_ip(self, domain: str, doh_url: str | None = None) -> str | None:
@@ -325,6 +332,24 @@ class DnsRunCache:
         self.doh_server = url
         for domain in domains:
             self.resolve(domain, doh_url=url)
+
+
+def _data_block_dns_ips(domain: str) -> list[str]:
+    """Return fresh cached IPs for *domain* from data_block/dns.db (best-effort)."""
+    try:
+        from blockchecks.data_block.provider import get_provider_dir
+        from blockchecks.data_block.store import ProviderStore
+
+        store = ProviderStore(get_provider_dir(allow_detect=False))
+        if not store.dns_db.is_file():
+            return []
+        recs = store.load_dns_records_sync()
+        value = recs.get(domain)
+        if isinstance(value, tuple):
+            return list(value[0] or [])
+        return list(value or [])
+    except Exception:
+        return []
 
 
 def apply_curl_resolve(session: curl_cffi.Session, domain: str, ip: str, port: int = 443) -> None:

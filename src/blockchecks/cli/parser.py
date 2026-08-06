@@ -204,6 +204,11 @@ def add_secure_dns_args(
         action="store_true",
         help="Continue when DNS hijack detected",
     )
+    g.add_argument(
+        "--data-block-sync",
+        action="store_true",
+        help="Commit+push data_block/ (provider DNS cache, strategies) after scan",
+    )
     if not include_preflight:
         return
     g = parser.add_argument_group("preflight")

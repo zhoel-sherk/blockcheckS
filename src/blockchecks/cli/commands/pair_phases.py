@@ -137,6 +137,9 @@ async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPrefl
     domains_for_dns = list(
         dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))
     )
+    from blockchecks.data_block.provider import provider_name
+
+    provider_name(allow_detect=True)
     secure_dns = SECURE_DNS_DEFAULT and not getattr(args, "no_secure_dns", False)
     dns_cache, dns_audits, dns_rc = prepare_dns_for_run(
         domains_for_dns,
@@ -689,6 +692,9 @@ async def finalize_pair_run(
     aq_result: Any | None,
 ) -> int:
     """Export configs, write summary, and compute final exit code."""
+    from blockchecks.engine.run_finalize import maybe_write_best_config_data_block
+
+    await maybe_write_best_config_data_block()
     export_result = None
     if getattr(args, "out_dir", None):
         export_result = await maybe_export_configs(

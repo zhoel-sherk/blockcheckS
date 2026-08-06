@@ -65,6 +65,9 @@ async def cmd_bench_settle(args) -> int:
     if len(items) > getattr(args, "max_strategies", 3):
         items = items[: getattr(args, "max_strategies", 3)]
 
+    from blockchecks.data_block.provider import provider_name
+
+    provider_name(allow_detect=True)
     secure_dns = SECURE_DNS_DEFAULT and not getattr(args, "no_secure_dns", False)
     dns_cache, _, dns_rc = prepare_dns_for_run(
         [domain],

@@ -173,6 +173,9 @@ def load_run_domains(args) -> tuple[list[str], str, int | None]:
 
 
 def prepare_run_dns(args, domains: list[str]) -> tuple[Any, list[Any], int | None]:
+    from blockchecks.data_block.provider import provider_name
+
+    provider_name(allow_detect=True)
     secure_dns = SECURE_DNS_DEFAULT and not getattr(args, "no_secure_dns", False)
     dns_cache, dns_audits, dns_rc = prepare_dns_for_run(
         domains,
@@ -901,6 +904,9 @@ def print_aq_stop_metrics(ctx: FullRunContext) -> None:
 
 async def export_and_summarize(ctx: FullRunContext) -> int:
     from blockchecks.engine.run_finalize import run_exit_code
+    from blockchecks.engine.run_finalize import maybe_write_best_config_data_block
+
+    await maybe_write_best_config_data_block()
 
     export_result = await maybe_export_configs(
         ctx.db,

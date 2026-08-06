@@ -260,6 +260,17 @@ DEFAULT_VOICE_PORT = 50006
 # IP-block cross-test reference host (blockcheck2 UNBLOCKED_DOM)
 UNBLOCKED_DOM = _env_or("BLOCKCHECKS_UNBLOCKED_DOM", "ripe.net")
 
+# Fallback reference hosts: tried in order when the primary UNBLOCKED_DOM is
+# unreachable (ISP blocks / geo), or used via cached IP when DNS itself fails.
+UNBLOCKED_DOMS = [
+    d.strip()
+    for d in os.environ.get(
+        "BLOCKCHECKS_UNBLOCKED_DOMS",
+        "ripe.net,cloudflare.com,about.rdap.org,iana.org",
+    ).split(",")
+    if d.strip()
+]
+
 # Content validation thresholds
 MIN_CONTENT_LENGTH = 300  # bytes — minimum for a real web page (aligned with tcp_tls)
 MIN_READ_RATE_BPS = 500.0  # bytes/sec — below this = TCP window clamp (FAIL)

@@ -14,6 +14,47 @@ from blockchecks.engine.store import RunStateStore
 from blockchecks.nfconf import export_configs
 
 
+async def maybe_write_best_config_data_block() -> None:
+    """Write the best nfqws2 config to data_block/providers/<p>/best_config.conf.
+
+    Best-effort: silently skipped when the submodule / provider is unavailable
+    or strategies.db has no recorded passes.  Uses approved pass strategies
+    (falling back to any pass) to keep the config stable.
+    """
+    try:
+        from blockchecks.engine.conf_builder import build_keenetic_conf
+        from blockchecks.data_block.provider import get_provider_dir
+        from blockchecks.data_block.store import ProviderStore
+
+        store = ProviderStore(get_provider_dir())
+        if not store.strategies_db.is_file():
+            return
+        rows = await store.pass_strategies(approved_only=True)
+        if not rows:
+            rows = await store.pass_strategies()
+        if not rows:
+            return
+        tcp = [r["strategy"] for r in rows if r.get("protocol") == "tcp"]
+        udp = [r["strategy"] for r in rows if r.get("protocol") == "udp"]
+        if not tcp and not udp:
+            return
+        comment = f"blockcheckS best_config ({_now()}) domains={len(rows)}"
+        content = build_keenetic_conf(
+            tcp_strategies=tcp[:5],
+            udp_strategies=udp[:5],
+            comment=comment,
+        )
+        store.write_best_config(content)
+    except Exception:
+        pass
+
+
+def _now() -> str:
+    import time
+
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def should_export(
     args,
     *,

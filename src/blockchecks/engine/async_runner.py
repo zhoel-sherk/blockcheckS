@@ -725,6 +725,31 @@ print(json.dumps({{"success": ok, "latency_ms": lat,
 # ── AsyncTestRunner ─────────────────────────────────
 
 
+async def _save_pass_strategy_data_block(
+    strategy: str,
+    domain: str,
+    *,
+    protocol: str,
+    latency_ms: float,
+    http_code: int,
+) -> None:
+    """Persist a PASS strategy into data_block strategies.db (best-effort)."""
+    try:
+        from blockchecks.data_block.provider import get_provider_dir
+        from blockchecks.data_block.store import ProviderStore
+
+        store = ProviderStore(get_provider_dir())
+        await store.upsert_pass_strategy(
+            strategy,
+            domain,
+            protocol=protocol,
+            latency_ms=latency_ms,
+            http_code=http_code,
+        )
+    except Exception:
+        pass
+
+
 class AsyncTestRunner:
     """Parallel strategy tester using NetNsPool + asyncio.Semaphore."""
 
@@ -1077,6 +1102,14 @@ class AsyncTestRunner:
             doh_server=doh_server,
             proto=proto_db,
         )
+        if status == "PASS":
+            await _save_pass_strategy_data_block(
+                item.strategy,
+                domain,
+                protocol=proto_db,
+                latency_ms=result.latency_ms,
+                http_code=result.http_code,
+            )
 
     async def test_tcp_domains(
         self,

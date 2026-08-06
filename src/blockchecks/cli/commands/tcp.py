@@ -61,6 +61,9 @@ def cmd_tcp(args):
         return 1
     print("\n  blockcheckS — TCP TLS test")
     print(f"  Domain: {args.domain}  Items: {len(strategies)}  Timeout: {args.timeout}s\n")
+    from blockchecks.data_block.provider import provider_name
+
+    provider_name(allow_detect=True)
     secure_dns = SECURE_DNS_DEFAULT and not getattr(args, "no_secure_dns", False)
     dns_cache, _, dns_rc = prepare_dns_for_run(
         [args.domain],

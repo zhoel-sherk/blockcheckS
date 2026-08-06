@@ -22,6 +22,39 @@ from blockchecks.checkers.tcp_tls import check_tls
 from blockchecks.engine.config import NFQWS2_BIN, UNBLOCKED_DOM
 
 
+async def _sync_dns_to_data_block(results: list[dict]) -> None:
+    """Persist DoH results (all + tampered) into data_block dns.db.
+
+    Best-effort: any failure (missing submodule, no provider, write error) is
+    silently ignored.
+    """
+    try:
+        from blockchecks.data_block.provider import get_provider_dir
+        from blockchecks.data_block.store import ProviderStore
+
+        store = ProviderStore(get_provider_dir())
+        records: dict[str, list[str]] = {}
+        tampered_rows: list[dict] = []
+        for r in results:
+            ips = [ip.strip() for ip in r.get("doh_ips", "").split(",") if ip.strip()]
+            if ips:
+                records[r["domain"]] = ips
+            if r.get("tampered"):
+                tampered_rows.append(
+                    {
+                        "domain": r["domain"],
+                        "udp_ips": r.get("udp_ips", ""),
+                        "doh_ips": r.get("doh_ips", ""),
+                        "verdict": r.get("verdict", ""),
+                    }
+                )
+        await store.save_dns_records(records)
+        await store.save_dns_tampered(tampered_rows)
+        store.write_hosts(records)
+    except Exception:
+        pass
+
+
 @dataclass
 class PreflightOptions:
     unblocked_dom: str = UNBLOCKED_DOM
@@ -89,20 +122,60 @@ def find_host_nfqws2_pids() -> list[int]:
         return []
 
 
+def _baseline_candidates(unblocked_dom: str | None) -> list[str]:
+    """Ordered list of baseline domains to try (primary first)."""
+    from blockchecks.engine.config import UNBLOCKED_DOMS
+
+    primary = (unblocked_dom or UNBLOCKED_DOM).strip().rstrip(".")
+    if not primary:
+        return list(UNBLOCKED_DOMS)
+    return [primary] + [d for d in UNBLOCKED_DOMS if d != primary]
+
+
 def run_unblocked_baseline(
     unblocked_dom: str | None = None,
     timeout: float = 5.0,
     dns_cache: DnsRunCache | None = None,
 ) -> tuple[bool, str]:
-    """Verify reference domain is reachable (BC2-2)."""
-    dom = unblocked_dom or UNBLOCKED_DOM
-    resolved_ip = None
-    if dns_cache:
-        resolved_ip = dns_cache.primary_ip(dom)
-    r = check_tls(dom, timeout=timeout, pre_resolved_ip=resolved_ip, verify_content=False)
-    if r.success:
-        return True, dom
-    return False, f"{dom} baseline failed: HTTP {r.http_status} {r.error or ''}".strip()
+    """Verify reference domain is reachable (BC2-2).
+
+    Tries the primary UNBLOCKED_DOM first, then fallbacks from UNBLOCKED_DOMS.
+    When live DNS is unavailable for a candidate, falls back to a cached IP
+    from data_block dns.db.  Returns (ok, working_domain_or_error).
+    """
+    for dom in _baseline_candidates(unblocked_dom):
+        resolved_ip = None
+        if dns_cache:
+            resolved_ip = dns_cache.primary_ip(dom)
+        # No live resolution → use data_block cached IP (anti-hijack fallback)
+        if not resolved_ip:
+            resolved_ip = _data_block_cached_ip(dom)
+        r = check_tls(
+            dom, timeout=timeout, pre_resolved_ip=resolved_ip, verify_content=False
+        )
+        if r.success:
+            return True, dom
+    last = _baseline_candidates(unblocked_dom)[-1]
+    r = check_tls(last, timeout=timeout, verify_content=False)
+    return False, f"{last} baseline failed: HTTP {r.http_status} {r.error or ''}".strip()
+
+
+def _data_block_cached_ip(domain: str) -> str | None:
+    """Return first cached IP for *domain* from data_block dns.db (best-effort)."""
+    try:
+        from blockchecks.data_block.provider import get_provider_dir
+        from blockchecks.data_block.store import ProviderStore
+
+        store = ProviderStore(get_provider_dir(allow_detect=False))
+        recs = store.load_dns_records_sync()
+        value = recs.get(domain)
+        if isinstance(value, tuple):
+            return value[0][0] if value[0] else None
+        if value:
+            return value[0]
+    except Exception:
+        pass
+    return None
 
 
 def run_prolog(
@@ -162,6 +235,8 @@ async def _audit_domains_parallel(
     results = await asyncio.gather(*(_one(d) for d in domains))
     tampered = [r for r in results if r["tampered"]]
 
+    await _sync_dns_to_data_block(results)
+
     if store and tampered:
         for r in tampered:
             await store.write_dns_audit_log(
@@ -216,12 +291,15 @@ async def run_preflight_async(
             report.exit_code = 1
             report.error = detail
             return report
+        # Working baseline (may be a fallback host) → reuse for IP-block cross-tests
+        if detail and detail in _baseline_candidates(o.unblocked_dom):
+            report.baseline_domain = detail
 
     # ── One-time parallel DNS audit (UDP vs DoH) ──
     if not o.skip_dns_audit and cache and o.store:
         await _audit_domains_parallel(domains, cache, o.timeout, store=o.store)
 
-    ref = (o.unblocked_dom or UNBLOCKED_DOM).rstrip(".")
+    ref = report.baseline_domain or (o.unblocked_dom or UNBLOCKED_DOM).rstrip(".")
     for domain in domains:
         ips: list[str] = []
         if cache:
@@ -252,7 +330,7 @@ async def run_preflight_async(
         if not o.skip_ip_block and domain.rstrip(".") != ref:
             ip_r = run_ip_block_cross_test(
                 domain,
-                unblocked_domain=o.unblocked_dom,
+                unblocked_domain=ref,
                 timeout=o.timeout,
                 dns_cache=cache,
             )
