@@ -1,6 +1,7 @@
 """Custom lists, config files, and user matrix generators."""
 
 import os
+import sys
 
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
 from blockchecks.engine.store import RunStateStore
@@ -96,8 +97,9 @@ class ConfigFileGenerator(StrategyGenerator):
 class UserMatrixGenerator(StrategyGenerator):
     """Load strategies from user-provided file (one per line).
 
-    A literal ``\\n`` sequence in a line becomes a real newline so multi-desync
-    / CLI companion strategies fit on one matrix line.
+    ``-`` reads from stdin (piped matrix).  A literal ``\\n`` sequence in a
+    line becomes a real newline so multi-desync / CLI companion strategies fit
+    on one matrix line.
     """
 
     def __init__(self, filepath: str):
@@ -112,38 +114,42 @@ class UserMatrixGenerator(StrategyGenerator):
         max_count: int = 100,
         run_set: set = None,
     ) -> list[StrategyItem]:
-        if not os.path.exists(self.filepath):
-            print(f"[matrix] User matrix file not found: {self.filepath}")
-            return []
+        if self.filepath == "-":
+            lines = sys.stdin.read().splitlines()
+        else:
+            if not os.path.exists(self.filepath):
+                print(f"[matrix] User matrix file not found: {self.filepath}")
+                return []
+            with open(self.filepath) as f:
+                lines = f.read().splitlines()
 
         items = []
-        with open(self.filepath) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or line == "---":
-                    continue
-                strategy = line.replace("\\n", "\n")
-                if protocol != "udp_voice":
-                    low = strategy.lower()
-                    if any(
-                        kw in low
-                        for kw in (
-                            "--filter-udp",
-                            "--qnum=201",
-                            "filter-udp",
-                            "blob=discord_udp",
-                            "discord_ip_discovery",
-                        )
-                    ):
-                        continue
-                if (
-                    protocol == "udp_voice"
-                    and "tcp" in strategy.lower()
-                    and "udp" not in strategy.lower()
+        for raw in lines:
+            line = raw.strip()
+            if not line or line.startswith("#") or line == "---":
+                continue
+            strategy = line.replace("\\n", "\n")
+            if protocol != "udp_voice":
+                low = strategy.lower()
+                if any(
+                    kw in low
+                    for kw in (
+                        "--filter-udp",
+                        "--qnum=201",
+                        "filter-udp",
+                        "blob=discord_udp",
+                        "discord_ip_discovery",
+                    )
                 ):
                     continue
-                label = strategy.split("\n", 1)[0][:50].replace(" ", "_").replace(":", "_")
-                items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
-                if scan_level == "single" and items:
-                    break
+            if (
+                protocol == "udp_voice"
+                and "tcp" in strategy.lower()
+                and "udp" not in strategy.lower()
+            ):
+                continue
+            label = strategy.split("\n", 1)[0][:50].replace(" ", "_").replace(":", "_")
+            items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
+            if scan_level == "single" and items:
+                break
         return items[:max_count]

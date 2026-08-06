@@ -88,6 +88,23 @@ sudo bs scan --preset pi2 -M timeout-benchmark \
 Transfer checklist: `nfqws2` + `lua/` + `blobs/` (`rsync --copy-links`); install
 `curl_cffi` **on the Pi** (armv7l wheels). `system_deps` refuses wrong-arch ELF.
 
+**Memory monitor / daemon recycle** (`engine/services/metrics.py`, lua_bridge
+backend only): samples nfqws2 RSS inside each netns and recycles the daemon
+(when RSS or leak-slope is exceeded). On a **RPi2** with ~256 MiB free RAM,
+lower the ceiling below the default:
+
+```bash
+export BLOCKCHECKS_MEM_MAX_MIB=256    # RSS ceiling for an nfqws2 daemon (MiB); recycle when exceeded
+export BLOCKCHECKS_MEM_LEAK_SLOPE=8   # leak slope (MiB/s) over the window; recycle when exceeded
+export BLOCKCHECKS_MEM_PY_MAX_MIB=2048 # Python worker RSS ceiling (MiB); warn only
+export BLOCKCHECKS_MEM_WINDOW=12      # sliding-window size (samples)
+export BLOCKCHECKS_MEM_POLL=2.0       # poll interval (s) between checks
+export BLOCKCHECKS_MEM_MONITOR=1      # 0 disables sampling/recycle entirely
+```
+
+Defaults: `MAX_MIB=512`, `LEAK_SLOPE=8`, `PY_MAX_MIB=2048`, `WINDOW=12`,
+`POLL=2.0`, `MONITOR=1`.
+
 Scale note: more workers = more netns×nfqws2 (already isolated). Raising
 `--parallel` on a Xeon is the first throughput lever; nftables vmap (B7) is for
 host-shared designs, not a prerequisite for `parallel > 4` under netns.

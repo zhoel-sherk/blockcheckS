@@ -454,15 +454,17 @@ def main(argv: list[str] | None = None) -> int:
     raw = list(argv) if argv is not None else None
     cli_args = expand_bare_generate(normalize_cli_args(raw)) if raw is not None else None
     if cli_args is None:
-        import sys
-
         cli_args = expand_bare_generate(normalize_cli_args(sys.argv[1:]))
 
     Root = build_cli_root()
     try:
         result = CliApp.run(Root, cli_args=cli_args)
     except SystemExit as exc:
-        return int(exc.code or 0)
+        code = exc.code
+        if isinstance(code, str):
+            print(code, file=sys.stderr)
+            return 1
+        return int(code or 0)
     except pydantic_core.ValidationError as exc:
         return _print_validation_error(exc)
 

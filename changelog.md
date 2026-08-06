@@ -34,6 +34,20 @@
 
 - `async_runner.py` — `test_batch_tcp` delegates to `ProbeBatchService` (classic or bridge)
 - `main_phases.py` — `_run_tcp_sequential_bridge()` for bridge path
+- `generators/custom.py` — `UserMatrixGenerator` now supports `--user-matrix -` (read strategies
+  from stdin), unblocking the `--lua-bridge-compare` integration tests (9/9 pass live)
+- `cli/cliapp.py` — `SystemExit` carrying a string message (e.g. the active-run lock
+  `bs stop` hint) is printed to stderr with rc=1 instead of crashing `int()` with a
+  `ValueError` traceback; removed the shadowing local `import sys`
+
+### Live-verified (this pass)
+
+- `bs full` smoke: TCP 9 PASS / HTTP 123 PASS (flowseal, `--max-timem 2`), conf-export path ok
+- `bench-settle`: 5×4 settle/curl grid all PASS, `settle_profile.json` written
+- `bs stop` graceful (SIGTERM + wait, times out on in-flight subprocess probe →
+  hints `--force`) and `bs stop --force` (SIGKILL, clears `run.lock`)
+- Integration suite `tests/integration/ -m integration` — **9 passed** (requires a clean
+  `run.lock`; leftover `bs scan` from an interrupted run makes tests fail fast)
 
 ---
 

@@ -150,3 +150,19 @@ def test_cli_main_returns_handler_exit_code():
         with patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0):
             code = ca.main(["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"])
     assert code == 7
+
+
+def test_cli_main_string_system_exit_prints_and_returns_1():
+    """A SystemExit carrying a message (e.g. active-run lock) must not crash int()."""
+    from blockchecks.cli import cliapp as ca
+
+    stderr = StringIO()
+
+    def _boom(*_a, **_k):
+        raise SystemExit("ERROR: active run already registered (pid 1, scan)")
+
+    with patch("blockchecks.cli.cliapp.CliApp.run", side_effect=_boom):
+        with patch("sys.stderr", stderr):
+            code = ca.main(["scan", "-d", "discord.com"])
+    assert code == 1
+    assert "active run already registered" in stderr.getvalue()

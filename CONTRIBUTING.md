@@ -98,10 +98,10 @@ See [`.gitignore`](.gitignore). Never commit:
 
 ## Known limitations
 
-- `--user-matrix -` (strategy list from stdin) is **not** supported by
-  `UserMatrixGenerator`; pass a regular file path instead. The `bs pair
-  --lua-bridge-compare` integration test currently uses stdin and is skipped in
-  CI for this reason.
+- Live integration tests (`tests/integration/test_lua_bridge_compare.py`) run
+  real `bs scan` subprocesses under `sudo -n`; they must run with a **clean
+  `run.lock`** (no concurrent/leftover `bs scan`) or the active-run lock makes
+  them fail fast. Use `bs stop --force` before a full `-m integration` run.
 
 ## Install note
 
