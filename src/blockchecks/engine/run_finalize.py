@@ -22,9 +22,9 @@ async def maybe_write_best_config_data_block() -> None:
     (falling back to any pass) to keep the config stable.
     """
     try:
-        from blockchecks.engine.conf_builder import build_keenetic_conf
         from blockchecks.data_block.provider import get_provider_dir
         from blockchecks.data_block.store import ProviderStore
+        from blockchecks.engine.conf_builder import build_keenetic_conf
 
         store = ProviderStore(get_provider_dir())
         if not store.strategies_db.is_file():
@@ -45,6 +45,30 @@ async def maybe_write_best_config_data_block() -> None:
             comment=comment,
         )
         store.write_best_config(content)
+    except Exception:
+        pass
+
+
+async def maybe_sync_data_block(args=None) -> None:
+    """Commit+push data_block/ when the ``--data-block-sync`` flag is set.
+
+    No-op otherwise (keeps the submodule clean after routine scans).
+    """
+    enabled = False
+    if args is not None:
+        enabled = bool(getattr(args, "data_block_sync", False))
+    if not enabled:
+        import sys
+
+        enabled = "--data-block-sync" in sys.argv[1:]
+    if not enabled:
+        return
+    try:
+        from blockchecks.data_block.provider import get_provider_dir
+        from blockchecks.data_block.store import ProviderStore
+
+        store = ProviderStore(get_provider_dir())
+        store.sync_commit()
     except Exception:
         pass
 

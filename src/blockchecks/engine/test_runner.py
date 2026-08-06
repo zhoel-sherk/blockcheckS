@@ -7,8 +7,8 @@ import sys
 import time
 from dataclasses import dataclass, field
 
-from blockchecks.engine.firewall import Firewall
-from blockchecks.engine.nfqws2 import Nfqws2Manager
+from blockchecks.engine.services.firewall import Firewall
+from blockchecks.engine.services.nfqws2 import Nfqws2Manager
 
 
 @dataclass

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from blockchecks.engine.firewall import Firewall
+from blockchecks.engine.services.firewall import Firewall
 
 pytestmark = pytest.mark.unit
 

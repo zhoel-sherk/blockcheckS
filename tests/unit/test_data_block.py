@@ -1,6 +1,5 @@
 """Unit tests for data_block (provider slug, dns.db, strategies.db, hosts)."""
 
-import asyncio
 from pathlib import Path
 
 import pytest

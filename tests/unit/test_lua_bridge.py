@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from blockchecks.engine.lua_bridge import (
+from blockchecks.engine.services.lua_bridge import (
     BridgeEvent,
     LuaBridge,
     build_bridge_conf,

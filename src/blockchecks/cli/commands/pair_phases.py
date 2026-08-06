@@ -692,9 +692,13 @@ async def finalize_pair_run(
     aq_result: Any | None,
 ) -> int:
     """Export configs, write summary, and compute final exit code."""
-    from blockchecks.engine.run_finalize import maybe_write_best_config_data_block
+    from blockchecks.engine.run_finalize import (
+        maybe_sync_data_block,
+        maybe_write_best_config_data_block,
+    )
 
     await maybe_write_best_config_data_block()
+    await maybe_sync_data_block(args)
     export_result = None
     if getattr(args, "out_dir", None):
         export_result = await maybe_export_configs(

@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import subprocess
-import time
-from pathlib import Path
 
 import pytest
-
 from tests.unit._quality_config import PROJECT_ROOT
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]

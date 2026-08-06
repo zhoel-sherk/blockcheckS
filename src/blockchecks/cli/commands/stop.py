@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from blockchecks.engine.run_control import request_graceful_stop
+from blockchecks.engine.services.run_control import request_graceful_stop
 
 
 def cmd_stop(args) -> int:

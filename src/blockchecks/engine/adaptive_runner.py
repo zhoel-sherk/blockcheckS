@@ -12,8 +12,8 @@ from blockchecks.engine.adaptive_queue import (
     AdaptiveMetrics,
     ScanWeights,
 )
-from blockchecks.engine.batch_probe import BatchJobAccumulator
 from blockchecks.engine.generators.base import StrategyItem
+from blockchecks.engine.services.batch_probe import BatchJobAccumulator
 from blockchecks.engine.store import RunStateStore
 
 ProgressCb = Callable[[int, int, int], None]

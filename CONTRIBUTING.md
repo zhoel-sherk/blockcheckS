@@ -96,6 +96,13 @@ See [`.gitignore`](.gitignore). Never commit:
 - [ ] Docs updated if CLI or public API changed
 - [ ] No secrets, `state.db`, or machine-specific paths
 
+## Known limitations
+
+- `--user-matrix -` (strategy list from stdin) is **not** supported by
+  `UserMatrixGenerator`; pass a regular file path instead. The `bs pair
+  --lua-bridge-compare` integration test currently uses stdin and is skipped in
+  CI for this reason.
+
 ## Install note
 
 Use **editable install** from a git checkout (`pip install -e .`). Strategy

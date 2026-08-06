@@ -16,8 +16,8 @@ from blockchecks.cli.presets import (
     resolve_domain_preset,
     resolve_strategy_preset,
 )
-from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
 from blockchecks.engine.secure_io import write_secure_text
+from blockchecks.engine.services.probe import invoke_curl_probe_worker, probe_request_dict
 
 
 @pytest.mark.unit
@@ -35,7 +35,7 @@ def test_invoke_curl_probe_worker_parses_stdout():
     payload = {"mode": "single", "request": {"domain": "x"}}
     fake = MagicMock()
     fake.stdout = json.dumps({"success": True, "http_code": 200, "latency_ms": 12})
-    with patch("blockchecks.engine.probe.sp.run", return_value=fake) as run:
+    with patch("blockchecks.engine.services.probe.sp.run", return_value=fake) as run:
         out = invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", payload, 10.0)
     assert out["success"] is True
     assert out["http_code"] == 200
@@ -47,7 +47,7 @@ def test_invoke_curl_probe_worker_parses_stdout():
 def test_invoke_curl_probe_worker_bad_json():
     fake = MagicMock()
     fake.stdout = "not-json"
-    with patch("blockchecks.engine.probe.sp.run", return_value=fake):
+    with patch("blockchecks.engine.services.probe.sp.run", return_value=fake):
         out = invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", {}, 10.0)
     assert out["success"] is False
     assert "parse:" in out["error"]
@@ -58,7 +58,7 @@ def test_composite_imports_public_probe():
     import blockchecks.checkers.composite_runner as cr
 
     src = Path(cr.__file__).read_text(encoding="utf-8")
-    assert "from blockchecks.engine.probe import" in src
+    assert "from blockchecks.engine.services.probe import" in src
     assert "_invoke_curl_probe_worker" not in src
 
 

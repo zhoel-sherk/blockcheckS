@@ -6,9 +6,12 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from colorama import Fore, Style
+
+if TYPE_CHECKING:
+    from blockchecks.engine.adaptive_queue import AdaptiveJob
 
 from blockchecks.checkers.curl_probe import (
     CurlProbeRequest,
@@ -16,12 +19,16 @@ from blockchecks.checkers.curl_probe import (
     prepare_googlevideo_probe,
     worker_wall_timeout,
 )
-from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.config import DEFAULT_BRIDGE_BATCH_MAX
 from blockchecks.engine.generators.base import StrategyItem
-from blockchecks.engine.lua_bridge import BridgeSession, LuaBridge, strategy_text_from_item
-from blockchecks.engine.lua_bridge import NetnsGoneError, _netns_tcp_probe_cleanup
-from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
+from blockchecks.engine.services.lua_bridge import (
+    BridgeSession,
+    LuaBridge,
+    NetnsGoneError,
+    _netns_tcp_probe_cleanup,
+    strategy_text_from_item,
+)
+from blockchecks.engine.services.probe import invoke_curl_probe_worker, probe_request_dict
 
 CYAN = Fore.CYAN + Style.BRIGHT
 RESET = Style.RESET_ALL
@@ -249,10 +256,16 @@ def run_tcp_check_bridge(
 class ProbeBatchService:
     """Boot batch → probe ×N → shutdown with classic or lua_bridge backend."""
 
-    def __init__(self, config: BatchProbeConfig, deps: RunnerProbeDeps) -> None:
+    def __init__(
+        self,
+        config: BatchProbeConfig,
+        deps: RunnerProbeDeps,
+        memory_monitor=None,
+    ) -> None:
         self.config = config
         self.deps = deps
         self.scheduler = BatchScheduler(config.batch_size)
+        self.memory_monitor = memory_monitor
 
     async def run_batch(self, ctx: BatchContext, timeout: float) -> BatchProbeResult:
         ns = await self.deps.acquire_ns()
@@ -379,11 +392,15 @@ class ProbeBatchService:
         )
         results: list = []
         settle_ms = 0.0
+        recycled = 0
         try:
             settle_ms = session.boot() * 1000
+            self._record_daemon_mem(ns_name)
             for idx, (item, dom) in enumerate(
                 zip(ctx.items, ctx.item_domains(), strict=False), start=1
             ):
+                if self._maybe_recycle(ns_name, session):
+                    recycled += 1
                 gen = self.deps.next_probe_gen()
                 timeout_i, _ = self.deps.timing_for(item, timeout)
                 item_proto = getattr(item, "protocol", protocol) or protocol
@@ -418,6 +435,36 @@ class ProbeBatchService:
             settle_ms=settle_ms,
             backend="lua_bridge",
         )
+
+    def _record_daemon_mem(self, ns_name: str) -> None:
+        if self.memory_monitor is None or self.config.backend != "lua_bridge":
+            return
+        if not self.memory_monitor.should_sample():
+            return
+        self.memory_monitor.record_ns(ns_name)
+        if self.memory_monitor.worker_over_limit():
+            print(
+                f"  {Fore.YELLOW}[mem] python worker RSS over threshold "
+                f"(see BLOCKCHECKS_MEM_PY_MAX_MIB){Style.RESET_ALL}"
+            )
+
+    def _maybe_recycle(self, ns_name: str, session: BridgeSession) -> bool:
+        """Recycle the nfqws2 daemon when the memory monitor flags a leak."""
+        if self.memory_monitor is None or self.config.backend != "lua_bridge":
+            return False
+        self._record_daemon_mem(ns_name)
+        candidates = self.memory_monitor.recycle_candidates()
+        if not candidates:
+            return False
+        for pid, reason in candidates:
+            self.memory_monitor.clear(pid)
+            print(
+                f"  {Fore.YELLOW}[mem] recycle nfqws2 pid={pid} ({reason}) "
+                f"in {ns_name}{Style.RESET_ALL}"
+            )
+        session.boot()
+        self._record_daemon_mem(ns_name)
+        return True
 
     def _maybe_wssize_retry(
         self,

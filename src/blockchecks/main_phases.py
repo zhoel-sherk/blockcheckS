@@ -554,7 +554,7 @@ async def _run_tcp_family_gates(ctx: FullRunContext, progress: TcpProgress) -> N
 async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
     args = ctx.args
     if getattr(args, "lua_bridge", False):
-        from blockchecks.engine.batch_probe import warn_fanout_bridge_once
+        from blockchecks.engine.services.batch_probe import warn_fanout_bridge_once
 
         warn_fanout_bridge_once()
 
@@ -629,7 +629,7 @@ async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> Non
 
 async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress) -> None:
     """Sequential domain×strategy with lua_bridge batch service."""
-    from blockchecks.engine.batch_probe import BatchScheduler
+    from blockchecks.engine.services.batch_probe import BatchScheduler
 
     args = ctx.args
     scheduler = BatchScheduler(ctx.runner.bridge_batch)
@@ -903,10 +903,14 @@ def print_aq_stop_metrics(ctx: FullRunContext) -> None:
 
 
 async def export_and_summarize(ctx: FullRunContext) -> int:
-    from blockchecks.engine.run_finalize import run_exit_code
-    from blockchecks.engine.run_finalize import maybe_write_best_config_data_block
+    from blockchecks.engine.run_finalize import (
+        maybe_sync_data_block,
+        maybe_write_best_config_data_block,
+        run_exit_code,
+    )
 
     await maybe_write_best_config_data_block()
+    await maybe_sync_data_block(ctx.args)
 
     export_result = await maybe_export_configs(
         ctx.db,

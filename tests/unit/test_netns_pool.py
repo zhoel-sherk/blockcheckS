@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from blockchecks.engine.netns_pool import NetNsPool
+from blockchecks.engine.services.netns_pool import NetNsPool
 
 pytestmark = pytest.mark.unit
 
@@ -23,8 +23,8 @@ async def test_create_seed_acquire_release_destroy():
     with (
         patch.object(pool, "_run", side_effect=fake_run),
         patch.object(pool, "_get_iface", return_value="eth0"),
-        patch("blockchecks.engine.netns_pool.subprocess.run") as sprun,
-        patch("blockchecks.engine.netns_pool.time.sleep"),
+        patch("blockchecks.engine.services.netns_pool.subprocess.run") as sprun,
+        patch("blockchecks.engine.services.netns_pool.time.sleep"),
     ):
         sprun.return_value = MagicMock(returncode=0, stdout="", stderr="")
         pool.create_all()
@@ -59,7 +59,7 @@ def test_create_one_failure_propagates():
     with (
         patch.object(pool, "_run", side_effect=boom),
         patch.object(pool, "_get_iface", return_value="eth0"),
-        patch("blockchecks.engine.netns_pool.time.sleep"),
+        patch("blockchecks.engine.services.netns_pool.time.sleep"),
     ):
         with pytest.raises(RuntimeError, match="netns add"):
             pool.create_all()

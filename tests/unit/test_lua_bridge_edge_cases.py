@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
-from blockchecks.engine.lua_bridge import BridgeEvent, BridgePaths, LuaBridge
+from blockchecks.engine.services.lua_bridge import BridgeEvent, BridgePaths, LuaBridge
 
 
 class TestBridgeEventParsing:

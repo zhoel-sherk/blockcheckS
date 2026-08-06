@@ -7,7 +7,6 @@ with ``push=True`` only when the ``--data-block-sync`` flag is set.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import time

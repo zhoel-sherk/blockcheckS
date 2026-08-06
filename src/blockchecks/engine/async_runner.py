@@ -22,13 +22,6 @@ from blockchecks.checkers.curl_probe import (
     worker_wall_timeout,
 )
 from blockchecks.checkers.dns_secure import DnsRunCache
-from blockchecks.engine.batch_probe import (
-    BatchContext,
-    BatchProbeConfig,
-    BatchScheduler,
-    ProbeBatchService,
-    RunnerProbeDeps,
-)
 from blockchecks.engine.config import (
     BLOB_DIR,
     NFQUEUE_TCP,
@@ -37,11 +30,18 @@ from blockchecks.engine.config import (
     get_lua_init_scripts,
 )
 from blockchecks.engine.matrix_generator import StrategyItem
-from blockchecks.engine.netns_pool import NetNsPool
-from blockchecks.engine.probe import (
+from blockchecks.engine.services.batch_probe import (
+    BatchContext,
+    BatchProbeConfig,
+    BatchScheduler,
+    ProbeBatchService,
+    RunnerProbeDeps,
+)
+from blockchecks.engine.services.netns_pool import NetNsPool
+from blockchecks.engine.services.probe import (
     invoke_curl_probe_worker as _invoke_curl_probe_worker,
 )
-from blockchecks.engine.probe import probe_request_dict as _probe_request_dict
+from blockchecks.engine.services.probe import probe_request_dict as _probe_request_dict
 from blockchecks.engine.settle_profile import SettleProfile
 from blockchecks.engine.store import RunStateStore
 
@@ -131,7 +131,7 @@ class ScanReport:
 # ── Utility: run command synchronously (called via asyncio.to_thread) ──
 
 
-from blockchecks.engine.nfqws2 import start_daemon as _nfqws2_daemon
+from blockchecks.engine.services.nfqws2 import start_daemon as _nfqws2_daemon
 
 
 def _sudo(*args: str) -> str:
@@ -801,6 +801,15 @@ class AsyncTestRunner:
         self.lua_extra = list(lua_extra or [])
         self._probe_gen = 0
         self._batch_id = 0
+        self.memory_monitor = None
+
+    def ensure_memory_monitor(self):
+        """Lazily create the shared MemoryMonitor for bridge runs."""
+        if self.memory_monitor is None:
+            from blockchecks.engine.services.metrics import MemoryMonitor
+
+            self.memory_monitor = MemoryMonitor()
+        return self.memory_monitor
 
     def _next_batch_id(self) -> int:
         self._batch_id += 1
@@ -827,6 +836,9 @@ class AsyncTestRunner:
         )
 
     def _probe_service(self, backend: str) -> ProbeBatchService:
+        monitor = self.memory_monitor
+        if backend == "lua_bridge":
+            monitor = self.ensure_memory_monitor()
         return ProbeBatchService(
             BatchProbeConfig(
                 backend=backend,
@@ -834,6 +846,7 @@ class AsyncTestRunner:
                 lua_extra=tuple(self.lua_extra),
             ),
             self._make_probe_deps(),
+            memory_monitor=monitor,
         )
 
     async def _run_probe_batch(

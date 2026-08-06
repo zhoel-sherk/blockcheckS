@@ -235,7 +235,7 @@ def test_udp_coexist_skips_pkill(monkeypatch):
 
 
 def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
-    import blockchecks.engine.nfqws2 as nfq
+    import blockchecks.engine.services.nfqws2 as nfq
 
     src = Path(nfq.__file__).read_text(encoding="utf-8")
     assert "stderr=subprocess.DEVNULL" in src
@@ -252,7 +252,7 @@ def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
 
 def test_nfqws2_daemon_unlinks_temp_conf(tmp_path, monkeypatch):
     """C1: daemon mkstemp copy must not leak in /tmp after settle."""
-    import blockchecks.engine.nfqws2 as nfq
+    import blockchecks.engine.services.nfqws2 as nfq
 
     src = tmp_path / "src.conf"
     src.write_text("--filter-tcp=443\n", encoding="utf-8")

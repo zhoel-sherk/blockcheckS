@@ -42,12 +42,12 @@ async def test_run_probe_batch_uses_semaphore() -> None:
     items = [StrategyItem("x", "fake:x")]
 
     with patch(
-        "blockchecks.engine.batch_probe.run_tcp_check_bridge",
+        "blockchecks.engine.services.batch_probe.run_tcp_check_bridge",
         return_value={"success": True, "http_code": 200, "latency_ms": 1},
     ):
         inst = MagicMock()
         inst.boot.return_value = 0.05
-        with patch("blockchecks.engine.batch_probe.BridgeSession", return_value=inst):
+        with patch("blockchecks.engine.services.batch_probe.BridgeSession", return_value=inst):
             await runner._run_probe_batch(items, "discord.com", 5.0, "lua_bridge")
 
     acquire.assert_called_once()

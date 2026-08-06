@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from collections.abc import Sequence
 from typing import Any
 
+import pydantic_core
 from pydantic import BaseModel, Field, create_model
 from pydantic_settings import (
     BaseSettings,
@@ -41,11 +43,13 @@ def _annotation_for_action(action: argparse.Action) -> Any:
     if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
         return bool
     if action.type is int:
-        return int | None if action.default is None else int
+        return int if action.required else (int | None if action.default is None else int)
     if action.type is float:
-        return float | None if action.default is None else float
+        return float if action.required else (float | None if action.default is None else float)
     if action.nargs in ("+", "*"):
-        return list[str] | None
+        return list[str]
+    if action.required:
+        return str
     if action.default is None:
         return str | None
     if isinstance(action.default, bool):
@@ -127,7 +131,10 @@ def model_from_subparser(name: str, parser: argparse.ArgumentParser) -> type[Bas
             continue
         ann = _annotation_for_action(action)
         default = _field_default(action)
-        fields[action.dest] = (ann, Field(default=default))
+        if action.required:
+            fields[action.dest] = (ann, Field(...))
+        else:
+            fields[action.dest] = (ann, Field(default=default))
     return create_model(name, __base__=BaseModel, **fields)
 
 
@@ -186,6 +193,26 @@ def _dispatch_subcommand(root: BaseModel) -> int:
     if handler is None:
         return 2
     return int(handler(sub))
+
+
+def _print_validation_error(exc: pydantic_core.ValidationError) -> int:
+    """Print required-flag errors without a traceback (argparse-style exit 2)."""
+    errs = exc.errors()
+    if not errs:
+        print("ERROR: invalid arguments", file=sys.stderr)
+        return 2
+    e = errs[0]
+    loc = ".".join(str(x) for x in e.get("loc", ()) if x != "__root__")
+    msg = e.get("msg", "invalid value")
+    ctx = e.get("ctx") or {}
+    extra = ""
+    if ctx.get("expected"):
+        extra = f" (expected {ctx['expected']})"
+    if loc:
+        print(f"ERROR: --{loc.replace('.', ' ')}: {msg}{extra}", file=sys.stderr)
+    else:
+        print(f"ERROR: {msg}{extra}", file=sys.stderr)
+    return 2
 
 
 def _run_tcp(model: BaseModel) -> int:
@@ -436,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
         result = CliApp.run(Root, cli_args=cli_args)
     except SystemExit as exc:
         return int(exc.code or 0)
+    except pydantic_core.ValidationError as exc:
+        return _print_validation_error(exc)
 
     # CliApp.run dispatches via _run_cli_cmd → root.cli_cmd → _dispatch_subcommand (once).
     if isinstance(result, int):

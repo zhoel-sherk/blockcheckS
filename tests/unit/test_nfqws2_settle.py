@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from blockchecks.engine.nfqws2_settle import (
+from blockchecks.engine.services.nfqws2_settle import (
     nfqws2_running_in_ns,
     wait_nfqws2_ready,
 )
@@ -10,21 +10,21 @@ from blockchecks.engine.nfqws2_settle import (
 
 def test_nfqws2_running_in_ns_true():
     mock_run = MagicMock(return_value=MagicMock(returncode=0, stdout="123\n"))
-    with patch("blockchecks.engine.nfqws2_settle.sp.run", mock_run):
+    with patch("blockchecks.engine.services.nfqws2_settle.sp.run", mock_run):
         assert nfqws2_running_in_ns("bs-p0") is True
 
 
 def test_nfqws2_running_in_ns_false():
     mock_run = MagicMock(return_value=MagicMock(returncode=1, stdout=""))
-    with patch("blockchecks.engine.nfqws2_settle.sp.run", mock_run):
+    with patch("blockchecks.engine.services.nfqws2_settle.sp.run", mock_run):
         assert nfqws2_running_in_ns("bs-p0") is False
 
 
 def test_wait_nfqws2_ready_returns_early():
     running = MagicMock(side_effect=[False, True])
     sleep = MagicMock()
-    with patch("blockchecks.engine.nfqws2_settle.nfqws2_running_in_ns", running):
-        with patch("blockchecks.engine.nfqws2_settle.time.sleep", sleep):
+    with patch("blockchecks.engine.services.nfqws2_settle.nfqws2_running_in_ns", running):
+        with patch("blockchecks.engine.services.nfqws2_settle.time.sleep", sleep):
             elapsed = wait_nfqws2_ready("bs-p0", max_wait=1.0, poll_interval=0.1, min_wait=0)
     assert running.call_count == 2
     assert sleep.call_count == 1
@@ -43,10 +43,10 @@ def test_wait_nfqws2_ready_timeout():
     def fake_sleep(dt):
         t["now"] += dt
 
-    with patch("blockchecks.engine.nfqws2_settle.nfqws2_running_in_ns", running):
-        with patch("blockchecks.engine.nfqws2_settle.time.sleep", side_effect=fake_sleep):
+    with patch("blockchecks.engine.services.nfqws2_settle.nfqws2_running_in_ns", running):
+        with patch("blockchecks.engine.services.nfqws2_settle.time.sleep", side_effect=fake_sleep):
             with patch(
-                "blockchecks.engine.nfqws2_settle.time.perf_counter",
+                "blockchecks.engine.services.nfqws2_settle.time.perf_counter",
                 side_effect=fake_perf,
             ):
                 elapsed = wait_nfqws2_ready("bs-p0", max_wait=0.3, poll_interval=0.1, min_wait=0)

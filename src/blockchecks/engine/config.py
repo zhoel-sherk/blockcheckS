@@ -291,6 +291,20 @@ NFQWS2_SETTLE_MAX = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MAX", "0.5"))
 NFQWS2_SETTLE_POLL = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_POLL", "0.05"))
 NFQWS2_SETTLE_MIN = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MIN", "0"))
 
+# ── memory monitor / daemon recycle (services.metrics) ───────
+# RSS ceiling for an nfqws2 daemon (MiB); recycle when exceeded.
+MEM_MONITOR_MAX_MIB = float(_env_or("BLOCKCHECKS_MEM_MAX_MIB", "512"))
+# Leak slope threshold (MiB/s over the sampling window); recycle when exceeded.
+MEM_MONITOR_LEAK_SLOPE = float(_env_or("BLOCKCHECKS_MEM_LEAK_SLOPE", "8"))
+# RSS ceiling for the Python worker (MiB); log warning (no recycle — process owner).
+MEM_MONITOR_PY_MAX_MIB = float(_env_or("BLOCKCHECKS_MEM_PY_MAX_MIB", "2048"))
+# Sampling window size (samples) for the sliding-window slope estimate.
+MEM_MONITOR_WINDOW = int(_env_or("BLOCKCHECKS_MEM_WINDOW", "12"))
+# Poll interval seconds for periodic checks inside long bridge runs.
+MEM_MONITOR_POLL = float(_env_or("BLOCKCHECKS_MEM_POLL", "2.0"))
+# Enable the monitor entirely (0 disables all sampling/recycle).
+MEM_MONITOR_ENABLED = _env_bool("BLOCKCHECKS_MEM_MONITOR", True)
+
 # ── multi-domain curl fan-out (Phase 11 B2) ───────
 DEFAULT_CURL_PARALLEL = int(_env_or("BLOCKCHECKS_CURL_PARALLEL", "1"))
 MAX_CURL_PARALLEL = int(_env_or("BLOCKCHECKS_CURL_PARALLEL_MAX", "8"))

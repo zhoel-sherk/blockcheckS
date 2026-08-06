@@ -14,7 +14,6 @@ from pathlib import Path
 from blockchecks.engine.blob_aliases import append_blob_cli_lines, extract_blob_names
 from blockchecks.engine.config import (
     BLOB_DIR,
-    DEFAULT_BRIDGE_BATCH_MAX,
     NFQUEUE_TCP,
     PROJECT_DIR,
     SHM_BASE,
@@ -264,7 +263,7 @@ class BridgeSession:
     extra_lua_init: list[str] | None = None
 
     def boot(self) -> float:
-        from blockchecks.engine.nfqws2 import start_daemon
+        from blockchecks.engine.services.nfqws2 import start_daemon
 
         _check_netns_exists(self.ns_name)
         self.bridge.setup()
@@ -433,6 +432,6 @@ def bridge_worker_session(
 
 def chunk_strategies(strategies: list, batch_size: int) -> list[list]:
     """Split strategy list into batches capped at DEFAULT_BRIDGE_BATCH_MAX."""
-    from blockchecks.engine.batch_probe import BatchScheduler
+    from blockchecks.engine.services.batch_probe import BatchScheduler
 
     return BatchScheduler(batch_size).iter_batches(strategies)

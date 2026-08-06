@@ -23,8 +23,8 @@ from blockchecks.engine.async_runner import (
 )
 from blockchecks.engine.config import NFQUEUE_TCP, NFQUEUE_UDP
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
-from blockchecks.engine.nfqws2 import start_daemon
-from blockchecks.engine.probe import invoke_curl_probe_worker, probe_request_dict
+from blockchecks.engine.services.nfqws2 import start_daemon
+from blockchecks.engine.services.probe import invoke_curl_probe_worker, probe_request_dict
 
 colorama_init(autoreset=True)
 
