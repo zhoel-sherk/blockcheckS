@@ -1,10 +1,14 @@
--- blockcheckS scan_pick orchestrator + ClientHello strategy poll
+-- blockcheckS scan_pick orchestrator + ClientHello / HTTP request poll
 
 _G.bs_active_id = 1
 _G.bs_active_gen = 0
 
+local function bs_l7_ok(l7)
+	return l7 == "tls_client_hello" or l7 == "http_req"
+end
+
 function bs_poll_strategy(ctx, desync)
-	if desync.l7payload ~= "tls_client_hello" then return end
+	if not bs_l7_ok(desync.l7payload) then return end
 	if not replay_first(desync) then return end
 	local id, gen = bs_read_strategy_ipc()
 	if id then
@@ -14,7 +18,7 @@ function bs_poll_strategy(ctx, desync)
 end
 
 function scan_pick(ctx, desync)
-	if desync.l7payload ~= "tls_client_hello" then return end
+	if not bs_l7_ok(desync.l7payload) then return end
 	if not replay_first(desync) then return end
 	local id, gen = bs_read_strategy_ipc()
 	if id then
@@ -49,7 +53,7 @@ function bs_timer_poll_strategy(name, data)
 end
 
 function smart_fallback(ctx, desync)
-	if desync.l7payload ~= "tls_client_hello" then return end
+	if not bs_l7_ok(desync.l7payload) then return end
 
 	-- Outbound retransmission detector (DPI silent-drop)
 	if desync.outgoing and is_retransmission(desync) then

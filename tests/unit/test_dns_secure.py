@@ -6,6 +6,8 @@ import pytest
 
 from blockchecks.checkers.dns_secure import (
     DnsRunCache,
+    _build_dns_query,
+    _domain_to_dns_ascii,
     _parse_dns_response,
     audit_domain,
     doh_query,
@@ -14,6 +16,30 @@ from blockchecks.checkers.dns_secure import (
     prepare_dns_for_run,
     udp_resolve,
 )
+
+
+@pytest.mark.unit
+def test_domain_to_dns_ascii_idna():
+    assert _domain_to_dns_ascii("пример.рф") == "xn--e1afmkfd.xn--p1ai"
+    assert _domain_to_dns_ascii("example.com") == "example.com"
+
+
+@pytest.mark.unit
+def test_build_dns_query_idna_domain():
+    wire = _build_dns_query("пример.рф")
+    assert b"xn--e1afmkfd" in wire
+    assert b"xn--p1ai" in wire
+
+
+@pytest.mark.unit
+def test_udp_resolve_idna_domain():
+    with patch("blockchecks.checkers.dns_secure.socket.socket") as mock_sock:
+        inst = mock_sock.return_value
+        inst.recvfrom.return_value = (b"", ("8.8.8.8", 53))
+        ips, err, _ = udp_resolve("пример.рф", "127.0.0.1", timeout=0.1)
+    assert ips == []
+    sent = inst.sendto.call_args[0][0]
+    assert b"xn--e1afmkfd" in sent
 
 
 @pytest.mark.unit

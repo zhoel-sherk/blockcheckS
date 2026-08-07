@@ -28,12 +28,26 @@ except AttributeError:
     CURLOPT_RESOLVE = 10203
 
 
+def _domain_to_dns_ascii(domain: str) -> str:
+    """IDNA/punycode for wire DNS and DoH (unicode labels e.g. .рф)."""
+    text = domain.strip().rstrip(".")
+    if not text:
+        return text
+    try:
+        return text.encode("idna").decode("ascii")
+    except UnicodeError:
+        return text.encode("ascii").decode("ascii")
+
+
 def _build_dns_query(domain: str, qtype: int = 1) -> bytes:
     """Build a DNS query (A record by default)."""
     header = struct.pack("!HHHHHH", 0x4242, 0x0100, 1, 0, 0, 0)
     qname = b""
-    for part in domain.encode("ascii").split(b"."):
-        qname += bytes([len(part)]) + part
+    for part in _domain_to_dns_ascii(domain).split("."):
+        if not part:
+            continue
+        label = part.encode("ascii")
+        qname += bytes([len(label)]) + label
     qname += b"\x00"
     question = qname + struct.pack("!HH", qtype, 1)
     return header + question
@@ -108,7 +122,7 @@ def _doh_json_query(
     try:
         with curl_cffi.Session(impersonate="chrome124") as session:
             resp = session.get(
-                f"{doh_url}?name={domain}&type=A",
+                f"{doh_url}?name={_domain_to_dns_ascii(domain)}&type=A",
                 timeout=timeout,
                 headers={"Accept": "application/dns-json"},
             )
