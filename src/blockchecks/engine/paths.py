@@ -139,36 +139,81 @@ def ensure_dirs() -> None:
         reclaim_sudo_ownership(path)
 
 
-def reclaim_sudo_ownership(path: Path) -> None:
-    """If running as root via sudo, chown *path* back to SUDO_UID/GID.
-
-    Prevents root-owned state.db / export dirs that user-space tools
-    (bc-nfconf, shortlist_import) cannot write.
-    """
+def _sudo_reclaim_ids() -> tuple[int, int] | None:
+    """Return (uid, gid) to reclaim when running as root via sudo, else None."""
     if os.geteuid() != 0:
-        return
+        return None
     uid_s = os.environ.get("SUDO_UID", "").strip()
     gid_s = os.environ.get("SUDO_GID", "").strip()
     if not uid_s or not gid_s:
-        return
+        return None
     try:
-        uid, gid = int(uid_s), int(gid_s)
+        return int(uid_s), int(gid_s)
     except ValueError:
-        return
+        return None
+
+
+def _is_sqlite_db_file(path: Path) -> bool:
+    return path.is_file() and path.suffix == ".db"
+
+
+def _is_sqlite_sidecar_file(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    name = path.name
+    return name.endswith(".db-wal") or name.endswith(".db-shm") or name.endswith(".db-journal")
+
+
+def _chown_path(path: Path, uid: int, gid: int) -> None:
     try:
         os.chown(path, uid, gid)
     except OSError as e:
         log.warning("chown failed for %s: %s", path, e)
+
+
+def _reclaim_sqlite_sidecars(db_path: Path, uid: int, gid: int) -> None:
+    for suffix in ("-wal", "-shm", "-journal"):
+        side = Path(str(db_path) + suffix)
+        if side.exists():
+            _chown_path(side, uid, gid)
+
+
+def _reclaim_sqlite_files_in_dir(directory: Path, uid: int, gid: int) -> None:
+    """Chown SQLite db files and sidecars directly under *directory* (non-recursive)."""
+    try:
+        entries = list(directory.iterdir())
+    except OSError as e:
+        log.warning("cannot scan %s for sqlite files: %s", directory, e)
         return
-    # SQLite sidecars when *path* is the db file
-    if path.is_file():
-        for suffix in ("-wal", "-shm", "-journal"):
-            side = Path(str(path) + suffix)
-            if side.exists():
-                try:
-                    os.chown(side, uid, gid)
-                except OSError as e:
-                    log.warning("chown failed for %s: %s", side, e)
+    for entry in entries:
+        if _is_sqlite_db_file(entry):
+            _chown_path(entry, uid, gid)
+            _reclaim_sqlite_sidecars(entry, uid, gid)
+        elif _is_sqlite_sidecar_file(entry):
+            _chown_path(entry, uid, gid)
+
+
+def reclaim_sudo_ownership(path: Path) -> None:
+    """If running as root via sudo, chown *path* back to SUDO_UID/GID.
+
+    For a SQLite database file, also reclaims ``-wal``, ``-shm``, and ``-journal``
+    sidecars. For a directory, also reclaims SQLite db files and sidecars in that
+    directory (one level, non-recursive).
+
+    Prevents root-owned state.db / export dirs that user-space tools
+    (bc-nfconf, shortlist_import) cannot write.
+    """
+    ids = _sudo_reclaim_ids()
+    if ids is None:
+        return
+    uid, gid = ids
+    if not path.exists():
+        return
+    _chown_path(path, uid, gid)
+    if path.is_file() and _is_sqlite_db_file(path):
+        _reclaim_sqlite_sidecars(path, uid, gid)
+    elif path.is_dir():
+        _reclaim_sqlite_files_in_dir(path, uid, gid)
 
 
 def apply_pycache_prefix() -> None:

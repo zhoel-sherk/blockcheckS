@@ -42,6 +42,8 @@ class SqliteRunStore:
         self._path = Path(db_path).expanduser().resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         reclaim_sudo_ownership(self._path.parent)
+        if self._path.exists():
+            reclaim_sudo_ownership(self._path)
         self.batch_size = max(0, int(batch_size or 0))
         self._tcp_pending: list[dict] = []
         self._udp_pending: list[dict] = []
@@ -171,6 +173,7 @@ class SqliteRunStore:
                 raise
         self._tcp_pending.clear()
         self._udp_pending.clear()
+        reclaim_sudo_ownership(self._path)
 
     async def log_tcp(
         self,
@@ -238,6 +241,7 @@ class SqliteRunStore:
                 ),
             )
             await db.commit()
+        reclaim_sudo_ownership(self._path)
 
     async def log_udp(
         self,
@@ -273,6 +277,7 @@ class SqliteRunStore:
                 (sid, target, status, latency_ms, error, ts),
             )
             await db.commit()
+        reclaim_sudo_ownership(self._path)
 
     async def write_dns_audit_log(
         self,

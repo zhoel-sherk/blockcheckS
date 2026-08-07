@@ -102,6 +102,32 @@ def test_reclaim_sudo_ownership_chowns_when_root(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
+def test_reclaim_sudo_ownership_chowns_sqlite_in_directory(tmp_path, monkeypatch):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    db = state_dir / "state.db"
+    db.write_text("x")
+    wal = state_dir / "state.db-wal"
+    wal.write_text("w")
+    shm = state_dir / "state.db-shm"
+    shm.write_text("s")
+    called: list[tuple] = []
+
+    def fake_chown(path, uid, gid):
+        called.append((str(path), uid, gid))
+
+    monkeypatch.setattr(paths.os, "geteuid", lambda: 0)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1000")
+    monkeypatch.setattr(paths.os, "chown", fake_chown)
+    paths.reclaim_sudo_ownership(state_dir)
+    assert (str(state_dir), 1000, 1000) in called
+    assert (str(db), 1000, 1000) in called
+    assert (str(wal), 1000, 1000) in called
+    assert (str(shm), 1000, 1000) in called
+
+
+@pytest.mark.unit
 def test_reclaim_sudo_ownership_noop_as_user(tmp_path, monkeypatch):
     target = tmp_path / "state.db"
     target.write_text("x")
