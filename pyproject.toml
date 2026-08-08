@@ -118,7 +118,7 @@ nest_exempt_parts = ["/generators/"]
 target_dirs = ["src"]
 
 [tool.vulture]
-paths = ["src/blockchecks", "vulture_whitelist.py"]
+paths = ["src/blockchecks"]
 min_confidence = 80
 ignore_names = [
     "main",
