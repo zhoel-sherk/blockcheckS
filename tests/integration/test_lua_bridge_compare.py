@@ -68,12 +68,10 @@ def test_lua_bridge_compare_no_drift():
     stdout = result.stdout
     stderr = result.stderr
 
-    # Count PASS lines in classic vs bridge sections
-    # classic_passes = [line for line in stdout.splitlines() if "[OK]" in line or "[THROTTLED]" in line]
-    bridge_passes = [line for line in stderr.splitlines() if "BRIDGE_DRIFT" in line]
+    drift_lines = [line for line in stderr.splitlines() if "BRIDGE_DRIFT" in line]
 
     # Enforce: zero drift warnings
-    for drift_line in bridge_passes:
+    for drift_line in drift_lines:
         if "DRIFT" in drift_line:
             pytest.fail(f"LUA BRIDGE DRIFT detected:\n{drift_line}")
 
