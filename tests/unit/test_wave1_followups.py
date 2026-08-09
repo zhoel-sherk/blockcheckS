@@ -54,6 +54,20 @@ def test_invoke_curl_probe_worker_bad_json():
 
 
 @pytest.mark.unit
+def test_invoke_curl_probe_worker_timeout_returns_failure_dict():
+    """TimeoutExpired must become a failure dict, not crash the batch."""
+    import subprocess
+
+    with patch(
+        "blockchecks.service.probe.sp.run",
+        side_effect=subprocess.TimeoutExpired(cmd="sudo ip netns exec", timeout=5),
+    ):
+        out = invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", {}, 5.0)
+    assert out["success"] is False
+    assert "timeout" in out["error"]
+
+
+@pytest.mark.unit
 def test_composite_imports_public_probe():
     import blockchecks.checkers.composite_runner as cr
 

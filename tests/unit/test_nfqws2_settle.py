@@ -72,3 +72,22 @@ def test_apply_gp_protocol_flags():
 
     args.tls12_off = True
     assert _apply_gp_protocol_flags(args) is True
+
+
+def test_wait_min_wait_floor():
+    """H10: min_wait dominates the deadline — no busy-loop, returns after min_wait."""
+    t = {"now": 0.0}
+
+    def fake_perf():
+        return t["now"]
+
+    def fake_sleep(dt):
+        t["now"] += dt
+
+    with patch("blockchecks.service.nfqws2_settle.nfqws2_running_in_ns", return_value=False):
+        with patch("blockchecks.service.nfqws2_settle.time.sleep", side_effect=fake_sleep):
+            with patch(
+                "blockchecks.service.nfqws2_settle.time.perf_counter", side_effect=fake_perf
+            ):
+                elapsed = wait_nfqws2_ready("bs-p0", max_wait=0.1, poll_interval=0.05, min_wait=0.5)
+    assert elapsed >= 0.5

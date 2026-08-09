@@ -73,4 +73,5 @@ def run_tcp_check_bridge(
     data["bridge_id"] = strategy_id
     events = session.bridge.drain_events(since_gen=gen)
     data["bridge_events"] = [e.event for e in events]
+    data["bridge_applied"] = any(e.event == "APPLIED" for e in events)
     return data

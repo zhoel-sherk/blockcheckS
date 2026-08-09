@@ -84,3 +84,24 @@ def test_stop_killpg_and_unlinks_temps(tmp_path: Path):
     assert mgr._proc is None
     assert mgr._temp_files == []
     assert not temp.exists()
+
+
+def test_stop_handles_dead_pid(tmp_path):
+    """H8: stop() must not raise when getpgid/killpg fail for an already-dead pid."""
+    temp = tmp_path / "dead.conf"
+    temp.write_text("x", encoding="utf-8")
+
+    mgr = Nfqws2Manager()
+    mgr._pid = 424242  # likely nonexistent
+    mgr._proc = None
+    mgr._temp_files = [str(temp)]
+
+    with (
+        patch("blockchecks.service.nfqws2.os.getpgid", side_effect=ProcessLookupError()),
+        patch("blockchecks.service.nfqws2.time.sleep"),
+    ):
+        mgr.stop()  # must not raise
+
+    assert mgr._pid is None
+    assert mgr._temp_files == []
+    assert not temp.exists()

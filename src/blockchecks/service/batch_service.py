@@ -20,7 +20,7 @@ from blockchecks.service.batch_models import (
 )
 from blockchecks.service.batch_scheduler import BatchScheduler
 from blockchecks.service.lua_bridge_ipc import LuaBridge
-from blockchecks.service.lua_netns import NetnsGoneError, _netns_tcp_probe_cleanup
+from blockchecks.service.lua_netns import _netns_tcp_probe_cleanup
 from blockchecks.service.lua_session import BridgeSession, strategy_text_from_item
 
 CYAN = Fore.CYAN + Style.BRIGHT
@@ -57,16 +57,17 @@ class ProbeBatchService:
                     ns,
                     resolved_by_domain,
                 )
-            except NetnsGoneError as e:
+            except Exception as e:
+                # Never lose the batch: any error in the sync probe loop must
+                # still produce per-item failure results + DB logging.
                 failed = self._batch_fail_results(ctx, str(e))
                 result = BatchProbeResult(
                     results=failed,
                     settle_ms=0,
-                    backend="lua_bridge",
+                    backend=self.config.backend,
                     batch_wall_ms=(time.monotonic() - wall_start) * 1000,
                     batch_fill_ratio=0,
                 )
-                return result
             result.batch_wall_ms = (time.monotonic() - wall_start) * 1000
             result.batch_fill_ratio = len(ctx.items) / max(1, self.config.batch_size)
             for item, dom, probe_result in zip(ctx.items, domains, result.results, strict=False):
@@ -255,6 +256,7 @@ class ProbeBatchService:
             not data.get("success")
             and self.deps.try_wssize
             and protocol == "tls12"
+            and not item.is_config
             and "wssize" not in item.strategy
         ):
             return self.deps.run_tcp_check(
@@ -294,6 +296,7 @@ class ProbeBatchService:
             not data.get("success")
             and self.deps.try_wssize
             and protocol == "tls12"
+            and not item.is_config
             and "wssize" not in item.strategy
         ):
             gen = self.deps.next_probe_gen()

@@ -1074,6 +1074,11 @@ class AsyncTestRunner:
         result.throttled = data.get("throttled", False)
         result.read_rate_bps = data.get("read_rate_bps", 0)
         result.error = data.get("error", "") or ""
+        if "bridge_applied" in data and data.get("bridge_applied") is False and result.success:
+            print(
+                f"  {YELLOW}WARN: bridge PASS without APPLIED event for "
+                f"{item.label[:24]} (strategy may not have been picked up by nfqws2){RESET}"
+            )
         return result
 
     async def _log_tcp_result(

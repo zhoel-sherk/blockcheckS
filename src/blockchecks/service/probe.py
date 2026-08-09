@@ -30,23 +30,37 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
     """Run curl probe subprocess in netns; return parsed result dict.
 
     On malformed stdout, returns a failure-shaped dict (never raises JSONDecodeError).
+    On subprocess timeout, returns a timeout-shaped failure dict (never raises
+    TimeoutExpired) — a hung worker must not lose the whole batch.
     """
-    r = sp.run(
-        [
-            "sudo",
-            "ip",
-            "netns",
-            "exec",
-            ns_name,
-            py,
-            "-m",
-            "blockchecks.engine._curl_probe_worker",
-        ],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        r = sp.run(
+            [
+                "sudo",
+                "ip",
+                "netns",
+                "exec",
+                ns_name,
+                py,
+                "-m",
+                "blockchecks.engine._curl_probe_worker",
+            ],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except sp.TimeoutExpired:
+        return {
+            "success": False,
+            "http_code": 0,
+            "latency_ms": 0,
+            "content_len": 0,
+            "content_ok": False,
+            "throttled": False,
+            "read_rate_bps": 0,
+            "error": f"timeout after {timeout:.0f}s",
+        }
     try:
         return json.loads(r.stdout)
     except json.JSONDecodeError:

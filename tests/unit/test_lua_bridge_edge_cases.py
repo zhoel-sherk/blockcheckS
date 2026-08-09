@@ -139,3 +139,37 @@ class TestBridgePaths:
         assert bp.strategy_cmd == Path("/dev/shm/blockchecks/bs-p-0/strategy.cmd")
         assert bp.strategy_ready == Path("/dev/shm/blockchecks/bs-p-0/strategy.ready")
         assert bp.events == Path("/dev/shm/blockchecks/bs-p-0/events.ndjson")
+
+
+class TestTornReadPublish:
+    def test_publish_then_read_is_consistent(self, tmp_path):
+        """H4: after each publish, a fresh reader sees a consistent id/gen pair."""
+        from blockchecks.service.lua_bridge_ipc import LuaBridge
+
+        lb = LuaBridge("torn-ns", shm_base=tmp_path)
+        lb.setup()
+        for i in range(1, 6):
+            lb.publish(i, i)
+            assert lb.paths.strategy_id.read_text().strip() == str(i)
+            assert lb.paths.strategy_gen.read_text().strip() == str(i)
+            assert lb.paths.strategy_ready.read_text().strip() == str(i)
+        lb.teardown()
+
+    def test_drain_since_last_gen_does_not_lose_events(self, tmp_path):
+        """H4: events filtered by gen >= since_gen survive repeated drains."""
+        import json
+
+        from blockchecks.service.lua_bridge_ipc import LuaBridge
+
+        lb = LuaBridge("drain-ns", shm_base=tmp_path)
+        lb.setup()
+        with open(lb.paths.events, "a") as f:
+            for i in range(1, 6):
+                f.write(json.dumps({"event": "APPLIED", "id": i, "gen": i}) + "\n")
+        # drain from gen 3: should see gens 3,4,5
+        got = lb.drain_events(since_gen=3)
+        assert [e.gen for e in got] == [3, 4, 5]
+        # drain again with same since_gen — file unchanged, no loss
+        got2 = lb.drain_events(since_gen=3)
+        assert len(got2) == 3
+        lb.teardown()

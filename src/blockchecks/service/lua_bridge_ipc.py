@@ -75,7 +75,15 @@ class LuaBridge:
     def setup(self) -> None:
         self.paths.base.mkdir(parents=True, exist_ok=True)
         os.chmod(self.paths.base, 0o755)
+        self._init_events()
+
+    def _init_events(self) -> None:
+        # nfqws2 drops privileges (setuid nobody/overflow) after init and must
+        # be able to APPEND APPLIED/STRATEGY_FAIL events. The file is created
+        # by Python as root — make it world-writable or Lua's io.open("a")
+        # returns nil and the strategy-selection events are silently lost.
         self.paths.events.write_text("", encoding="utf-8")
+        os.chmod(self.paths.events, 0o666)
 
     def teardown(self) -> None:
         shutil.rmtree(self.paths.base, ignore_errors=True)
@@ -111,4 +119,4 @@ class LuaBridge:
         return out
 
     def truncate_events(self) -> None:
-        self.paths.events.write_text("", encoding="utf-8")
+        self._init_events()

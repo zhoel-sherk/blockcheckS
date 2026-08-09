@@ -2,6 +2,32 @@
 
 ## 1.2.1a — unreleased
 
+### Fixed (service-layer audit 2026-08-09)
+
+- `service/lua_bridge_ipc.py` — **events.ndjson must be world-writable (0666)**:
+  nfqws2 drops privileges (setuid overflow-uid) after init, so a root-owned
+  0644 `events.ndjson` made Lua's `io.open("a")` return nil and `APPLIED` /
+  `STRATEGY_FAIL` events were silently lost. Strategy selection tracking was
+  broken — PASS recorded without confirmation that the strategy was picked up.
+  Verified live: bridge batch PASS previously emitted "bridge PASS without
+  APPLIED" warnings for every strategy; after fix 0 warnings at same PASS.
+- `service/probe.py` — `invoke_curl_probe_worker` now catches `TimeoutExpired`
+  and returns a failure dict instead of killing the whole batch (a hung worker
+  lost all per-strategy results + DB logging).
+- `service/batch_service.py` — `run_batch` catches **any** exception from the
+  sync probe loop (not just `NetnsGoneError`) and emits per-item failure
+  results, so a mid-batch crash can no longer drop unlogged strategies.
+- `service/batch_service.py` — wssize retry no longer fires for config
+  strategies (`is_config=True`); the old check inspected the config *path* for
+  the substring "wssize", which is meaningless → spurious retry on every config.
+- `service/batch_bridge_probe.py` + `engine/async_runner.py` — bridge probe
+  surfaces `bridge_applied` (was an APPLIED event drained?) and warns on
+  PASS-without-APPLIED instead of silently trusting the HTTP 200.
+- Unit tests: TimeoutExpired dict, generic batch exception → fail results,
+  wssize config skip, `bridge_applied` flag, events 0666 perms, publish
+  consistency, probe-gen monotonicity, dead-pid `Nfqws2Manager.stop`,
+  recycle preserves strategy id, settle `min_wait` floor.
+
 ### Added — Lua bridge (hot-swap nfqws2 per batch)
 
 - **`--lua-bridge`** — persistent nfqws2 daemon per netns worker. Strategies hot-swapped
