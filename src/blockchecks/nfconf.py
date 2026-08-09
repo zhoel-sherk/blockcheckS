@@ -7,6 +7,7 @@ import asyncio
 import os
 import sys
 import time
+from pathlib import Path
 
 from blockchecks.engine.conf_builder import (
     DEFAULT_KEENETIC_PREFIX,
@@ -151,6 +152,11 @@ async def export_configs(
     with open(raw_path, "w", encoding="utf-8") as f:
         f.write(raw)
     write_user_list(user_list, domains)
+
+    from blockchecks.engine.paths import reclaim_sudo_ownership
+
+    for artifact in (keenetic_path, raw_path, user_list):
+        reclaim_sudo_ownership(Path(artifact))
 
     if own_store:
         await db.close()

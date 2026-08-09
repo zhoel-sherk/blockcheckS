@@ -164,6 +164,10 @@ def _is_sqlite_sidecar_file(path: Path) -> bool:
     return name.endswith(".db-wal") or name.endswith(".db-shm") or name.endswith(".db-journal")
 
 
+def _is_log_file(path: Path) -> bool:
+    return path.is_file() and path.suffix == ".log"
+
+
 def _chown_path(path: Path, uid: int, gid: int) -> None:
     try:
         os.chown(path, uid, gid)
@@ -179,17 +183,17 @@ def _reclaim_sqlite_sidecars(db_path: Path, uid: int, gid: int) -> None:
 
 
 def _reclaim_sqlite_files_in_dir(directory: Path, uid: int, gid: int) -> None:
-    """Chown SQLite db files and sidecars directly under *directory* (non-recursive)."""
+    """Chown SQLite db files/sidecars and .log files directly under *directory*."""
     try:
         entries = list(directory.iterdir())
     except OSError as e:
-        log.warning("cannot scan %s for sqlite files: %s", directory, e)
+        log.warning("cannot scan %s for reclaimable files: %s", directory, e)
         return
     for entry in entries:
         if _is_sqlite_db_file(entry):
             _chown_path(entry, uid, gid)
             _reclaim_sqlite_sidecars(entry, uid, gid)
-        elif _is_sqlite_sidecar_file(entry):
+        elif _is_sqlite_sidecar_file(entry) or _is_log_file(entry):
             _chown_path(entry, uid, gid)
 
 
@@ -197,8 +201,9 @@ def reclaim_sudo_ownership(path: Path) -> None:
     """If running as root via sudo, chown *path* back to SUDO_UID/GID.
 
     For a SQLite database file, also reclaims ``-wal``, ``-shm``, and ``-journal``
-    sidecars. For a directory, also reclaims SQLite db files and sidecars in that
-    directory (one level, non-recursive).
+    sidecars. For a directory, also reclaims SQLite db files/sidecars and ``.log``
+    files in that directory (one level, non-recursive). Any single file path
+    (db, .log, export conf) is chowned directly.
 
     Prevents root-owned state.db / export dirs that user-space tools
     (bc-nfconf, shortlist_import) cannot write.
@@ -223,6 +228,47 @@ def apply_pycache_prefix() -> None:
     if hasattr(sys, "pycache_prefix") and not sys.pycache_prefix:
         sys.pycache_prefix = prefix
     os.environ.setdefault("PYTHONPYCACHEPREFIX", prefix)
+
+
+def configure_logging(*, level: str | int | None = None) -> None:
+    """Configure the ``blockchecks`` logger: file handler + stderr.
+
+    Ensures warnings/info from module loggers (paths, presets, …) are not
+    silently dropped in production. The file lives under ``RUNTIME_LOGS_DIR``;
+    level defaults to ``BLOCKCHECKS_LOG_LEVEL`` env (default WARNING).
+
+    Idempotent: existing ``blockchecks`` handlers are left untouched (so tests
+    using ``caplog`` keep their own configuration).
+    """
+    if logging.getLogger("blockchecks").handlers:
+        return
+    ensure_dirs()
+    log_level = logging.WARNING
+    if level is not None:
+        log_level = level
+    else:
+        v = os.environ.get("BLOCKCHECKS_LOG_LEVEL", "").strip()
+        if v:
+            log_level = getattr(logging, v.upper(), logging.WARNING)
+
+    root = logging.getLogger("blockchecks")
+    root.setLevel(log_level)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+
+    try:
+        RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        fh = logging.FileHandler(RUNTIME_LOGS_DIR / "blockchecks.log", encoding="utf-8")
+        fh.setLevel(log_level)
+        fh.setFormatter(formatter)
+        root.addHandler(fh)
+        reclaim_sudo_ownership(RUNTIME_LOGS_DIR / "blockchecks.log")
+    except OSError:
+        pass
+
+    sh = logging.StreamHandler()
+    sh.setLevel(log_level)
+    sh.setFormatter(formatter)
+    root.addHandler(sh)
 
 
 def migrate_legacy_state_db(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from io import StringIO
 from unittest.mock import patch
 
@@ -166,3 +167,80 @@ def test_cli_main_string_system_exit_prints_and_returns_1():
             code = ca.main(["scan", "-d", "discord.com"])
     assert code == 1
     assert "active run already registered" in stderr.getvalue()
+
+
+@pytest.mark.unit
+def test_nfqws2_debug_parsed_by_cliapp_but_env_not_set_yet():
+    """H1: the CliApp path parses --nfqws2-debug into the model but does NOT
+    propagate it to BLOCKCHECKS_NFQWS2_DEBUG (only parser.dispatch does, and it
+    is not reached from cliapp.main). This documents the pre-fix behavior."""
+    import os
+
+
+    os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+    try:
+        Root = build_cli_root()
+        model = Root(_cli_parse_args=["scan", "--nfqws2-debug", "1", "--max", "1"])
+        sub = get_subcommand(model, is_required=True)
+        assert sub.nfqws2_debug == "1"
+        assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") is None
+    finally:
+        os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+
+
+@pytest.mark.unit
+def test_nfqws2_debug_env_set_by_dispatch_legacy_path():
+    """H1 control: the legacy argparse dispatch() path does set the env var."""
+    import os
+
+    from blockchecks.cli.parser import dispatch
+
+    os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+    try:
+        ns = argparse.Namespace(
+            nfqws2_debug="syslog", command="stop", list_presets=False
+        )
+        with patch("blockchecks.cli.commands.stop.cmd_stop", lambda _a: 0):
+            dispatch(ns)
+        assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") == "syslog"
+    finally:
+        os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+
+
+@pytest.mark.unit
+def test_nfqws2_debug_bare_requires_value_under_cliapp():
+    """H6: argparse's nargs='?' const='1' bare form is rejected by the CliApp
+    model (the flag demands a value), unlike the argparse path."""
+    import os
+
+    from blockchecks.cli import cliapp as ca
+
+    os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+    try:
+        Root = build_cli_root()
+        # Preprocessing expands bare --nfqws2-debug → "1" (const).
+        expanded = ca.expand_bare_nfqws2_debug(["scan", "--nfqws2-debug", "--max", "1"])
+        assert expanded == ["scan", "--nfqws2-debug", "1", "--max", "1"]
+        model = Root(_cli_parse_args=expanded)
+        sub = get_subcommand(model, is_required=True)
+        assert sub.nfqws2_debug == "1"
+    finally:
+        os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+
+
+@pytest.mark.unit
+def test_nfqws2_debug_env_propagated_by_dispatch_subcommand():
+    """F1: _dispatch_subcommand sets BLOCKCHECKS_NFQWS2_DEBUG from the model."""
+    import os
+
+    from blockchecks.cli import cliapp as ca
+
+    os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+    try:
+        Root = build_cli_root()
+        model = Root(_cli_parse_args=["scan", "--nfqws2-debug", "syslog", "--max", "1"])
+        sub = get_subcommand(model, is_required=True)
+        ca._apply_nfqws2_debug_env(sub)
+        assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") == "syslog"
+    finally:
+        os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)

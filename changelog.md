@@ -2,6 +2,30 @@
 
 ## 1.2.1a — unreleased
 
+### Fixed (logging + XDG audit 2026-08-09)
+
+- `cli/cliapp.py` — **`--nfqws2-debug` was silently ignored on the main CliApp
+  path**: the env var `BLOCKCHECKS_NFQWS2_DEBUG` was only set by argparse's
+  `dispatch()` (legacy path). Added `_apply_nfqws2_debug_env()` in
+  `_dispatch_subcommand` and `expand_bare_nfqws2_debug()` so both `--nfqws2-debug 1`
+  and bare `--nfqws2-debug` work. Verified live: `bs tcp --nfqws2-debug 1` now
+  produces a debug log.
+- `engine/paths.py` — **application logging was never configured**: module
+  loggers (paths, presets) wrote to a root logger with no handlers, so
+  `log.warning` was silently dropped in production. Added `configure_logging()`
+  (FileHandler under `RUNTIME_LOGS_DIR/blockchecks.log` + stderr, level from
+  `BLOCKCHECKS_LOG_LEVEL`, default WARNING), called from `cliapp.main()` and
+  `parser._main_argparse`.
+- `engine/paths.py` — `reclaim_sudo_ownership()` now also repairs **`.log`
+  files** (single and inside directories). nfqws2 debug logs are created by the
+  dropped-privilege daemon (overflow-uid) and stayed root/`UNKNOWN`-owned.
+- `service/nfqws2.py` — after daemon start, the nfqws2 `--debug` log is
+  reclaimed to `SUDO_UID/GID` (verified live: `nfqws2_q200_*.log` → zhoel).
+- `engine/run_finalize.py` + `nfconf.py` — `run_summary_*.json` and exported
+  `nfqws2_*.conf`/`user.list` are reclaimed when running as root.
+- Tests: cliapp debug-flag propagation + bare form, logging configured under
+  state/logs, reclaim of .log (single + directory), run_summary reclaim.
+
 ### Fixed (service-layer audit 2026-08-09)
 
 - `service/lua_bridge_ipc.py` — **events.ndjson must be world-writable (0666)**:

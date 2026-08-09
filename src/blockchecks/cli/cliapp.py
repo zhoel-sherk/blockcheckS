@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import Sequence
 from typing import Any
@@ -122,6 +123,31 @@ def expand_bare_generate(argv: Sequence[str]) -> list[str]:
     return out
 
 
+def expand_bare_nfqws2_debug(argv: Sequence[str]) -> list[str]:
+    """Restore argparse ``nargs='?' const='1'`` UX for ``--nfqws2-debug``.
+
+    The argparse path accepts a bare ``--nfqws2-debug`` (means ``1``), but the
+    pydantic CliApp model rejects a flag without a value. Inject ``1`` when the
+    flag is followed by another flag or end-of-args.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--nfqws2-debug":
+            out.append(tok)
+            nxt = argv[i + 1] if i + 1 < len(argv) else None
+            if nxt is None or nxt.startswith("-"):
+                out.append("1")
+            else:
+                out.append(nxt)
+                i += 1
+        else:
+            out.append(tok)
+        i += 1
+    return out
+
+
 def model_from_subparser(name: str, parser: argparse.ArgumentParser) -> type[BaseModel]:
     fields: dict[str, Any] = {}
     for action in parser._actions:
@@ -189,10 +215,24 @@ def _dispatch_subcommand(root: BaseModel) -> int:
     sub = get_subcommand(root, is_required=False)
     if sub is None:
         return 2
+    _apply_nfqws2_debug_env(sub)
     handler = _CMD_HANDLERS.get(type(sub).__name__)
     if handler is None:
         return 2
     return int(handler(sub))
+
+
+def _apply_nfqws2_debug_env(sub: BaseModel) -> None:
+    """Propagate ``--nfqws2-debug`` from the parsed subcommand into the env.
+
+    The argparse ``dispatch()`` path sets ``BLOCKCHECKS_NFQWS2_DEBUG`` before
+    running the command; the CliApp path bypasses ``dispatch()``, so without
+    this the flag is silently ignored. ``nfqws2_debug_conf_line()`` and the
+    nfqws2 managers read this env var.
+    """
+    dbg = getattr(sub, "nfqws2_debug", None)
+    if dbg is not None:
+        os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
 
 
 def _print_validation_error(exc: pydantic_core.ValidationError) -> int:
@@ -437,10 +477,16 @@ def build_cli_root() -> type[BaseSettings]:
 def main(argv: list[str] | None = None) -> int:
     """Process entry: CliApp instead of argparse.parse_args."""
     from blockchecks.cli.user_config import apply_parser_defaults, load_user_config
-    from blockchecks.engine.paths import apply_pycache_prefix, ensure_dirs, migrate_legacy_state_db
+    from blockchecks.engine.paths import (
+        apply_pycache_prefix,
+        configure_logging,
+        ensure_dirs,
+        migrate_legacy_state_db,
+    )
 
     apply_pycache_prefix()
     ensure_dirs()
+    configure_logging()
     cfg = load_user_config()
     paths_cfg = cfg.get("paths") if isinstance(cfg.get("paths"), dict) else {}
     migrate_on = True if paths_cfg.get("migrate") is None else bool(paths_cfg.get("migrate"))
@@ -452,9 +498,15 @@ def main(argv: list[str] | None = None) -> int:
     apply_parser_defaults(probe, cfg)
 
     raw = list(argv) if argv is not None else None
-    cli_args = expand_bare_generate(normalize_cli_args(raw)) if raw is not None else None
+    cli_args = (
+        expand_bare_nfqws2_debug(expand_bare_generate(normalize_cli_args(raw)))
+        if raw is not None
+        else None
+    )
     if cli_args is None:
-        cli_args = expand_bare_generate(normalize_cli_args(sys.argv[1:]))
+        cli_args = expand_bare_nfqws2_debug(
+            expand_bare_generate(normalize_cli_args(sys.argv[1:]))
+        )
 
     Root = build_cli_root()
     try:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 from blockchecks.engine.adaptive_runner import persist_adaptive_weights
@@ -130,6 +131,9 @@ def write_run_summary(
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
         f.write("\n")
+    from blockchecks.engine.paths import reclaim_sudo_ownership
+
+    reclaim_sudo_ownership(Path(path))
     return path
 
 

@@ -52,6 +52,22 @@ def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
     return dbg_path if dbg else None
 
 
+def _reclaim_debug_log(dbg_path: str | None) -> None:
+    """Chown a just-created nfqws2 --debug log back to SUDO_UID/GID.
+
+    nfqws2 drops privileges (setuid overflow-uid) and creates the log itself,
+    so it stays root/overflow-owned unless repaired after launch.
+    """
+    if not dbg_path:
+        return
+    try:
+        from blockchecks.engine.paths import reclaim_sudo_ownership
+
+        reclaim_sudo_ownership(Path(dbg_path))
+    except Exception:
+        pass
+
+
 def start_daemon(
     ns_name: str,
     config_path: str,
@@ -75,7 +91,7 @@ def start_daemon(
     os.close(_fd)
     try:
         shutil.copy2(config_path, tmp_conf)
-        inject_debug_and_daemon(tmp_conf, tag=ns_name)
+        dbg_path = inject_debug_and_daemon(tmp_conf, tag=ns_name)
         if kill_existing:
             subprocess.run(
                 ["sudo", "ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2"],
@@ -93,7 +109,9 @@ def start_daemon(
             f"@{tmp_conf}",
         ]
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
+        settle = wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
+        _reclaim_debug_log(dbg_path)
+        return settle
     finally:
         # Daemon has read @config into memory by settle; do not leak /tmp/bs_nfq_*
         try:
@@ -143,6 +161,7 @@ class Nfqws2Manager:
             wait_nfqws2_ready(self.ns_name)
         else:
             time.sleep(0.1)
+        _reclaim_debug_log(self.last_debug_log)
 
         if self._proc.poll() is not None:
             hint = ""

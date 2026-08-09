@@ -689,10 +689,11 @@ def _main_argparse(argv: list[str] | None = None) -> int:
         finalize_store_args,
         load_user_config,
     )
-    from blockchecks.engine.paths import apply_pycache_prefix, ensure_dirs
+    from blockchecks.engine.paths import apply_pycache_prefix, configure_logging, ensure_dirs
 
     apply_pycache_prefix()
     ensure_dirs()
+    configure_logging()
     user_cfg = load_user_config()
     paths_cfg = user_cfg.get("paths") if isinstance(user_cfg.get("paths"), dict) else {}
     migrate_on = True if paths_cfg.get("migrate") is None else bool(paths_cfg.get("migrate"))
