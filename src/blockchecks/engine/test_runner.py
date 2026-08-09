@@ -56,6 +56,7 @@ def _check_tls_in_ns(domain: str, timeout: float, resolved_ip: str | None = None
                 "curl_url": req.curl_url,
                 "disable_ech": req.disable_ech,
                 "googlevideo": req.googlevideo,
+                "ggc": req.ggc,
                 "protocol": req.protocol,
             },
             "repeats": 1,

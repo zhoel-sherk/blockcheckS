@@ -22,6 +22,7 @@ def probe_request_dict(req: CurlProbeRequest) -> dict:
         "curl_url": req.curl_url,
         "disable_ech": req.disable_ech,
         "googlevideo": req.googlevideo,
+        "ggc": req.ggc,
         "protocol": req.protocol,
     }
 

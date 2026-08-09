@@ -313,6 +313,14 @@ MIN_REDIRECT_LENGTH = 10  # bytes — redirects have tiny bodies, don't fail the
 # Range request size — just above 16KB TSPU buffer threshold
 GOOGLEVIDEO_RANGE_SIZE = 17408  # 17KB, bytes=0-17407
 
+# Deterministic GGC probe (no yt-dlp signature): hit a live Google cache IP with
+# SNI=rr*.googlevideo.com and a 1MB Range to trigger the TSPU "video download"
+# heuristic. CDN responding (any HTTP) == bypassed; timeout == blocked.
+GGC_RANGE_SIZE = 1048576  # 1MiB, bytes=0-1048575
+GGC_HOST = _env_or("BLOCKCHECKS_GGC_HOST", "rr5---sn-5goeenes.googlevideo.com")
+GGC_FALLBACK_IP = _env_or("BLOCKCHECKS_GGC_IP", "74.125.108.234")
+GGC_ENABLED = _env_bool("BLOCKCHECKS_GV_GGC", False)
+
 # ── ECH (Encrypted Client Hello) ──────────────────
 # Disable ECH via curl_cffi.CurlOpt.ECH = 10325
 # Forces plaintext SNI in ClientHello — testable by standard DPI strategies

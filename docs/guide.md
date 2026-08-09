@@ -198,6 +198,24 @@ pytest -m "not integration"
 - Проверь iptables: `sudo iptables -L OUTPUT -n | grep NFQUEUE`.
 - Для googlevideo.com: это известная проблема — IP `142.251.x.x` блокируется на уровне IP (не SNI).
 
+**Детерминированный GGC-тест (обман ТСПУ, без 6h TTL)**
+- Подписанные `*.googlevideo.com` URL живут ровно 6 часов (`expire=21600`). Для
+  стабильных массовых прогонов можно не зависеть от yt-dlp и подписи:
+  `BLOCKCHECKS_GV_GGC=1 bs tcp -d googlevideo.com ...`
+- Техника: берём IP живого Google-кэша (GGC, напр. `74.125.108.234`), шлём
+  запрос на него, но в SNI подставляем `rr*.googlevideo.com` и принудительно
+  ставим `Range: bytes=0-1048575` (1MiB) — ТСПУ включает эвристику «скачивания
+  видео».
+- **Отличие пробоя от блока** (детектор): настоящий Google CDN отвечает с
+  уникальным заголовком `Server: gws | scone | gvs 1.0`; заглушка ТСПУ пишет
+  `Server: nginx | nts` или не присылает его. При 302/307 проверяется
+  `Location` — должен оставаться внутри `*.googlevideo.com`/`*.google.com`,
+  иначе это региональный редирект ТСПУ.
+- Настройки: `BLOCKCHECKS_GGC_HOST`, `BLOCKCHECKS_GGC_IP`,
+  `BLOCKCHECKS_GV_GGC` (вкл/выкл), `BLOCKCHECKS_PROXY` (обход прямого egress).
+- Детали: `prepare_ggc_probe()` / `_ggc_redirect_is_google()` в
+  `src/blockchecks/checkers/curl_probe.py`.
+
 **STUN probe всегда timeout**
 - GCP Discord-сервера требуют активную WebSocket-сессию для ответа на STUN.
 - Без `--full-voice` (gateway WS + voice WS) STUN таймаутит — это ожидаемо.

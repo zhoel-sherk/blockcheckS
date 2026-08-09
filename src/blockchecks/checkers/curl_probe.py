@@ -18,6 +18,7 @@ from blockchecks.checkers.dns_secure import CURLOPT_RESOLVE
 from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS, classify_http_status
 from blockchecks.engine.config import (
     CURLOPT_ECH,
+    GGC_RANGE_SIZE,
     GOOGLEVIDEO_RANGE_SIZE,
     MIN_READ_RATE_BPS,
     SOCKS5_PROXY,
@@ -42,6 +43,7 @@ class CurlProbeRequest:
     curl_url: str | None = None
     disable_ech: bool = False
     googlevideo: bool = False
+    ggc: bool = False
     protocol: str = "tls12"
 
 
@@ -83,9 +85,17 @@ def prepare_googlevideo_probe(
     *,
     timeout: float = 5.0,
 ) -> tuple[CurlProbeRequest, dict | None]:
-    """Build probe request for videoplayback URL or return error dict."""
+    """Build probe request for videoplayback URL or return error dict.
+
+    When ``BLOCKCHECKS_GV_GGC=1`` uses the deterministic GGC probe instead
+    (no yt-dlp signature, valid beyond the 6-hour signed-URL TTL).
+    """
     from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
     from blockchecks.checkers.youtube_url import get_fresh_url, videoplayback_host
+    from blockchecks.engine.config import GGC_ENABLED
+
+    if GGC_ENABLED:
+        return prepare_ggc_probe(domain, timeout=timeout, resolved_ip=resolved_ip)
 
     curl_url = get_fresh_url()
     if not curl_url:
@@ -121,6 +131,51 @@ def prepare_googlevideo_probe(
     )
 
 
+def prepare_ggc_probe(
+    domain: str,
+    *,
+    timeout: float = 5.0,
+    resolve_name: str | None = None,
+    resolved_ip: str | None = None,
+) -> tuple[CurlProbeRequest, dict | None]:
+    """Deterministic GGC probe — no yt-dlp signature required.
+
+    Hits a live Google cache (GGC) IP with SNI = ``rr*.googlevideo.com`` and a
+    large Range header (1MiB) to trigger the TSPU "video download" heuristic.
+    The signed googlevideo URLs expire in 6h, but the GGC-IP + SNI + Range
+    pattern is valid indefinitely and yields different answers on bypass
+    (CDN responds with any HTTP status) vs block (timeout / RST).
+    """
+    from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
+    from blockchecks.engine.config import GGC_FALLBACK_IP, GGC_HOST
+
+    host = resolve_name or GGC_HOST
+    ip = resolved_ip
+    if not ip:
+        try:
+            ips, err, _ = doh_query(host, pick_working_doh(), timeout=5.0)
+            if ips and not err:
+                ip = ips[0]
+        except Exception:
+            ip = None
+    if not ip:
+        ip = GGC_FALLBACK_IP
+
+    return (
+        CurlProbeRequest(
+            domain=domain,
+            timeout=timeout,
+            resolved_ip=ip,
+            resolve_name=host,
+            curl_url=f"https://{host}/videoplayback?ip={ip}",
+            disable_ech=True,
+            googlevideo=True,
+            ggc=True,
+        ),
+        None,
+    )
+
+
 def build_probe_request(
     domain: str,
     *,
@@ -128,9 +183,12 @@ def build_probe_request(
     resolved_ip: str | None = None,
     disable_ech: bool = False,
     protocol: str = "tls12",
+    ggc: bool = False,
 ) -> tuple[CurlProbeRequest, dict | None]:
     """Resolve googlevideo-specific fields when needed."""
     if protocol != "http" and is_googlevideo_domain(domain):
+        if ggc:
+            return prepare_ggc_probe(domain, timeout=timeout, resolved_ip=resolved_ip)
         return prepare_googlevideo_probe(domain, resolved_ip=resolved_ip, timeout=timeout)
     use_ech_off = disable_ech
     return (
@@ -160,6 +218,28 @@ def _apply_ech_off(session: curl_cffi.Session) -> str | None:
         return f"ech_setopt:{e!s}"[:100]
 
 
+def _ggc_redirect_is_google(location: str) -> bool:
+    """True if a 302/307 Location stays inside Google-owned domains.
+
+    The TSPU stub redirects to regional Russian IPs / foreign domains; a
+    genuine Google load-balancer redirect keeps the host inside
+    ``*.googlevideo.com`` / ``*.google.com``.
+    """
+    from urllib.parse import urlparse
+
+    if not location:
+        return False
+    host = (urlparse(location).hostname or "").lower()
+    if not host:
+        return False
+    return (
+        host == "googlevideo.com"
+        or host.endswith(".googlevideo.com")
+        or host == "google.com"
+        or host.endswith(".google.com")
+    )
+
+
 def _googlevideo_follow_request(req: CurlProbeRequest, location: str) -> CurlProbeRequest | None:
     """Build a one-hop follow-up request for CDN redirects between googlevideo hosts."""
     from urllib.parse import urlparse
@@ -170,8 +250,7 @@ def _googlevideo_follow_request(req: CurlProbeRequest, location: str) -> CurlPro
     host = (urlparse(target).hostname or "").lower()
     if "googlevideo" not in host:
         return None
-    return CurlProbeRequest(
-        domain=req.domain,
+    return CurlProbeRequest(        domain=req.domain,
         timeout=req.timeout,
         resolved_ip=None,
         resolve_name=host,
@@ -195,7 +274,9 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
 
     headers: dict[str, str] = {"Accept": "text/html"}
     if req.googlevideo:
-        headers["Range"] = googlevideo_range_header()
+        headers["Range"] = (
+            f"bytes=0-{GGC_RANGE_SIZE - 1}" if req.ggc else googlevideo_range_header()
+        )
         headers["Referer"] = "https://www.youtube.com/"
         headers["Origin"] = "https://www.youtube.com"
 
@@ -245,6 +326,45 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     clen = len(resp.content)
     rate = clen / elapsed
     loc = resp.headers.get("Location") or resp.headers.get("location") or ""
+    server_hdr = resp.headers.get("Server") or resp.headers.get("server") or ""
+
+    # GGC probe (deterministic, no signature): a genuine Google CDN answer is
+    # recognized by the unique Server header (gws / scone / gvs) and, on 302/307,
+    # by a Location that stays inside *.googlevideo.com / *.google.com. The TSPU
+    # stub replies with Server: nginx/nts (or none) and redirects to regional
+    # Russian IPs/domains. timeout/RST (handled in except) == blocked.
+    if req.ggc:
+        server = server_hdr.lower()
+        google_server = any(t in server for t in ("gws", "scone", "gvs"))
+        status = resp.status_code
+        if status in {301, 302, 303, 307, 308} and not _ggc_redirect_is_google(loc):
+            return CurlProbeResult(
+                success=False,
+                http_code=status,
+                latency_ms=elapsed * 1000,
+                content_len=clen,
+                read_rate_bps=rate,
+                error=f"tspu redirect to {loc[:80]}",
+            )
+        if not google_server:
+            return CurlProbeResult(
+                success=False,
+                http_code=status,
+                latency_ms=elapsed * 1000,
+                content_len=clen,
+                read_rate_bps=rate,
+                error=f"non-google server header: {server_hdr[:40]!r}",
+            )
+        return CurlProbeResult(
+            success=True,
+            http_code=status,
+            latency_ms=elapsed * 1000,
+            content_len=clen,
+            content_ok=clen >= 300,
+            throttled=rate < THROTTLED_MAX_BPS and clen >= 300,
+            read_rate_bps=rate,
+            error=None,
+        )
 
     redirect_domain = "googlevideo.com" if req.googlevideo else dom
     redirect_err = classify_http_status(redirect_domain, resp.status_code, loc)

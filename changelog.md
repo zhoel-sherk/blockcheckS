@@ -2,6 +2,27 @@
 
 ## 1.2.1a — unreleased
 
+### Added — deterministic GGC probe (bypass-detector, no 6h signed-URL TTL)
+
+- googlevideo signed URLs expire in exactly 6h (21600s). New deterministic
+  detector `BLOCKCHECKS_GV_GGC=1` hits a live Google cache (GGC) IP with
+  SNI=`rr*.googlevideo.com` and `Range: bytes=0-1048575` (1MiB) to trigger the
+  TSPU "video download" heuristic — valid indefinitely, no yt-dlp signature.
+- **Bypass vs block detection**: a genuine Google CDN answer carries the unique
+  `Server: gws | scone | gvs 1.0` header; the TSPU stub replies `Server: nginx |
+  nts` or none. On 302/307 the `Location` must stay inside
+  `*.googlevideo.com`/`*.google.com`, otherwise it is a TSPU regional redirect.
+- `checkers/curl_probe.py`: `prepare_ggc_probe()`, `_ggc_redirect_is_google()`,
+  PASS logic (CDN answered + Google Server header + Google-only redirect).
+  `ggc` flag plumbed through `probe_request_dict` / `_curl_probe_worker` /
+  `test_runner` payloads.
+- Config: `GGC_HOST`, `GGC_FALLBACK_IP`, `GGC_RANGE_SIZE` (1MiB),
+  `GGC_ENABLED` (`BLOCKCHECKS_GV_GGC`).
+- Verified live: `bs tcp -d googlevideo.com` with GGC returns `HTTP 403` +
+  `Server: gvs 1.0` → PASS (bypass), while direct egress is blocked (timeout).
+- Tests: `test_curl_probe.py::TestGgcProbe` (6) — Server gws pass, nginx fail,
+  no-header fail, Google redirect pass, TSPU redirect fail, `_ggc_redirect_is_google`.
+
 ### Fixed — googlevideo CDN probe via SOCKS proxy (2026-08-09)
 
 - `checkers/curl_probe.py` — googlevideo videoplayback probes now route through

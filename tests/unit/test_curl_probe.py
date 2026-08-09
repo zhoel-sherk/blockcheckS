@@ -205,3 +205,147 @@ def test_curl_probe_worker_batch_mode():
     assert batch.requests[0].domain == "discord.com"
     assert batch.requests[0].resolved_ip == "1.2.3.4"
     assert batch.requests[1].domain == "google.com"
+
+
+class TestGgcProbe:
+    """Deterministic GGC detector — Google CDN Server header + redirect check."""
+
+    def _mk_session(self, status, headers):
+        setopts = []
+        captured = {}
+
+        class FakeCurl:
+            def setopt(self, opt, value):
+                setopts.append((opt, value))
+
+        class FakeSession:
+            def __init__(self, **kwargs):
+                self.curl = FakeCurl()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def get(self, url, timeout=None, **kwargs):
+                resp = MagicMock()
+                resp.status_code = status
+                resp.content = b"" if status >= 400 else b"x" * 400
+                resp.headers = headers
+                return resp
+
+        return FakeSession, captured, setopts
+
+    def test_ggc_google_server_header_passes(self):
+        from blockchecks.checkers.curl_probe import run_curl_probe
+        from blockchecks.engine.config import GGC_HOST
+
+        req = CurlProbeRequest(
+            domain="googlevideo.com",
+            curl_url=f"https://{GGC_HOST}/videoplayback",
+            resolve_name=GGC_HOST,
+            resolved_ip="74.125.108.234",
+            googlevideo=True,
+            ggc=True,
+            disable_ech=True,
+            timeout=5.0,
+        )
+        sess, _, _ = self._mk_session(403, {"Server": "gvs 1.0"})
+        with patch("curl_cffi.Session", sess):
+            r = run_curl_probe(req)
+        assert r.success is True
+        assert r.http_code == 403
+
+    def test_ggc_nginx_server_header_fails(self):
+        from blockchecks.checkers.curl_probe import run_curl_probe
+        from blockchecks.engine.config import GGC_HOST
+
+        req = CurlProbeRequest(
+            domain="googlevideo.com",
+            curl_url=f"https://{GGC_HOST}/videoplayback",
+            resolve_name=GGC_HOST,
+            resolved_ip="74.125.108.234",
+            googlevideo=True,
+            ggc=True,
+            disable_ech=True,
+            timeout=5.0,
+        )
+        sess, _, _ = self._mk_session(403, {"Server": "nginx"})
+        with patch("curl_cffi.Session", sess):
+            r = run_curl_probe(req)
+        assert r.success is False
+        assert "non-google server header" in (r.error or "")
+
+    def test_ggc_no_server_header_fails(self):
+        from blockchecks.checkers.curl_probe import run_curl_probe
+        from blockchecks.engine.config import GGC_HOST
+
+        req = CurlProbeRequest(
+            domain="googlevideo.com",
+            curl_url=f"https://{GGC_HOST}/videoplayback",
+            resolve_name=GGC_HOST,
+            resolved_ip="74.125.108.234",
+            googlevideo=True,
+            ggc=True,
+            disable_ech=True,
+            timeout=5.0,
+        )
+        sess, _, _ = self._mk_session(403, {})
+        with patch("curl_cffi.Session", sess):
+            r = run_curl_probe(req)
+        assert r.success is False
+        assert "server header" in (r.error or "")
+
+    def test_ggc_redirect_to_google_passes(self):
+        from blockchecks.checkers.curl_probe import run_curl_probe
+        from blockchecks.engine.config import GGC_HOST
+
+        req = CurlProbeRequest(
+            domain="googlevideo.com",
+            curl_url=f"https://{GGC_HOST}/videoplayback",
+            resolve_name=GGC_HOST,
+            resolved_ip="74.125.108.234",
+            googlevideo=True,
+            ggc=True,
+            disable_ech=True,
+            timeout=5.0,
+        )
+        sess, _, _ = self._mk_session(
+            302,
+            {"Server": "gws", "Location": "https://rr3---sn-xx.googlevideo.com/videoplayback?x=1"},
+        )
+        with patch("curl_cffi.Session", sess):
+            r = run_curl_probe(req)
+        assert r.success is True
+        assert r.http_code == 302
+
+    def test_ggc_redirect_to_foreign_host_fails(self):
+        from blockchecks.checkers.curl_probe import run_curl_probe
+        from blockchecks.engine.config import GGC_HOST
+
+        req = CurlProbeRequest(
+            domain="googlevideo.com",
+            curl_url=f"https://{GGC_HOST}/videoplayback",
+            resolve_name=GGC_HOST,
+            resolved_ip="74.125.108.234",
+            googlevideo=True,
+            ggc=True,
+            disable_ech=True,
+            timeout=5.0,
+        )
+        sess, _, _ = self._mk_session(302, {"Server": "gws", "Location": "http://81.88.1.1/blocked"})
+        with patch("curl_cffi.Session", sess):
+            r = run_curl_probe(req)
+        assert r.success is False
+        assert "tspu redirect" in (r.error or "")
+
+
+def test_ggc_redirect_is_google():
+    from blockchecks.checkers.curl_probe import _ggc_redirect_is_google
+
+    assert _ggc_redirect_is_google("https://rr3---sn-xx.googlevideo.com/v?x=1") is True
+    assert _ggc_redirect_is_google("https://foo.google.com/") is True
+    assert _ggc_redirect_is_google("http://81.88.1.1/blocked") is False
+    assert _ggc_redirect_is_google("https://example.ru/x") is False
+    assert _ggc_redirect_is_google("") is False
