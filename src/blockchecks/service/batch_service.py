@@ -52,8 +52,10 @@ class ProbeBatchService:
         try:
             domains = ctx.item_domains()
             resolved_by_domain: dict[str, tuple[str | None, str, str]] = {}
+            ip_lists_by_domain: dict[str, list[str]] = {}
             for d in dict.fromkeys(domains):
                 resolved_by_domain[d] = await self.deps.resolve_domain_dns(d)
+                ip_lists_by_domain[d] = self.deps.resolve_domain_ips(d)
             wall_start = time.monotonic()
             try:
                 result = await asyncio.to_thread(
@@ -62,6 +64,7 @@ class ProbeBatchService:
                     timeout,
                     ns,
                     resolved_by_domain,
+                    ip_lists_by_domain,
                 )
             except Exception as e:
                 # Never lose the batch: any error in the sync probe loop must
@@ -97,10 +100,13 @@ class ProbeBatchService:
         timeout: float,
         ns_name: str,
         resolved_by_domain: dict[str, tuple[str | None, str, str]],
+        ip_lists_by_domain: dict[str, list[str]] | None = None,
     ) -> BatchProbeResult:
         if self.config.backend == "lua_bridge":
-            return self._run_lua_bridge_batch(ctx, timeout, ns_name, resolved_by_domain)
-        return self._run_classic_batch(ctx, timeout, ns_name, resolved_by_domain)
+            return self._run_lua_bridge_batch(
+                ctx, timeout, ns_name, resolved_by_domain, ip_lists_by_domain
+            )
+        return self._run_classic_batch(ctx, timeout, ns_name, resolved_by_domain, ip_lists_by_domain)
 
     def _run_classic_batch(
         self,
@@ -108,6 +114,7 @@ class ProbeBatchService:
         timeout: float,
         ns_name: str,
         resolved_by_domain: dict[str, tuple[str | None, str, str]],
+        ip_lists_by_domain: dict[str, list[str]] | None = None,
     ) -> BatchProbeResult:
         results: list = []
         for item, dom in zip(ctx.items, ctx.item_domains(), strict=False):
@@ -131,9 +138,11 @@ class ProbeBatchService:
                 None,
                 self.deps.repeats_mode,
                 self.deps.quick_break,
+                resolved_ips=(ip_lists_by_domain or {}).get(dom),
             )
             data = self._maybe_wssize_retry(
-                item, ctx, timeout_i, ns_name, resolved_ip, protocol, settle_max, data
+                item, ctx, timeout_i, ns_name, resolved_ip, protocol, settle_max, data,
+                ip_lists=(ip_lists_by_domain or {}).get(dom),
             )
             data["batch_id"] = ctx.batch_id
             result = self.deps.tcp_result_from_data(item, dom, data)
@@ -159,6 +168,7 @@ class ProbeBatchService:
         timeout: float,
         ns_name: str,
         resolved_by_domain: dict[str, tuple[str | None, str, str]],
+        ip_lists_by_domain: dict[str, list[str]] | None = None,
     ) -> BatchProbeResult:
         protocol = ctx.protocol
         if ctx.items:
@@ -214,9 +224,11 @@ class ProbeBatchService:
                     item_proto,
                     self.deps.repeats_mode,
                     self.deps.quick_break,
+                    resolved_ips=(ip_lists_by_domain or {}).get(dom),
                 )
                 data = self._maybe_wssize_bridge_retry(
-                    session, idx, item, ctx, timeout_i, resolved_ip, item_proto, data, domain=dom
+                    session, idx, item, ctx, timeout_i, resolved_ip, item_proto, data,
+                    domain=dom, ip_lists=(ip_lists_by_domain or {}).get(dom),
                 )
                 data["batch_id"] = ctx.batch_id
                 result = self.deps.tcp_result_from_data(item, dom, data)
@@ -269,6 +281,8 @@ class ProbeBatchService:
         protocol: str,
         settle_max: float | None,
         data: dict,
+        *,
+        ip_lists: list[str] | None = None,
     ) -> dict:
         if (
             not data.get("success")
@@ -294,6 +308,7 @@ class ProbeBatchService:
                 None,
                 self.deps.repeats_mode,
                 self.deps.quick_break,
+                resolved_ips=ip_lists,
             )
         return data
 
@@ -309,6 +324,7 @@ class ProbeBatchService:
         data: dict,
         *,
         domain: str | None = None,
+        ip_lists: list[str] | None = None,
     ) -> dict:
         if (
             not data.get("success")
@@ -334,6 +350,7 @@ class ProbeBatchService:
                 protocol,
                 self.deps.repeats_mode,
                 self.deps.quick_break,
+                resolved_ips=ip_lists,
             )
         return data
 

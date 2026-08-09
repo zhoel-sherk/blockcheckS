@@ -28,6 +28,7 @@ def run_tcp_check_bridge(
     protocol: str = "tls12",
     repeats_mode: str = "fast",
     quick_break: bool = False,
+    resolved_ips: list[str] | None = None,
 ) -> dict:
     """Publish strategy id to shm IPC and curl (nfqws2 already running)."""
     is_http = protocol == "http"
@@ -63,23 +64,40 @@ def run_tcp_check_bridge(
         )
 
     probe_req.timeout = timeout
-    payload = {
-        "mode": "single",
-        "request": probe_request_dict(probe_req),
-        "repeats": max(1, int(repeats)),
-        "parallel_repeats": bool(parallel_repeats and repeats > 1),
-        "repeats_mode": repeats_mode,
-        "quick_break": bool(quick_break),
-    }
-    wall = worker_wall_timeout(
-        timeout,
-        repeats,
-        n_domains=1,
-        curl_parallel=1,
-        parallel_repeats=parallel_repeats,
-    )
-    data = invoke_curl_probe_worker(session.ns_name, python_bin, payload, wall)
-    data["settle_ms"] = 0.0
+    # Retry-on-next-IP (IP-PIN): bridge/daemon already running; re-probe failed
+    # domain against remaining candidate IPs with a shorter per-IP budget.
+    ips_to_try = list(resolved_ips or [])
+    if resolved_ip and resolved_ip not in ips_to_try:
+        ips_to_try.insert(0, resolved_ip)
+    if not ips_to_try:
+        ips_to_try = [resolved_ip] if resolved_ip else [None]
+
+    data: dict = {}
+    for attempt, ip in enumerate(ips_to_try):
+        probe_req.resolved_ip = ip
+        if attempt > 0:
+            probe_req.timeout = min(timeout, 2.0)
+        payload = {
+            "mode": "single",
+            "request": probe_request_dict(probe_req),
+            "repeats": max(1, int(repeats)),
+            "parallel_repeats": bool(parallel_repeats and repeats > 1),
+            "repeats_mode": repeats_mode,
+            "quick_break": bool(quick_break),
+        }
+        wall = worker_wall_timeout(
+            probe_req.timeout,
+            repeats,
+            n_domains=1,
+            curl_parallel=1,
+            parallel_repeats=parallel_repeats,
+        )
+        data = invoke_curl_probe_worker(session.ns_name, python_bin, payload, wall)
+        data["settle_ms"] = 0.0
+        if ip is not None:
+            data["used_ip"] = ip
+        if data.get("success") or attempt == len(ips_to_try) - 1:
+            break
     data["bridge_gen"] = gen
     data["bridge_id"] = strategy_id
     events = session.bridge.drain_events(since_gen=gen)

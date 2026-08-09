@@ -288,11 +288,18 @@ def has_dns_hijack(results: list[DnsAuditResult]) -> bool:
 
 @dataclass
 class DnsRunCache:
-    """Per-batch DoH cache (SD6)."""
+    """Per-batch DoH cache (SD6) with optional hosts-analog IP pinning (IP-PIN).
+
+    ``_pins`` maps domain -> pinned IP (hosts-analog file or auto-pin). When a
+    pin exists it is returned first from ``resolve`` / ``primary_ip``, so the
+    DoH order (which Fryazino can throttle per-IP) no longer decides the probe
+    target. ``set_pins`` refreshes from file/auto-pin at startup.
+    """
 
     ttl_sec: float = DNS_CACHE_TTL
     doh_server: str = ""
     _entries: dict[str, tuple[list[str], float]] = field(default_factory=dict)
+    _pins: dict[str, str] = field(default_factory=dict)
 
     def get(self, domain: str) -> list[str] | None:
         row = self._entries.get(domain)
@@ -307,17 +314,48 @@ class DnsRunCache:
     def set(self, domain: str, ips: list[str]) -> None:
         self._entries[domain] = (ips, time.time())
 
+    # ── IP pinning (hosts-analog, IP-PIN) ──
+
+    def set_pins(self, pins: dict[str, str]) -> None:
+        """Replace the domain->IP pin map (empty values removed)."""
+        self._pins = {d: ip for d, ip in pins.items() if ip}
+
+    def add_pin(self, domain: str, ip: str) -> None:
+        if ip:
+            self._pins[domain] = ip
+
+    def pinned_ip(self, domain: str) -> str | None:
+        return self._pins.get(domain)
+
+    def pins(self) -> dict[str, str]:
+        return dict(self._pins)
+
+    def domains(self) -> list[str]:
+        """Domains currently cached (for auto-pin iteration)."""
+        return list(self._entries.keys())
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+    def _pinned_first(self, domain: str, ips: list[str]) -> list[str]:
+        pin = self._pins.get(domain)
+        if pin and pin not in ips:
+            ips = [pin, *ips]
+        elif pin and ips and ips[0] != pin:
+            ips = [pin, *[i for i in ips if i != pin]]
+        return ips
+
     def resolve(self, domain: str, doh_url: str | None = None, timeout: float = 5.0) -> list[str]:
         cached = self.get(domain)
         if cached:
-            return cached
+            return self._pinned_first(domain, cached)
         url = doh_url or self.doh_server or pick_working_doh(timeout=timeout)
         if not self.doh_server:
             self.doh_server = url
         ips, err, _ = doh_query(domain, url, timeout=timeout)
         if ips and not err:
             self.set(domain, ips)
-            return ips
+            return self._pinned_first(domain, ips)
         # H6: rotate DoH server on failure (skip the one that just failed)
         for alt, _name in DOH_SERVERS:
             if alt == url:
@@ -326,19 +364,29 @@ class DnsRunCache:
             if ips2 and not err2:
                 self.doh_server = alt
                 self.set(domain, ips2)
-                return ips2
+                return self._pinned_first(domain, ips2)
         # Fallback: verified DoH records cached in data_block (anti-hijack).
         # When live DoH is blocked (doh_blocked / no_resolution), trust the last
         # known-good IPs instead of tampered UDP answers.
         cached_ips = _data_block_dns_ips(domain)
         if cached_ips:
             self.set(domain, cached_ips)
-            return cached_ips
-        return ips
+            return self._pinned_first(domain, cached_ips)
+        return self._pinned_first(domain, ips)
 
     def primary_ip(self, domain: str, doh_url: str | None = None) -> str | None:
         ips = self.resolve(domain, doh_url=doh_url)
         return ips[0] if ips else None
+
+    def candidates(self, domain: str) -> list[str]:
+        """DoH/known IPs for *domain*, *without* pin-priority (auto-pin probes)."""
+        cached = self.get(domain)
+        if cached:
+            return list(cached)
+        try:
+            return list(self.resolve(domain))
+        except Exception:
+            return []
 
     def prime(self, domains: list[str], doh_url: str | None = None) -> None:
         """Pre-resolve all domains for a batch run."""

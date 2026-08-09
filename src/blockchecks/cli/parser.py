@@ -227,6 +227,20 @@ def add_secure_dns_args(
         help="Disable DoH pre-resolve (default: on)",
     )
     g.add_argument("--doh-server", default=None, help="Fixed DoH server URL")
+    g.add_argument(
+        "--fixed-ip",
+        default=None,
+        help=(
+            "Hosts-analog IP pin file (one 'domain IP' per line, # comments). "
+            "Pinned IPs override DoH order; auto-refreshed at startup. "
+            "Default: $BLOCKCHECKS_FIXED_IP"
+        ),
+    )
+    g.add_argument(
+        "--no-auto-pin",
+        action="store_true",
+        help="Disable auto-probing of pinned/DoH IPs at startup (use pins as-is)",
+    )
     g.add_argument("--skip-dns-audit", action="store_true", help="Skip UDP vs DoH audit table")
     g.add_argument(
         "--allow-dns-hijack",

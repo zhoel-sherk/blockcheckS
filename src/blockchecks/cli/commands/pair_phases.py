@@ -155,6 +155,22 @@ async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPrefl
     if dns_rc:
         return DnsPreflightResult(dns_cache, dns_audits, exit_code=dns_rc)
 
+    # IP-PIN: load hosts-analog file (--fixed-ip) into the cache; pinned IPs
+    # override DoH order so Fryazino per-IP throttling can't flip the result.
+    pins = {}
+    pin_path = getattr(args, "fixed_ip", None) or os.environ.get("BLOCKCHECKS_FIXED_IP", "")
+    if pin_path:
+        from blockchecks.checkers.ip_pin import load_pins
+
+        pins = load_pins(pin_path)
+        if pins:
+            print(
+                f"  {Fore.CYAN}[dns] pinned IPs from {pin_path}: "
+                f"{', '.join(f'{d}={ip}' for d, ip in pins.items())}{RESET}"
+            )
+        if dns_cache is not None:
+            dns_cache.set_pins(pins)
+
     test_domains = list(
         dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))
     )
@@ -186,6 +202,8 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         secure_dns=secure_dns,
         dns_cache=dns_cache,
         dns_audit={r.domain: r for r in dns_audits},
+        pinned_path=getattr(args, "fixed_ip", None) or os.environ.get("BLOCKCHECKS_FIXED_IP", ""),
+        auto_pin=not bool(getattr(args, "no_auto_pin", False)),
         repeats=repeats,
         parallel_repeats=parallel_repeats,
         repeats_mode=repeats_mode,

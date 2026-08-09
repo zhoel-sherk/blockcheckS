@@ -606,6 +606,19 @@ def resolve_byedpi_bin() -> str | None:
 2. Код: в `_run_tcp_check` при FAIL можно перебирать следующие `dns_cache.resolve()` IP (retry-on-next-IP) вместо мгновенного FAIL.
 3. При сравнении движков указывать выбранный IP — иначе результат зависит от ротации DoH, а не от движка.
 
+#### Реализовано (2026-08-10) — hosts-analog pin + retry-on-next-IP
+
+- **`--fixed-ip <path>`** (env `BLOCKCHECKS_FIXED_IP`): hosts-analog файл
+  `domain IP` (комментарии `#`). Pinned IP перекрывает DoH-порядок.
+- **Авто-пин**: при старте (если не `--no-auto-pin`) проверяет кандидатов
+  стратегией `fake:blob=stun` (PIN_STRATEGY), пинит первый PASS, атомарно
+  перезаписывает файл. Проверено: pin `136.232` (троттлится) → авто-замена
+  на `138.232` → 3/3 PASS.
+- **Retry-on-next-IP**: `_run_tcp_check`/`_multi`/`run_tcp_check_bridge` при
+  FAIL повторяют curl-worker со следующими IP (короткий `RETRY_IP_TIMEOUT`),
+  nfqws2 поднимается один раз. Использованный IP в `used_ip` → лог/DB.
+- Модуль `blockchecks/checkers/ip_pin.py`; тесты `tests/unit/test_ip_pin.py`.
+
 ### Phase 7 — ByeByeDPI catalog import (~2 часа)
 
 - [ ] `presets/byedpi/proxytest_strategies.list` — vendor 60 строк из [ByeByeDPI](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/assets/proxytest_strategies.list)

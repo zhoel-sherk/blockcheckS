@@ -58,6 +58,7 @@ class RunnerProbeDeps:
     lua_extra: list[str]
     timing_for: Callable[[StrategyItem, float], tuple[float, float | None]]
     resolve_domain_dns: Callable[[str], Awaitable[tuple[str | None, str, str]]]
+    resolve_domain_ips: Callable[[str], list[str]]
     tcp_result_from_data: Callable[[StrategyItem, str, dict], object]
     log_tcp_result: Callable[..., Awaitable[None]]
     next_probe_gen: Callable[[], int]

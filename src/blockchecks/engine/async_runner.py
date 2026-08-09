@@ -48,6 +48,15 @@ CYAN = Fore.CYAN
 GREY = Fore.LIGHTBLACK_EX
 RESET = Style.RESET_ALL
 
+# Auto-pin (IP-PIN): known-good strategy + short budget for probing candidate
+# IPs at startup. Pinned IPs override DoH order against Fryazino per-IP throttling.
+PIN_STRATEGY = "fake:blob=stun:repeats=6:tcp_ts=-1000"
+PIN_TIMEOUT = 3.0
+PIN_SETTLE_MAX = 0.5
+# Budget for retry-on-next-IP attempts after the first failed IP (keeps
+# throttled-IP worst case from N×timeout, see Fryazino per-IP throttling).
+RETRY_IP_TIMEOUT = 2.0
+
 __all__ = [
     "AsyncTestRunner",
     "PairResult",
@@ -70,6 +79,7 @@ class TcpTestResult:
     throttled: bool = False
     read_rate_bps: float = 0
     error: str = ""
+    used_ip: str = ""
 
 
 def tcp_results_from_details(
@@ -398,6 +408,7 @@ def _run_tcp_check(
     settle_poll: float | None = None,
     repeats_mode: str = "fast",
     quick_break: bool = False,
+    resolved_ips: list[str] | None = None,
 ) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
 
@@ -468,24 +479,43 @@ def _run_tcp_check(
     )
 
     probe_req.timeout = timeout
-    payload = {
-        "mode": "single",
-        "request": _probe_request_dict(probe_req),
-        "repeats": max(1, int(repeats)),
-        "parallel_repeats": bool(parallel_repeats and repeats > 1),
-        "repeats_mode": repeats_mode,
-        "quick_break": bool(quick_break),
-    }
+    # Retry-on-next-IP (IP-PIN): when the resolved IP fails but nfqws2 is already
+    # up, retry the curl worker against the next candidate with a shorter budget.
+    ips_to_try = list(resolved_ips or [])
+    if resolved_ip and resolved_ip not in ips_to_try:
+        ips_to_try.insert(0, resolved_ip)
+    if not ips_to_try:
+        ips_to_try = [resolved_ip] if resolved_ip else [None]
+
     try:
-        wall = worker_wall_timeout(
-            timeout,
-            repeats,
-            n_domains=1,
-            curl_parallel=1,
-            parallel_repeats=parallel_repeats,
-        )
-        data = _invoke_curl_probe_worker(ns_name, py, payload, wall)
-        data["settle_ms"] = round(settle_elapsed * 1000, 1)
+        data: dict = {}
+        used_ip: str | None = None
+        for attempt, ip in enumerate(ips_to_try):
+            probe_req.resolved_ip = ip
+            if attempt > 0:
+                probe_req.timeout = min(timeout, RETRY_IP_TIMEOUT)
+            payload = {
+                "mode": "single",
+                "request": _probe_request_dict(probe_req),
+                "repeats": max(1, int(repeats)),
+                "parallel_repeats": bool(parallel_repeats and repeats > 1),
+                "repeats_mode": repeats_mode,
+                "quick_break": bool(quick_break),
+            }
+            wall = worker_wall_timeout(
+                probe_req.timeout,
+                repeats,
+                n_domains=1,
+                curl_parallel=1,
+                parallel_repeats=parallel_repeats,
+            )
+            data = _invoke_curl_probe_worker(ns_name, py, payload, wall)
+            data["settle_ms"] = round(settle_elapsed * 1000, 1)
+            used_ip = ip
+            if data.get("success") or attempt == len(ips_to_try) - 1:
+                break
+        if used_ip is not None:
+            data["used_ip"] = used_ip
         return data
     finally:
         if tmp_conf:
@@ -493,6 +523,18 @@ def _run_tcp_check(
                 os.unlink(tmp_conf)
             except OSError:
                 pass
+
+
+def _clone_request_with_ip(
+    probe_requests: list[CurlProbeRequest], domain: str, ip: str
+) -> CurlProbeRequest | None:
+    """Return a copy of the CurlProbeRequest for *domain* with *ip* pinned."""
+    for req in probe_requests:
+        if req.domain == domain:
+            import dataclasses
+
+            return dataclasses.replace(req, resolved_ip=ip)
+    return None
 
 
 def _run_tcp_check_multi(
@@ -505,6 +547,7 @@ def _run_tcp_check_multi(
     python_bin: str | None = None,
     disable_ech: bool = False,
     resolved_ips: dict[str, str | None] | None = None,
+    resolved_ip_lists: dict[str, list[str]] | None = None,
     repeats: int = 1,
     extra_lua_desync: str = "",
     protocol: str = "tls12",
@@ -619,6 +662,38 @@ def _run_tcp_check_multi(
         raw = _invoke_curl_probe_worker(ns_name, py, payload, wall)
         settle_ms = round(settle_elapsed * 1000, 1)
         out = {d: {**raw.get(d, {}), "settle_ms": settle_ms} for d in domains_active}
+        # Retry-on-next-IP for failed domains (IP-PIN): nfqws2 is already up, so
+        # re-probe each failed domain against its remaining candidate IPs.
+        if resolved_ip_lists:
+            for d in domains_active:
+                data = out.get(d)
+                if data and data.get("success"):
+                    continue
+                remaining = [ip for ip in (resolved_ip_lists.get(d) or []) if ip]
+                if not remaining:
+                    continue
+                for attempt, ip in enumerate(remaining):
+                    req = _clone_request_with_ip(probe_requests, d, ip)
+                    if req is None:
+                        continue
+                    req.timeout = min(timeout, RETRY_IP_TIMEOUT)
+                    retry_payload = {
+                        "mode": "single",
+                        "request": _probe_request_dict(req),
+                        "repeats": max(1, int(repeats)),
+                        "parallel_repeats": False,
+                        "repeats_mode": repeats_mode,
+                        "quick_break": bool(quick_break),
+                    }
+                    retry_wall = worker_wall_timeout(
+                        req.timeout, repeats, n_domains=1, curl_parallel=1
+                    )
+                    retry = _invoke_curl_probe_worker(ns_name, py, retry_payload, retry_wall)
+                    retry["settle_ms"] = settle_ms
+                    retry["used_ip"] = ip
+                    out[d] = retry
+                    if retry.get("success") or attempt == len(remaining) - 1:
+                        break
         out.update(gv_fail)
         return out
     finally:
@@ -799,6 +874,8 @@ class AsyncTestRunner:
         secure_dns: bool = True,
         dns_cache: DnsRunCache | None = None,
         dns_audit: dict | None = None,
+        pinned_path: str | None = None,
+        auto_pin: bool = True,
         repeats: int = 1,
         parallel_repeats: bool = False,
         repeats_mode: str = "fast",
@@ -824,6 +901,8 @@ class AsyncTestRunner:
         self.secure_dns = secure_dns
         self.dns_cache = dns_cache
         self.dns_audit = dns_audit or {}
+        self.pinned_path = pinned_path or ""
+        self.auto_pin = auto_pin
         from blockchecks.checkers.curl_probe import clamp_repeats
 
         self.repeats = clamp_repeats(repeats)
@@ -864,6 +943,7 @@ class AsyncTestRunner:
             lua_extra=list(self.lua_extra),
             timing_for=self._timing_for,
             resolve_domain_dns=self._resolve_domain_dns,
+            resolve_domain_ips=self._resolve_domain_ips,
             tcp_result_from_data=self._tcp_result_from_data,
             log_tcp_result=self._log_tcp_result,
             next_probe_gen=self._next_probe_gen,
@@ -924,9 +1004,97 @@ class AsyncTestRunner:
         return timeout, settle_max
 
     async def start(self):
-        """Create netns pool and seed the asyncio Queue on the event loop."""
+        """Create netns pool, seed the Queue, and auto-pin working IPs."""
         await asyncio.to_thread(self.pool.create_all)
         await self.pool.seed()
+        if self.auto_pin and self.dns_cache:
+            await self._auto_pin_ips()
+
+    async def _auto_pin_ips(self) -> None:
+        """Probe DoH/pinned IPs with the known-good fake strategy; pin first PASS.
+
+        Hosts-analog file (``pinned_path``) is loaded, refreshed, and saved, so
+        pins persist across runs and survive Fryazino per-IP throttling.
+        """
+        from blockchecks.checkers.ip_pin import load_pins, save_pins
+
+        pins = dict(self.dns_cache.pins())
+        if self.pinned_path:
+            pins.update(load_pins(self.pinned_path))
+            self.dns_cache.set_pins(pins)
+
+        domains = [d for d in self.dns_cache.domains() if d]
+        if not domains:
+            return
+
+        changed = False
+        for domain in domains:
+            ips = self.dns_cache.candidates(domain)
+            if not ips:
+                continue
+            existing = pins.get(domain)
+            candidates = []
+            if existing:
+                candidates.append(existing)
+            for ip in ips:
+                if ip not in candidates:
+                    candidates.append(ip)
+            picked = None
+            for ip in candidates:
+                if await self._probe_pin_ip(domain, ip):
+                    picked = ip
+                    break
+            if picked:
+                if self.dns_cache.pinned_ip(domain) != picked:
+                    self.dns_cache.add_pin(domain, picked)
+                    changed = True
+                print(
+                    f"  {Fore.CYAN}[dns] pinned {domain} -> {picked} "
+                    f"({'file' if self.dns_cache.pinned_ip(domain) == existing and existing == picked else 'auto'}){RESET}"
+                )
+            elif existing:
+                # previously pinned IP no longer works and no fallback found —
+                # drop it so DoH order decides instead of a dead pin.
+                self.dns_cache.add_pin(domain, "")
+                changed = True
+                print(
+                    f"  {Fore.YELLOW}[dns] pin dropped for {domain} "
+                    f"(no working IP){RESET}"
+                )
+
+        if changed and self.pinned_path:
+            try:
+                save_pins(self.pinned_path, {d: ip for d, ip in self.dns_cache.pins().items() if ip})
+                print(f"  {Fore.CYAN}[dns] saved pinned IPs -> {self.pinned_path}{RESET}")
+            except OSError as e:
+                print(f"  {Fore.YELLOW}[dns] cannot save pins {self.pinned_path}: {e}{RESET}")
+
+    async def _probe_pin_ip(self, domain: str, ip: str) -> bool:
+        """Return True when ``fake:blob=stun`` passes to *domain* via *ip*."""
+        ns = await self.pool.acquire()
+        try:
+            data = await asyncio.to_thread(
+                _run_tcp_check,
+                ns,
+                PIN_STRATEGY,
+                domain,
+                PIN_TIMEOUT,
+                False,
+                self.python,
+                self.disable_ech,
+                ip,
+                1,
+                False,
+                "",
+                "tls12",
+                PIN_SETTLE_MAX,
+                None,
+                "fast",
+                False,
+            )
+            return bool(data.get("success"))
+        finally:
+            await self.pool.release(ns)
 
     async def stop(self):
         """Drain queue then destroy netns pool."""
@@ -954,6 +1122,7 @@ class AsyncTestRunner:
                         doh_server = audit.doh_server or self.dns_cache.doh_server
                 protocol = getattr(item, "protocol", "tls12") or "tls12"
                 proto_db = "http" if protocol == "http" else "tcp"
+                ip_candidates = self._resolve_domain_ips(domain)
                 data = await asyncio.to_thread(
                     _run_tcp_check,
                     ns_name,
@@ -972,6 +1141,7 @@ class AsyncTestRunner:
                     None,
                     self.repeats_mode,
                     self.quick_break,
+                    resolved_ips=ip_candidates,
                 )
                 if (
                     not data.get("success")
@@ -997,6 +1167,7 @@ class AsyncTestRunner:
                         None,
                         self.repeats_mode,
                         self.quick_break,
+                        resolved_ips=ip_candidates,
                     )
                 result.success = data.get("success", False)
                 result.http_code = data.get("http_code", 0)
@@ -1005,6 +1176,7 @@ class AsyncTestRunner:
                 result.content_valid = data.get("content_ok", True)
                 result.throttled = data.get("throttled", False)
                 result.read_rate_bps = data.get("read_rate_bps", 0)
+                result.used_ip = data.get("used_ip") or ""
                 result.error = data.get("error", "") or ""
 
                 if self.db:
@@ -1120,6 +1292,15 @@ class AsyncTestRunner:
                 doh_server = audit.doh_server or self.dns_cache.doh_server
         return resolved_ip, dns_verdict, doh_server
 
+    def _resolve_domain_ips(self, domain: str) -> list[str]:
+        """Full candidate IP list for retry-on-next-IP (pinned first)."""
+        if self.dns_cache:
+            try:
+                return self.dns_cache.resolve(domain)
+            except Exception:
+                pass
+        return []
+
     def _tcp_result_from_data(self, item: StrategyItem, domain: str, data: dict) -> TcpTestResult:
         result = TcpTestResult(item=item, domain=domain)
         result.success = data.get("success", False)
@@ -1130,6 +1311,7 @@ class AsyncTestRunner:
         result.throttled = data.get("throttled", False)
         result.read_rate_bps = data.get("read_rate_bps", 0)
         result.error = data.get("error", "") or ""
+        result.used_ip = data.get("used_ip") or ""
         if "bridge_applied" in data and data.get("bridge_applied") is False and result.success:
             print(
                 f"  {YELLOW}WARN: bridge PASS without APPLIED event for "
@@ -1167,7 +1349,7 @@ class AsyncTestRunner:
             error=result.error,
             read_rate_bps=result.read_rate_bps,
             config_path=item.strategy,
-            resolved_ip=resolved_ip or "",
+            resolved_ip=(result.used_ip or resolved_ip or ""),
             dns_verdict=dns_verdict,
             doh_server=doh_server,
             proto=proto_db,
@@ -1198,10 +1380,12 @@ class AsyncTestRunner:
             ns_name = await self.pool.acquire()
             try:
                 resolved_ips: dict[str, str | None] = {}
+                resolved_ip_lists: dict[str, list[str]] = {}
                 dns_meta: dict[str, tuple[str, str]] = {}
                 for domain in domains:
                     rip, dv, ds = await self._resolve_domain_dns(domain)
                     resolved_ips[domain] = rip
+                    resolved_ip_lists[domain] = self._resolve_domain_ips(domain)
                     dns_meta[domain] = (dv, ds)
                 protocol = getattr(item, "protocol", "tls12") or "tls12"
                 data_map = await asyncio.to_thread(
@@ -1214,6 +1398,7 @@ class AsyncTestRunner:
                     python_bin=self.python,
                     disable_ech=self.disable_ech,
                     resolved_ips=resolved_ips,
+                    resolved_ip_lists=resolved_ip_lists,
                     repeats=self.repeats,
                     extra_lua_desync="",
                     protocol=protocol,
@@ -1249,6 +1434,7 @@ class AsyncTestRunner:
                             None,
                             self.repeats_mode,
                             self.quick_break,
+                            resolved_ips=resolved_ip_lists.get(domain),
                         )
                     result = self._tcp_result_from_data(item, domain, data)
                     rip = resolved_ips.get(domain)

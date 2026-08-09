@@ -2,6 +2,26 @@
 
 ## 1.2.1a — unreleased
 
+### Added — IP pinning (hosts-analog) + retry-on-next-IP vs Fryazino per-IP throttling
+
+- **`--fixed-ip <path>`** (env `BLOCKCHECKS_FIXED_IP`): hosts-analog pin file
+  (`domain IP` per line, `#` comments). Pinned IPs override DoH order, so the
+  Cloudflare DoH rotation can no longer land on a Fryazino-throttled discord
+  IP (e.g. `162.159.136.232`). See `byedpi_engine.md` §5 Phase 6 diagnosis.
+- **Auto-pin at startup**: unless `--no-auto-pin`, the runner probes each
+  cached domain's candidate IPs with `fake:blob=stun` (PIN_STRATEGY) and pins
+  the first PASS. If a pinned IP starts failing it is re-probed and the file
+  is atomically refreshed — verified: pin `136.232` (throttled) → auto-swap to
+  `138.232` → 3/3 PASS.
+- **Retry-on-next-IP**: on a failed probe, `_run_tcp_check`, `_run_tcp_check_multi`
+  and `run_tcp_check_bridge` retry the curl worker against the remaining
+  candidate IPs with a short `RETRY_IP_TIMEOUT` (2s) budget; nfqws2/daemon is
+  started once. The used IP is recorded in `data["used_ip"]` / `TcpTestResult.used_ip`
+  and logged to the DB.
+- New `blockchecks.checkers.ip_pin` (parse/load/dump/save hosts-analog pins);
+  `DnsRunCache` gained `_pins`, `set_pins/add_pin/pinned_ip/pins/candidates/domains`.
+- Covered by `tests/unit/test_ip_pin.py` (9 tests); full unit suite passes.
+
 ### Added — byedpi (ciadpi) install + first selection-speed benchmark
 
 - Installed byedpi v0.17.3 (`ciadpi`) into `~/workspace/byedpi/` — SOCKS5
