@@ -4,7 +4,7 @@ _G.bs_active_id = 1
 _G.bs_active_gen = 0
 
 local function bs_l7_ok(l7)
-	return l7 == "tls_client_hello" or l7 == "http_req"
+	return l7 == "tls_client_hello" or l7 == "http_req" or l7 == "quic_initial"
 end
 
 function bs_poll_strategy(ctx, desync)

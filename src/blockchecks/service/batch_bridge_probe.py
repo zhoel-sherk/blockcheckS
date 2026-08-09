@@ -31,7 +31,21 @@ def run_tcp_check_bridge(
 ) -> dict:
     """Publish strategy id to shm IPC and curl (nfqws2 already running)."""
     is_http = protocol == "http"
-    is_gv = not is_http and is_googlevideo_domain(domain)
+    is_quic = protocol == "quic"
+    is_gv = not is_http and not is_quic and is_googlevideo_domain(domain)
+
+    session.bridge.truncate_events()
+    session.bridge.publish(strategy_id, gen, strategy if extra_lua_desync else None)
+
+    if is_quic:
+        data = _run_quic_bridge_probe(session.ns_name, python_bin, domain, timeout, resolved_ip)
+        data["settle_ms"] = 0.0
+        data["bridge_gen"] = gen
+        data["bridge_id"] = strategy_id
+        events = session.bridge.drain_events(since_gen=gen)
+        data["bridge_events"] = [e.event for e in events]
+        data["bridge_applied"] = any(e.event == "APPLIED" for e in events)
+        return data
 
     if is_gv:
         probe_req, gv_err = prepare_googlevideo_probe(domain, resolved_ip=resolved_ip)
@@ -47,9 +61,6 @@ def run_tcp_check_bridge(
             disable_ech=disable_ech,
             protocol=protocol,
         )
-
-    session.bridge.truncate_events()
-    session.bridge.publish(strategy_id, gen, strategy if extra_lua_desync else None)
 
     probe_req.timeout = timeout
     payload = {
@@ -75,3 +86,63 @@ def run_tcp_check_bridge(
     data["bridge_events"] = [e.event for e in events]
     data["bridge_applied"] = any(e.event == "APPLIED" for e in events)
     return data
+
+
+def _run_quic_bridge_probe(
+    ns_name: str,
+    python_bin: str,
+    domain: str,
+    timeout: float,
+    resolved_ip: str | None,
+) -> dict:
+    """HTTP/3 (QUIC) probe via check_http3 in the netns subprocess."""
+    import json
+    import subprocess as sp
+
+    resolved_ip_lit = repr(resolved_ip) if resolved_ip else "None"
+    check_code = f"""
+import json
+from blockchecks.checkers.http3 import check_http3
+r = check_http3({domain!r}, {timeout}, pre_resolved_ip={resolved_ip_lit})
+print(json.dumps({{
+    "success": r.success,
+    "http_code": r.http_status,
+    "latency_ms": r.latency_ms,
+    "content_len": r.content_length,
+    "content_ok": True,
+    "throttled": False,
+    "read_rate_bps": 0,
+    "error": r.error,
+    "http_version": r.http_version,
+}}))
+"""
+    try:
+        r = sp.run(
+            ["sudo", "ip", "netns", "exec", ns_name, python_bin, "-c", check_code],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,
+        )
+        return json.loads(r.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {
+            "success": False,
+            "http_code": 0,
+            "latency_ms": 0,
+            "content_len": 0,
+            "content_ok": False,
+            "throttled": False,
+            "read_rate_bps": 0,
+            "error": f"parse: {r.stdout[:100] if 'stdout' in dir() else 'quic bridge parse'}",
+        }
+    except sp.TimeoutExpired:
+        return {
+            "success": False,
+            "http_code": 0,
+            "latency_ms": 0,
+            "content_len": 0,
+            "content_ok": False,
+            "throttled": False,
+            "read_rate_bps": 0,
+            "error": "timeout",
+        }

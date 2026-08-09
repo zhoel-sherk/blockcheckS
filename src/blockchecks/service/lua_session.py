@@ -52,7 +52,7 @@ class BridgeSession:
         settle = start_daemon(self.ns_name, self.conf_path, kill_existing=True)
         if not self.iptables_ready:
             dport = "80" if self.protocol == "http" else "443"
-            _bridge_iptables_add(self.ns_name, dport)
+            _bridge_iptables_add(self.ns_name, dport, protocol=self.protocol)
             self.iptables_ready = True
         return settle
 

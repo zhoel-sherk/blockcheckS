@@ -94,12 +94,27 @@ def test_build_bridge_conf_http_protocol(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_build_bridge_conf_quic_protocol(tmp_path: Path) -> None:
+    ipc = tmp_path / "bs-p-quic"
+    conf = build_bridge_conf(
+        ["fake:blob=fake_default_quic:repeats=6"],
+        ipc,
+        protocol="quic",
+    )
+    assert "--filter-udp=443" in conf
+    assert "--filter-l7=quic" in conf
+    assert "--payload=quic_initial" in conf
+    assert "--lua-desync=scan_pick" in conf
+
+
+@pytest.mark.unit
 def test_scan_bridge_lua_accepts_http_req() -> None:
     from blockchecks.engine.config import get_blockchecks_lua_scripts
 
     lua = next(p for p in get_blockchecks_lua_scripts() if p.name == "scan_bridge.lua")
     text = lua.read_text(encoding="utf-8")
     assert "http_req" in text
+    assert "quic_initial" in text
     assert "bs_l7_ok" in text
 
 

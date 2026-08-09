@@ -824,6 +824,8 @@ async def run_quic_phase(ctx: FullRunContext) -> None:
 
         quic_done = quic_passed = quic_skipped = 0
 
+        use_bridge = resolve_probe_backend(args) == "lua_bridge" and not args.tcp_only
+
         async def _one_quic(item: StrategyItem, domain: str):
             nonlocal quic_done, quic_skipped, quic_passed
             if ctx.stop.is_set():
@@ -831,6 +833,16 @@ async def run_quic_phase(ctx: FullRunContext) -> None:
             if args.resume and await ctx.db.has_tcp_result(item.label, domain, proto="quic"):
                 quic_skipped += 1
                 quic_done += 1
+                return
+            if use_bridge:
+                batch = [item]
+                results = await ctx.runner._run_probe_batch(
+                    batch, domain, quic_timeout, "lua_bridge"
+                )
+                r = results[0] if results else None
+                quic_done += 1
+                if r and r.success:
+                    quic_passed += 1
                 return
             r = await ctx.runner.test_quic(item, domain, timeout=quic_timeout)
             quic_done += 1

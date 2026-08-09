@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from blockchecks.engine.config import NFQUEUE_TCP
+from blockchecks.engine.config import NFQUEUE_TCP, NFQUEUE_UDP
 
 
 class NetnsGoneError(RuntimeError):
@@ -45,9 +45,10 @@ def _netns_tcp_probe_cleanup(ns_name: str) -> None:
     )
 
 
-def _bridge_iptables_add(ns_name: str, dport: str) -> None:
+def _bridge_iptables_add(ns_name: str, dport: str, protocol: str = "tls12") -> None:
     import subprocess as sp
 
+    is_quic = protocol == "quic"
     _check_netns_exists(ns_name)
     sp.run(
         ["sudo", "ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT"],
@@ -66,13 +67,13 @@ def _bridge_iptables_add(ns_name: str, dport: str) -> None:
             "-A",
             "OUTPUT",
             "-p",
-            "tcp",
+            "udp" if is_quic else "tcp",
             "--dport",
             dport,
             "-j",
             "NFQUEUE",
             "--queue-num",
-            str(NFQUEUE_TCP),
+            str(NFQUEUE_UDP if is_quic else NFQUEUE_TCP),
             "--queue-bypass",
         ],
         capture_output=True,

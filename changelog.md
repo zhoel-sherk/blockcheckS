@@ -2,6 +2,24 @@
 
 ## 1.2.1a — unreleased
 
+### Added — QUIC/HTTP3 via Lua bridge + backend map in lua/README.md
+
+- **QUIC bridge**: `bs full` QUIC phase now groups strategies into a
+  `lua_bridge` batch when the backend is lua_bridge (default):
+  - `lua_conf._strategy_filter_lines` — new `protocol="quic"` branch:
+    `--filter-udp=443 --filter-l7=quic --payload=quic_initial` (UDP qnum).
+  - `lua_netns._bridge_iptables_add` — protocol-aware: UDP/NFQUEUE_UDP for quic.
+  - `lua_session.BridgeSession.boot` — passes protocol to iptables.
+  - `batch_bridge_probe.run_tcp_check_bridge` — `protocol=="quic"` probes via
+    `check_http3` in the netns subprocess (was curl-only).
+  - `scan_bridge.lua` `bs_l7_ok` accepts `quic_initial`.
+- **Classic QUIC fallback unchanged** (`fake→badsum→ip_ttl` in `test_quic`);
+  bridge QUIC uses the base strategy (no fallback chain yet).
+- **`lua/README.md`** — full backend map: what runs via Lua bridge vs classic
+  (TCP batch, QUIC batch vs single TCP, fan-out, pair, UDP voice).
+- Tests: `build_bridge_conf` quic branch, `scan_bridge.lua` accepts
+  `quic_initial`.
+
 ### Fixed — `--classic`/`--probe-backend` accepted on tcp/udp
 
 - `--classic` / `--probe-backend` are now valid on `bs tcp` and `bs udp`

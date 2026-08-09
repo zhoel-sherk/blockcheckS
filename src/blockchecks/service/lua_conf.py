@@ -11,6 +11,7 @@ from blockchecks.engine.blob_aliases import append_blob_cli_lines, extract_blob_
 from blockchecks.engine.config import (
     BLOB_DIR,
     NFQUEUE_TCP,
+    NFQUEUE_UDP,
     get_blockchecks_lua_scripts,
     get_lua_init_scripts,
 )
@@ -49,6 +50,16 @@ def _strategy_filter_lines(protocol: str) -> list[str]:
             "--ipcache-lifetime=0",
             "--bind-fix4",
             "--payload=http_req",
+        ]
+    if protocol == "quic":
+        return [
+            f"--qnum={NFQUEUE_UDP}",
+            "--filter-udp=443",
+            "--filter-l3=ipv4",
+            "--filter-l7=quic",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+            "--payload=quic_initial",
         ]
     return [
         f"--qnum={NFQUEUE_TCP}",
@@ -97,7 +108,6 @@ def build_bridge_conf(
     """Build nfqws2 flat conf: writable + scan_pick batch with strategy=1..N."""
     lines: list[str] = [
         f"--writable={ipc_dir}",
-        f"--qnum={NFQUEUE_TCP}",
     ]
     for lua in get_lua_init_scripts():
         if os.path.isfile(lua):
