@@ -131,3 +131,80 @@ def test_voice_udp_probe_both_fail():
 
     assert ok is False
     assert method == ""
+
+
+def test_voice_burst_probe_success():
+    from blockchecks.checkers.udp_voice import voice_burst_probe
+
+    sock = MagicMock()
+    sock.recvfrom.return_value = (b"\x80\x78" + b"\x00" * 40, ("35.217.3.3", 50004))
+
+    with patch("socket.socket", return_value=sock):
+        ok, ms, detail = voice_burst_probe(
+            "35.217.3.3", 50004, timeout=1.0, burst_bytes=17408, packet_size=1400
+        )
+
+    assert ok is True
+    assert "burst" in detail
+    # Total bytes sent must exceed 16KB (17408)
+    sent_bytes = sum(len(c[0][0]) for c in sock.sendto.call_args_list)
+    assert sent_bytes >= 17408
+    assert sent_bytes > 16384
+
+
+def test_voice_burst_probe_timeout():
+    from blockchecks.checkers.udp_voice import voice_burst_probe
+
+    sock = MagicMock()
+    sock.recvfrom.side_effect = TimeoutError
+
+    with patch("socket.socket", return_value=sock):
+        ok, ms, detail = voice_burst_probe(
+            "35.217.3.3", 50004, timeout=1.0, burst_bytes=17408, packet_size=1400
+        )
+
+    assert ok is False
+    assert "timeout" in detail
+
+
+def test_voice_udp_probe_try_burst_on_fail():
+
+    with (
+        patch(
+            "blockchecks.checkers.udp_voice.stun_probe",
+            return_value=(False, 1000.0, "timeout"),
+        ),
+        patch(
+            "blockchecks.checkers.udp_voice.ip_discovery_probe",
+            return_value=(False, 1000.0, "timeout"),
+        ),
+        patch(
+            "blockchecks.checkers.udp_voice.voice_burst_probe",
+            return_value=(True, 25.0, "X B UDP reply to 17408B burst"),
+        ),
+    ):
+        ok, ms, detail, method = voice_udp_probe("1.1.1.1", 50000, try_burst=True)
+
+    assert ok is True
+    assert method == "burst"
+    assert ms == 25.0
+
+
+def test_voice_udp_probe_no_burst_by_default():
+    with (
+        patch(
+            "blockchecks.checkers.udp_voice.stun_probe",
+            return_value=(False, 1000.0, "timeout"),
+        ),
+        patch(
+            "blockchecks.checkers.udp_voice.ip_discovery_probe",
+            return_value=(False, 1000.0, "timeout"),
+        ),
+        patch(
+            "blockchecks.checkers.udp_voice.voice_burst_probe",
+        ) as burst,
+    ):
+        ok, ms, detail, method = voice_udp_probe("1.1.1.1", 50000)
+
+    assert ok is False
+    burst.assert_not_called()

@@ -132,13 +132,72 @@ def ip_discovery_probe(
                 pass
 
 
+def voice_burst_probe(
+    ip: str,
+    port: int = 50004,
+    timeout: float = 3.0,
+    ssrc: int = 0,
+    burst_bytes: int = 17408,
+    packet_size: int = 1400,
+) -> tuple[bool, float, str]:
+    """UDP media-burst probe — simulate a voice stream >16KB.
+
+    The TSPU "voice traffic" heuristic keys on sustained transfer above the
+    16KB buffer (dpi-detector's TCP 16-20KB drop). A single STUN/IP-discovery
+    probe (20–74B) never triggers it; a burst of media-sized UDP packets
+    (default 17408 B total in 1400 B chunks, Opus-like) does.
+
+    Returns (ok, ms, detail). ``ok`` means the endpoint answered (any UDP
+    reply — the connection bypassed the DPI); a total timeout/RST means the
+    burst was dropped (blocked). Some endpoints only reply to an RTP-shaped
+    first packet, so we seed with a fake RTP header + SSRC.
+    """
+    sock = None
+    start = time.perf_counter()
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        # Fake RTP header (12B) + Opus payload for the first packet, then bulk.
+        rtp = struct.pack(">BBHII", 0x80, 0x78, 0, ssrc & 0xFFFFFFFF, 0)
+        payload = bytes((i * 7 + 3) & 0xFF for i in range(packet_size))
+        sent = 0
+        while sent < burst_bytes:
+            chunk = payload if sent > 0 else (rtp + payload[12:])
+            sock.sendto(chunk, (ip, port))
+            sent += len(chunk)
+        # Receive loop — wait for any reply while the burst settles.
+        data, addr = sock.recvfrom(512)
+        elapsed = (time.perf_counter() - start) * 1000
+        return True, elapsed, f"{len(data)}B UDP reply to {burst_bytes}B burst from {addr[0]}:{addr[1]}"
+    except TimeoutError:
+        elapsed = (time.perf_counter() - start) * 1000
+        return False, elapsed, f"timeout after {burst_bytes}B burst"
+    except OSError as e:
+        elapsed = (time.perf_counter() - start) * 1000
+        return False, elapsed, str(e)[:100]
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
 def voice_udp_probe(
-    ip: str, port: int = 50004, timeout: float = 3.0, ssrc: int = 0
+    ip: str,
+    port: int = 50004,
+    timeout: float = 3.0,
+    ssrc: int = 0,
+    try_burst: bool = False,
+    burst_bytes: int = 17408,
 ) -> tuple[bool, float, str, str]:
-    """Dual probe: RFC5389 STUN first, then Discord IP Discovery.
+    """Probe: RFC5389 STUN → Discord IP Discovery → optional UDP media burst.
 
     Returns (ok, latency_ms, detail, method) where method is
-    'rfc5389', 'ip_discovery', or ''.
+    'rfc5389', 'ip_discovery', 'burst', or ''.
+
+    ``try_burst`` appends the >16KB media burst (voice-traffic heuristic);
+    an endpoint that only answers a sustained stream is detected by it.
     """
     ok, ms, detail = stun_probe(ip, port, timeout)
     if ok:
@@ -146,6 +205,14 @@ def voice_udp_probe(
     ok2, ms2, detail2 = ip_discovery_probe(ip, port, ssrc=ssrc, timeout=timeout)
     if ok2:
         return True, ms2, detail2, "ip_discovery"
+    if try_burst:
+        ok3, ms3, detail3 = voice_burst_probe(
+            ip, port, timeout=timeout, ssrc=ssrc, burst_bytes=burst_bytes
+        )
+        if ok3:
+            return True, ms3, detail3, "burst"
+        if detail3 != "timeout":
+            return False, ms3, detail3, ""
     # Prefer the more informative failure (non-timeout wins)
     if detail2 != "timeout":
         return False, ms2, detail2, ""

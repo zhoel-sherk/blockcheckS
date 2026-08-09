@@ -693,9 +693,10 @@ def _run_udp_check(
     )
 
     probe_code = f"""
-import json
+import json, os
 from blockchecks.checkers.udp_voice import voice_udp_probe
-ok, lat, detail, method = voice_udp_probe({ip!r}, {port}, {timeout})
+_burst = os.environ.get("BLOCKCHECKS_VOICE_BURST", "").strip().lower() in ("1","true","on","yes")
+ok, lat, detail, method = voice_udp_probe({ip!r}, {port}, {timeout}, try_burst=_burst)
 print(json.dumps({{"success": ok, "latency_ms": lat,
     "detail": detail, "method": method}}))
 """

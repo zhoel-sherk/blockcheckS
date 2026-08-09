@@ -33,10 +33,32 @@ DNS_RANGE = (14000, 14148)
 VOICE_PORTS = [50000, 50001, 50002, 50003, 50004, 50005, 50006]
 
 # Maks-gaming discord-servers (daily GitHub Actions refresh)
+# Region-specific list; not every region is published under regions/ (russia /
+# frankfurt 404) — fall back to the global all-regions list below.
 MAKS_IP_LIST_URL = (
     "https://raw.githubusercontent.com/Maks-gaming/discord-servers/main"
     "/regions/{region}/{region}-voice-ip-list.txt"
 )
+MAKS_GLOBAL_IP_LIST_URL = (
+    "https://raw.githubusercontent.com/Maks-gaming/discord-servers/main"
+    "/data/voice-ip-list.txt"
+)
+# Region-prefixed hostnames (finland14000.discord.gg, frankfurt14000…) — used to
+# pick the region's endpoints out of the global list via DNS re-resolution.
+MAKS_GLOBAL_DOMAIN_LIST_URL = (
+    "https://raw.githubusercontent.com/Maks-gaming/discord-servers/main"
+    "/data/voice-domain-list.txt"
+)
+
+# Region prefixes → hostname prefixes in the domain list
+REGION_HOST_PREFIXES = {
+    "russia": "russia",
+    "frankfurt": "frankfurt",
+    "finland": "finland",
+    "warsaw": "warsaw",
+    "stockholm": "stockholm",
+    "us-east": "useast",
+}
 
 # Cache settings — XDG cache
 CACHE_TTL_SECONDS = 90 * 60  # 90 minutes
@@ -271,19 +293,69 @@ def parse_maks_ip_list(text: str) -> list[str]:
     return ips
 
 
-def fetch_maks_voice_ips(region: str = "finland", timeout: float = 5.0) -> list[str]:
-    """Fetch voice IPs from Maks-gaming discord-servers. Soft-fail → []."""
-    url = MAKS_IP_LIST_URL.format(region=region)
+def _maks_get(url: str, timeout: float) -> str | None:
+    """GET a Maks-gaming raw file; None on any error."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "blockcheckS"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8", errors="replace")
-        ips = parse_maks_ip_list(text)
-        print(f"[voice-dns] Maks-gaming ({region}): {len(ips)} IPs")
-        return ips
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-        print(f"[voice-dns] Maks-gaming fetch failed (continuing with DNS): {e}")
+            return resp.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+
+
+def fetch_maks_voice_ips(region: str = "finland", timeout: float = 5.0) -> list[str]:
+    """Fetch voice IPs from Maks-gaming discord-servers. Soft-fail → [].
+
+    Tries the region-specific list first; when the region is not published under
+    ``regions/`` (russia / frankfurt 404), falls back to the global
+    ``data/voice-ip-list.txt`` (all regions).
+    """
+    text = _maks_get(MAKS_IP_LIST_URL.format(region=region), timeout)
+    if text is None:
+        text = _maks_get(MAKS_GLOBAL_IP_LIST_URL, timeout)
+        if text is not None:
+            print(f"[voice-dns] Maks-gaming ({region}): region 404 → global list")
+    if text is None:
+        print("[voice-dns] Maks-gaming fetch failed (continuing with DNS)")
         return []
+    ips = parse_maks_ip_list(text)
+    print(f"[voice-dns] Maks-gaming ({region}): {len(ips)} IPs")
+    return ips
+
+
+def fetch_maks_region_ips(region: str = "russia", timeout: float = 8.0) -> list[str]:
+    """Fetch a region's voice IPs via the global domain list + DNS.
+
+    ``data/voice-domain-list.txt`` lists hosts like ``russia14000.discord.gg`` /
+    ``frankfurt14000.discord.gg``. We resolve the region-prefixed hosts to IPs
+    and return the unique set. This covers regions missing from ``regions/``.
+    """
+    text = _maks_get(MAKS_GLOBAL_DOMAIN_LIST_URL, timeout)
+    if not text:
+        return []
+    prefix = REGION_HOST_PREFIXES.get(region, region)
+    hosts: list[str] = []
+    for line in text.splitlines():
+        line = line.strip().lower()
+        if line.startswith(prefix) and line.endswith(".discord.gg"):
+            hosts.append(line)
+    if not hosts:
+        print(f"[voice-dns] Maks-gaming region '{region}': no matching hosts")
+        return []
+
+    async def _resolve_all():
+        sem = asyncio.Semaphore(32)
+        return await asyncio.gather(*(_resolve_host(h, sem=sem) for h in hosts))
+
+    results = asyncio.run(_resolve_all())
+    ips: list[str] = []
+    seen: set[str] = set()
+    for ip in results:
+        if ip and ip not in seen:
+            seen.add(ip)
+            ips.append(ip)
+    print(f"[voice-dns] Maks-gaming ({region}): {len(ips)} IPs from {len(hosts)} hosts")
+    return ips
 
 
 @contextmanager
@@ -374,6 +446,7 @@ async def discover_dns_alive(
     use_maks: bool = True,
     region: str = "finland",
     use_bootstrap: bool = True,
+    try_burst: bool = False,
 ) -> list[dict]:
     """Discover voice endpoints via DNS + Maks seed, filtered by dual UDP probe.
 
@@ -427,13 +500,24 @@ async def discover_dns_alive(
             dns_seed += 1
 
     if use_maks:
-        maks_ips = await asyncio.to_thread(fetch_maks_voice_ips, region)
-        random.shuffle(maks_ips)
-        for ip in maks_ips:
-            before = len(meta)
-            _add(ip, hostname=f"maks:{region}", source="maks-alive")
-            if len(meta) > before:
-                maks_seed += 1
+        # Region-specific endpoints (russia/frankfurt via domain list) first;
+        # fall back to the region IP list (or its global fallback).
+        region_ips = await asyncio.to_thread(fetch_maks_region_ips, region)
+        if region_ips:
+            random.shuffle(region_ips)
+            for ip in region_ips:
+                before = len(meta)
+                _add(ip, hostname=f"maks:{region}", source="maks-region")
+                if len(meta) > before:
+                    maks_seed += 1
+        else:
+            maks_ips = await asyncio.to_thread(fetch_maks_voice_ips, region)
+            random.shuffle(maks_ips)
+            for ip in maks_ips:
+                before = len(meta)
+                _add(ip, hostname=f"maks:{region}", source="maks-alive")
+                if len(meta) > before:
+                    maks_seed += 1
 
     ordered = list(meta.values())[:candidates]
     if not ordered:
@@ -452,7 +536,7 @@ async def discover_dns_alive(
         async def _probe(ep: dict) -> dict | None:
             async with sem:
                 ok, ms, _detail, method = await asyncio.to_thread(
-                    voice_udp_probe, ep["ip"], ep["port"], stun_timeout
+                    voice_udp_probe, ep["ip"], ep["port"], stun_timeout, try_burst=try_burst
                 )
                 if not ok:
                     return None

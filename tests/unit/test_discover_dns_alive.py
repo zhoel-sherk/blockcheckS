@@ -58,7 +58,7 @@ def test_udp_discover_bootstrap_noop_non_linux():
 
 
 def _fake_voice_probe(alive_ips):
-    def fake(ip, port, timeout=1.0, ssrc=0):
+    def fake(ip, port, timeout=1.0, ssrc=0, try_burst=False):
         if ip in alive_ips:
             return True, 12.5, "ok", "rfc5389"
         return False, 1000.0, "timeout", ""
@@ -85,6 +85,10 @@ async def test_discover_dns_alive_filters_dead():
         ),
         patch(
             "blockchecks.checkers.voice_dns.fetch_maks_voice_ips",
+            return_value=[],
+        ),
+        patch(
+            "blockchecks.checkers.voice_dns.fetch_maks_region_ips",
             return_value=[],
         ),
         patch(
@@ -152,6 +156,10 @@ async def test_discover_dns_alive_merges_maks_and_tags():
             return_value=["35.217.2.2", "35.217.1.1"],
         ),
         patch(
+            "blockchecks.checkers.voice_dns.fetch_maks_region_ips",
+            return_value=[],
+        ),
+        patch(
             "blockchecks.checkers.voice_dns._load_cache",
             return_value=None,
         ),
@@ -184,6 +192,10 @@ async def test_discover_dns_alive_maks_fetch_soft_fail():
         ),
         patch(
             "blockchecks.checkers.voice_dns.fetch_maks_voice_ips",
+            return_value=[],
+        ),
+        patch(
+            "blockchecks.checkers.voice_dns.fetch_maks_region_ips",
             return_value=[],
         ),
         patch(

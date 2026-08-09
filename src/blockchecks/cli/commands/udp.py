@@ -58,6 +58,8 @@ def cmd_udp(args):
                 discover_dns_alive(
                     count,
                     use_bootstrap=not getattr(args, "discover_dns_no_bootstrap", False),
+                    region=getattr(args, "voice_region", None) or "finland",
+                    try_burst=bool(getattr(args, "voice_burst", False)),
                 )
             )
             if multi_eps:

@@ -2,6 +2,24 @@
 
 ## 1.2.1a — unreleased
 
+### Added — Discord voice region endpoints + UDP >16KB media-burst probe
+
+- **`--voice-region`** / `BLOCKCHECKS_VOICE_REGION` — select a Discord voice
+  region for endpoint discovery (`finland`/`russia`/`frankfurt`/…). `discover_dns_alive`
+  seeds region IPs from Maks-gaming; when a region is not published under
+  `regions/` (russia/frankfurt 404), it falls back to the **global**
+  `data/voice-ip-list.txt` (all regions) + region-host DNS resolution.
+  Verified live: `bs udp --discover-dns 3 --voice-region russia` → 3/3 PASS.
+- **`--voice-burst`** — `voice_burst_probe()` sends a **>16KB UDP media burst**
+  (RTP-shaped, Opus-like chunks) to trigger the TSPU "voice traffic" heuristic
+  (dpi-detector's 16-20KB drop). `voice_udp_probe` now tries STUN →
+  IP-Discovery → burst. Wired through `_probe_worker` (`--burst`) and the
+  async inline probe (`BLOCKCHECKS_VOICE_BURST`).
+- `checkers/voice_dns.py`: `fetch_maks_region_ips()` (region via global domain
+  list + DNS), `MAKS_GLOBAL_IP_LIST_URL`, `REGION_HOST_PREFIXES`.
+- Tests: `test_udp_voice_probes.py` burst success/timeout/try_burst (4),
+  `test_probe_worker.py` burst flag (2).
+
 ### Changed — googlevideo always uses the deterministic GGC probe (auto-fallback)
 
 - **`config.ggc_enabled(domain)`** replaces the `GGC_ENABLED` constant: any

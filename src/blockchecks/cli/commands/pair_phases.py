@@ -285,6 +285,8 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
             multi_eps = await discover_dns_alive(
                 count,
                 use_bootstrap=not getattr(args, "discover_dns_no_bootstrap", False),
+                region=getattr(args, "voice_region", None) or "finland",
+                try_burst=bool(getattr(args, "voice_burst", False)),
             )
             if multi_eps:
                 for ep in multi_eps[:3]:

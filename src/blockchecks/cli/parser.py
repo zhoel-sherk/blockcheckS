@@ -371,6 +371,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="DNS + gateway discover via sing-box (VPN path)",
     )
+    udp.add_argument(
+        "--voice-region",
+        default=os.environ.get("BLOCKCHECKS_VOICE_REGION", "finland"),
+        metavar="REGION",
+        help="Discord voice region for endpoint discovery "
+        "(finland/russia/frankfurt/…; default BLOCKCHECKS_VOICE_REGION or finland)",
+    )
+    udp.add_argument(
+        "--voice-burst",
+        action="store_true",
+        help="Also probe with a >16KB UDP media burst (voice-traffic heuristic; "
+        "detects endpoints that only answer a sustained stream)",
+    )
     udp.add_argument("--timeout", type=float, default=3.0)
     udp.add_argument("--qnum", type=int, default=201)
     udp.add_argument("--ns")
@@ -530,6 +543,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="DNS + gateway discover via sing-box (VPN path)",
+    )
+    pair.add_argument(
+        "--voice-region",
+        default=os.environ.get("BLOCKCHECKS_VOICE_REGION", "finland"),
+        metavar="REGION",
+        help="Discord voice region for endpoint discovery "
+        "(finland/russia/frankfurt/…; default BLOCKCHECKS_VOICE_REGION or finland)",
+    )
+    pair.add_argument(
+        "--voice-burst",
+        action="store_true",
+        help="Also probe with a >16KB UDP media burst (voice-traffic heuristic)",
     )
     pair.add_argument("--full-voice", action="store_true")
     pair.add_argument("--udp-bypass", action="store_true")
