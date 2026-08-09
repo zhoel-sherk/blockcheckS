@@ -39,7 +39,10 @@ Entry points: `bs` → `blockchecks.bs:main`, `bc-main`, `bc-nfconf`.
 
 **Recommended:** `pip install -e .` from git checkout.
 
-`PROJECT_DIR` in `config.py` resolves repo root (parent of `src/`). Runtime paths:
+`PROJECT_DIR` in `config.py` resolves repo root (parent of `src/`). For a plain
+`pip install` wheel (no checkout), it falls back to `sys.prefix/blockchecks`,
+where `[tool.setuptools.data-files]` ships `blobs/`, `configs/`, `lua/` and
+`presets/` — the wheel is self-sufficient. Runtime paths:
 
 - `configs/*.conf` — repo root only (`PROJECT_DIR`)
 - `presets/` — repo root (shipped catalog)
@@ -61,9 +64,9 @@ See [`engine/paths.py`](../src/blockchecks/engine/paths.py) and [`settings.examp
 Legacy CWD-relative `--db state.db` still works when passed explicitly.
 
 `MANIFEST.in` includes `configs/*.conf` in **sdist** for source distributions.
-Plain `pip install` wheel without checkout may not find configs — use editable
-install or clone repo. This is intentional (not the same as **BLOB-1**
-`presets/blobs/` manifest).
+Since 1.2.1a the wheel also carries baked data via `[tool.setuptools.data-files]`,
+so a plain `pip install` wheel is self-sufficient (no editable install / clone
+needed). `BLOCKCHECKS_BLOBS`/`BLOCKCHECKS_LUA_DIR` still override at runtime.
 
 ### Tools / zapret2 vendor (1.0.1)
 

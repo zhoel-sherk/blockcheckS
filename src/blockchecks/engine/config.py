@@ -17,8 +17,17 @@ _REPO_CANDIDATE = os.path.dirname(_PARENT)  # repo root (editable src layout)
 
 
 def _resolve_project_dir() -> str:
-    """Repo root (editable) or package dir (wheel with packaged configs)."""
-    for candidate in (_REPO_CANDIDATE, _PARENT, _PACKAGE_DIR):
+    """Repo root (editable) or package dir (wheel with packaged configs).
+
+    Wheel data (blobs/configs/lua via [tool.setuptools.data-files]) lands under
+    ``sys.prefix/blockchecks`` (PEP 427 install scheme), not inside
+    site-packages — check it as a fallback so a plain ``pip install`` wheel is
+    self-sufficient.
+    """
+    candidates = [_REPO_CANDIDATE, _PARENT, _PACKAGE_DIR]
+    if sys.prefix != _PARENT:
+        candidates.append(os.path.join(sys.prefix, "blockchecks"))
+    for candidate in candidates:
         if os.path.isdir(os.path.join(candidate, "configs")):
             return candidate
     # Editable src/ layout without relying on configs/

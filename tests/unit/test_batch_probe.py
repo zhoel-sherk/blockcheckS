@@ -505,3 +505,88 @@ async def test_recycle_preserves_strategy_idx_and_events() -> None:
         assert len(published) == 3
     finally:
         bp.BridgeSession = original
+
+
+@pytest.mark.unit
+async def test_debug_env_toggle_restarts_lua_daemon() -> None:
+    """SIGUSR1 debug toggle: env change mid-batch forces a daemon reboot."""
+    import os
+
+    booted = 0
+
+    class FakeSession:
+        ns_name = "bs-p-0"
+
+        def __init__(self, **_k) -> None:
+            self.bridge = MagicMock()
+            self.bridge.truncate_events = MagicMock()
+            self.bridge.publish = MagicMock()
+            self.bridge.drain_events = MagicMock(return_value=[])
+
+        def boot(self) -> float:
+            nonlocal booted
+            booted += 1
+            return 0.1
+
+        def shutdown(self) -> None:
+            pass
+
+    import blockchecks.service.batch_service as bp
+
+    original = bp.BridgeSession
+    bp.BridgeSession = FakeSession
+    os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+    try:
+        deps = RunnerProbeDeps(
+            python="python3",
+            disable_ech=False,
+            repeats=1,
+            parallel_repeats=False,
+            repeats_mode="fast",
+            quick_break=False,
+            try_wssize=False,
+            lua_extra=[],
+            timing_for=lambda item, t: (t, None),
+            resolve_domain_dns=AsyncMock(return_value=(None, "", "")),
+            tcp_result_from_data=lambda item, domain, data: MagicMock(success=True),
+            log_tcp_result=AsyncMock(),
+            next_probe_gen=lambda: 1,
+            run_tcp_check=lambda *a, **k: {"success": True},
+            acquire_ns=AsyncMock(return_value="bs-p-0"),
+            release_ns=AsyncMock(),
+        )
+        svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), deps)
+
+        # SIGUSR1 arrives mid-batch: _debug_env() flips between boots → restart.
+        seq = iter(["" , "1", "1"])
+        calls = {"boots": 0, "env_calls": 0}
+
+        def fake_debug_env():
+            calls["env_calls"] += 1
+            try:
+                return next(seq)
+            except StopIteration:
+                return "1"
+
+        orig_debug_env = bp._debug_env
+        bp._debug_env = fake_debug_env
+        orig_boot = FakeSession.boot
+
+        def booting(self):
+            calls["boots"] += 1
+            return 0.1
+
+        FakeSession.boot = booting
+        ctx = BatchContext(
+            ns_name="",
+            items=[_item("a"), _item("b")],
+            domain="discord.com",
+            batch_id=5,
+        )
+        await svc.run_batch(ctx, 5.0)
+        assert calls["boots"] >= 2, f"expected restart on debug toggle, boots={calls['boots']}"
+    finally:
+        FakeSession.boot = orig_boot
+        bp._debug_env = orig_debug_env
+        bp.BridgeSession = original
+        os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)

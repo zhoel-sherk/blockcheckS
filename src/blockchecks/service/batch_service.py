@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,11 @@ from blockchecks.service.lua_session import BridgeSession, strategy_text_from_it
 
 CYAN = Fore.CYAN + Style.BRIGHT
 RESET = Style.RESET_ALL
+
+
+def _debug_env() -> str:
+    """Current nfqws2 --debug env value ('' when disabled)."""
+    return os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
 
 
 class ProbeBatchService:
@@ -170,11 +176,23 @@ class ProbeBatchService:
         recycled = 0
         try:
             settle_ms = session.boot() * 1000
+            boot_debug = _debug_env()
             self._record_daemon_mem(ns_name)
             for idx, (item, dom) in enumerate(
                 zip(ctx.items, ctx.item_domains(), strict=False), start=1
             ):
                 if self._maybe_recycle(ns_name, session):
+                    recycled += 1
+                    boot_debug = _debug_env()
+                elif _debug_env() != boot_debug:
+                    # SIGUSR1 toggled nfqws2 --debug while this batch was running:
+                    # restart the daemon so the next probe picks it up.
+                    print(
+                        f"  {Fore.YELLOW}[debug] restarting nfqws2 in {ns_name} "
+                        f"(debug={'1' if _debug_env() else '0'}){Style.RESET_ALL}"
+                    )
+                    session.boot()
+                    boot_debug = _debug_env()
                     recycled += 1
                 gen = self.deps.next_probe_gen()
                 timeout_i, _ = self.deps.timing_for(item, timeout)

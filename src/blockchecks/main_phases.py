@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import time
 from dataclasses import dataclass, field
@@ -115,6 +116,7 @@ class FullRunContext:
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     deadline: RunDeadline | None = None
     signal_interrupted: bool = False
+    debug_requested: bool = False
     aq_result: Any = None
     voice_eps: list = field(default_factory=list)
     repeats: int = 0
@@ -436,12 +438,35 @@ def arm_stop_handlers(ctx: FullRunContext) -> None:
             ctx.deadline.reason = "signal"
         ctx.stop.set()
 
+    def _debug(*_a):
+        """SIGUSR1: toggle nfqws2 --debug on the next daemon boot (recycle)."""
+        currently = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
+        if currently in ("1", "true", "on", "yes"):
+            os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+            print(
+                f"  {YELLOW}[debug] SIGUSR1 — nfqws2 --debug OFF on next restart{RESET}",
+                flush=True,
+            )
+        else:
+            os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = "1"
+            ctx.debug_requested = True
+            print(
+                f"  {YELLOW}[debug] SIGUSR1 — nfqws2 --debug will be enabled "
+                f"on the next daemon start{RESET}",
+                flush=True,
+            )
+
     try:
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGINT, _stop)
         loop.add_signal_handler(signal.SIGTERM, _stop)
+        loop.add_signal_handler(signal.SIGUSR1, _debug)
     except (NotImplementedError, RuntimeError):
         signal.signal(signal.SIGINT, lambda *_: _stop())
+        try:
+            signal.signal(signal.SIGUSR1, lambda *_: _debug())
+        except (AttributeError, OSError):
+            pass
 
 
 async def arm_run_deadline(ctx: FullRunContext) -> None:

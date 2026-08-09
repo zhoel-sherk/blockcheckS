@@ -217,12 +217,26 @@ def register_stop_handlers(
     def _request_stop():
         state.request_stop(deadline, stop_event)
 
+    def _toggle_debug():
+        currently = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
+        if currently in ("1", "true", "on", "yes"):
+            os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+            print("  [debug] SIGUSR1 — nfqws2 --debug OFF on next restart", flush=True)
+        else:
+            os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = "1"
+            print("  [debug] SIGUSR1 — nfqws2 --debug ON on next restart", flush=True)
+
     try:
         loop.add_signal_handler(signal.SIGINT, _request_stop)
         loop.add_signal_handler(signal.SIGTERM, _request_stop)
+        loop.add_signal_handler(signal.SIGUSR1, _toggle_debug)
     except (NotImplementedError, RuntimeError):
         signal.signal(signal.SIGINT, lambda *_: _request_stop())
         signal.signal(signal.SIGTERM, lambda *_: _request_stop())
+        try:
+            signal.signal(signal.SIGUSR1, lambda *_: _toggle_debug())
+        except (AttributeError, OSError):
+            pass
 
 
 async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | None]:

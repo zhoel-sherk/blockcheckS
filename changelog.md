@@ -2,6 +2,24 @@
 
 ## 1.2.1a — unreleased
 
+### Added — wheel self-contained data + runtime nfqws2 debug (2026-08-09)
+
+- **Wheel now ships baked data** (`[tool.setuptools.data-files]`): `blobs/*.bin`
+  (23), `configs/*.conf` (28), `lua/blockchecks/*.lua` (3), `presets/strategies`,
+  `presets/domains`, `presets/voice`. A plain `pip install` wheel is
+  self-sufficient — no editable install required.
+- `engine/config.py` — `_resolve_project_dir()` falls back to
+  `sys.prefix/blockchecks` (where PEP 427 data-files land) so `PROJECT_DIR`,
+  `BLOB_DIR`, `REPO_LUA_DIR` and presets resolve from the installed package.
+  Verified: wheel installed in a clean venv resolves blobs/configs/lua/presets.
+- **Runtime nfqws2 --debug toggle (SIGUSR1)** — must-have for multi-hour scans:
+  `SIGUSR1` toggles `BLOCKCHECKS_NFQWS2_DEBUG` and restarts the bridge daemon on
+  the next probe (reuses `BridgeSession.boot()` / recycle path). `bs full` and
+  `bs scan`/`pair` both handle SIGUSR1. Verified live: SIGUSR1 ON → daemon
+  restarts with `--debug`, `nfqws2_*.log` written (3337 B, zhoel-owned); second
+  SIGUSR1 → debug OFF. Works without stopping the campaign.
+- Tests: debug-env toggle forces lua daemon restart.
+
 ### Fixed (logging + XDG audit 2026-08-09)
 
 - `cli/cliapp.py` — **`--nfqws2-debug` was silently ignored on the main CliApp

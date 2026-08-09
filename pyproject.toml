@@ -38,9 +38,17 @@ youtube = ["yt-dlp>=2024.1.0"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# configs/*.conf and presets/* ship via MANIFEST.in (sdist).
-# For wheel installs (pip install .), editable install (-e) is required
-# so PROJECT_DIR resolves to the source tree. See docs/package.md (ONB-7).
+# BLOB-1: ship baked data inside the package so a plain `pip install` wheel is
+# self-sufficient (no editable install required). data-files land under
+# site-packages/blockchecks/{blobs,configs,lua}; config.PROJECT_DIR resolves
+# to the package dir when configs/ is present there.
+[tool.setuptools.data-files]
+"blockchecks/blobs" = ["blobs/*.bin"]
+"blockchecks/configs" = ["configs/*.conf"]
+"blockchecks/lua/blockchecks" = ["lua/blockchecks/*.lua"]
+"blockchecks/presets/strategies" = ["presets/strategies/*.tls", "presets/strategies/*.txt"]
+"blockchecks/presets/domains" = ["presets/domains/*.txt"]
+"blockchecks/presets/voice" = ["presets/voice/*.txt"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
