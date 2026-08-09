@@ -1,7 +1,8 @@
 # blockcheckS custom Lua (nfqws2 bridge)
 
-Loaded via `--lua-init` when `--lua-bridge` is enabled. See
-[docs/custom_lua.md](../docs/custom_lua.md).
+Loaded via `--lua-init` when `--lua-bridge` is enabled. См. также
+[docs/custom_lua.md](../docs/custom_lua.md) — источник идей: `scan_pick`,
+`smart_fallback` и hot-swap реализованы; §3–§5, §14 — backlog.
 
 ## Структура
 

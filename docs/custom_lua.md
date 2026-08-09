@@ -1,10 +1,12 @@
 # Custom Lua для nfqws2 × blockcheckS
 
-> **Статус:** design doc (не реализовано)  
+> **Статус:** реализовано (`scan_pick`, `smart_fallback`, hot-swap `/dev/shm`,
+> `write_ipc`) + backlog идей (§3–§5, §14). См. [lua/README.md](../lua/README.md)
+> для карты backend.  
 > **Upstream:** [zapret2/nfqws2](https://github.com/bol-van/zapret2) — `zapret-lib.lua`, `zapret-antidpi.lua`, `zapret-auto.lua`  
 > **Связанные:** [architecture.md](architecture.md), [byedpi_engine.md](byedpi_engine.md), [todo.md](todo.md) T3-4
 
-Документ описывает, как **кастомные Lua-скрипты** могут усилить blockcheckS: что уже есть в nfqws2, что из идей реализуемо без fork C, и как это стыкуется с Python-раннером.
+Документ описывает, как **кастомные Lua-скрипты** могут усилить blockcheckS: что уже есть в nfqws2, что из идей реализуемо без fork C, и как это стыкуется с Python-раннером. Секции с маркером `✅ done` реализованы; с `— backlog` — идеи на будущее.
 
 ---
 
@@ -26,7 +28,7 @@ blockcheckS собирает flat `.conf` и запускает daemon в netns:
 --lua-desync=fake:blob=max_ru:repeats=6:tcp_ts=-1000   # multiline chain
 ```
 
-Код: `nfqws2.py`, `async_runner.py`, `config.py` (`LUA_INIT_SCRIPTS`).
+Код: `service/nfqws2.py`, `async_runner.py`, `config.py` (`LUA_INIT_SCRIPTS`).
 
 ### 1.2 Модель выполнения (важно для дизайна)
 
@@ -79,7 +81,7 @@ presets/lua/            # опциональные one-liner стратегии
 
 ---
 
-## 3. Идея 1 — Genetic LUA-мутатор фейков (payload-randomizer)
+## 3. Идея 1 — Genetic LUA-мутатор фейков (payload-randomizer) — backlog
 
 ### Проблема
 
@@ -153,7 +155,7 @@ end
 
 ---
 
-## 4. Идея 2 — LUA-валидатор фейков (anti-tamper-assert)
+## 4. Идея 2 — LUA-валидатор фейков (anti-tamper-assert) — backlog
 
 ### Проблема
 
@@ -233,7 +235,7 @@ iptables -A INPUT -p tcp --sport 443 -j NFQUEUE --queue-num 200 --queue-bypass
 
 ---
 
-## 5. Идея 3 — Динамический активатор по команде из Python (lua-signal-bridge)
+## 5. Идея 3 — Динамический активатор по команде из Python (lua-signal-bridge) — backlog
 
 ### Проблема
 
@@ -308,7 +310,7 @@ Conf содержит **все** стратегии batch (например 200)
 
 ---
 
-## 6. Идея 4 — Реактивный failover по метрикам DPI (smart-fallback)
+## 6. Идея 4 — Реактивный failover по метрикам DPI (smart-fallback) — ✅ done
 
 ### Проблема
 
@@ -367,7 +369,7 @@ end
 
 ---
 
-## 7. Идея 5 — Hot-swap через `/dev/shm` и `_G` (file poll)
+## 7. Идея 5 — Hot-swap через `/dev/shm` и `_G` (file poll) — ✅ done
 
 ### 7.1 Проблема: где именно упирается restart
 
@@ -387,7 +389,7 @@ async_runner.test_tcp()
   pool.release(ns) → _cleanup_ns: pkill nfqws2 + iptables -F OUTPUT
 ```
 
-Код: `async_runner.py` (`_run_tcp_check`), `nfqws2.py` (`start_daemon`), `netns_pool.py` (`_cleanup_ns`).
+Код: `async_runner.py` (`_run_tcp_check`), `service/nfqws2.py` (`start_daemon`), `service/netns_pool.py` (`_cleanup_ns`).
 
 #### Бюджет времени на один TLS-probe (FAIL, wssize retry)
 
@@ -779,7 +781,7 @@ Preset: `presets/strategies/gp-custom-dupfake.tls` (comments only today).
 
 ## 9. Интеграция в blockcheckS (чеклист)
 
-### 9.1 ProbeBatchService (`engine/batch_probe.py`)
+### 9.1 ProbeBatchService (`service/batch_probe.py`) — ✅ done
 
 Единый сервис batch-прогона: **boot batch → probe ×N → shutdown**.
 
@@ -801,7 +803,7 @@ CLI: `scan`/`pair`/`full` — `--lua-bridge`, `--bridge-batch`, `--lua-bridge-co
 
 Поэтапный flip default → `lua_bridge`: см. `docs/todo.md` (L-transition-*).
 
-### 9.2 nfqws2.conf generation (lua_bridge)
+### 9.2 nfqws2.conf generation (lua_bridge) — ✅ done
 
 ```python
 lines.append("--writable=/dev/shm/blockchecks/{ns}")
@@ -810,9 +812,9 @@ lines.append("--lua-desync=scan_pick")
 # ... strategy=1..N groups
 ```
 
-Реализовано в `lua_bridge.build_bridge_conf()`.
+Реализовано в `service/lua_conf.py` (`build_bridge_conf`, `write_bridge_conf`).
 
-### 9.3 Python IPC helpers
+### 9.3 Python IPC helpers — ✅ done
 
 ```python
 class LuaBridge:
@@ -820,7 +822,9 @@ class LuaBridge:
     def drain_events(self, since_gen: int = 0) -> list[BridgeEvent]: ...
 ```
 
-Реализовано в `engine/lua_bridge.py` (`BridgeSession.boot` / `shutdown`).
+Реализовано в `service/lua_bridge_ipc.py` (`LuaBridge`),
+`service/lua_session.py` (`BridgeSession.boot` / `shutdown`),
+`service/lua_netns.py` (iptables).
 
 ### 9.4 async_runner branch
 
@@ -881,22 +885,25 @@ class LuaBridge:
 | nfqws2 manual (EN) | `/opt/zapret2/docs/manual.en.md` |
 | Orchestrators | `zapret-auto.lua` — `circular`, `repeater`, `condition`, `stopif` |
 | Desync functions | `zapret-antidpi.lua` — `fake`, `multisplit`, … |
-| blockcheckS nfqws2 lifecycle | `src/blockchecks/engine/nfqws2.py` |
+| blockcheckS nfqws2 lifecycle | `src/blockchecks/service/nfqws2.py` |
 | Keenetic circular scaffold | `src/blockchecks/engine/conf_builder.py` |
 | Hot-reload todo | `docs/todo.md` T3-4 |
 | ByeByeDPI probe parity | `docs/byedpi_engine.md` §8.5 |
 
 ---
 
-## 13. Краткий ответ на «можем ли кастомный fast circular»
+## 13. Краткий ответ на «можем ли кастомный fast circular» — ✅ done (historical)
 
 **Да, но не через `circular`.** Нужен **`scan_pick` + file/timer bridge**: один nfqws2, Python пишет `strategy.id` в `/dev/shm`, Lua на ClientHello применяет нужную группу, `smart_fallback` шлёт `STRATEGY_FAIL` для early abort. Это даёт скорость близкую к «без restart», с **детерминизмом** blockcheckS matrix.
 
 `circular` оставить для **keenetic export** и production failover ([conf_builder.py](https://github.com/zhoel-sherk/blockcheckS/blob/alpha/src/blockchecks/engine/conf_builder.py) scaffold).
 
+> **Примечание:** это уже реализовано — `scan_pick` + `/dev/shm` IPC + `smart_fallback`
+> (см. `lua/blockchecks/`, `service/lua_bridge_ipc.py`, `service/batch_probe.py`).
+
 ---
 
-## 14. Новые идеи (вне документа)
+## 14. Новые идеи (вне документа) — backlog
 
 ### 14.1 `parallel_fake` — мульти-фейк в одном проходе
 

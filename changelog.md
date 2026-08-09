@@ -2,6 +2,17 @@
 
 ## 1.2.1a — unreleased
 
+### Docs — refresh `docs/custom_lua.md` (paths + done/backlog markers)
+
+- Fixed stale module paths after the service-layer refactor:
+  `engine/lua_bridge.py` → `service/lua_bridge_ipc.py` (+ lua_conf/lua_session/
+  lua_netns), `engine/batch_probe.py` → `service/batch_probe.py`,
+  `engine/nfqws2.py` / `engine/netns_pool.py` → `service/…`.
+- Marked implemented sections `✅ done` (scan_pick hot-swap §7, smart-fallback
+  §6, ProbeBatchService/build_bridge_conf/BridgeSession §9, circular answer §13)
+  and ideation `— backlog` (§3–§5, §14). Status banner now reflects reality.
+- `lua/README.md` — notes custom_lua.md as the idea source (done + backlog).
+
 ### Added — QUIC/HTTP3 via Lua bridge + backend map in lua/README.md
 
 - **QUIC bridge**: `bs full` QUIC phase now groups strategies into a
