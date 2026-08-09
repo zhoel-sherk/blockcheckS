@@ -2,6 +2,19 @@
 
 ## 1.2.1a — unreleased
 
+### Added — voice-traffic >16KB preflight check + provider-result → AQ weights
+
+- **Preflight UDP >16KB check** (`preflight.check_udp_16kb`, `PreflightReport.
+  udp_16kb_blocked`): during startup, sends a >16KB UDP media burst to a
+  discovered Discord voice endpoint to detect whether the TSPU drops the voice
+  stream (dpi-detector analogue). Result feeds strategy selection.
+- **Provider → AQ weight orchestration** (`adaptive_runner._apply_provider_weights`):
+  `build_adaptive_queue` now reads `data_block` pass_strategies
+  (`approved_only`) and boosts family/blob/cluster weights for strategies the
+  provider already saw pass on the scanned domains — the adaptive scan tests
+  the most promising candidates first. Wired into `bs full` AQ path.
+- Tests: provider-weight boost + cross-domain skip (`test_adaptive_runner.py`).
+
 ### Added — Discord voice region endpoints + UDP >16KB media-burst probe
 
 - **`--voice-region`** / `BLOCKCHECKS_VOICE_REGION` — select a Discord voice

@@ -102,6 +102,8 @@ class PreflightReport:
     skip_domains: set[str] = field(default_factory=set)
     port_reports: list[PortBlockReport] = field(default_factory=list)
     ip_reports: list[IpBlockReport] = field(default_factory=list)
+    udp_16kb_blocked: bool = False
+    udp_16kb_detail: str = ""
     exit_code: int = 0
     error: str = ""
 
@@ -299,6 +301,14 @@ async def run_preflight_async(
     if not o.skip_dns_audit and cache and o.store:
         await _audit_domains_parallel(domains, cache, o.timeout, store=o.store)
 
+    # ── UDP voice-traffic >16KB check (dpi-detector analogue) ──
+    # Simulate a voice stream to a Discord voice endpoint; a sustained >16KB
+    # burst tells us whether the TSPU "voice" heuristic applies (endpoint
+    # answers) or the transfer is dropped (blocked). Feeds strategy selection.
+    report.udp_16kb_blocked, report.udp_16kb_detail = check_udp_16kb(o.timeout)
+    if report.udp_16kb_detail:
+        print(f"  UDP 16KB voice check: {report.udp_16kb_detail}")
+
     ref = report.baseline_domain or (o.unblocked_dom or UNBLOCKED_DOM).rstrip(".")
     for domain in domains:
         ips: list[str] = []
@@ -338,3 +348,53 @@ async def run_preflight_async(
             print_ip_block_report(ip_r)
 
     return report
+
+
+def check_udp_16kb(timeout: float = 5.0) -> tuple[bool, str]:
+    """UDP voice-traffic >16KB check (dpi-detector analogue).
+
+    Sends a >16KB UDP media burst to a discovered Discord voice endpoint.
+    ``blocked=True`` means the burst was dropped (TSPU cut the voice stream);
+    ``blocked=False`` means an endpoint answered (voice heuristic applies /
+    transfer survives). Returns (blocked, detail).
+    """
+    from blockchecks.checkers.udp_voice import voice_burst_probe
+
+    try:
+        endpoints = _voice_endpoint_candidates()
+    except Exception:
+        endpoints = []
+    if not endpoints:
+        return False, "no voice endpoint candidates"
+
+    ok_count = 0
+    for ip, port in endpoints[:3]:
+        ok, _ms, detail = voice_burst_probe(ip, port, timeout=min(timeout, 3.0))
+        if ok:
+            ok_count += 1
+        elif "timeout" in detail:
+            return True, f"burst dropped (blocked) at {ip}:{port}"
+    if ok_count:
+        return False, f"{ok_count}/{len(endpoints[:3])} endpoints answered burst (>16KB)"
+    return True, "all endpoints dropped burst (>16KB) — voice stream likely blocked"
+
+
+def _voice_endpoint_candidates() -> list[tuple[str, int]]:
+    """Short list of voice endpoint IP:port candidates (cache → default)."""
+    from blockchecks.engine.paths import VOICE_DNS_CACHE_FILE
+
+    try:
+        import json as _json
+
+        if VOICE_DNS_CACHE_FILE.is_file():
+            data = _json.loads(VOICE_DNS_CACHE_FILE.read_text(encoding="utf-8"))
+            eps = data.get("endpoints", [])
+            if eps:
+                return [
+                    (e["ip"], int(e.get("port", 50004)))
+                    for e in eps[:3]
+                    if e.get("ip")
+                ]
+    except Exception:
+        pass
+    return [("35.217.42.214", 50004)]

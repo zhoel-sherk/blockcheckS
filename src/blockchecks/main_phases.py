@@ -502,6 +502,15 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     async def _resume_job(job):
         return (job.item.label, job.domain) in completed_tcp
 
+    provider_store = None
+    try:
+        from blockchecks.data_block.provider import get_provider_dir
+        from blockchecks.data_block.store import ProviderStore
+
+        provider_store = ProviderStore(get_provider_dir())
+    except Exception:
+        provider_store = None
+
     queue, skipped = await build_adaptive_queue(
         ctx.tcp_items,
         ctx.domains,
@@ -509,6 +518,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         epsilon=getattr(args, "adaptive_epsilon", 0.1),
         load_weights=not getattr(args, "no_adaptive_weights", False),
         resume_check=_resume_job if args.resume else None,
+        provider_store=provider_store,
     )
     progress.done = skipped
     progress.report()

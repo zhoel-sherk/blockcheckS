@@ -116,3 +116,51 @@ async def test_run_adaptive_tcp_stops_on_stop_event():
     assert result.done == 1
     assert result.passed == 1
     assert len(queue) > 0
+
+
+@pytest.mark.asyncio
+async def test_build_adaptive_queue_provider_weights():
+    """Provider pass_strategies boost AQ family weights for approved strategies."""
+    from blockchecks.engine.adaptive_queue import ScanWeights
+    from blockchecks.engine.adaptive_runner import _apply_provider_weights
+
+    class FakeProviderStore:
+        async def pass_strategies(self, *, approved_only=False):
+            return [
+                {
+                    "strategy": "fake:blob=stun:repeats=6:tcp_ts=-1000",
+                    "domain": "discord.com",
+                    "protocol": "tcp",
+                    "approved": 1,
+                }
+            ]
+
+    weights = ScanWeights()
+    await _apply_provider_weights(
+        FakeProviderStore(),
+        weights,
+        ["discord.com", "youtube.com"],
+    )
+    # fake family gets boosted by the provider-approved strategy
+    assert any(v > 1.0 for v in weights.family.values())
+
+
+@pytest.mark.asyncio
+async def test_build_adaptive_queue_provider_skips_other_domain():
+    """Provider strategies for domains outside the scan are not boosted."""
+    from blockchecks.engine.adaptive_queue import ScanWeights
+    from blockchecks.engine.adaptive_runner import _apply_provider_weights
+
+    class FakeProviderStore:
+        async def pass_strategies(self, *, approved_only=False):
+            return [
+                {
+                    "strategy": "fake:blob=stun:repeats=6",
+                    "domain": "not-in-scan.com",
+                    "approved": 1,
+                }
+            ]
+
+    weights = ScanWeights()
+    await _apply_provider_weights(FakeProviderStore(), weights, ["discord.com"])
+    assert all(v == 1.0 for v in weights.family.values())

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 from blockchecks.engine.adaptive_queue import (
     AdaptiveJob,
@@ -37,6 +38,7 @@ async def build_adaptive_queue(
     epsilon: float = 0.1,
     load_weights: bool = True,
     resume_check: ResumeCb | None = None,
+    provider_store: Any = None,
 ) -> tuple[AdaptiveJobQueue, int]:
     """Create queue, optionally loading persisted weights and applying resume skip."""
     weights = ScanWeights()
@@ -45,11 +47,61 @@ async def build_adaptive_queue(
         if rows:
             weights = ScanWeights.from_rows(rows)
 
+    if provider_store is not None:
+        await _apply_provider_weights(provider_store, weights, domains)
+
     queue = AdaptiveJobQueue.build(items, domains, weights=weights, epsilon=epsilon)
     skipped = 0
     if resume_check:
         skipped = await queue.filter_resume(resume_check)
     return queue, skipped
+
+
+async def _apply_provider_weights(
+    provider_store: Any,
+    weights: ScanWeights,
+    domains: list[str],
+) -> None:
+    """Boost AQ weights for strategies the provider already saw passing.
+
+    Reads ``data_block`` pass_strategies and raises family/blob/cluster weights
+    for approved PASS strategies on the scanned domains — so the adaptive scan
+    tests the most promising candidates first (provider-result orchestration).
+    """
+    try:
+        if hasattr(provider_store, "pass_strategies"):
+            rows = await provider_store.pass_strategies(approved_only=True)
+        else:
+            rows = []
+    except Exception:
+        rows = []
+    if not rows:
+        return
+
+    domain_set = {d.lower() for d in domains}
+    from blockchecks.engine.adaptive_queue import (
+        cluster_domain,
+        extract_blob_hints,
+    )
+    from blockchecks.engine.family_needs import classify_strategy_family
+    from blockchecks.engine.generators.base import StrategyItem
+
+    boosted = 0
+    for row in rows:
+        dom = (row.get("domain") or "").lower()
+        if dom and dom not in domain_set:
+            continue
+        strat = row.get("strategy") or ""
+        if not strat:
+            continue
+        item = StrategyItem(label=strat, strategy=strat)
+        fam = classify_strategy_family(item)
+        blobs = extract_blob_hints(strat)
+        cl = cluster_domain(dom) if dom else ""
+        weights.boost_pass(fam, blobs, cl)
+        boosted += 1
+    if boosted:
+        print(f"  [AQ] provider-preflight: boosted {boosted} approved strategies")
 
 
 async def run_adaptive_tcp_bridge(
