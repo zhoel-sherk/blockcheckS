@@ -31,6 +31,7 @@ from blockchecks.engine.config import (
 )
 from blockchecks.engine.domain_loader import (
     RESERVED_DOMAIN_FILES,
+    auto_enable_gv_ggc,
     format_skip_summary,
     load_preset,
 )
@@ -113,6 +114,7 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
     if not preset_domains:
         print(f"  {Fore.RED}ERROR: preset empty after denylist (use --allow-unsafe-domains){RESET}")
         return preset_domains, 1
+    auto_enable_gv_ggc(preset_domains)
     return preset_domains, None
 
 
@@ -138,6 +140,7 @@ async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPrefl
     domains_for_dns = list(
         dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))
     )
+    auto_enable_gv_ggc(domains_for_dns)
     from blockchecks.data_block.provider import provider_name
 
     provider_name(allow_detect=True)

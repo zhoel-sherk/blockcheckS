@@ -27,6 +27,7 @@ def test_googlevideo_range_header_size():
 
 
 def test_prepare_googlevideo_probe_unavailable(monkeypatch):
+    monkeypatch.setenv("BLOCKCHECKS_GV_GGC", "0")
     monkeypatch.setattr(
         "blockchecks.checkers.youtube_url.get_fresh_url",
         lambda *a, **k: None,
@@ -36,7 +37,18 @@ def test_prepare_googlevideo_probe_unavailable(monkeypatch):
     assert err["error"] == "gv_url_unavailable"
 
 
+def test_prepare_googlevideo_probe_auto_ggc_without_env(monkeypatch):
+    """googlevideo auto-falls back to the deterministic GGC probe (no env)."""
+    monkeypatch.delenv("BLOCKCHECKS_GV_GGC", raising=False)
+    req, err = prepare_googlevideo_probe("googlevideo.com")
+    assert err is None
+    assert req.ggc is True
+    assert req.googlevideo is True
+    assert "googlevideo.com" in (req.resolve_name or "")
+
+
 def test_prepare_googlevideo_probe_ok(monkeypatch):
+    monkeypatch.setenv("BLOCKCHECKS_GV_GGC", "0")
     url = "https://rr3---sn-x.googlevideo.com/videoplayback?sig=1"
     monkeypatch.setattr(
         "blockchecks.checkers.youtube_url.get_fresh_url",

@@ -30,6 +30,7 @@ from blockchecks.engine.config import (
 )
 from blockchecks.engine.domain_loader import (
     DEFAULT_DOMAINS_FILE,
+    auto_enable_gv_ggc,
     format_skip_summary,
     load_domains,
     warn_zero_pass_domains,
@@ -172,6 +173,7 @@ def load_run_domains(args) -> tuple[list[str], str, int | None]:
         return [], domains_file, 1
     if loaded.skipped:
         print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
+    auto_enable_gv_ggc(domains)
     return domains, domains_file, None
 
 

@@ -8,6 +8,20 @@ from dataclasses import dataclass
 from blockchecks.engine.config import PROJECT_DIR
 from blockchecks.engine.preset_paths import RESERVED_DOMAIN_FILES, resolve_domain_preset
 
+
+def auto_enable_gv_ggc(domains: list[str]) -> None:
+    """If any test domain is googlevideo, force the deterministic GGC probe.
+
+    Sets ``BLOCKCHECKS_GV_GGC=1`` so subprocess curl workers (which read env,
+    not the in-process config function) also use the GGC detector. An explicit
+    ``BLOCKCHECKS_GV_GGC=0`` opt-out is respected.
+    """
+    if not any("googlevideo" in (d or "").lower() for d in domains):
+        return
+    if os.environ.get("BLOCKCHECKS_GV_GGC", "").strip().lower() in ("0", "false", "off", "no"):
+        return
+    os.environ.setdefault("BLOCKCHECKS_GV_GGC", "1")
+
 DOMAINS_PRESET_DIR = os.path.join(PROJECT_DIR, "presets", "domains")
 DEFAULT_DOMAINS_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage-tcp.txt")
 FULL_COVERAGE_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage.txt")

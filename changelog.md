@@ -2,6 +2,22 @@
 
 ## 1.2.1a — unreleased
 
+### Changed — googlevideo always uses the deterministic GGC probe (auto-fallback)
+
+- **`config.ggc_enabled(domain)`** replaces the `GGC_ENABLED` constant: any
+  googlevideo host is automatically probed via the GGC detector (no yt-dlp
+  signature, valid beyond the 6-hour signed-URL TTL). `BLOCKCHECKS_GV_GGC=0`
+  opts out (signed yt-dlp URL), `=1` forces GGC for any domain.
+- **`domain_loader.auto_enable_gv_ggc(domains)`**: when a domain list contains
+  googlevideo, sets `BLOCKCHECKS_GV_GGC=1` so subprocess curl workers (which
+  read env, not the in-process function) use the GGC detector too. Wired into
+  `load_run_domains` (`bs full`) and `resolve_preset_domains` /
+  `prepare_dns_and_preflight` (`bs scan`/`bs pair`).
+- Verified live: `bs tcp -d googlevideo.com` with **no** env → `HTTP 403`
+  (GGC applied, PASS); `bs tcp -d discord.com` → `HTTP 200` (normal path).
+- Tests: `test_gv_ggc.py` (10) — ggc_enabled precedence + auto_enable env
+  behavior; `test_curl_probe.py` auto-fallback + signed-path (env=0) coverage.
+
 ### Added — deterministic GGC probe (bypass-detector, no 6h signed-URL TTL)
 
 - googlevideo signed URLs expire in exactly 6h (21600s). New deterministic

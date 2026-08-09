@@ -202,6 +202,9 @@ pytest -m "not integration"
 - Подписанные `*.googlevideo.com` URL живут ровно 6 часов (`expire=21600`). Для
   стабильных массовых прогонов можно не зависеть от yt-dlp и подписи:
   `BLOCKCHECKS_GV_GGC=1 bs tcp -d googlevideo.com ...`
+- **Авто-fallback**: любой googlevideo-домен в списках тестирования
+  автоматически проверяется через GGC (env `BLOCKCHECKS_GV_GGC` ставится при
+  загрузке доменов). `BLOCKCHECKS_GV_GGC=0` — вернуть подписанный yt-dlp путь.
 - Техника: берём IP живого Google-кэша (GGC, напр. `74.125.108.234`), шлём
   запрос на него, но в SNI подставляем `rr*.googlevideo.com` и принудительно
   ставим `Range: bytes=0-1048575` (1MiB) — ТСПУ включает эвристику «скачивания

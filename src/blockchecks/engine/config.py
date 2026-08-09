@@ -319,7 +319,26 @@ GOOGLEVIDEO_RANGE_SIZE = 17408  # 17KB, bytes=0-17407
 GGC_RANGE_SIZE = 1048576  # 1MiB, bytes=0-1048575
 GGC_HOST = _env_or("BLOCKCHECKS_GGC_HOST", "rr5---sn-5goeenes.googlevideo.com")
 GGC_FALLBACK_IP = _env_or("BLOCKCHECKS_GGC_IP", "74.125.108.234")
-GGC_ENABLED = _env_bool("BLOCKCHECKS_GV_GGC", False)
+
+
+def ggc_enabled(domain: str | None = None) -> bool:
+    """Whether the deterministic GGC probe is active for *domain*.
+
+    Precedence:
+      ``BLOCKCHECKS_GV_GGC=0``  → False (explicit opt-out, keep signed yt-dlp URL)
+      ``BLOCKCHECKS_GV_GGC=1``  → True  (forced)
+      otherwise                 → True when *domain* is a googlevideo host
+                                  (automatic fallback — googlevideo is always
+                                  probed via the GGC detector, no yt-dlp TTL)
+    """
+    env = os.environ.get("BLOCKCHECKS_GV_GGC", "").strip().lower()
+    if env in ("0", "false", "off", "no"):
+        return False
+    if env in ("1", "true", "on", "yes"):
+        return True
+    if domain:
+        return "googlevideo" in domain.lower()
+    return False
 
 # ── ECH (Encrypted Client Hello) ──────────────────
 # Disable ECH via curl_cffi.CurlOpt.ECH = 10325

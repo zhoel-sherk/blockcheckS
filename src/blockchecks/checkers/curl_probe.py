@@ -87,14 +87,15 @@ def prepare_googlevideo_probe(
 ) -> tuple[CurlProbeRequest, dict | None]:
     """Build probe request for videoplayback URL or return error dict.
 
-    When ``BLOCKCHECKS_GV_GGC=1`` uses the deterministic GGC probe instead
-    (no yt-dlp signature, valid beyond the 6-hour signed-URL TTL).
+    googlevideo hosts are always probed via the deterministic GGC detector
+    (no yt-dlp signature, valid beyond the 6-hour signed-URL TTL). Disable with
+    ``BLOCKCHECKS_GV_GGC=0`` to fall back to the signed yt-dlp URL.
     """
     from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
     from blockchecks.checkers.youtube_url import get_fresh_url, videoplayback_host
-    from blockchecks.engine.config import GGC_ENABLED
+    from blockchecks.engine.config import ggc_enabled
 
-    if GGC_ENABLED:
+    if ggc_enabled(domain):
         return prepare_ggc_probe(domain, timeout=timeout, resolved_ip=resolved_ip)
 
     curl_url = get_fresh_url()
