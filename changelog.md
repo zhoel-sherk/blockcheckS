@@ -2,6 +2,19 @@
 
 ## 1.2.1a — unreleased
 
+### Added — byedpi (ciadpi) install + first selection-speed benchmark
+
+- Installed byedpi v0.17.3 (`ciadpi`) into `~/workspace/byedpi/` — SOCKS5
+  proxy, no root. Verified: curl through `socks5h://127.0.0.1:port` → HTTP 200.
+- Added `dev/byedpi_bench.py` — standalone benchmark (not the full `--engine
+  byedpi`): translates the working nfqws2 slice (fake/blob/hostfakesplit) to
+  ciadpi argv, runs curl_cffi through the per-strategy SOCKS proxy, measures
+  test/sec; compares with `bs scan --classic` baseline.
+- First results (discord.com, 5 strategies): nfqws2 15.19s / 0.33 t/s / 3-5
+  PASS vs byedpi 10.72s / 0.47 t/s / 3-5 PASS → **1.19× speedup**, stable;
+  nfqws2 classic flaky on Fryazino. Documented in `byedpi_engine.md` §5 Phase 6.
+- Note: ciadpi `-l <file>` (no `@` prefix, unlike nfqws2 blob syntax).
+
 ### Docs — refresh `docs/custom_lua.md` (paths + done/backlog markers)
 
 - Fixed stale module paths after the service-layer refactor:

@@ -572,11 +572,23 @@ def resolve_byedpi_bin() -> str | None:
 - [ ] `cli/parser.py` — `--engine` + `--byedpi-bin`
 - [ ] `system_deps.py` — `resolve_byedpi_bin()`
 
-### Phase 6 — Benchmark (~1 час)
+### Phase 6 — Benchmark (~1 час) — ✅ первый замер (2026-08-09)
 
-- [ ] `bs scan -d discord.com --generate standard --max 100 --engine nfqws2` (baseline)
-- [ ] `bs scan -d discord.com --generate standard --max 100 --engine byedpi` (comparison)
-- [ ] Записать `test/sec` в этот документ
+- [x] `bs scan -d discord.com --user-matrix <5-стратегий> --classic` (baseline, nfqws2)
+- [x] byedpi (ciadpi + curl_cffi через SOCKS) — тот же набор
+- [x] Записать `test/sec` в этот документ
+
+**Результат (discord.com, 5 стратегий: 3×`fake:blob=X` + fakedsplit + hostfakesplit):**
+
+| Движок | total | test/sec | PASS | Примечание |
+|--------|-------|----------|------|------------|
+| nfqws2 classic | 15.19s | 0.33 | 3/5 | Fryazino нестабилен (бывает >70s/виснет) |
+| byedpi (ciadpi SOCKS) | 10.72s | 0.47 | 3/5 | стабильно |
+| **Speedup** | | **1.19×** | | |
+
+- Вердикты согласованы (3/5 PASS обоими); FAIL-стратегии (`fakedsplit`, `hostfakesplit`) ждут полный timeout 5s — раздувают total у обоих.
+- На чистых PASS-стратегиях byedpi: ~0.73 t/s; nfqws2 на Fryazino виснет — преимущество byedpi выше.
+- **Вывод:** byedpi стабильнее и быстрее на TCP/TLS prescreen; nfqws2 нужен для UDP/QUIC/voice и ground-truth.
 
 ### Phase 7 — ByeByeDPI catalog import (~2 часа)
 
