@@ -2,6 +2,17 @@
 
 ## 1.2.1a — unreleased
 
+### Changed — QUIC fallback timing + iptables hygiene
+
+- **Fallback variants use a shorter timeout** (`min(timeout, 3.0)`): a TSPU
+  drop happens immediately, so waiting a full 5s on each already-dropped
+  fallback tripled QUIC wall-time (15s/strategy) under systematic drops.
+  Base strategy keeps the full timeout; only fallbacks are quick drop-checks.
+- **`_run_quic_check` flushes OUTPUT iptables** before adding the NFQUEUE rule,
+  so fallback re-entry in the same netns no longer stacks duplicate rules.
+- Tests: `test_quic_http3.py` — fallback uses short timeout for variants (base
+  5.0, fallbacks 3.0).
+
 ### Added — QUIC fallback chain when the base strategy is dropped
 
 - `test_quic` now tries a fallback chain when a QUIC strategy times out (TSPU

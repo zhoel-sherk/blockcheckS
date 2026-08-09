@@ -166,3 +166,49 @@ def test_is_quic_dropped():
     assert _is_quic_dropped("Connection timed out") is True
     assert _is_quic_dropped("ngtcp2_conn_writev_stream failed") is False
     assert _is_quic_dropped("SSL: no alternative certificate") is False
+
+
+@pytest.mark.asyncio
+async def test_quic_fallback_uses_short_timeout_for_fallback_variants():
+    """Fallback variants must use a shorter timeout (drop happens instantly)."""
+    from unittest.mock import patch
+
+    from blockchecks.engine.async_runner import AsyncTestRunner
+    from blockchecks.engine.generators.base import StrategyItem
+
+    calls = []
+
+    def fake_run_quic(ns, strategy, domain, timeout, *a, **k):
+        calls.append((strategy, timeout))
+        return {"success": False, "http_code": 0, "latency_ms": 0,
+                "content_len": 0, "error": "Connection timed out"}
+
+    runner = AsyncTestRunner(pool_size=1)
+    runner.secure_dns = False
+    runner.dns_cache = None
+    runner.dns_audit = {}
+    item = StrategyItem(label="quic_fake", strategy="fake:blob=quic_google:repeats=6",
+                        protocol="quic")
+
+    # AsyncTestRunner.test_quic uses self.pool.acquire + asyncio.to_thread.
+    # Patch acquire to return a ns and _run_quic_check to capture timeouts.
+
+    async def fake_acquire():
+        return "bs-quic-t"
+
+    async def fake_release(ns):
+        pass
+
+    with (
+        patch.object(runner.pool, "acquire", new=fake_acquire),
+        patch.object(runner.pool, "release", new=fake_release),
+        patch("blockchecks.engine.async_runner._run_quic_check", side_effect=fake_run_quic),
+    ):
+        result = await runner.test_quic(item, "googlevideo.com", timeout=5.0)
+
+    # base uses full timeout 5.0; fallbacks use min(5, 3) = 3.0
+    assert len(calls) == 3
+    assert calls[0][1] == 5.0
+    assert calls[1][1] == 3.0
+    assert calls[2][1] == 3.0
+    assert result.success is False

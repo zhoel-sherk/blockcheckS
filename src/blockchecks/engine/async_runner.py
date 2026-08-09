@@ -277,6 +277,9 @@ def _run_quic_check(
             f.write("\n".join(config_lines))
         _nfqws2_daemon(ns_name, tmp_conf)
 
+    # Flush OUTPUT first: fallback variants re-enter this function in the same
+    # netns and would otherwise stack duplicate NFQUEUE rules.
+    _sudo("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT")
     _sudo(
         "ip",
         "netns",
@@ -1053,13 +1056,17 @@ class AsyncTestRunner:
                         doh_server = audit.doh_server or self.dns_cache.doh_server
 
                 variants = [item.strategy] + _quic_fallback_variants(item.strategy)
-                for variant in variants:
+                for idx, variant in enumerate(variants):
+                    # Base strategy uses the full timeout; fallback variants are
+                    # quick drop-checks — a TSPU drop happens immediately, so a
+                    # shorter budget avoids 3× wall time when everything drops.
+                    variant_timeout = timeout if idx == 0 else min(timeout, 3.0)
                     data = await asyncio.to_thread(
                         _run_quic_check,
                         ns_name,
                         variant,
                         domain,
-                        timeout,
+                        variant_timeout,
                         item.is_config,
                         self.python,
                         resolved_ip,
