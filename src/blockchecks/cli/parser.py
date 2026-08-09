@@ -121,11 +121,13 @@ def add_curl_repeats_args(
         )
 
 
-def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
-    """nfqws2 Lua bridge: /dev/shm IPC + scan_pick batch (no per-strategy restart).
+def add_backend_args(parser: argparse.ArgumentParser) -> None:
+    """Probe-backend selection shared by all commands.
 
-    Backend selection (T-L3/T-L4/T-L5): default is ``lua_bridge``. Precedence:
-    ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` > ``BLOCKCHECKS_PROBE_BACKEND``.
+    Precedence: ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` >
+    ``BLOCKCHECKS_PROBE_BACKEND`` (default lua_bridge). ``--classic`` /
+    ``--probe-backend`` are meaningful everywhere (incl. single tcp/udp);
+    lua-specific flags are added only by ``add_lua_bridge_args``.
     """
     g = parser.add_argument_group("probe backend")
     g.add_argument(
@@ -141,6 +143,15 @@ def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
         metavar="{classic,lua_bridge}",
         help="Explicit probe backend (default lua_bridge unless overridden)",
     )
+
+
+def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
+    """nfqws2 Lua bridge: /dev/shm IPC + scan_pick batch (no per-strategy restart).
+
+    Backend selection (T-L3/T-L4/T-L5): default is ``lua_bridge``. Precedence:
+    ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` > ``BLOCKCHECKS_PROBE_BACKEND``.
+    """
+    add_backend_args(parser)
     g = parser.add_argument_group("lua bridge (scan_pick IPC)")
     g.add_argument(
         "--lua-bridge",
@@ -337,6 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_system_deps_args(tcp)
     add_time_limit_args(tcp)
     add_curl_repeats_args(tcp)
+    add_backend_args(tcp)
     tcp.add_argument(
         "--nfqws2-debug",
         nargs="?",
@@ -394,6 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
     )
+    add_backend_args(udp)
     add_system_deps_args(udp)
 
     scan = sub.add_parser("scan", help="Async TCP strategy batch scan")

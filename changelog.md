@@ -2,6 +2,22 @@
 
 ## 1.2.1a — unreleased
 
+### Fixed — `--classic`/`--probe-backend` accepted on tcp/udp
+
+- `--classic` / `--probe-backend` are now valid on `bs tcp` and `bs udp`
+  (previously `unrecognized arguments` — they were only wired into
+  scan/pair/full). Extracted `add_backend_args()` (classic + probe-backend)
+  shared by all commands; `add_lua_bridge_args()` keeps lua-specific flags
+  (bridge-batch/compare/extra) on scan/pair/full only.
+- Verified live: `bs tcp --classic` → HTTP 200 PASS; `bs udp --classic` → 30ms
+  PASS; `bs scan --classic` → `backend=classic` PASS.
+- **Trottling confirmation**: GP control-plane standard discovery on
+  discord.com shows pervasive `code=28` timeouts across dozens of strategies
+  (Fryazino throttling), while fake+tls_mod strategies (`fake_default_tls +
+  tls_mod rnd`, `luaexec patmod`) succeed — the same pattern blockcheckS finds
+  (`fake:blob=...:tcp_ts=-1000`). Not a blockcheckS bug.
+- dead_cli_flags now covers tcp/udp for the new backend dests.
+
 ### Changed — QUIC fallback timing + iptables hygiene
 
 - **Fallback variants use a shorter timeout** (`min(timeout, 3.0)`): a TSPU
