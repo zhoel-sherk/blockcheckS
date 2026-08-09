@@ -20,6 +20,7 @@ from blockchecks.engine.config import (
     CURLOPT_ECH,
     GOOGLEVIDEO_RANGE_SIZE,
     MIN_READ_RATE_BPS,
+    SOCKS5_PROXY,
     THROTTLED_MAX_BPS,
 )
 
@@ -222,7 +223,14 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
                     )
             url = req.curl_url if req.curl_url else f"{url_scheme}://{req.domain}"
             curl_timeout = min(req.timeout, 8.0) if req.googlevideo else req.timeout
-            resp = session.get(url, timeout=curl_timeout)
+            # googlevideo CDN is often only reachable via the SOCKS proxy
+            # (direct egress blocked by DPI on Fryazino). Pass it per-request via
+            # the proxy= kw (socks5h = DNS through proxy); CurlOpt.PROXY setopt
+            # does not map socks5h correctly and yields 403.
+            get_kwargs: dict = {}
+            if req.googlevideo and SOCKS5_PROXY:
+                get_kwargs["proxy"] = SOCKS5_PROXY.replace("socks5://", "socks5h://")
+            resp = session.get(url, timeout=curl_timeout, **get_kwargs)
     except RequestsError as e:
         msg = str(e)
         return CurlProbeResult(

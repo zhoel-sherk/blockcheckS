@@ -2,6 +2,23 @@
 
 ## 1.2.1a — unreleased
 
+### Fixed — googlevideo CDN probe via SOCKS proxy (2026-08-09)
+
+- `checkers/curl_probe.py` — googlevideo videoplayback probes now route through
+  `SOCKS5_PROXY` (`BLOCKCHECKS_PROXY`, default `socks5://127.0.0.1:11080`).
+  Direct egress to the googlevideo CDN is DPI-blocked on Fryazino, so without a
+  proxy every GV probe timed out / 403'd even though yt-dlp had a fresh signed
+  URL. The proxy is passed per-request via the `proxy=` kwarg as
+  `socks5h://…` (DNS through proxy); the `CurlOpt.PROXY` setopt path does not
+  map `socks5h` correctly and yields 403.
+- Verified live end-to-end: fresh rr-URL fetched through sing-box (SOCKS
+  127.0.0.1:11080) and `bs tcp -d googlevideo.com` now returns
+  `[OK] HTTP 206` (was 403 / timeout). Direct `curl --proxy socks5h://…` on the
+  same URL returns HTTP 206, 300 KB range body.
+- sing-box config updated to a fresh VLESS UUID
+  (`9b175962-…`, Riga `94.158.219.192:31237`) and migrated to sing-box 1.13
+  config schema (legacy inbound `sniff` fields removed); daemon runs via nohup.
+
 ### Changed — scripts audit + repeatable functional-test entry points (2026-08-09)
 
 - **Removed obsolete/one-off scripts** from `scripts/`: `flag_campaign.py`,

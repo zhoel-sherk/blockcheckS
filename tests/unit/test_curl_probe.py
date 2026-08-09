@@ -81,9 +81,10 @@ def test_run_curl_probe_googlevideo_request_shape():
         def __exit__(self, *exc):
             return False
 
-        def get(self, url, timeout=None):
+        def get(self, url, timeout=None, **kwargs):
             captured["url"] = url
             captured["timeout"] = timeout
+            captured["get_kwargs"] = kwargs
             resp = MagicMock()
             resp.status_code = 206
             resp.content = b"x" * 400
@@ -100,7 +101,8 @@ def test_run_curl_probe_googlevideo_request_shape():
         timeout=5.0,
     )
     with patch("curl_cffi.Session", FakeSession):
-        result = run_curl_probe(req)
+        with patch("blockchecks.checkers.curl_probe.SOCKS5_PROXY", "socks5://127.0.0.1:11080"):
+            result = run_curl_probe(req)
 
     assert result.http_code == 206
     assert captured["kwargs"]["headers"]["Range"] == googlevideo_range_header()
@@ -108,6 +110,8 @@ def test_run_curl_probe_googlevideo_request_shape():
     assert captured["url"] == req.curl_url
     assert any(v == "" for o, v in setopts if "ECH" in str(o) or o == CURLOPT_ECH)
     assert any("cdn.googlevideo.com:443:9.9.9.9" in str(v) for o, v in setopts)
+    # GV CDN via SOCKS proxy (socks5h = DNS through proxy) — direct egress is DPI-blocked.
+    assert captured["get_kwargs"]["proxy"] == "socks5h://127.0.0.1:11080"
 
 
 def test_run_curl_probe_slow_rate_fails():
