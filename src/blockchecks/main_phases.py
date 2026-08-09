@@ -26,6 +26,7 @@ from blockchecks.engine.config import (
     DEFAULT_VOICE_PORT,
     MAX_CURL_PARALLEL,
     SECURE_DNS_DEFAULT,
+    resolve_probe_backend,
 )
 from blockchecks.engine.domain_loader import (
     DEFAULT_DOMAINS_FILE,
@@ -424,7 +425,7 @@ def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
         try_wssize=not getattr(args, "no_wssize", False)
         and getattr(args, "protocol", "tls12") == "tls12",
         settle_profile=ctx.settle_profile,
-        lua_bridge=bool(getattr(args, "lua_bridge", False)),
+        lua_bridge=resolve_probe_backend(args) == "lua_bridge",
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
         lua_bridge_compare=bool(getattr(args, "lua_bridge_compare", False)),
         lua_extra=list(getattr(args, "lua_extra", None) or []),
@@ -524,7 +525,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         disable_ech=bool(getattr(args, "disable_ech", False)),
         stop_event=ctx.stop,
         on_progress=_progress,
-        lua_bridge=bool(getattr(args, "lua_bridge", False)),
+        lua_bridge=resolve_probe_backend(args) == "lua_bridge",
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
         workers=max(1, int(getattr(args, "parallel", 4) or 4)),
     )
@@ -578,7 +579,7 @@ async def _run_tcp_family_gates(ctx: FullRunContext, progress: TcpProgress) -> N
 
 async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
     args = ctx.args
-    if getattr(args, "lua_bridge", False):
+    if resolve_probe_backend(args) == "lua_bridge":
         from blockchecks.service.batch_service import warn_fanout_bridge_once
 
         warn_fanout_bridge_once()
@@ -626,7 +627,7 @@ async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
 
 async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> None:
     args = ctx.args
-    if getattr(args, "lua_bridge", False):
+    if resolve_probe_backend(args) == "lua_bridge":
         await _run_tcp_sequential_bridge(ctx, progress)
         return
 

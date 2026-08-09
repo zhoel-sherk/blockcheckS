@@ -2,6 +2,25 @@
 
 ## 1.2.1a — unreleased
 
+### Changed — lua_bridge is the standard backend, `--classic` opt-out (T-L3/T-L4/T-L5)
+
+- **Default probe backend flipped to `lua_bridge`** (T-L3): `bs scan`/`pair`/
+  `full` now use the persistent nfqws2 + `/dev/shm` IPC bridge without a flag.
+  Verified live: `bs scan` (no flag) → `backend=lua_bridge`, 3/3 PASS.
+- **`--classic`** (T-L4): force the legacy per-strategy nfqws2 restart backend.
+  Verified live: `bs scan --classic` → `backend=classic`, 3/3 PASS.
+- **`--probe-backend {classic,lua_bridge}`** (T-L4): explicit backend selection.
+  Verified live: `--probe-backend classic` → `backend=classic`.
+- **`BLOCKCHECKS_PROBE_BACKEND` env** (T-L5): backend override for scripts/CI.
+- Backend precedence (single resolver `config.resolve_probe_backend`):
+  `--classic` > `--probe-backend` > `--lua-bridge` > `BLOCKCHECKS_PROBE_BACKEND`
+  > default `lua_bridge`.
+- Unchanged invariants: pair **UDP bootstrap** and **fan-out waves** always use
+  classic; `--lua-bridge-compare` dual path still logs drift (verified live:
+  classic + bridge batches, 0 drift).
+- Tests: `tests/unit/test_probe_backend.py` (10 cases) — precedence, env,
+  CliApp parsing, always-classic paths.
+
 ### Added — wheel self-contained data + runtime nfqws2 debug (2026-08-09)
 
 - **Wheel now ships baked data** (`[tool.setuptools.data-files]`): `blobs/*.bin`

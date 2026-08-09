@@ -185,6 +185,29 @@ SHM_BASE = _env_or("BLOCKCHECKS_SHM_BASE", "/dev/shm/blockchecks")
 DEFAULT_BRIDGE_BATCH = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH", "500"))
 DEFAULT_BRIDGE_BATCH_MAX = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH_MAX", "2000"))
 
+DEFAULT_PROBE_BACKEND = "lua_bridge"  # T-L3: lua_bridge is the standard backend
+
+
+def resolve_probe_backend(args) -> str:
+    """Resolve probe backend from flags/env (T-L3/T-L4/T-L5).
+
+    Precedence: ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` >
+    ``BLOCKCHECKS_PROBE_BACKEND`` > default ``lua_bridge``.
+
+    Returns one of ``"classic"`` / ``"lua_bridge"``.
+    """
+    if getattr(args, "classic", False):
+        return "classic"
+    pb = getattr(args, "probe_backend", None)
+    if pb in ("classic", "lua_bridge"):
+        return pb
+    if getattr(args, "lua_bridge", False):
+        return "lua_bridge"
+    env = os.environ.get("BLOCKCHECKS_PROBE_BACKEND", "").strip().lower()
+    if env in ("classic", "lua_bridge"):
+        return env
+    return DEFAULT_PROBE_BACKEND
+
 
 def effective_default_pool_size(*, mem_soft_cap_kb: int = 1_500_000) -> int:
     """CLI default for ``--parallel``: env/DEFAULT_POOL_SIZE, soft-capped on low RAM.

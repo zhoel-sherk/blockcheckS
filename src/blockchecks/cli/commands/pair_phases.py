@@ -27,6 +27,7 @@ from blockchecks.engine.config import (
     DPI_TESTER_SETTINGS,
     PROJECT_DIR,
     SECURE_DNS_DEFAULT,
+    resolve_probe_backend,
 )
 from blockchecks.engine.domain_loader import (
     RESERVED_DOMAIN_FILES,
@@ -188,7 +189,7 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         quick_break=quick_break,
         try_wssize=not getattr(args, "no_wssize", False)
         and getattr(args, "protocol", "tls12") == "tls12",
-        lua_bridge=bool(getattr(args, "lua_bridge", False)),
+        lua_bridge=resolve_probe_backend(args) == "lua_bridge",
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
         lua_bridge_compare=bool(getattr(args, "lua_bridge_compare", False)),
         lua_extra=lua_extra,
@@ -584,7 +585,7 @@ async def run_adaptive_pair_phase(
         curl_parallel=curl_parallel,
         protocol=protocol,
         stop_event=stop_event,
-        lua_bridge=bool(getattr(args, "lua_bridge", False)),
+        lua_bridge=resolve_probe_backend(args) == "lua_bridge",
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
         workers=max(1, int(getattr(args, "parallel", 4) or 4)),
     )

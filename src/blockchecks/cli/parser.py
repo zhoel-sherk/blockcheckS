@@ -122,7 +122,25 @@ def add_curl_repeats_args(
 
 
 def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
-    """nfqws2 Lua bridge: /dev/shm IPC + scan_pick batch (no per-strategy restart)."""
+    """nfqws2 Lua bridge: /dev/shm IPC + scan_pick batch (no per-strategy restart).
+
+    Backend selection (T-L3/T-L4/T-L5): default is ``lua_bridge``. Precedence:
+    ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` > ``BLOCKCHECKS_PROBE_BACKEND``.
+    """
+    g = parser.add_argument_group("probe backend")
+    g.add_argument(
+        "--classic",
+        action="store_true",
+        help="Force legacy classic backend (per-strategy nfqws2 restart); "
+        "overrides --probe-backend / --lua-bridge / BLOCKCHECKS_PROBE_BACKEND",
+    )
+    g.add_argument(
+        "--probe-backend",
+        choices=("classic", "lua_bridge"),
+        default=None,
+        metavar="{classic,lua_bridge}",
+        help="Explicit probe backend (default lua_bridge unless overridden)",
+    )
     g = parser.add_argument_group("lua bridge (scan_pick IPC)")
     g.add_argument(
         "--lua-bridge",

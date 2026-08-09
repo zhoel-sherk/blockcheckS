@@ -61,10 +61,14 @@ sudo bs full
 sudo bs full --parallel 2 --resume
 sudo bs full --max 500 --domains-file presets/domains/critical.txt
 
-# Lua bridge: one nfqws2 per batch of N strategies (scan/pair/full):
-sudo bs scan -d discord.com --generate --lua-bridge --bridge-batch 500 --max 50
-sudo bs full -d discord.com --max 100 --lua-bridge --tcp-only --no-http --no-quic --no-voice
-# Fan-out + --lua-bridge: classic per-strategy (WARN once); sequential/AQ use bridge.
+# Probe backend (default lua_bridge since 1.2.1a):
+#   no flag  → lua_bridge (one nfqws2 per batch, /dev/shm IPC)
+#   --classic / --probe-backend classic → legacy per-strategy restart
+#   BLOCKCHECKS_PROBE_BACKEND=classic|lua_bridge → env override (scripts/CI)
+sudo bs scan -d discord.com --generate --bridge-batch 500 --max 50
+sudo bs scan -d discord.com --generate --classic --max 50           # legacy backend
+sudo bs full -d discord.com --max 100 --tcp-only --no-http --no-quic --no-voice
+# Fan-out waves always use classic per-strategy nfqws2 (WARN once under bridge).
 sudo bs scan -d discord.com --generate --lua-bridge-compare --max 20  # A/B drift log
 bc-nfconf --db state.db --limit 3 --out-dir output
 
