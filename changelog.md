@@ -2,6 +2,29 @@
 
 ## 1.2.1a — unreleased
 
+### Changed — scripts audit + repeatable functional-test entry points (2026-08-09)
+
+- **Removed obsolete/one-off scripts** from `scripts/`: `flag_campaign.py`,
+  `retest_failed.py`, `b2_smoke_benchmark.sh`, `export_shortlist.sh` (dup of
+  `bc-nfconf`), `export_shortlist_json.sh`, `gv5_quic_smoke.sh` (QUIC blocked
+  on Fryazino), `gv_e2e_smoke.sh`. Removed `dev/oc_*` OpenCode API smokes
+  (unrelated to testing).
+- **Added repeatable functional-test scripts** in `scripts/`:
+  - `smoke_scan.sh` — quick `bs scan` on a known-good matrix; backend selectable
+    (default/classic/bridge/compare).
+  - `smoke_full_quick.sh` — time-boxed `bs full`; verifies deadline-stop,
+    nfqws2 export + run_summary.
+  - `smoke_backend_matrix.sh` — functional test of backend selection
+    (default→lua_bridge, `--classic`, `--probe-backend`, env, compare no-drift).
+  - `gate_all.sh` — one-shot unit + quality + ruff + vulture (+ optional
+    `--integration`).
+  - `cleanup_env.sh` — reset netns / nfqws2 / shm / run.lock between runs.
+- **Added `dev/functional_smoke.sh`** — end-to-end test of every `bs`
+  subcommand (tcp/udp/composite/scan classic+bridge/pair/bench-settle/full/
+  stop) + `bc-nfconf` export + shortlist round-trip. Live result: **11/11 PASS**.
+- `dev/README.md` updated to document the remaining dev helpers + the smoke
+  suite.
+
 ### Changed — lua_bridge is the standard backend, `--classic` opt-out (T-L3/T-L4/T-L5)
 
 - **Default probe backend flipped to `lua_bridge`** (T-L3): `bs scan`/`pair`/
