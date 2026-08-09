@@ -56,7 +56,7 @@ colorama_init(autoreset=True)
 
 
 async def run_full(args) -> int:
-    from blockchecks.engine.services.run_control import run_session
+    from blockchecks.service.run_control import run_session
 
     async with run_session("full", db_path=getattr(args, "db", None)):
         return await _run_full_campaign(args)

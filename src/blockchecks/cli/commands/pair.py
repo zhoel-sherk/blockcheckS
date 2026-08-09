@@ -41,7 +41,7 @@ async def cmd_pair(args):
         list_presets()
         return 0
 
-    from blockchecks.engine.services.run_control import run_session
+    from blockchecks.service.run_control import run_session
 
     cmd = "scan" if getattr(args, "tcp_only", False) else "pair"
     async with run_session(cmd, db_path=getattr(args, "db", None)):

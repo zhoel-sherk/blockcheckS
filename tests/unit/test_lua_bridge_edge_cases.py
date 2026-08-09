@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from blockchecks.engine.services.lua_bridge import BridgeEvent, BridgePaths, LuaBridge
+from blockchecks.service.lua_bridge_ipc import BridgeEvent, BridgePaths, LuaBridge
 
 
 class TestBridgeEventParsing:

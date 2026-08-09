@@ -7,8 +7,8 @@ import os
 import pytest
 
 from blockchecks.engine.config import NFQWS2_BIN, PYTHON_BIN
-from blockchecks.engine.services.firewall import Firewall
-from blockchecks.engine.services.nfqws2 import Nfqws2Manager
+from blockchecks.service.firewall import Firewall
+from blockchecks.service.nfqws2 import Nfqws2Manager
 
 pytestmark = pytest.mark.integration
 

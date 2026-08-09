@@ -159,7 +159,7 @@ class NetNsPool:
 
     def _cleanup_ns(self, ns_name: str) -> None:
         """Best-effort cleanup inside a netns before returning to pool."""
-        from blockchecks.engine.services.lua_bridge import LuaBridge
+        from blockchecks.service.lua_bridge_ipc import LuaBridge
 
         LuaBridge(ns_name).teardown()
         self._run("ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2", check=False)

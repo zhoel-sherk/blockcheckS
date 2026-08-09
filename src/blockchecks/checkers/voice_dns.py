@@ -307,8 +307,8 @@ def udp_discover_bootstrap(
         get_lua_init_scripts,
         nfqws2_debug_conf_line,
     )
-    from blockchecks.engine.services.firewall import Firewall
-    from blockchecks.engine.services.nfqws2 import Nfqws2Manager
+    from blockchecks.service.firewall import Firewall
+    from blockchecks.service.nfqws2 import Nfqws2Manager
 
     q = NFQUEUE_UDP if qnum is None else qnum
     fw = Firewall()

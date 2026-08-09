@@ -1,38 +1,37 @@
 """Runtime services — nfqws2 lifecycle, netns pool, bridge IPC, batch probe, run control.
 
-Single public entry point for process/resource services; keeps ``engine`` root
-for generators, runners, matrix, store and config.
+Single public entry point for process/resource services.
 """
 
 from __future__ import annotations
 
-from blockchecks.engine.services.batch_probe import (
+from blockchecks.service.batch_bridge_probe import run_tcp_check_bridge
+from blockchecks.service.batch_models import (
     BatchContext,
-    BatchJobAccumulator,
     BatchProbeConfig,
     BatchProbeResult,
-    BatchScheduler,
     ProbeBackend,
-    ProbeBatchService,
     RunnerProbeDeps,
 )
-from blockchecks.engine.services.firewall import Firewall
-from blockchecks.engine.services.lua_bridge import (
-    BridgeEvent,
-    BridgePaths,
-    BridgeSession,
-    LuaBridge,
-    NetnsGoneError,
+from blockchecks.service.batch_scheduler import BatchJobAccumulator, BatchScheduler
+from blockchecks.service.batch_service import ProbeBatchService, warn_fanout_bridge_once
+from blockchecks.service.firewall import Firewall
+from blockchecks.service.lua_bridge_ipc import BridgeEvent, BridgePaths, LuaBridge
+from blockchecks.service.lua_conf import (
     blockchecks_lua_init_lines,
-    bridge_worker_session,
     build_bridge_conf,
-    chunk_strategies,
     stage_blockchecks_lua,
-    strategy_text_from_item,
-    teardown_all_bridge_shm,
     write_bridge_conf,
 )
-from blockchecks.engine.services.metrics import (
+from blockchecks.service.lua_netns import NetnsGoneError
+from blockchecks.service.lua_session import (
+    BridgeSession,
+    bridge_worker_session,
+    chunk_strategies,
+    strategy_text_from_item,
+    teardown_all_bridge_shm,
+)
+from blockchecks.service.metrics import (
     MemoryMonitor,
     MemorySample,
     compute_leak_slope,
@@ -40,14 +39,14 @@ from blockchecks.engine.services.metrics import (
     process_rss_bytes,
     process_vms_bytes,
 )
-from blockchecks.engine.services.netns_pool import NetNsPool
-from blockchecks.engine.services.nfqws2 import Nfqws2Manager, inject_debug_and_daemon, start_daemon
-from blockchecks.engine.services.nfqws2_settle import (
+from blockchecks.service.netns_pool import NetNsPool
+from blockchecks.service.nfqws2 import Nfqws2Manager, inject_debug_and_daemon, start_daemon
+from blockchecks.service.nfqws2_settle import (
     nfqws2_running_in_ns,
     wait_nfqws2_ready,
 )
-from blockchecks.engine.services.probe import invoke_curl_probe_worker, probe_request_dict
-from blockchecks.engine.services.run_control import (
+from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
+from blockchecks.service.run_control import (
     ActiveRunInfo,
     clear_active_run,
     is_pid_alive,
@@ -95,10 +94,12 @@ __all__ = [
     "register_active_run",
     "request_graceful_stop",
     "run_session",
+    "run_tcp_check_bridge",
     "stage_blockchecks_lua",
     "start_daemon",
     "strategy_text_from_item",
     "teardown_all_bridge_shm",
     "wait_nfqws2_ready",
+    "warn_fanout_bridge_once",
     "write_bridge_conf",
 ]

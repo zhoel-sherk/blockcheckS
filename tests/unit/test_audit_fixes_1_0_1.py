@@ -152,7 +152,7 @@ async def test_completed_pair_keys(tmp_path):
 
 
 def test_netns_base_reject_shell_metachar():
-    from blockchecks.engine.services.netns_pool import NetNsPool
+    from blockchecks.service.netns_pool import NetNsPool
 
     with pytest.raises(ValueError):
         NetNsPool(size=1, base="bs;rm")

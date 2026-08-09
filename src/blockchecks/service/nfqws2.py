@@ -22,7 +22,7 @@ from blockchecks.engine.config import (
     get_nfqws2_bin,
     nfqws2_debug_conf_line,
 )
-from blockchecks.engine.services.nfqws2_settle import wait_nfqws2_ready
+from blockchecks.service.nfqws2_settle import wait_nfqws2_ready
 
 
 def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:

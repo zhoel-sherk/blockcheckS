@@ -30,20 +30,16 @@ from blockchecks.engine.config import (
     get_lua_init_scripts,
 )
 from blockchecks.engine.matrix_generator import StrategyItem
-from blockchecks.engine.services.batch_probe import (
-    BatchContext,
-    BatchProbeConfig,
-    BatchScheduler,
-    ProbeBatchService,
-    RunnerProbeDeps,
-)
-from blockchecks.engine.services.netns_pool import NetNsPool
-from blockchecks.engine.services.probe import (
-    invoke_curl_probe_worker as _invoke_curl_probe_worker,
-)
-from blockchecks.engine.services.probe import probe_request_dict as _probe_request_dict
 from blockchecks.engine.settle_profile import SettleProfile
 from blockchecks.engine.store import RunStateStore
+from blockchecks.service.batch_models import BatchContext, BatchProbeConfig, RunnerProbeDeps
+from blockchecks.service.batch_scheduler import BatchScheduler
+from blockchecks.service.batch_service import ProbeBatchService
+from blockchecks.service.netns_pool import NetNsPool
+from blockchecks.service.probe import (
+    invoke_curl_probe_worker as _invoke_curl_probe_worker,
+)
+from blockchecks.service.probe import probe_request_dict as _probe_request_dict
 
 GREEN = Fore.GREEN + Style.BRIGHT
 RED = Fore.RED + Style.BRIGHT
@@ -131,7 +127,7 @@ class ScanReport:
 # ── Utility: run command synchronously (called via asyncio.to_thread) ──
 
 
-from blockchecks.engine.services.nfqws2 import start_daemon as _nfqws2_daemon
+from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon
 
 
 def _sudo(*args: str) -> str:
@@ -806,7 +802,7 @@ class AsyncTestRunner:
     def ensure_memory_monitor(self):
         """Lazily create the shared MemoryMonitor for bridge runs."""
         if self.memory_monitor is None:
-            from blockchecks.engine.services.metrics import MemoryMonitor
+            from blockchecks.service.metrics import MemoryMonitor
 
             self.memory_monitor = MemoryMonitor()
         return self.memory_monitor

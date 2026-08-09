@@ -172,7 +172,7 @@ async def run_session(
     try:
         yield
     finally:
-        from blockchecks.engine.services.lua_bridge import teardown_all_bridge_shm
+        from blockchecks.service.lua_session import teardown_all_bridge_shm
 
         teardown_all_bridge_shm()
         clear_active_run()

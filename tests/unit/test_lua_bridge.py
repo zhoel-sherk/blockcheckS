@@ -6,12 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from blockchecks.engine.services.lua_bridge import (
-    BridgeEvent,
-    LuaBridge,
-    build_bridge_conf,
-    chunk_strategies,
-)
+from blockchecks.service.lua_bridge_ipc import BridgeEvent, LuaBridge
+from blockchecks.service.lua_conf import build_bridge_conf
+from blockchecks.service.lua_session import chunk_strategies
 
 
 @pytest.mark.unit

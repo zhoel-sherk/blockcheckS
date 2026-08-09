@@ -132,7 +132,7 @@ ignore_decorators = ["@pytest.fixture"]
 [tool.mutmut]
 source_paths = [
     "src/blockchecks/engine/store/sqlite_store.py",
-    "src/blockchecks/engine/services/nfqws2_settle.py",
+    "src/blockchecks/service/nfqws2_settle.py",
     "src/blockchecks/checkers/dns_secure.py",
     "src/blockchecks/checkers/voice_dns.py",
 ]
@@ -172,6 +172,11 @@ match = "blockchecks.engine*"
 should_not_import = ["blockchecks.cli*"]
 
 [[tool.blockchecks.architecture.rules]]
+name = "service_no_cli"
+match = "blockchecks.service*"
+should_not_import = ["blockchecks.cli*"]
+
+[[tool.blockchecks.architecture.rules]]
 name = "checkers_no_entry"
 match = "blockchecks.checkers*"
 should_not_import = ["blockchecks.bs", "blockchecks.main"]
@@ -179,6 +184,11 @@ should_not_import = ["blockchecks.bs", "blockchecks.main"]
 [[tool.blockchecks.architecture.rules]]
 name = "engine_no_entry"
 match = "blockchecks.engine*"
+should_not_import = ["blockchecks.bs", "blockchecks.main"]
+
+[[tool.blockchecks.architecture.rules]]
+name = "service_no_entry"
+match = "blockchecks.service*"
 should_not_import = ["blockchecks.bs", "blockchecks.main"]
 
 # ── Dead CLI flags + settings policy ─────────────────────────────────

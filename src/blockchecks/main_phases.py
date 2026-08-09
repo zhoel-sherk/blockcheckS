@@ -554,7 +554,7 @@ async def _run_tcp_family_gates(ctx: FullRunContext, progress: TcpProgress) -> N
 async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
     args = ctx.args
     if getattr(args, "lua_bridge", False):
-        from blockchecks.engine.services.batch_probe import warn_fanout_bridge_once
+        from blockchecks.service.batch_service import warn_fanout_bridge_once
 
         warn_fanout_bridge_once()
 
@@ -629,7 +629,7 @@ async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> Non
 
 async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress) -> None:
     """Sequential domain×strategy with lua_bridge batch service."""
-    from blockchecks.engine.services.batch_probe import BatchScheduler
+    from blockchecks.service.batch_scheduler import BatchScheduler
 
     args = ctx.args
     scheduler = BatchScheduler(ctx.runner.bridge_batch)

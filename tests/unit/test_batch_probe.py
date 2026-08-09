@@ -8,13 +8,14 @@ import pytest
 
 from blockchecks.engine.adaptive_queue import AdaptiveJob
 from blockchecks.engine.generators.base import StrategyItem
-from blockchecks.engine.services.batch_probe import (
+from blockchecks.service.batch_models import (
     BatchContext,
-    BatchJobAccumulator,
     BatchProbeConfig,
-    BatchScheduler,
-    ProbeBatchService,
     RunnerProbeDeps,
+)
+from blockchecks.service.batch_scheduler import BatchJobAccumulator, BatchScheduler
+from blockchecks.service.batch_service import (
+    ProbeBatchService,
     warn_fanout_bridge_once,
 )
 
@@ -142,7 +143,7 @@ async def test_probe_batch_service_lua_bridge_mock() -> None:
             nonlocal shutdown
             shutdown += 1
 
-    import blockchecks.engine.services.batch_probe as bp
+    import blockchecks.service.batch_service as bp
 
     original = bp.BridgeSession
     bp.BridgeSession = FakeSession
@@ -218,7 +219,7 @@ async def test_probe_batch_service_recycles_on_memory_flag() -> None:
         def clear(self, pid=None) -> None:
             pass
 
-    import blockchecks.engine.services.batch_probe as bp
+    import blockchecks.service.batch_service as bp
 
     original = bp.BridgeSession
     bp.BridgeSession = FakeSession

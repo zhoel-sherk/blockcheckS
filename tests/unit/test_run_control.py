@@ -7,7 +7,7 @@ import signal
 
 import pytest
 
-from blockchecks.engine.services.run_control import (
+from blockchecks.service.run_control import (
     clear_active_run,
     read_active_run,
     register_active_run,
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def run_lock_file(monkeypatch, tmp_path):
     lock = tmp_path / "run.lock"
-    monkeypatch.setattr("blockchecks.engine.services.run_control.RUN_LOCK_FILE", lock)
+    monkeypatch.setattr("blockchecks.service.run_control.RUN_LOCK_FILE", lock)
     return lock
 
 
@@ -39,7 +39,7 @@ def test_register_blocks_second_active_run(run_lock_file, monkeypatch):
     import json
 
     monkeypatch.setattr(
-        "blockchecks.engine.services.run_control.is_pid_alive",
+        "blockchecks.service.run_control.is_pid_alive",
         lambda pid: pid == 4242,
     )
     run_lock_file.write_text(
@@ -68,7 +68,7 @@ def test_request_stop_graceful(run_lock_file, monkeypatch):
         if sig == signal.SIGTERM and pid in alive:
             alive[pid] = False
 
-    monkeypatch.setattr("blockchecks.engine.services.run_control.is_pid_alive", fake_alive)
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive", fake_alive)
     monkeypatch.setattr(os, "kill", fake_kill)
 
     run_lock_file.write_text(

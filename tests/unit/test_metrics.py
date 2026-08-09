@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from blockchecks.engine.services.metrics import (
+from blockchecks.service.metrics import (
     MemoryMonitor,
     MemorySample,
     compute_leak_slope,
@@ -39,7 +39,7 @@ def test_leak_slope_zero_for_flat():
 
 
 def test_process_rss_returns_zero_on_error():
-    with patch("blockchecks.engine.services.metrics.process_rss_bytes", return_value=0):
+    with patch("blockchecks.service.metrics.process_rss_bytes", return_value=0):
         assert process_rss_bytes(999999) == 0
 
 
@@ -60,8 +60,8 @@ def test_find_nfqws2_pids_matches_netns_inode():
         raise OSError("not found")
 
     with (
-        patch("blockchecks.engine.services.metrics.os.stat") as mock_stat,
-        patch("blockchecks.engine.services.metrics.os.readlink", side_effect=_readlink),
+        patch("blockchecks.service.metrics.os.stat") as mock_stat,
+        patch("blockchecks.service.metrics.os.readlink", side_effect=_readlink),
         patch("psutil.process_iter", return_value=iter(fake_procs)),
     ):
         mock_stat.return_value.st_ino = 99
@@ -69,7 +69,7 @@ def test_find_nfqws2_pids_matches_netns_inode():
 
 
 def test_find_nfqws2_pids_missing_ns_file():
-    with patch("blockchecks.engine.services.metrics.os.stat", side_effect=OSError):
+    with patch("blockchecks.service.metrics.os.stat", side_effect=OSError):
         assert find_nfqws2_pids("bs-p0") == []
 
 
@@ -78,7 +78,7 @@ def test_find_nfqws2_pids_skips_non_nfqws2():
     p.pid = 777
     p.info = {"name": "nginx"}
     with (
-        patch("blockchecks.engine.services.metrics.os.stat") as mock_stat,
+        patch("blockchecks.service.metrics.os.stat") as mock_stat,
         patch("psutil.process_iter", return_value=iter([p])),
     ):
         mock_stat.return_value.st_ino = 99
@@ -87,7 +87,7 @@ def test_find_nfqws2_pids_skips_non_nfqws2():
 
 def test_monitor_flags_rss_ceiling():
     mon = MemoryMonitor(enabled=True, max_mib=100, window=20)
-    with patch("blockchecks.engine.services.metrics.process_rss_bytes", return_value=200 * 1024 * 1024):
+    with patch("blockchecks.service.metrics.process_rss_bytes", return_value=200 * 1024 * 1024):
         mon.record_pid(42)
         cands = mon.recycle_candidates()
     assert cands == [(42, "rss=200MiB > 100MiB")]
@@ -96,8 +96,8 @@ def test_monitor_flags_rss_ceiling():
 def test_monitor_flags_leak_slope():
     mon = MemoryMonitor(enabled=True, max_mib=1000, leak_slope=8, window=20)
     seq = [100 * 1024 * 1024, 200 * 1024 * 1024, 300 * 1024 * 1024, 400 * 1024 * 1024]
-    with patch("blockchecks.engine.services.metrics.time.monotonic", side_effect=[1, 2, 3, 4]):
-        with patch("blockchecks.engine.services.metrics.process_rss_bytes", side_effect=seq):
+    with patch("blockchecks.service.metrics.time.monotonic", side_effect=[1, 2, 3, 4]):
+        with patch("blockchecks.service.metrics.process_rss_bytes", side_effect=seq):
             for _ in seq:
                 mon.record_pid(7)
     cands = mon.recycle_candidates()
@@ -108,7 +108,7 @@ def test_monitor_flags_leak_slope():
 
 def test_monitor_clear_resets_window():
     mon = MemoryMonitor(enabled=True, max_mib=100, window=20)
-    with patch("blockchecks.engine.services.metrics.process_rss_bytes", return_value=500 * 1024 * 1024):
+    with patch("blockchecks.service.metrics.process_rss_bytes", return_value=500 * 1024 * 1024):
         mon.record_pid(9)
         mon.clear(9)
         mon.clear()  # clear-all path
@@ -117,14 +117,14 @@ def test_monitor_clear_resets_window():
 
 def test_monitor_disabled_skips_sampling():
     mon = MemoryMonitor(enabled=False)
-    with patch("blockchecks.engine.services.metrics.process_rss_bytes", return_value=999 * 1024 * 1024):
+    with patch("blockchecks.service.metrics.process_rss_bytes", return_value=999 * 1024 * 1024):
         mon.record_pid(1)
     assert mon.recycle_candidates() == []
 
 
 def test_monitor_rate_limit():
     mon = MemoryMonitor(enabled=True, poll=5.0)
-    with patch("blockchecks.engine.services.metrics.time.monotonic", side_effect=[0, 1, 6]):
+    with patch("blockchecks.service.metrics.time.monotonic", side_effect=[0, 1, 6]):
         assert mon.should_sample() is True  # first check always passes
         assert mon.should_sample() is False  # t=1 within poll
         assert mon.should_sample() is True  # t=6 past poll
@@ -132,16 +132,16 @@ def test_monitor_rate_limit():
 
 def test_worker_over_limit():
     mon = MemoryMonitor(enabled=True, py_max_mib=1)
-    with patch("blockchecks.engine.services.metrics.process_rss_bytes", return_value=50 * 1024 * 1024):
+    with patch("blockchecks.service.metrics.process_rss_bytes", return_value=50 * 1024 * 1024):
         assert mon.worker_over_limit() is True
     mon2 = MemoryMonitor(enabled=True, py_max_mib=99999)
-    with patch("blockchecks.engine.services.metrics.process_rss_bytes", return_value=50 * 1024 * 1024):
+    with patch("blockchecks.service.metrics.process_rss_bytes", return_value=50 * 1024 * 1024):
         assert mon2.worker_over_limit() is False
 
 
 def test_summary_shape():
     mon = MemoryMonitor(enabled=True, max_mib=100, window=20)
-    with patch("blockchecks.engine.services.metrics.process_rss_bytes", return_value=64 * 1024 * 1024):
+    with patch("blockchecks.service.metrics.process_rss_bytes", return_value=64 * 1024 * 1024):
         mon.record_pid(5)
     s = mon.summary()
     assert s["enabled"] is True

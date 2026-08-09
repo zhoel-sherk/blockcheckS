@@ -13,8 +13,8 @@ from blockchecks.engine.adaptive_queue import (
     ScanWeights,
 )
 from blockchecks.engine.generators.base import StrategyItem
-from blockchecks.engine.services.batch_probe import BatchJobAccumulator
 from blockchecks.engine.store import RunStateStore
+from blockchecks.service.batch_scheduler import BatchJobAccumulator
 
 ProgressCb = Callable[[int, int, int], None]
 ResumeCb = Callable[[AdaptiveJob], Awaitable[bool]]

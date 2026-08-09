@@ -88,7 +88,7 @@ sudo bs scan --preset pi2 -M timeout-benchmark \
 Transfer checklist: `nfqws2` + `lua/` + `blobs/` (`rsync --copy-links`); install
 `curl_cffi` **on the Pi** (armv7l wheels). `system_deps` refuses wrong-arch ELF.
 
-**Memory monitor / daemon recycle** (`engine/services/metrics.py`, lua_bridge
+**Memory monitor / daemon recycle** (`service/metrics.py`, lua_bridge
 backend only): samples nfqws2 RSS inside each netns and recycles the daemon
 (when RSS or leak-slope is exceeded). On a **RPi2** with ~256 MiB free RAM,
 lower the ceiling below the default:

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from blockchecks.engine.services.nfqws2 import Nfqws2Manager
+from blockchecks.service.nfqws2 import Nfqws2Manager
 
 pytestmark = pytest.mark.unit
 
@@ -28,9 +28,9 @@ def test_launch_raises_when_process_exits_immediately(tmp_path: Path):
 
     mgr = Nfqws2Manager(ns_name="bs-p0")
     with (
-        patch("blockchecks.engine.services.nfqws2.get_nfqws2_bin", return_value="/opt/zapret2/nfq2/nfqws2"),
-        patch("blockchecks.engine.services.nfqws2.subprocess.Popen", return_value=dead),
-        patch("blockchecks.engine.services.nfqws2.wait_nfqws2_ready", return_value=0.01),
+        patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/opt/zapret2/nfq2/nfqws2"),
+        patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=dead),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.01),
     ):
         with pytest.raises(RuntimeError, match="failed to start"):
             mgr.start_config(str(conf))
@@ -48,9 +48,9 @@ def test_launch_success_sets_pid(tmp_path: Path):
 
     mgr = Nfqws2Manager(ns_name="bs-p0")
     with (
-        patch("blockchecks.engine.services.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
-        patch("blockchecks.engine.services.nfqws2.subprocess.Popen", return_value=alive) as popen,
-        patch("blockchecks.engine.services.nfqws2.wait_nfqws2_ready", return_value=0.02),
+        patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
+        patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=alive) as popen,
+        patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.02),
     ):
         mgr.start_config(str(conf))
 
@@ -73,9 +73,9 @@ def test_stop_killpg_and_unlinks_temps(tmp_path: Path):
     mgr._temp_files = [str(temp)]
 
     with (
-        patch("blockchecks.engine.services.nfqws2.os.getpgid", return_value=9999),
-        patch("blockchecks.engine.services.nfqws2.os.killpg") as killpg,
-        patch("blockchecks.engine.services.nfqws2.time.sleep"),
+        patch("blockchecks.service.nfqws2.os.getpgid", return_value=9999),
+        patch("blockchecks.service.nfqws2.os.killpg") as killpg,
+        patch("blockchecks.service.nfqws2.time.sleep"),
     ):
         mgr.stop()
 

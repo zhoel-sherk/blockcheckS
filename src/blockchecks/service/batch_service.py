@@ -1,256 +1,30 @@
-"""Batch TCP probing — N strategies per nfqws2 lifecycle (classic or lua_bridge)."""
+"""ProbeBatchService — boot batch → probe ×N → shutdown (classic | lua_bridge)."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from colorama import Fore, Style
 
 if TYPE_CHECKING:
-    from blockchecks.engine.adaptive_queue import AdaptiveJob
+    pass
 
-from blockchecks.checkers.curl_probe import (
-    CurlProbeRequest,
-    is_googlevideo_domain,
-    prepare_googlevideo_probe,
-    worker_wall_timeout,
+from blockchecks.service.batch_bridge_probe import run_tcp_check_bridge
+from blockchecks.service.batch_models import (
+    BatchContext,
+    BatchProbeConfig,
+    BatchProbeResult,
+    RunnerProbeDeps,
 )
-from blockchecks.engine.config import DEFAULT_BRIDGE_BATCH_MAX
-from blockchecks.engine.generators.base import StrategyItem
-from blockchecks.engine.services.lua_bridge import (
-    BridgeSession,
-    LuaBridge,
-    NetnsGoneError,
-    _netns_tcp_probe_cleanup,
-    strategy_text_from_item,
-)
-from blockchecks.engine.services.probe import invoke_curl_probe_worker, probe_request_dict
+from blockchecks.service.batch_scheduler import BatchScheduler
+from blockchecks.service.lua_bridge_ipc import LuaBridge
+from blockchecks.service.lua_netns import NetnsGoneError, _netns_tcp_probe_cleanup
+from blockchecks.service.lua_session import BridgeSession, strategy_text_from_item
 
 CYAN = Fore.CYAN + Style.BRIGHT
 RESET = Style.RESET_ALL
-
-ProbeBackend = Literal["classic", "lua_bridge"]
-
-
-@dataclass(frozen=True)
-class BatchContext:
-    ns_name: str
-    items: list[StrategyItem]
-    domain: str
-    batch_id: int
-    protocol: str = "tls12"
-    domains: list[str] | None = None  # parallel to items; defaults to domain
-
-    def item_domains(self) -> list[str]:
-        if self.domains is not None and len(self.domains) == len(self.items):
-            return list(self.domains)
-        return [self.domain] * len(self.items)
-
-
-@dataclass(frozen=True)
-class BatchProbeConfig:
-    backend: ProbeBackend
-    batch_size: int = 500
-    lua_extra: tuple[str, ...] = ()
-    compare_classic: bool = False
-
-
-@dataclass
-class BatchProbeResult:
-    results: list
-    settle_ms: float = 0.0
-    batch_wall_ms: float = 0.0
-    backend: str = "classic"
-    batch_fill_ratio: float = 1.0
-
-
-@dataclass
-class RunnerProbeDeps:
-    """Minimal runner contract for ProbeBatchService (avoids cyclic imports)."""
-
-    python: str
-    disable_ech: bool
-    repeats: int
-    parallel_repeats: bool
-    repeats_mode: str
-    quick_break: bool
-    try_wssize: bool
-    lua_extra: list[str]
-    timing_for: Callable[[StrategyItem, float], tuple[float, float | None]]
-    resolve_domain_dns: Callable[[str], Awaitable[tuple[str | None, str, str]]]
-    tcp_result_from_data: Callable[[StrategyItem, str, dict], object]
-    log_tcp_result: Callable[..., Awaitable[None]]
-    next_probe_gen: Callable[[], int]
-    run_tcp_check: Callable[..., dict]
-    acquire_ns: Callable[[], Awaitable[str]]
-    release_ns: Callable[[str], Awaitable[None]]
-
-
-class BatchScheduler:
-    """Chunk strategies/jobs into bridge-sized batches."""
-
-    def __init__(self, batch_size: int) -> None:
-        self.batch_size = max(1, min(batch_size, DEFAULT_BRIDGE_BATCH_MAX))
-
-    def iter_batches(self, items: list[StrategyItem]) -> list[list[StrategyItem]]:
-        n = self.batch_size
-        if not items:
-            return []
-        return [items[i : i + n] for i in range(0, len(items), n)]
-
-    def group_jobs_by_domain(
-        self,
-        jobs: list[AdaptiveJob],
-        *,
-        flush_partial: bool = True,
-    ) -> list[list[AdaptiveJob]]:
-        """Group consecutive jobs with same domain into batches up to batch_size."""
-        if not jobs:
-            return []
-        out: list[list[AdaptiveJob]] = []
-        cur_domain = jobs[0].domain
-        cur: list[AdaptiveJob] = []
-        labels: set[str] = set()
-
-        for job in jobs:
-            if job.domain != cur_domain:
-                if cur:
-                    out.append(cur)
-                cur = []
-                labels = set()
-                cur_domain = job.domain
-            if job.item.label in labels:
-                if cur:
-                    out.append(cur)
-                cur = [job]
-                labels = {job.item.label}
-                continue
-            if len(cur) >= self.batch_size:
-                out.append(cur)
-                cur = []
-                labels = set()
-            cur.append(job)
-            labels.add(job.item.label)
-
-        if cur and (flush_partial or len(cur) >= self.batch_size):
-            out.append(cur)
-        return out
-
-
-class BatchJobAccumulator:
-    """AQ bridge mode: accumulate jobs until batch_size unique (label, domain) keys.
-
-    The bridge is domain-agnostic (netns iptables redirects all :443 traffic to
-    nfqws2; strategy selected by published id), so jobs from *different* domains
-    can share one batch. Only fan-out waves are excluded (classic per-strategy).
-    """
-
-    def __init__(self, batch_size: int) -> None:
-        self.batch_size = max(1, batch_size)
-        self._jobs: list[AdaptiveJob] = []
-        self._keys: set[tuple[str, str]] = set()
-
-    def __len__(self) -> int:
-        return len(self._jobs)
-
-    @property
-    def domain(self) -> str | None:
-        return self._jobs[0].domain if self._jobs else None
-
-    @property
-    def domains(self) -> list[str]:
-        return [j.domain for j in self._jobs]
-
-    def flush(self) -> list[AdaptiveJob]:
-        jobs = self._jobs
-        self._jobs = []
-        self._keys = set()
-        return jobs
-
-    def can_accept(self, job: AdaptiveJob) -> bool:
-        if job.fanout:
-            return False
-        if job.key in self._keys:
-            return False
-        return len(self._jobs) < self.batch_size
-
-    def push(self, job: AdaptiveJob) -> bool:
-        if not self.can_accept(job):
-            return False
-        self._jobs.append(job)
-        self._keys.add(job.key)
-        return True
-
-    def is_full(self) -> bool:
-        return len(self._jobs) >= self.batch_size
-
-
-def run_tcp_check_bridge(
-    session: BridgeSession,
-    strategy_id: int,
-    gen: int,
-    strategy: str,
-    domain: str,
-    timeout: float,
-    python_bin: str,
-    disable_ech: bool = False,
-    resolved_ip: str | None = None,
-    repeats: int = 1,
-    parallel_repeats: bool = False,
-    extra_lua_desync: str = "",
-    protocol: str = "tls12",
-    repeats_mode: str = "fast",
-    quick_break: bool = False,
-) -> dict:
-    """Publish strategy id to shm IPC and curl (nfqws2 already running)."""
-    is_http = protocol == "http"
-    is_gv = not is_http and is_googlevideo_domain(domain)
-
-    if is_gv:
-        probe_req, gv_err = prepare_googlevideo_probe(domain, resolved_ip=resolved_ip)
-        if gv_err:
-            return gv_err
-        resolved_ip = probe_req.resolved_ip
-    else:
-        probe_req = CurlProbeRequest(
-            domain=domain,
-            timeout=timeout,
-            resolved_ip=resolved_ip,
-            resolve_name=domain.split("/")[0],
-            disable_ech=disable_ech,
-            protocol=protocol,
-        )
-
-    session.bridge.truncate_events()
-    session.bridge.publish(strategy_id, gen, strategy if extra_lua_desync else None)
-
-    probe_req.timeout = timeout
-    payload = {
-        "mode": "single",
-        "request": probe_request_dict(probe_req),
-        "repeats": max(1, int(repeats)),
-        "parallel_repeats": bool(parallel_repeats and repeats > 1),
-        "repeats_mode": repeats_mode,
-        "quick_break": bool(quick_break),
-    }
-    wall = worker_wall_timeout(
-        timeout,
-        repeats,
-        n_domains=1,
-        curl_parallel=1,
-        parallel_repeats=parallel_repeats,
-    )
-    data = invoke_curl_probe_worker(session.ns_name, python_bin, payload, wall)
-    data["settle_ms"] = 0.0
-    data["bridge_gen"] = gen
-    data["bridge_id"] = strategy_id
-    events = session.bridge.drain_events(since_gen=gen)
-    data["bridge_events"] = [e.event for e in events]
-    return data
 
 
 class ProbeBatchService:
@@ -468,7 +242,7 @@ class ProbeBatchService:
 
     def _maybe_wssize_retry(
         self,
-        item: StrategyItem,
+        item,
         ctx: BatchContext,
         timeout_i: float,
         ns_name: str,
@@ -507,7 +281,7 @@ class ProbeBatchService:
         self,
         session: BridgeSession,
         idx: int,
-        item: StrategyItem,
+        item,
         ctx: BatchContext,
         timeout_i: float,
         resolved_ip: str | None,
@@ -565,3 +339,9 @@ def warn_fanout_bridge_once() -> None:
         f"  {yellow}WARN: --lua-bridge ignored for fan-out waves "
         f"(classic per-strategy nfqws2){RESET}"
     )
+
+
+__all__ = [
+    "ProbeBatchService",
+    "warn_fanout_bridge_once",
+]
