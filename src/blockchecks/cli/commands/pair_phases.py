@@ -135,6 +135,30 @@ class DnsPreflightResult:
     exit_code: int | None = None
 
 
+def _default_pin_path() -> str:
+    """data_block provider hosts file — default IP-PIN source.
+
+    Auto-pin probes cached domains with the known-good fake strategy and
+    writes back only changed IPs, so this hosts file stays the single
+    source for both blockcheckS and a hand-copied Windows hosts.
+    """
+    try:
+        from blockchecks.data_block.provider import get_provider_dir
+
+        return str(get_provider_dir() / "hosts")
+    except Exception:
+        return ""
+
+
+def _resolve_pin_path(args) -> str:
+    """Explicit --fixed-ip / env, else the provider hosts file."""
+    return (
+        getattr(args, "fixed_ip", None)
+        or os.environ.get("BLOCKCHECKS_FIXED_IP", "")
+        or _default_pin_path()
+    )
+
+
 async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPreflightResult:
     """DNS + preflight; exit_code set on failure or prolog skip."""
     domains_for_dns = list(
@@ -155,10 +179,11 @@ async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPrefl
     if dns_rc:
         return DnsPreflightResult(dns_cache, dns_audits, exit_code=dns_rc)
 
-    # IP-PIN: load hosts-analog file (--fixed-ip) into the cache; pinned IPs
-    # override DoH order so Fryazino per-IP throttling can't flip the result.
+    # IP-PIN: load hosts-analog file (--fixed-ip, else provider hosts) into the
+    # cache; pinned IPs override DoH order so Fryazino per-IP throttling can't
+    # flip the result.
     pins = {}
-    pin_path = getattr(args, "fixed_ip", None) or os.environ.get("BLOCKCHECKS_FIXED_IP", "")
+    pin_path = _resolve_pin_path(args)
     if pin_path:
         from blockchecks.checkers.ip_pin import load_pins
 
@@ -202,7 +227,7 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         secure_dns=secure_dns,
         dns_cache=dns_cache,
         dns_audit={r.domain: r for r in dns_audits},
-        pinned_path=getattr(args, "fixed_ip", None) or os.environ.get("BLOCKCHECKS_FIXED_IP", ""),
+        pinned_path=_resolve_pin_path(args),
         auto_pin=not bool(getattr(args, "no_auto_pin", False)),
         repeats=repeats,
         parallel_repeats=parallel_repeats,

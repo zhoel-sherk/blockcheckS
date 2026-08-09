@@ -1013,21 +1013,22 @@ class AsyncTestRunner:
     async def _auto_pin_ips(self) -> None:
         """Probe DoH/pinned IPs with the known-good fake strategy; pin first PASS.
 
-        Hosts-analog file (``pinned_path``) is loaded, refreshed, and saved, so
-        pins persist across runs and survive Fryazino per-IP throttling.
+        The provider hosts file (or ``--fixed-ip`` file) is loaded, its pinned
+        domains probed, and only *changed* IPs are written back — so the file
+        stays clean in git unless a pinned address actually started failing.
         """
-        from blockchecks.checkers.ip_pin import load_pins, save_pins
+        from blockchecks.checkers.ip_pin import load_pins, merge_pins, save_pins
 
+        file_pins = load_pins(self.pinned_path) if self.pinned_path else {}
         pins = dict(self.dns_cache.pins())
-        if self.pinned_path:
-            pins.update(load_pins(self.pinned_path))
-            self.dns_cache.set_pins(pins)
+        pins = merge_pins(file_pins, pins)
+        self.dns_cache.set_pins(pins)
 
         domains = [d for d in self.dns_cache.domains() if d]
         if not domains:
             return
 
-        changed = False
+        updates: dict[str, str] = {}
         for domain in domains:
             ips = self.dns_cache.candidates(domain)
             if not ips:
@@ -1045,29 +1046,33 @@ class AsyncTestRunner:
                     picked = ip
                     break
             if picked:
+                updates[domain] = picked
                 if self.dns_cache.pinned_ip(domain) != picked:
                     self.dns_cache.add_pin(domain, picked)
-                    changed = True
+                tag = "file" if existing == picked else "auto"
                 print(
-                    f"  {Fore.CYAN}[dns] pinned {domain} -> {picked} "
-                    f"({'file' if self.dns_cache.pinned_ip(domain) == existing and existing == picked else 'auto'}){RESET}"
+                    f"  {Fore.CYAN}[dns] pinned {domain} -> {picked} ({tag}){RESET}"
                 )
             elif existing:
-                # previously pinned IP no longer works and no fallback found —
-                # drop it so DoH order decides instead of a dead pin.
-                self.dns_cache.add_pin(domain, "")
-                changed = True
+                # No candidate passed — keep the old pin as a best-effort target
+                # rather than dropping it (a stale pin still beats a DoH rotate
+                # onto a throttled IP).
+                self.dns_cache.add_pin(domain, existing)
                 print(
-                    f"  {Fore.YELLOW}[dns] pin dropped for {domain} "
-                    f"(no working IP){RESET}"
+                    f"  {Fore.YELLOW}[dns] pin kept for {domain} -> {existing} "
+                    f"(no working fallback){RESET}"
                 )
 
-        if changed and self.pinned_path:
-            try:
-                save_pins(self.pinned_path, {d: ip for d, ip in self.dns_cache.pins().items() if ip})
-                print(f"  {Fore.CYAN}[dns] saved pinned IPs -> {self.pinned_path}{RESET}")
-            except OSError as e:
-                print(f"  {Fore.YELLOW}[dns] cannot save pins {self.pinned_path}: {e}{RESET}")
+        if self.pinned_path:
+            merged = merge_pins(file_pins, updates)
+            if merged != file_pins:
+                try:
+                    save_pins(self.pinned_path, merged)
+                    print(f"  {Fore.CYAN}[dns] saved pinned IPs -> {self.pinned_path}{RESET}")
+                except OSError as e:
+                    print(f"  {Fore.YELLOW}[dns] cannot save pins {self.pinned_path}: {e}{RESET}")
+            else:
+                print(f"  {Fore.CYAN}[dns] pins unchanged -> {self.pinned_path}{RESET}")
 
     async def _probe_pin_ip(self, domain: str, ip: str) -> bool:
         """Return True when ``fake:blob=stun`` passes to *domain* via *ip*."""

@@ -609,15 +609,19 @@ def resolve_byedpi_bin() -> str | None:
 #### Реализовано (2026-08-10) — hosts-analog pin + retry-on-next-IP
 
 - **`--fixed-ip <path>`** (env `BLOCKCHECKS_FIXED_IP`): hosts-analog файл
-  `domain IP` (комментарии `#`). Pinned IP перекрывает DoH-порядок.
+  `domain IP` **или** `IP domain` (комментарии `#`). По умолчанию — файл
+  **`data_block/providers/<provider>/hosts`**: единый источник и для
+  blockcheckS, и для копируемого вручную Windows hosts.
 - **Авто-пин**: при старте (если не `--no-auto-pin`) проверяет кандидатов
-  стратегией `fake:blob=stun` (PIN_STRATEGY), пинит первый PASS, атомарно
-  перезаписывает файл. Проверено: pin `136.232` (троттлится) → авто-замена
-  на `138.232` → 3/3 PASS.
+  стратегией `fake:blob=stun` (PIN_STRATEGY), пинит первый PASS. Неактивные
+  домены hosts сохраняются, записываются только **изменённые** IP (git не
+  грязнится). Проверено: pin `136.232` (троттлится) → авто-замена на
+  `135.232` → 3/3 PASS; discord.gg/discordcdn.com сохранены.
 - **Retry-on-next-IP**: `_run_tcp_check`/`_multi`/`run_tcp_check_bridge` при
   FAIL повторяют curl-worker со следующими IP (короткий `RETRY_IP_TIMEOUT`),
   nfqws2 поднимается один раз. Использованный IP в `used_ip` → лог/DB.
-- Модуль `blockchecks/checkers/ip_pin.py`; тесты `tests/unit/test_ip_pin.py`.
+- Модуль `blockchecks/checkers/ip_pin.py` (двунаправленный парсер, вывод в
+  формате Windows hosts); тесты `tests/unit/test_ip_pin.py`.
 
 ### Phase 7 — ByeByeDPI catalog import (~2 часа)
 
