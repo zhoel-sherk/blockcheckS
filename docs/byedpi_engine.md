@@ -590,6 +590,22 @@ def resolve_byedpi_bin() -> str | None:
 - На чистых PASS-стратегиях byedpi: ~0.73 t/s; nfqws2 на Fryazino виснет — преимущество byedpi выше.
 - **Вывод:** byedpi стабильнее и быстрее на TCP/TLS prescreen; nfqws2 нужен для UDP/QUIC/voice и ground-truth.
 
+#### Диагностика "нестабильности" nfqws2 (2026-08-10, tshark/tcpdump)
+
+**Вердикт: не баг nfqws2 и не общий сбой сети, а IP-специфичный троттлинг Fryazino.**
+
+- Симптом: те же 3 fake-стратегии дают то 3/3 PASS (1s), то 0/3 FAIL (26s+) при идентичных флагах.
+- Причина: `prepare_dns_for_run()` берёт `dns_cache.primary_ip()` = **первый IP из DoH-ответа** (dns_secure.py:339). DoH (Cloudflare) **ротирует A-записи** discord.com: порядок меняется между запросами (проверено 5×: 136/138/128/135/137 .232).
+- **162.159.136.232 сейчас троттлится Fryazino**: на нём FAIL директ, nfqws2 fake, и byedpi (`curl (97) cannot complete SOCKS5`). Остальные 4 IP — PASS 75-85ms. Все 5 IP пингуются (15ms) — это DPI-троттлинг TLS-handshake, не потеря маршрута.
+- tshark подтверждает: на троттленом IP SYN→SYN+ACK проходит, **ClientHello уходит, ответа нет** (silent drop, SNI-based — см. Fryazino в AGENTS.md §6). Поedpi на рабочем IP шлёт CH в 3 сегментах (1388+396+1) и получает ответ.
+- `settle=0ms` в логе — норма (wait_nfqws2_ready видит процесс), не признак бага.
+- Лог "0 байт" при зависании — **артефакт буферизации stdout**: `bs` без `-u` буферизует при редиректе в файл; при kill буфер теряется. Для диагностики нужен `PYTHONUNBUFFERED=1`.
+
+**Рекомендации:**
+1. Бенчмарк: зафиксировать `--resolve`/pre-resolve на рабочий IP или прогонять несколько раз (поedpi и nfqws2 дают один вердикт на рабочем IP).
+2. Код: в `_run_tcp_check` при FAIL можно перебирать следующие `dns_cache.resolve()` IP (retry-on-next-IP) вместо мгновенного FAIL.
+3. При сравнении движков указывать выбранный IP — иначе результат зависит от ротации DoH, а не от движка.
+
 ### Phase 7 — ByeByeDPI catalog import (~2 часа)
 
 - [ ] `presets/byedpi/proxytest_strategies.list` — vendor 60 строк из [ByeByeDPI](https://github.com/romanvht/ByeByeDPI/blob/master/app/src/main/assets/proxytest_strategies.list)
