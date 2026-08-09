@@ -234,6 +234,17 @@ pytest -m "not integration"
   SNI на белый домен не даёт CDN-контента. Для обхода нужен SNI-маскинг или
   туннель (sing-box), не подмена IP.
 
+**QUIC fallback при дропе (переключение механизма)**
+- При постоянном FAIL (timeout = дроп ТСПУ) базовой QUIC-стратегии
+  `test_quic` автоматически пробует fallback-цепочку: базовая
+  `fake:blob=X` → `+badsum` → `+ip_ttl=1`. Отключается `BLOCKCHECKS_QUIC_FALLBACK=0`.
+- Диагностика 2026-08: **fake-инъекции пробивают ТСПУ** для QUIC (QUIC Initial
+  доходит до CDN — ошибка `ngtcp2_conn_writev_*`/`SSL cert`, НЕ timeout), тогда
+  как `send:ipfrag` (split/disorder) дропается (timeout). `_is_quic_dropped()`
+  отличает дроп от «дошёл до CDN».
+- Детали: `_quic_fallback_variants()` / `_is_quic_dropped()` в
+  `src/blockchecks/engine/async_runner.py`.
+
 **STUN probe всегда timeout**
 - GCP Discord-сервера требуют активную WebSocket-сессию для ответа на STUN.
 - Без `--full-voice` (gateway WS + voice WS) STUN таймаутит — это ожидаемо.

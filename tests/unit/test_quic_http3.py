@@ -129,3 +129,40 @@ def test_supports_http3_false_when_not_supported():
 
     with patch("blockchecks.checkers.http3.curl_cffi.Session", return_value=session):
         assert supports_http3() is False
+
+
+def test_quic_fallback_variants_adds_badsum_and_ttl():
+    from blockchecks.engine.async_runner import _quic_fallback_variants
+
+    variants = _quic_fallback_variants("fake:blob=quic_google:repeats=6")
+    assert variants == [
+        "fake:blob=quic_google:repeats=6:badsum",
+        "fake:blob=quic_google:repeats=6:ip_ttl=1",
+    ]
+
+
+def test_quic_fallback_variants_skips_existing(monkeypatch):
+    monkeypatch.delenv("BLOCKCHECKS_QUIC_FALLBACK", raising=False)
+    from blockchecks.engine.async_runner import _quic_fallback_variants
+
+    assert _quic_fallback_variants("fake:blob=X:badsum") == ["fake:blob=X:badsum:ip_ttl=1"]
+    assert _quic_fallback_variants("fake:blob=X:ip_ttl=1") == ["fake:blob=X:ip_ttl=1:badsum"]
+    assert _quic_fallback_variants("fake:blob=X:badsum:ip_ttl=1") == []
+
+
+def test_quic_fallback_variants_skips_config_and_disabled(monkeypatch):
+    from blockchecks.engine.async_runner import _quic_fallback_variants
+
+    assert _quic_fallback_variants("--qnum=201\n--filter-udp=443") == []
+    monkeypatch.setenv("BLOCKCHECKS_QUIC_FALLBACK", "0")
+    assert _quic_fallback_variants("fake:blob=X") == []
+    monkeypatch.delenv("BLOCKCHECKS_QUIC_FALLBACK", raising=False)
+
+
+def test_is_quic_dropped():
+    from blockchecks.engine.async_runner import _is_quic_dropped
+
+    assert _is_quic_dropped("timeout after 5000ms") is True
+    assert _is_quic_dropped("Connection timed out") is True
+    assert _is_quic_dropped("ngtcp2_conn_writev_stream failed") is False
+    assert _is_quic_dropped("SSL: no alternative certificate") is False

@@ -341,6 +341,43 @@ print(json.dumps({{
                 pass
 
 
+def _is_quic_dropped(error: str) -> bool:
+    """True if a QUIC probe failed by full drop (TSPU), vs reached-CDN errors.
+
+    A dropped session times out; an error like ``ngtcp2_conn_writev_*`` or
+    ``SSL: no alternative certificate`` means the QUIC Initial reached the CDN
+    (bypassed the TSPU SNI filter) but HTTP/3 did not complete.
+    """
+    low = (error or "").lower()
+    return "timeout" in low or "timed out" in low
+
+
+def _quic_fallback_variants(strategy: str) -> list[str]:
+    """Fallback chain for a QUIC strategy that was dropped (timeout).
+
+    fake-инъекции пробивают ТСПУ (доходят до CDN — диагностика 2026-08),
+    тогда как split/disorder (ipfrag) дропаются. Порядок: базовый fake →
+    +badsum → +ip_ttl=1. Стратегии уже содержащие badsum/ip_ttl не дублируются.
+    ``BLOCKCHECKS_QUIC_FALLBACK=0`` disables the fallback.
+    """
+    if not strategy or strategy.strip().startswith("--"):
+        return []
+    if os.environ.get("BLOCKCHECKS_QUIC_FALLBACK", "").strip().lower() in (
+        "0",
+        "false",
+        "off",
+        "no",
+    ):
+        return []
+    base = strategy.strip()
+    out: list[str] = []
+    for suffix in (":badsum", ":ip_ttl=1"):
+        if suffix in base:
+            continue
+        out.append(base + suffix)
+    return out
+
+
 def _run_tcp_check(
     ns_name: str,
     strategy: str,
@@ -1014,21 +1051,32 @@ class AsyncTestRunner:
                     if audit:
                         dns_verdict = audit.verdict
                         doh_server = audit.doh_server or self.dns_cache.doh_server
-                data = await asyncio.to_thread(
-                    _run_quic_check,
-                    ns_name,
-                    item.strategy,
-                    domain,
-                    timeout,
-                    item.is_config,
-                    self.python,
-                    resolved_ip,
-                )
-                result.success = data.get("success", False)
-                result.http_code = data.get("http_code", 0)
-                result.latency_ms = data.get("latency_ms", 0)
-                result.content_length = data.get("content_len", 0)
-                result.error = data.get("error", "") or ""
+
+                variants = [item.strategy] + _quic_fallback_variants(item.strategy)
+                for variant in variants:
+                    data = await asyncio.to_thread(
+                        _run_quic_check,
+                        ns_name,
+                        variant,
+                        domain,
+                        timeout,
+                        item.is_config,
+                        self.python,
+                        resolved_ip,
+                    )
+                    result.success = data.get("success", False)
+                    result.http_code = data.get("http_code", 0)
+                    result.latency_ms = data.get("latency_ms", 0)
+                    result.content_length = data.get("content_len", 0)
+                    result.error = data.get("error", "") or ""
+                    if result.success or not _is_quic_dropped(result.error):
+                        break
+                    # timeout = TSPU dropped this variant; try the next fallback.
+                    if variant != variants[-1]:
+                        print(
+                            f"  {YELLOW}[quic] {item.label[:24]} timeout "
+                            f"— trying fallback: {variant[:40]}...{RESET}"
+                        )
 
                 if self.db:
                     status = "PASS" if result.success else "FAIL"

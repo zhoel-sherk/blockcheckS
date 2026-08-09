@@ -2,6 +2,20 @@
 
 ## 1.2.1a — unreleased
 
+### Added — QUIC fallback chain when the base strategy is dropped
+
+- `test_quic` now tries a fallback chain when a QUIC strategy times out (TSPU
+  drop): base `fake:blob=X` → `+badsum` → `+ip_ttl=1`. Disable with
+  `BLOCKCHECKS_QUIC_FALLBACK=0`.
+- Live diagnosis (2026-08): fake injections **bypass the TSPU** for QUIC — the
+  QUIC Initial reaches the CDN (`ngtcp2_conn_writev_*` / `SSL: no alternative
+  certificate`, NOT timeout), while `send:ipfrag` (split/disorder) is dropped
+  (timeout). `_is_quic_dropped()` distinguishes a full drop from reached-CDN
+  errors; `_quic_fallback_variants()` builds the fallback list.
+- Tests: `test_quic_http3.py` — fallback variants (+badsum/+ip_ttl, skips
+  existing, config/disabled), `_is_quic_dropped` (4).
+- `docs/guide.md` QUIC fallback section added.
+
 ### Investigated — QUIC/HTTP-3 blocking mechanism on Fryazino (2026-08)
 
 - **QUIC as a protocol is NOT blocked**: `check_http3('cloudflare.com')` → 301;
