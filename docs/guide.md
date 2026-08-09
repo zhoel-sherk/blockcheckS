@@ -219,6 +219,21 @@ pytest -m "not integration"
 - Детали: `prepare_ggc_probe()` / `_ggc_redirect_is_google()` в
   `src/blockchecks/checkers/curl_probe.py`.
 
+**QUIC / HTTP-3 блокировка — механизм (исследовано 2026-08)**
+- **QUIC как протокол НЕ заблокирован** на Fryazino: `check_http3('cloudflare.com')`
+  → HTTP 301 (работает), низкоуровневый QUIC Initial к Cloudflare IP отвечает
+  (1200B), до `vk.com` / голого `googlevideo.com` QUIC доходит.
+- **Блокировка по SNI, не по IP**: тот же Google IP `74.125.108.234` (rr-диапазон)
+  пропускает `cloudflare.com` / `cdn.example.com` / голый `googlevideo.com`
+  (доходят до CDN → SSL-ошибка сертификата), но **дропает** `youtube.com`,
+  `www.youtube.com`, `rr*.googlevideo.com` (timeout) на **любом** IP.
+- ТСПУ анализирует SNI внутри первого UDP-пакета (QUIC Initial), поэтому
+  применяет разные правила к разным сайтам в рамках одного протокола —
+  «белый» SNI пролетает, заблокированный — весь UDP-поток сессии дропается.
+- Следствие: **GGC-подход для QUIC бесполезен** (дроп не по IP), а подмена
+  SNI на белый домен не даёт CDN-контента. Для обхода нужен SNI-маскинг или
+  туннель (sing-box), не подмена IP.
+
 **STUN probe всегда timeout**
 - GCP Discord-сервера требуют активную WebSocket-сессию для ответа на STUN.
 - Без `--full-voice` (gateway WS + voice WS) STUN таймаутит — это ожидаемо.

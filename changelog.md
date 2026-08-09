@@ -2,6 +2,21 @@
 
 ## 1.2.1a — unreleased
 
+### Investigated — QUIC/HTTP-3 blocking mechanism on Fryazino (2026-08)
+
+- **QUIC as a protocol is NOT blocked**: `check_http3('cloudflare.com')` → 301;
+  raw QUIC Initial to a Cloudflare IP gets a reply; QUIC reaches `vk.com` and
+  bare `googlevideo.com`.
+- **Blocking is by SNI, not by IP**: the same Google rr-range IP
+  `74.125.108.234` passes `cloudflare.com` / `cdn.example.com` / bare
+  `googlevideo.com` (reach the CDN → certificate error) but **drops**
+  `youtube.com`, `www.youtube.com`, `rr*.googlevideo.com` (timeout) on any IP.
+  TSPU inspects the SNI inside the first QUIC Initial UDP packet and applies
+  per-site rules; blocked SNI → whole UDP session dropped.
+- Consequence: GGC-style IP substitution does not help for QUIC; masking the
+  SNI to a white domain yields no CDN content. Needs SNI masking or a tunnel,
+  not IP substitution. Documented in `docs/guide.md`.
+
 ### Added — voice-traffic >16KB preflight check + provider-result → AQ weights
 
 - **Preflight UDP >16KB check** (`preflight.check_udp_16kb`, `PreflightReport.
