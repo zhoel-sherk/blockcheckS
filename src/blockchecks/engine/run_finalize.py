@@ -69,7 +69,7 @@ async def maybe_sync_data_block(args=None) -> None:
         from blockchecks.data_block.store import ProviderStore
 
         store = ProviderStore(get_provider_dir())
-        store.sync_commit()
+        store.sync_commit(push=True)
     except Exception:
         pass
 

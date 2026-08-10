@@ -244,3 +244,29 @@ def test_nfqws2_debug_env_propagated_by_dispatch_subcommand():
         assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") == "syslog"
     finally:
         os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+
+
+@pytest.mark.unit
+def test_no_prefix_flags_set_true_by_dispatch():
+    """pydantic parses --no-<field> as negation; _dispatch_subcommand must
+    re-apply the captured field as True (no_http/no_quic/no_voice/...)."""
+    from blockchecks.cli import cliapp as ca
+
+    old = ca._NO_FLAGS_CAPTURED
+    try:
+        Root = build_cli_root()
+        model = Root(_cli_parse_args=["full", "-d", "discord.com"])
+        ca._NO_FLAGS_CAPTURED = {"no_quic", "no_http"}
+        captured: dict[str, bool] = {}
+
+        def handler(sub):
+            for field in ("no_quic", "no_http"):
+                captured[field] = bool(getattr(sub, field))
+            return 0
+
+        ca._CMD_HANDLERS["FullCmd"] = handler
+        assert ca._dispatch_subcommand(model) == 0
+        assert captured == {"no_quic": True, "no_http": True}
+    finally:
+        ca._NO_FLAGS_CAPTURED = old
+        ca._CMD_HANDLERS.pop("FullCmd", None)

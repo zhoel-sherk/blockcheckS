@@ -38,6 +38,25 @@ def normalize_cli_args(argv: list[str]) -> list[str]:
 _CMD_HANDLERS: dict[str, Any] = {}
 _CLI_EXIT_CODE: int = 0
 _FULL_RUN_ACTIVE: bool = False
+# Fields whose --no-<name> flag pydantic parses as negation (False) instead of
+# setting True; re-applied in _dispatch_subcommand from main()'s argv capture.
+_NO_FLAGS_CAPTURED: set[str] = set()
+_NO_PREFIX_FIELDS = frozenset({
+    "no_wssize",
+    "no_http",
+    "no_quic",
+    "no_voice",
+    "no_secure_dns",
+    "no_auto_pin",
+    "no_settle_profile",
+    "no_hostlist",
+    "no_common_only",
+    "no_family_gates",
+    "no_adaptive_weights",
+    "no_write_profile",
+    "no_fetch_deps",
+    "no_export_on_stop",
+})
 
 
 def _annotation_for_action(action: argparse.Action) -> Any:
@@ -216,6 +235,11 @@ def _dispatch_subcommand(root: BaseModel) -> int:
     if sub is None:
         return 2
     _apply_nfqws2_debug_env(sub)
+    # pydantic-settings 2.14 parses "--no-<field>" as negation, so fields named
+    # ``no_*`` arrive False; re-apply the captured flags from main().
+    for _field in _NO_FLAGS_CAPTURED:
+        if hasattr(sub, _field):
+            setattr(sub, _field, True)
     handler = _CMD_HANDLERS.get(type(sub).__name__)
     if handler is None:
         return 2
@@ -509,6 +533,17 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     Root = build_cli_root()
+    # pydantic-settings 2.14 treats "--no-<field>" as a negation, so a field
+    # literally named ``no_*`` (no_wssize, no_http, ...) can never be set True
+    # through the CLI (both "--no-x" and "--no-no-x" parse to False). Capture
+    # the flags first; _dispatch_subcommand applies them to the subcommand.
+    global _NO_FLAGS_CAPTURED
+    _NO_FLAGS_CAPTURED = set()
+    for _arg in cli_args or ():
+        if _arg.startswith("--no-"):
+            _field = _arg[2:].replace("-", "_")
+            if _field in _NO_PREFIX_FIELDS:
+                _NO_FLAGS_CAPTURED.add(_field)
     try:
         result = CliApp.run(Root, cli_args=cli_args)
     except SystemExit as exc:

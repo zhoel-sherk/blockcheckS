@@ -2,8 +2,27 @@
 
 ## 1.2.1a — unreleased
 
-### Fixed — v1.2.2 test-plan findings (days 1-2)
+### Fixed — v1.2.2 test-plan findings (days 1-3)
 
+- **CliApp `--no-*` flags were silently ignored**: pydantic-settings 2.14
+  parses `--no-<field>` as a *negation*, so fields literally named `no_*`
+  (no_wssize, no_http, no_quic, no_voice, no_secure_dns, no_auto_pin,
+  no_settle_profile, …) could never be set True through the CLI — both
+  `--no-x` and `--no-no-x` parsed to False. smoke_scan/release_smoke with
+  `--no-*` did not actually disable their phases. Fix: `cliapp.main` captures
+  `--no-*` flags and `_dispatch_subcommand` re-applies them to the parsed
+  subcommand. Verified `--no-quic/--no-voice/--no-http/--no-wssize` → True;
+  +1 unit test.
+- **Settle profile auto-load could break `bs full`**: a stale
+  `/root/.cache/blockcheckS/settle_profile.json` with `curl_timeout=0.5s`
+  (from an earlier bench on a faster network) turned every TCP probe into a
+  500ms FAIL on throttled Fryazino. `auto_load_profile` now rejects profiles
+  whose defaults demand `curl_timeout < 2.0` (AUTO_LOAD_MIN_CURL) with a
+  warning; explicit `--settle-profile` still forces. +3 unit tests.
+- **`--data-block-sync` committed but never pushed**: `maybe_sync_data_block`
+  called `sync_commit()` without `push=True`, and under sudo git could not
+  find the user's credentials. Now `sync_commit(push=True)` and git runs via
+  `sudo -u $SUDO_USER`. Verified live push (origin 58ff6b2). +1 unit test.
 - `ProviderStore.write_hosts` merged with the existing hosts file instead of
   overwriting: a run that DNS-audits only a few domains (e.g. benchmark.txt)
   previously wiped unrelated pinned entries (googleapis, googlevideo, youtu.be,

@@ -316,23 +316,33 @@ class ProviderStore:
     # ── sync (opt-in) ─────────────────────────────────────
 
     def sync_commit(self, *, push: bool = False) -> bool:
-        """Commit data_block changes locally; push only if requested."""
+        """Commit data_block changes locally; push only if requested.
+
+        When running as root via sudo, git is re-invoked as the original user
+        (``sudo -u $SUDO_USER``) so its credentials (gh helper) are available —
+        otherwise ``git push`` fails with "could not read Username".
+        """
         repo = self._dir.parents[1]  # .../data_block
         if not (repo / ".git").exists():
             return False
+        prefix: list[str] = []
+        if os.geteuid() == 0:
+            sudo_user = os.environ.get("SUDO_USER", "").strip()
+            if sudo_user:
+                prefix = ["sudo", "-u", sudo_user]
         for cmd in (
             ["git", "add", "-A"],
             ["git", "commit", "-m", f"sync: update provider data ({_now()})"],
         ):
             r = subprocess.run(
-                cmd, cwd=repo, capture_output=True, text=True, timeout=30
+                prefix + cmd, cwd=repo, capture_output=True, text=True, timeout=30
             )
             if r.returncode != 0 and "nothing to commit" not in r.stdout + r.stderr:
                 print(f"  [data_block] git {cmd[1]} failed: {r.stderr[:200]}")
                 return False
         if push:
             r = subprocess.run(
-                ["git", "push"], cwd=repo, capture_output=True, text=True, timeout=60
+                prefix + ["git", "push"], cwd=repo, capture_output=True, text=True, timeout=60
             )
             if r.returncode != 0:
                 print(

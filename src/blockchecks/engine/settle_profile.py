@@ -13,6 +13,12 @@ from blockchecks.engine.paths import SETTLE_PROFILE_FILE
 PROFILE_VERSION = 1
 DEFAULT_PROFILE_PATH = str(SETTLE_PROFILE_FILE)
 
+# Auto-load guard: profiles whose defaults demand a curl budget below this are
+# rejected on auto-load (they usually went stale on a throttled network and
+# would turn every TCP probe into a 500ms FAIL). Explicit --settle-profile
+# still forces them through.
+AUTO_LOAD_MIN_CURL = 2.0
+
 
 @dataclass
 class TimingOverride:
@@ -148,8 +154,25 @@ def load_profile(path: str | None = None) -> SettleProfile | None:
 
 
 def auto_load_profile() -> SettleProfile | None:
-    """Load profile from env or default logs path."""
+    """Load profile from env or default logs path (safe auto-load).
+
+    A profile whose defaults demand an aggressive curl budget (<
+    ``AUTO_LOAD_MIN_CURL``) is ignored on auto-load — it is most likely stale
+    from a previously faster/throttled network and would fail every TCP probe
+    (e.g. curl timeout 0.5s on Fryazino). Use ``--settle-profile`` to force it.
+    """
     env = os.environ.get("BLOCKCHECKS_SETTLE_PROFILE", "").strip()
     if env.lower() in ("0", "off", "false", "no"):
         return None
-    return load_profile(env or None)
+    profile = load_profile(env or None)
+    if profile is None:
+        return None
+    d = profile.defaults
+    if d is not None and d.curl_timeout is not None and d.curl_timeout < AUTO_LOAD_MIN_CURL:
+        print(
+            "  [settle] auto profile ignored: curl_timeout "
+            f"{d.curl_timeout}s < {AUTO_LOAD_MIN_CURL}s (likely stale; "
+            "use --settle-profile to force)"
+        )
+        return None
+    return profile

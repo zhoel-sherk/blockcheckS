@@ -262,3 +262,21 @@ async def test_maybe_export_on_time_limit(tmp_path):
     assert Path(result["keenetic"]).exists()
     user = Path(result["user_list"]).read_text(encoding="utf-8")
     assert "discord.com" in user
+
+
+def test_maybe_sync_data_block_pushes(monkeypatch):
+    """--data-block-sync must push (sync_commit(push=True))."""
+    from blockchecks.engine import run_finalize
+
+    calls: list[dict] = []
+    store = type("FakeStore", (), {"sync_commit": lambda self, push=False: calls.append({"push": push})})()
+    monkeypatch.setattr(
+        "blockchecks.data_block.provider.get_provider_dir", lambda: "."
+    )
+    monkeypatch.setattr(
+        "blockchecks.data_block.store.ProviderStore", lambda *a, **k: store
+    )
+    asyncio.run(
+        run_finalize.maybe_sync_data_block(args=type("A", (), {"data_block_sync": True})())
+    )
+    assert calls == [{"push": True}]

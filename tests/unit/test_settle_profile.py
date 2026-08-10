@@ -6,6 +6,7 @@ from pathlib import Path
 from blockchecks.engine.settle_profile import (
     SettleProfile,
     TimingOverride,
+    auto_load_profile,
     build_profile_from_rows,
     load_profile,
     save_profile,
@@ -58,3 +59,39 @@ def test_save_load_roundtrip(tmp_path: Path):
     with open(path) as f:
         data = json.load(f)
     assert data["version"] == 1
+
+
+def test_auto_load_rejects_aggressive_profile(tmp_path, monkeypatch):
+    """Stale profile with curl_timeout < AUTO_LOAD_MIN_CURL is ignored."""
+    path = tmp_path / "stale.json"
+    save_profile(
+        SettleProfile(
+            domain="discord.com",
+            defaults=TimingOverride(0.1, 0.5),
+            strategies={"fake:blob=stun": TimingOverride(0.1, 0.5)},
+        ),
+        str(path),
+    )
+    monkeypatch.setenv("BLOCKCHECKS_SETTLE_PROFILE", str(path))
+    assert auto_load_profile() is None
+
+
+def test_auto_load_accepts_safe_profile(tmp_path, monkeypatch):
+    path = tmp_path / "ok.json"
+    save_profile(
+        SettleProfile(
+            domain="discord.com",
+            defaults=TimingOverride(0.2, 2.5),
+            strategies={"fake:blob=stun": TimingOverride(0.2, 2.5)},
+        ),
+        str(path),
+    )
+    monkeypatch.setenv("BLOCKCHECKS_SETTLE_PROFILE", str(path))
+    p = auto_load_profile()
+    assert p is not None
+    assert p.defaults.curl_timeout == 2.5
+
+
+def test_auto_load_disabled_by_env(monkeypatch):
+    monkeypatch.setenv("BLOCKCHECKS_SETTLE_PROFILE", "0")
+    assert auto_load_profile() is None
