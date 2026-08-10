@@ -64,3 +64,21 @@ def test_create_one_failure_propagates():
         with pytest.raises(RuntimeError, match="netns add"):
             pool.create_all()
     assert pool._created is False
+
+
+def test_get_iface_skips_veth_and_peer():
+    """_get_iface must not pick a leftover veth/peer as the out-interface."""
+    from unittest.mock import MagicMock, patch
+
+    pool = NetNsPool(size=1, base="bs-t")
+    fake_output = (
+        "lo               UNKNOWN        127.0.0.1/8\n"
+        "vh-bs-p-1234-3@if513 UP             c2:89:35:34:b7:b7\n"
+        "enp2s0           DOWN\n"
+        "wlp4s0           UP             192.168.1.132/24\n"
+    )
+    with patch(
+        "blockchecks.service.netns_pool.subprocess.run",
+        return_value=MagicMock(returncode=0, stdout=fake_output, stderr=""),
+    ):
+        assert pool._get_iface() == "wlp4s0"

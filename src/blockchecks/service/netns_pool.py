@@ -43,15 +43,26 @@ class NetNsPool:
         return r
 
     def _get_iface(self) -> str:
-        """Find a working non-loopback interface (cached)."""
+        """Find a working non-loopback interface (cached).
+
+        Excludes veth/peer interfaces (``veth*``, ``vh-*``, ``vn-*`` or names
+        with an ``@`` peer suffix) — otherwise a leftover UP veth from a prior
+        pool (or a concurrently running bs) is picked as the out-interface and
+        ``iptables -o vh-...@ifNNN`` fails with "interface name must be shorter
+        than IFNAMSIZ (15)".
+        """
         if self._iface:
             return self._iface
         r = subprocess.run(["ip", "-br", "link", "show"], capture_output=True, text=True)
         for line in r.stdout.splitlines():
             parts = line.split()
-            if len(parts) >= 2 and parts[1] == "UP" and parts[0] != "lo":
-                self._iface = parts[0]
-                return self._iface
+            if len(parts) < 2 or parts[1] != "UP" or parts[0] == "lo":
+                continue
+            name = parts[0]
+            if "@" in name or name.startswith(("veth", "vh-", "vn-")):
+                continue
+            self._iface = name
+            return self._iface
         self._iface = "eth0"
         return self._iface
 
