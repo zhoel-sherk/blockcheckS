@@ -2,6 +2,17 @@
 
 ## 1.2.1a — unreleased
 
+### Fixed — v1.2.2 test-plan day 1 findings
+
+- `--fixed-ip` / `--no-auto-pin` moved to scan/pair only (`add_ip_pin_args`);
+  tcp/udp are single-shot sync commands without the AsyncTestRunner auto-pin
+  path, so declaring the flags there tripped the dead-CLI-flags gate.
+- Integration `test_lua_bridge_compare`: wall timeout 300→500s, per-strategy
+  `--timeout 5` (FAIL paths stay short on throttled Fryazino), child runs in
+  its own process group and `killpg` cleans the whole sudo→bs→nfqws2 tree on
+  timeout (no leaked procs / stale run.lock / PID-reuse false conflict);
+  `test_lua_bridge_single_strategy` now probes 1 strategy (was silently 10).
+
 ### Added — IP pinning (hosts-analog) + retry-on-next-IP vs Fryazino per-IP throttling
 
 - **`--fixed-ip <path>`** (env `BLOCKCHECKS_FIXED_IP`): hosts-analog pin file
