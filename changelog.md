@@ -2,7 +2,21 @@
 
 ## 1.2.1a — unreleased
 
-### Fixed — v1.2.2 test-plan day 1 findings
+### Fixed — v1.2.2 test-plan findings (days 1-2)
+
+- `ProviderStore.write_hosts` merged with the existing hosts file instead of
+  overwriting: a run that DNS-audits only a few domains (e.g. benchmark.txt)
+  previously wiped unrelated pinned entries (googleapis, googlevideo, youtu.be,
+  discordapp, discordcdn). Found via v1.2.2 day-2 E2E when the data_block hosts
+  shrank from 13 to 7 domains. +1 unit test.
+- `bs tcp --protocol http`: `Nfqws2Manager.start()` always injected
+  `--payload=tls_client_hello` + wrapped the whole strategy in `--lua-desync=`.
+  For full CLI strategy lines from custom list_http.txt (e.g.
+  `--payload=http_req --lua-desync=http_hostcase`) this produced a duplicate
+  `--payload` and nfqws2 exited immediately. Now full `--`-prefixed strategies
+  are split via `lua_conf._split_cli_args` and not re-wrapped; plain
+  `fake:...` strategies keep the default TLS wrap. Verified `bs tcp -d ya.ru
+  --protocol http --test custom` → 3/3 PASS; +2 unit tests.
 
 - `--fixed-ip` / `--no-auto-pin` moved to scan/pair only (`add_ip_pin_args`);
   tcp/udp are single-shot sync commands without the AsyncTestRunner auto-pin

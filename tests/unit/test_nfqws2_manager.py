@@ -62,6 +62,50 @@ def test_launch_success_sets_pid(tmp_path: Path):
     assert any(str(a).startswith("@") for a in cmd)
 
 
+def test_start_full_cli_strategy_no_double_payload(tmp_path: Path):
+    """A full CLI strategy (custom list_http.txt) is split as-is, not re-wrapped
+    with --payload=tls_client_hello (which makes nfqws2 exit immediately)."""
+    alive = MagicMock()
+    alive.pid = 8888
+    alive.poll.return_value = None
+
+    mgr = Nfqws2Manager(ns_name="bs-p0")
+    with (
+        patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
+        patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=alive) as popen,
+        patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.02),
+    ):
+        mgr.start("--payload=http_req --lua-desync=http_hostcase")
+
+    cmd = popen.call_args.args[0]
+    conf_arg = next(str(a) for a in cmd if str(a).startswith("@"))
+    conf_text = Path(conf_arg[1:]).read_text(encoding="utf-8")
+    assert "--payload=http_req" in conf_text
+    assert "--lua-desync=http_hostcase" in conf_text
+    assert "--payload=tls_client_hello" not in conf_text
+
+
+def test_start_simple_strategy_still_wrapped(tmp_path: Path):
+    """Plain fake:... strategies keep the default TLS payload + lua-desync wrap."""
+    alive = MagicMock()
+    alive.pid = 9999
+    alive.poll.return_value = None
+
+    mgr = Nfqws2Manager(ns_name="bs-p0")
+    with (
+        patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
+        patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=alive) as popen,
+        patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.02),
+    ):
+        mgr.start("fake:blob=stun:repeats=6:tcp_ts=-1000")
+
+    cmd = popen.call_args.args[0]
+    conf_arg = next(str(a) for a in cmd if str(a).startswith("@"))
+    conf_text = Path(conf_arg[1:]).read_text(encoding="utf-8")
+    assert "--payload=tls_client_hello" in conf_text
+    assert "--lua-desync=fake:blob=stun:repeats=6:tcp_ts=-1000" in conf_text
+
+
 def test_stop_killpg_and_unlinks_temps(tmp_path: Path):
     temp = tmp_path / "tmp.conf"
     temp.write_text("x", encoding="utf-8")

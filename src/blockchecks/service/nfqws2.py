@@ -238,8 +238,17 @@ class Nfqws2Manager:
                     pass
                 raise
 
-        lines.append("--payload=tls_client_hello")
-        lines.append(f"--lua-desync={strategy}")
+        # Full CLI strategy lines (e.g. custom list_http.txt entries like
+        # "--payload=http_req --lua-desync=http_hostcase") carry their own
+        # payload + desync and must not be wrapped again — otherwise nfqws2
+        # gets a duplicate --payload / a garbage --lua-desync and exits.
+        if strategy.strip().startswith("--"):
+            from blockchecks.service.lua_conf import _split_cli_args
+
+            lines.extend(_split_cli_args(strategy))
+        else:
+            lines.append("--payload=tls_client_hello")
+            lines.append(f"--lua-desync={strategy}")
         if extra_lua_desync:
             for extra in extra_lua_desync:
                 lines.append(f"--lua-desync={extra}")
