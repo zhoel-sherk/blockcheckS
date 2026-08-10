@@ -2,8 +2,14 @@
 
 ## 1.2.1a — unreleased
 
-### Fixed — v1.2.2 test-plan findings (days 1-3)
+### Fixed — v1.2.2 test-plan findings (days 1-4)
 
+- **netns_pool `_get_iface` picked a leftover veth/peer as the out-interface**:
+  a leftover UP veth (`vh-bs-p-*-N@ifNNN`) from a prior pool or a concurrent
+  `bs` is the first non-lo UP iface, so `iptables -o vh-...@ifNNN` failed with
+  "interface name must be shorter than IFNAMSIZ (15)" and netns creation
+  aborted (found by the day-4 stress run). `_get_iface` now excludes
+  `veth*`/`vh-*`/`vn-*` and any `@`-suffixed (peer) names. +1 unit test.
 - **CliApp `--no-*` flags were silently ignored**: pydantic-settings 2.14
   parses `--no-<field>` as a *negation*, so fields literally named `no_*`
   (no_wssize, no_http, no_quic, no_voice, no_secure_dns, no_auto_pin,
