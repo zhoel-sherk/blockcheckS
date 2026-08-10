@@ -216,17 +216,9 @@ def add_family_gate_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_secure_dns_args(
-    parser: argparse.ArgumentParser, *, include_preflight: bool = False
-) -> None:
-    """CLI flags for Phase 9 secure DNS (SD5); optional preflight group."""
-    g = parser.add_argument_group("secure DNS")
-    g.add_argument(
-        "--no-secure-dns",
-        action="store_true",
-        help="Disable DoH pre-resolve (default: on)",
-    )
-    g.add_argument("--doh-server", default=None, help="Fixed DoH server URL")
+def add_ip_pin_args(parser: argparse.ArgumentParser) -> None:
+    """IP pinning (IP-PIN) flags — scan/pair only (runner-level auto-pin)."""
+    g = parser.add_argument_group("IP pinning")
     g.add_argument(
         "--fixed-ip",
         default=None,
@@ -241,6 +233,19 @@ def add_secure_dns_args(
         action="store_true",
         help="Disable auto-probing of pinned/DoH IPs at startup (use pins as-is)",
     )
+
+
+def add_secure_dns_args(
+    parser: argparse.ArgumentParser, *, include_preflight: bool = False
+) -> None:
+    """CLI flags for Phase 9 secure DNS (SD5); optional preflight group."""
+    g = parser.add_argument_group("secure DNS")
+    g.add_argument(
+        "--no-secure-dns",
+        action="store_true",
+        help="Disable DoH pre-resolve (default: on)",
+    )
+    g.add_argument("--doh-server", default=None, help="Fixed DoH server URL")
     g.add_argument("--skip-dns-audit", action="store_true", help="Skip UDP vs DoH audit table")
     g.add_argument(
         "--allow-dns-hijack",
@@ -470,6 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--resume", action="store_true")
     add_secure_dns_args(scan, include_preflight=True)
+    add_ip_pin_args(scan)
     add_system_deps_args(scan)
     add_curl_repeats_args(scan)
     add_family_gate_args(scan)
@@ -595,6 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pair.add_argument("--resume", action="store_true")
     add_secure_dns_args(pair, include_preflight=True)
+    add_ip_pin_args(pair)
     add_system_deps_args(pair)
     add_curl_repeats_args(pair)
     add_family_gate_args(pair)
