@@ -26,15 +26,21 @@ TEST_STRATEGIES = "\n".join([
 TEST_DOMAIN = "discord.com"
 
 
-def _run_scan(extra_args: list[str]) -> subprocess.CompletedProcess:
-    """Run bs scan with lua-bridge-compare, return CompletedProcess."""
+def _run_scan(extra_args: list[str], *, max_strategies: int = 10) -> subprocess.CompletedProcess:
+    """Run bs scan with lua-bridge-compare, return CompletedProcess.
+
+    Runs the child in its own process group so that a subprocess timeout can
+    kill the whole tree (sudo -> bs -> nfqws2). On Fryazino the per-strategy
+    ``--timeout 5`` keeps FAIL paths short; ``--lua-bridge-compare`` doubles
+    the work (classic + bridge), so the wall budget is generous.
+    """
     cmd = [
         BS, "scan",
         "--domain", TEST_DOMAIN,
         "--user-matrix", "-",
-        "--max", "10",
+        "--max", str(max_strategies),
         "--parallel", "1",
-        "--timeout", "10",
+        "--timeout", "5",
         "--scan-level", "fast",
         "--skip-deps-check",
         "--skip-dns-audit",
@@ -45,12 +51,35 @@ def _run_scan(extra_args: list[str]) -> subprocess.CompletedProcess:
         "--no-wssize",
         *extra_args,
     ]
-    return subprocess.run(
+    import os
+    import signal as _signal
+
+    proc = subprocess.Popen(
         ["sudo", "-n", *cmd],
-        input=TEST_STRATEGIES,
-        capture_output=True, text=True,
-        timeout=300,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
         cwd=PROJECT_ROOT,
+        start_new_session=True,
+    )
+    assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+    try:
+        out, err = proc.communicate(input=TEST_STRATEGIES, timeout=500)
+    except subprocess.TimeoutExpired:
+        # sudo does not propagate SIGTERM down the tree: kill the whole process
+        # group so bs + nfqws2 (and any stale run.lock) do not leak onwards.
+        try:
+            os.killpg(proc.pid, _signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
+    return subprocess.CompletedProcess(
+        proc.args, proc.returncode or 0, out, err
     )
 
 
@@ -112,10 +141,10 @@ def test_lua_bridge_batch_500_default():
 
 def test_lua_bridge_single_strategy():
     """Single strategy through bridge works."""
-    result = _run_scan([
-        "--lua-bridge",
-        "--bridge-batch", "1",
-    ])
+    result = _run_scan(
+        ["--lua-bridge", "--bridge-batch", "1"],
+        max_strategies=1,
+    )
 
     stdout = result.stdout
     assert "TCP:" in stdout, f"No results. stdout:\n{stdout[:500]}"
