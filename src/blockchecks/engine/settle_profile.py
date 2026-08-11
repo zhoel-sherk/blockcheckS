@@ -159,7 +159,7 @@ def auto_load_profile() -> SettleProfile | None:
     A profile whose defaults demand an aggressive curl budget (<
     ``AUTO_LOAD_MIN_CURL``) is ignored on auto-load — it is most likely stale
     from a previously faster/throttled network and would fail every TCP probe
-    (e.g. curl timeout 0.5s on Fryazino). Use ``--settle-profile`` to force it.
+    (e.g. curl timeout 0.5s on throttling ISPs). Use ``--settle-profile`` to force it.
     """
     env = os.environ.get("BLOCKCHECKS_SETTLE_PROFILE", "").strip()
     if env.lower() in ("0", "off", "false", "no"):

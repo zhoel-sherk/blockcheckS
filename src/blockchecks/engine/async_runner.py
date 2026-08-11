@@ -35,12 +35,12 @@ GREY = Fore.LIGHTBLACK_EX
 RESET = Style.RESET_ALL
 
 # Auto-pin (IP-PIN): known-good strategy + short budget for probing candidate
-# IPs at startup. Pinned IPs override DoH order against Fryazino per-IP throttling.
+# IPs at startup. Pinned IPs override DoH order against per-IP throttling.
 PIN_STRATEGY = "fake:blob=stun:repeats=6:tcp_ts=-1000"
 PIN_TIMEOUT = 3.0
 PIN_SETTLE_MAX = 0.5
 # Budget for retry-on-next-IP attempts after the first failed IP (keeps
-# throttled-IP worst case from N×timeout, see Fryazino per-IP throttling).
+# throttled-IP worst case from N×timeout, see per-IP throttling).
 
 from blockchecks.engine.in_ns_workers import (
     _is_quic_dropped,

@@ -292,7 +292,7 @@ class DnsRunCache:
 
     ``_pins`` maps domain -> pinned IP (hosts-analog file or auto-pin). When a
     pin exists it is returned first from ``resolve`` / ``primary_ip``, so the
-    DoH order (which Fryazino can throttle per-IP) no longer decides the probe
+    DoH order (which some ISPs can throttle per-IP) no longer decides the probe
     target. ``set_pins`` refreshes from file/auto-pin at startup.
     """
 

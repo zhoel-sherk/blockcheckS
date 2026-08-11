@@ -180,7 +180,7 @@ async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPrefl
         return DnsPreflightResult(dns_cache, dns_audits, exit_code=dns_rc)
 
     # IP-PIN: load hosts-analog file (--fixed-ip, else provider hosts) into the
-    # cache; pinned IPs override DoH order so Fryazino per-IP throttling can't
+    # cache; pinned IPs override DoH order so per-IP throttling can't
     # flip the result.
     pins = {}
     pin_path = _resolve_pin_path(args)

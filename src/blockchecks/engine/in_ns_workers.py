@@ -37,7 +37,7 @@ from blockchecks.service.probe import (
 from blockchecks.service.probe import probe_request_dict as _probe_request_dict
 
 # Budget for retry-on-next-IP attempts after the first failed IP (keeps
-# throttled-IP worst case from N×timeout, see Fryazino per-IP throttling).
+# throttled-IP worst case from N×timeout, see per-IP throttling).
 RETRY_IP_TIMEOUT = 2.0
 
 

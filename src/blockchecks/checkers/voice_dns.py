@@ -73,7 +73,7 @@ def _ensure_cache_dir() -> None:
 
 
 # Parallel probes through host NFQUEUE+bootstrap; >4 tends to queue-bypass
-# drop replies (remote Fryazino: 8→0/64 alive, 4→3/4 ip_discovery).
+# drop replies (remote throttling: 8→0/64 alive, 4→3/4 ip_discovery).
 STUN_PROBE_CONCURRENCY = 4
 
 

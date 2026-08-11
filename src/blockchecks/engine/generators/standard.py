@@ -14,13 +14,13 @@ FOOLINGS_TCP = [
     "tcp_md5",
     "tcp_ack=-66000:tcp_ts_up",
 ]
-REPEATS_VALUES = [6, 3, 1, 8, 10, 11, 12, 2, 4]  # 6,8 Fryazino; 2,11 Flowseal; 4 matrix gap
+REPEATS_VALUES = [6, 3, 1, 8, 10, 11, 12, 2, 4]  # 6,8; 2,11 Flowseal; 4 matrix gap
 TTL_VALUES = [1, 5, 7, 12, 63, 64, 127, 128, 255]
 AUTOTTL_RANGES = ["-1,3-20", "-2,5-15", "-3,7-12"]
 
 # Common blobs
 # Common blobs (empty = auto-generated, not recommended)
-BLOBS_TCP = ["stun", "max_ru", "google"]  # skipping empty — doesn't work on Fryazino
+BLOBS_TCP = ["stun", "max_ru", "google"]  # skipping empty — doesn't work on some ISPs
 BLOBS_UDP = ["discord_udp"]
 
 

@@ -3,6 +3,7 @@
 Facade over engine.generators.*. See docs/architecture.md.
 """
 
+from blockchecks.engine.byedpi_matrix_generator import ByedpiMatrixGenerator
 from blockchecks.engine.generators import (
     HTTP_FAMILIES,
     QUIC_HTTP3_FAMILIES,
@@ -31,6 +32,7 @@ class MatrixGenerator:
     REGISTRY = {
         "custom": CustomListGenerator,
         "flowseal": FlowsealGenerator,
+        "byedpi": ByedpiMatrixGenerator,
         "standard": lambda: StandardGenerator(strategy_types=list(TCP_FAMILIES)),
         "standard_udp": lambda: StandardGenerator(strategy_types=list(UDP_VOICE_FAMILIES)),
         "standard_quic": lambda: StandardGenerator(strategy_types=list(QUIC_HTTP3_FAMILIES)),
