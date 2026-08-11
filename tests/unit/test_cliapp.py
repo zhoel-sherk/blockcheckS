@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from io import StringIO
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic_settings import CliApp, get_subcommand
@@ -270,3 +270,118 @@ def test_no_prefix_flags_set_true_by_dispatch():
     finally:
         ca._NO_FLAGS_CAPTURED = old
         ca._CMD_HANDLERS.pop("FullCmd", None)
+
+
+# ── _run_* dispatcher coverage (release: all CLI commands tested) ─────
+
+
+@pytest.mark.unit
+def test_run_tcp_dispatcher_delegates():
+    from blockchecks.cli import cliapp as ca
+
+    with patch("blockchecks.cli.cliapp._to_namespace") as to_ns, patch(
+        "blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0
+    ), patch("blockchecks.cli.commands.tcp.cmd_tcp", return_value=3) as cmd:
+        to_ns.return_value = argparse.Namespace()
+        rc = ca._run_tcp(MagicMock())
+    assert rc == 3
+    cmd.assert_called_once()
+    assert to_ns.return_value.command == "tcp"
+
+
+@pytest.mark.unit
+def test_run_tcp_dispatcher_deps_short_circuit():
+    from blockchecks.cli import cliapp as ca
+
+    with patch("blockchecks.cli.cliapp._to_namespace"), patch(
+        "blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=5
+    ), patch("blockchecks.cli.commands.tcp.cmd_tcp") as cmd:
+        rc = ca._run_tcp(MagicMock())
+    assert rc == 5
+    cmd.assert_not_called()
+
+
+@pytest.mark.unit
+def test_run_udp_dispatcher_delegates():
+    from blockchecks.cli import cliapp as ca
+
+    with patch("blockchecks.cli.cliapp._to_namespace") as to_ns, patch(
+        "blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0
+    ), patch("blockchecks.cli.commands.udp.cmd_udp", return_value=1):
+        to_ns.return_value = argparse.Namespace()
+        rc = ca._run_udp(MagicMock())
+    assert rc == 1
+    assert to_ns.return_value.command == "udp"
+
+
+@pytest.mark.unit
+def test_run_composite_dispatcher_delegates():
+    from blockchecks.cli import cliapp as ca
+
+    ns = argparse.Namespace(config="/tmp/c.conf", domains=["x.com"], parallel=2, timeout=3.0)
+    with patch("blockchecks.cli.cliapp._to_namespace", return_value=ns), patch(
+        "blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0
+    ), patch("blockchecks.checkers.composite_runner.run", new=AsyncMock(return_value=4)) as cr:
+        rc = ca._run_composite(MagicMock())
+    assert rc == 4
+    cr.assert_awaited_once_with("/tmp/c.conf", ["x.com"], 2, 3.0)
+
+
+@pytest.mark.unit
+def test_run_bench_dispatcher_delegates():
+    from blockchecks.cli import cliapp as ca
+
+    with patch("blockchecks.cli.cliapp._to_namespace") as to_ns, patch(
+        "blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0
+    ), patch("blockchecks.cli.commands.bench_settle.cmd_bench_settle", new=AsyncMock(return_value=2)):
+        to_ns.return_value = argparse.Namespace()
+        rc = ca._run_bench(MagicMock())
+    assert rc == 2
+    assert to_ns.return_value.command == "bench-settle"
+
+
+@pytest.mark.unit
+def test_run_stop_dispatcher_delegates():
+    from blockchecks.cli import cliapp as ca
+
+    ns = argparse.Namespace(force=False, wait=120.0)
+    with patch("blockchecks.cli.cliapp._to_namespace", return_value=ns), patch(
+        "blockchecks.cli.commands.stop.cmd_stop", return_value=1
+    ) as cmd:
+        rc = ca._run_stop(MagicMock())
+    assert rc == 1
+    cmd.assert_called_once_with(ns)
+
+
+@pytest.mark.unit
+def test_run_full_delegates_and_guards_nesting():
+    from blockchecks.cli import cliapp as ca
+
+    ns = argparse.Namespace()
+    with patch("blockchecks.cli.cliapp._to_namespace", return_value=ns), patch(
+        "blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0
+    ), patch("blockchecks.main.run_full", new=AsyncMock(return_value=0)) as rf:
+        rc = ca._run_full(MagicMock())
+    assert rc == 0
+    rf.assert_awaited_once_with(ns)
+
+    # nested guard
+    ca._FULL_RUN_ACTIVE = True
+    try:
+        rc2 = ca._run_full(MagicMock())
+        assert rc2 == 2
+    finally:
+        ca._FULL_RUN_ACTIVE = False
+
+
+@pytest.mark.unit
+def test_print_validation_error_returns_2():
+    from pydantic_core import ValidationError
+
+    from blockchecks.cli import cliapp as ca
+
+    err = ValidationError.from_exception_data("ScanCmd", [])
+    with patch("sys.stderr", StringIO()) as out:
+        rc = ca._print_validation_error(err)
+    assert rc == 2
+    assert "invalid arguments" in out.getvalue()
