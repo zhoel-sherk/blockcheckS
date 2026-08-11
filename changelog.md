@@ -2,6 +2,36 @@
 
 ## 1.2.1a — unreleased
 
+### Refactor + coverage — v1.2.2 day-5 (85%+ target, pre-release)
+
+- **async_runner god-file split** (1764 → ~330 lines): moved to
+   (models),  (config builders),
+   (netns probe workers). async_runner keeps
+  AsyncTestRunner +  re-exports so external imports and monkeypatch
+  paths keep working.
+- **Coverage 73% → 85%** across 18 core modules: added test_tcp_tls (13),
+  test_lua_session (7), test_batch_bridge_probe (6), test_async_runner_methods (7),
+  test_in_ns_workers (5), plus retry/config/multi/quic/udp coverage. pytest-cov
+  and pytest-randomly added to dev deps (randomly required by mutmut).
+- mutmut scoped to 15 modules; mutmut run requires test fixes for mutants/
+  cwd (tests reading non-mutated sources) — documented, gate stays
+  workflow_dispatch.
+
+### Refactor + coverage — v1.2.2 day-5 (85%+ target, pre-release)
+
+- **async_runner god-file split** (1764 → ~330 lines): moved to
+  `engine/results.py` (models), `engine/nfqws_config.py` (config builders),
+  `engine/in_ns_workers.py` (netns probe workers). async_runner keeps
+  AsyncTestRunner + `__all__` re-exports so external imports and monkeypatch
+  paths keep working.
+- **Coverage 73% → 85%** across 18 core modules: added test_tcp_tls (13),
+  test_lua_session (7), test_batch_bridge_probe (6), test_async_runner_methods (7),
+  test_in_ns_workers (5), plus retry/config/multi/quic/udp coverage. pytest-cov
+  and pytest-randomly added to dev deps (randomly required by mutmut).
+- mutmut scoped to 15 modules; mutmut run requires test fixes for mutants/
+  cwd (tests reading non-mutated sources) — documented, gate stays
+  workflow_dispatch.
+
 ### Fixed — v1.2.2 test-plan findings (days 1-4)
 
 - **netns_pool `_get_iface` picked a leftover veth/peer as the out-interface**:
