@@ -76,7 +76,15 @@ def mock_tcp_udp(monkeypatch):
     """Mock probe workers so pair/resume tests need no netns."""
 
     def fake_tcp(
-        ns_name, strategy, domain, timeout, is_config=False, python_bin=None, disable_ech=False
+        ns_name,
+        strategy,
+        domain,
+        timeout,
+        is_config=False,
+        python_bin=None,
+        disable_ech=False,
+        *args,
+        **kwargs,
     ):
         return {
             "success": True,

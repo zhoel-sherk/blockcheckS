@@ -172,20 +172,24 @@ def test_disable_ech_in_curl_probe_source():
     assert "CurlOpt.ECH" in src
     assert "_apply_ech_off" in src
     assert 'kwargs["options"]' not in src
-    runner = Path(ar.__file__).read_text(encoding="utf-8")
+    from blockchecks.engine import in_ns_workers as insw
+
+    runner = Path(insw.__file__).read_text(encoding="utf-8")
     assert "_curl_probe_worker" in runner
     assert '["-c", check_code]' not in runner
 
 
 def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
+    from blockchecks.engine import in_ns_workers as insw
+
     written = {}
 
     def fake_daemon(ns_name, config_path, kill_existing=True):
         written["text"] = Path(config_path).read_text(encoding="utf-8")
         written["kill"] = kill_existing
 
-    monkeypatch.setattr(ar, "_nfqws2_daemon", fake_daemon)
-    monkeypatch.setattr(ar, "_sudo", lambda *a, **k: None)
+    monkeypatch.setattr(insw, "_nfqws2_daemon", fake_daemon)
+    monkeypatch.setattr(insw, "_sudo", lambda *a, **k: None)
 
     class FakeCompleted:
         stdout = '{"success": true, "latency_ms": 1.0, "detail": "ok"}'
@@ -206,14 +210,16 @@ def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
 
 
 def test_udp_coexist_skips_pkill(monkeypatch):
+    from blockchecks.engine import in_ns_workers as insw
+
     calls = []
 
     def fake_daemon(ns_name, config_path, kill_existing=True):
         calls.append(kill_existing)
         Path(config_path).write_text("--qnum=201\n", encoding="utf-8")
 
-    monkeypatch.setattr(ar, "_nfqws2_daemon", fake_daemon)
-    monkeypatch.setattr(ar, "_sudo", lambda *a, **k: None)
+    monkeypatch.setattr(insw, "_nfqws2_daemon", fake_daemon)
+    monkeypatch.setattr(insw, "_sudo", lambda *a, **k: None)
 
     class FakeCompleted:
         stdout = '{"success": true, "latency_ms": 1.0, "detail": "ok"}'
@@ -236,13 +242,14 @@ def test_udp_coexist_skips_pkill(monkeypatch):
 
 def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
     import blockchecks.service.nfqws2 as nfq
+    from blockchecks.engine import in_ns_workers as insw
 
     src = Path(nfq.__file__).read_text(encoding="utf-8")
     assert "stderr=subprocess.DEVNULL" in src
     assert "kill_existing" in inspect.signature(nfq.start_daemon).parameters
     assert "kill_existing" in inspect.signature(ar._nfqws2_daemon).parameters
-    ar_src = Path(ar.__file__).read_text(encoding="utf-8")
-    assert "--queue-bypass" in ar_src
+    worker_src = Path(insw.__file__).read_text(encoding="utf-8")
+    assert "--queue-bypass" in worker_src
     probe = (
         Path(__file__).resolve().parents[2] / "src" / "blockchecks" / "checkers" / "curl_probe.py"
     ).read_text(encoding="utf-8")
