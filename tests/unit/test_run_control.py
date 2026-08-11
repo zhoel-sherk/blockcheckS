@@ -94,3 +94,91 @@ def test_normalize_cli_args_stop_alias():
 
     assert normalize_cli_args(["--stop"]) == ["stop"]
     assert normalize_cli_args(["--stop", "--force"]) == ["stop", "--force"]
+
+
+# ── added: is_pid_alive / stale lock / stop branches ──────────────────
+
+
+def test_is_pid_alive_current():
+    import os
+
+    from blockchecks.service.run_control import is_pid_alive
+
+    assert is_pid_alive(os.getpid()) is True
+    assert is_pid_alive(0) is False
+    assert is_pid_alive(-5) is False
+    assert is_pid_alive(99999999) is False
+
+
+def test_read_active_run_stale_clears(run_lock_file, monkeypatch):
+    import json
+
+
+    run_lock_file.write_text(json.dumps({"pid": 99999999, "command": "scan"}))
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive",
+                        lambda pid: False)
+    assert read_active_run() is None
+    assert not run_lock_file.exists()
+
+
+def test_request_stop_permission_denied(run_lock_file, monkeypatch):
+    import json
+
+    run_lock_file.write_text(json.dumps({"pid": 12345, "command": "scan"}))
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive",
+                        lambda pid: True)
+
+    def _kill(pid, sig):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("blockchecks.service.run_control.os.kill", _kill)
+    code, msg = request_graceful_stop()
+    assert code == 2
+    assert "Permission denied" in msg
+
+
+def test_request_stop_stale_process(run_lock_file, monkeypatch):
+    import json
+
+    run_lock_file.write_text(json.dumps({"pid": 12345, "command": "scan"}))
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive",
+                        lambda pid: True)
+
+    def _kill(pid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr("blockchecks.service.run_control.os.kill", _kill)
+    code, msg = request_graceful_stop()
+    assert code == 2
+    assert "Stale run lock" in msg
+    assert not run_lock_file.exists()
+
+
+def test_request_stop_refuses_self(run_lock_file, monkeypatch):
+    import json
+
+    run_lock_file.write_text(json.dumps({"pid": os.getpid(), "command": "scan"}))
+    code, msg = request_graceful_stop()
+    assert code == 2
+    assert "this process is the active run" in msg
+
+
+def test_request_stop_force_immediate_exit(run_lock_file, monkeypatch):
+    """force: process dies on SIGKILL → clear lock, return 0."""
+    import json
+
+    run_lock_file.write_text(json.dumps({"pid": 12345, "command": "scan"}))
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive",
+                        lambda pid: True)
+
+    def _kill(pid, sig):
+        if sig == signal.SIGTERM:
+            raise ProcessLookupError  # already gone before kill
+        return None
+
+    monkeypatch.setattr("blockchecks.service.run_control.os.kill", _kill)
+    monkeypatch.setattr("blockchecks.service.run_control.time.sleep",
+                        lambda s: None)
+    code, msg = request_graceful_stop(force=True, wait_sec=1.0)
+    assert code == 2
+    assert "Stale run lock" in msg

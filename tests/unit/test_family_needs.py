@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from blockchecks.engine.family_needs import (
@@ -57,3 +59,62 @@ def test_finish_family_updates_needs():
     assert tracker.need_hostfakesplit == 0
     tracker.finish_family("multisplit", False)
     assert tracker.need_multisplit == 1
+
+
+# ── run_tcp_with_family_gates (async) ─────────────────────────────────
+
+
+def test_run_family_gates_single_break():
+    import asyncio
+
+    from blockchecks.engine.family_needs import run_tcp_with_family_gates
+
+    items = [
+        StrategyItem("std_fake_a", "fake:blob=stun"),
+        StrategyItem("std_hostfake_b", "hostfakesplit:nofake2"),
+    ]
+    runner = MagicMock()
+    runner.test_tcp = AsyncMock(return_value=MagicMock(success=True))
+    results, done, skipped, passed = asyncio.run(
+        run_tcp_with_family_gates(runner, items, "d.com", scan_level="single", timeout=3.0)
+    )
+    assert passed == 1
+    assert results
+
+
+def test_run_family_gates_skips_resumed():
+    import asyncio
+
+    from blockchecks.engine.family_needs import run_tcp_with_family_gates
+
+    items = [StrategyItem("std_fake_a", "fake:blob=stun")]
+    runner = MagicMock()
+
+    async def _resume(label, dom):
+        return True
+
+    results, done, skipped, passed = asyncio.run(
+        run_tcp_with_family_gates(
+            runner, items, "d.com", scan_level="fast", timeout=3.0, resume_check=_resume
+        )
+    )
+    assert skipped == 1 and done == 1
+    runner.test_tcp.assert_not_called()
+
+
+def test_run_family_gates_stop_event():
+    import asyncio
+
+    from blockchecks.engine.family_needs import run_tcp_with_family_gates
+
+    items = [StrategyItem("std_fake_a", "fake:blob=stun")]
+    runner = MagicMock()
+    ev = asyncio.Event()
+    ev.set()
+    results, done, skipped, passed = asyncio.run(
+        run_tcp_with_family_gates(
+            runner, items, "d.com", scan_level="fast", timeout=3.0, stop_event=ev
+        )
+    )
+    assert done == 0
+    runner.test_tcp.assert_not_called()
