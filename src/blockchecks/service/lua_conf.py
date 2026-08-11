@@ -84,6 +84,16 @@ def _split_cli_args(raw_line: str) -> list[str]:
     return out
 
 
+def _escape_conf_lt(cli: str) -> str:
+    """Escape '<' in a CLI arg so nfqws2 can read it from an @conf file.
+
+    nfqws2's conf splitter treats a bare '<' (e.g. ``--out-range=s1<d1``) as a
+    bad token and fails with "failed to split command line options". Quoting or
+    ``\\<`` both work; we use ``\\<`` (plain backslash escape).
+    """
+    return cli.replace("<", "\\<")
+
+
 def _append_strategy_desyncs(lines: list[str], strategy: str, strategy_n: int) -> None:
     tag = f":strategy={strategy_n}"
     for raw_line in strategy.split("\n"):
@@ -92,10 +102,10 @@ def _append_strategy_desyncs(lines: list[str], strategy: str, strategy_n: int) -
             continue
         if raw_line.startswith("--"):
             for cli in _split_cli_args(raw_line):
-                lines.append(cli)
+                lines.append(_escape_conf_lt(cli))
         else:
             desync = raw_line if ":strategy=" in raw_line else raw_line + tag
-            lines.append(f"--lua-desync={desync}")
+            lines.append(f"--lua-desync={_escape_conf_lt(desync)}")
 
 
 def build_bridge_conf(

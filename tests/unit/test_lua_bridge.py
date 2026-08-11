@@ -140,3 +140,21 @@ def test_lua_scripts_exist_in_repo() -> None:
     assert "write_ipc.lua" in names
     assert "scan_bridge.lua" in names
     assert "init.lua" in names
+
+
+def test_build_bridge_conf_escapes_lt(tmp_path: Path) -> None:
+    """nfqws2 conf splitter rejects a bare '<' — it must be escaped."""
+    from blockchecks.service.lua_conf import _escape_conf_lt, build_bridge_conf
+
+    assert _escape_conf_lt("--out-range=s1<d1") == "--out-range=s1\\<d1"
+
+    ipc = tmp_path / "ipc"
+    ipc.mkdir()
+    conf = build_bridge_conf(
+        ["--payload=empty --out-range=s1<d1\npktmod:ip_ttl=1"],
+        ipc,
+        protocol="tls12",
+    )
+    assert "--out-range=s1\\<d1" in conf
+    assert "--out-range=s1<d1" not in conf
+    assert "--lua-desync=pktmod:ip_ttl=1:strategy=1" in conf
