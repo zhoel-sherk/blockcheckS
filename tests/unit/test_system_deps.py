@@ -243,3 +243,64 @@ def test_ensure_zapret2_vendor_bad_arch(monkeypatch):
                         lambda: "weird-arch")
     with pytest.raises(RuntimeError, match="unsupported CPU arch"):
         ensure_zapret2_vendor(offline=False)
+
+
+# ── _http_get / resolve vendor path / verify details ──────────────────
+
+
+def test_http_get_writes_file(tmp_path, monkeypatch):
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return None
+
+        def read(self):
+            return b"data"
+
+    monkeypatch.setattr("blockchecks.engine.system_deps.urllib.request.urlopen",
+                        lambda *a, **k: FakeResp())
+    dest = tmp_path / "x.bin"
+    data = sd._http_get("https://x", dest=dest)
+    assert data == b"data"
+    assert dest.read_bytes() == b"data"
+
+
+def test_verify_arch_mismatch(monkeypatch, tmp_path):
+    import sys
+
+    monkeypatch.setattr(sd, "sys", sys)
+    monkeypatch.setattr(sd.sys, "platform", "linux")
+    monkeypatch.setattr(sd.shutil, "which", lambda name: None)
+    bin = tmp_path / "nfqws2"
+    bin.write_text("x")
+    bin.chmod(0o755)
+    monkeypatch.setattr(sd, "resolve_nfqws2_bin", lambda: str(bin))
+    monkeypatch.setattr(sd, "check_nfqws2_arch",
+                        lambda p: "Exec format error (x86_64 vs aarch64)")
+    monkeypatch.setattr(sd, "_path_ok", lambda p: True)
+    monkeypatch.setattr(sd.os, "environ", {})
+    report = sd.verify_system_dependencies(fetch=False)
+    assert report.ok is False
+    assert any("Exec format error" in e for e in report.errors)
+
+
+def test_verify_blobs_missing_warns(monkeypatch, tmp_path):
+    import sys
+
+
+    monkeypatch.setattr(sd, "sys", sys)
+    monkeypatch.setattr(sd.sys, "platform", "linux")
+    monkeypatch.setattr(sd.shutil, "which", lambda name: None)
+    bin = tmp_path / "nfqws2"
+    bin.write_text("x")
+    bin.chmod(0o755)
+    monkeypatch.setattr(sd, "resolve_nfqws2_bin", lambda: str(bin))
+    monkeypatch.setattr(sd, "check_nfqws2_arch", lambda p: None)
+    monkeypatch.setattr(sd, "_path_ok", lambda p: True)
+    monkeypatch.setattr(sd.os, "environ", {})
+    monkeypatch.setattr(sd.cfg, "LUA_INIT_DIR", str(tmp_path / "lua"))
+    monkeypatch.setattr(sd.cfg, "BLOB_DIR", str(tmp_path / "blobs-missing"))
+    report = sd.verify_system_dependencies(fetch=False)
+    assert any("blobs" in w for w in report.warnings)
