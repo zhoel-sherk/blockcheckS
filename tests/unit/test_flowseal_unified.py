@@ -54,3 +54,36 @@ async def test_flowseal_generator_covers_techniques_and_protocols():
     assert udp
     assert all(i.protocol == "udp_voice" for i in udp)
     assert any("discord_udp" in i.strategy or "game_udp" in i.strategy for i in udp)
+
+
+# ── added: quic / udp / http protocols + full expansion ───────────────
+
+
+async def test_flowseal_quic_protocol():
+    gen = FlowsealGenerator()
+    items = await gen.generate("quic", scan_level="fast", max_count=20)
+    for it in items:
+        assert it.protocol == "quic"
+
+
+async def test_flowseal_udp_voice_protocol():
+    gen = FlowsealGenerator()
+    items = await gen.generate("udp_voice", scan_level="fast", max_count=20)
+    for it in items:
+        assert it.protocol == "udp_voice"
+
+
+async def test_flowseal_http_protocol():
+    gen = FlowsealGenerator()
+    items = await gen.generate("http", scan_level="fast", max_count=20)
+    for it in items:
+        assert it.protocol == "http"
+
+
+async def test_flowseal_full_expansion():
+    gen = FlowsealGenerator()
+    items = await gen.generate("tls12", scan_level="full", max_count=10_000)
+    # full expansion produces many strategies across _expand_* families
+    assert len(items) > 100
+    labels = {i.label.split("_")[1] if "_" in i.label else i.label for i in items}
+    assert len(labels) > 5

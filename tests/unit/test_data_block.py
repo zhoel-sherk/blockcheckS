@@ -237,3 +237,54 @@ def test_sync_commit_commit_failure(store, tmp_path, monkeypatch):
         subprocess, "run", lambda *a, **k: MagicMock(returncode=1, stdout="err", stderr="fail")
     )
     assert store.sync_commit(push=False) is False
+
+
+# ── _query_ipinfo (network mocked) ────────────────────────────────────
+
+
+def test_query_ipinfo_ok(monkeypatch):
+    import json as _json
+
+    import blockchecks.data_block.provider as prov
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return None
+
+        def read(self):
+            return _json.dumps({"org": "My ISP LLC"}).encode()
+
+    monkeypatch.setattr(prov.urllib.request, "urlopen", lambda *a, **k: FakeResp())
+    assert prov._query_ipinfo() == "My ISP LLC"
+
+
+def test_query_ipinfo_no_org(monkeypatch):
+    import blockchecks.data_block.provider as prov
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return None
+
+        def read(self):
+            return b'{"city": "x"}'
+
+    monkeypatch.setattr(prov.urllib.request, "urlopen", lambda *a, **k: FakeResp())
+    assert prov._query_ipinfo() is None
+
+
+def test_query_ipinfo_error(monkeypatch):
+    import urllib.error
+
+    import blockchecks.data_block.provider as prov
+
+    def boom(*a, **k):
+        raise urllib.error.URLError("down")
+
+    monkeypatch.setattr(prov.urllib.request, "urlopen", boom)
+    assert prov._query_ipinfo() is None
