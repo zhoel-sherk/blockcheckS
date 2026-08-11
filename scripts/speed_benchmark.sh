@@ -58,7 +58,7 @@ for run in $(seq 1 $REPEATS); do
         --skip-deps-check --no-wssize \
         > /tmp/bs_classic_out.txt 2>&1 || true
     classic_time=$(($SECONDS - t0))
-    classic_pass=$(grep -c 'OK\|THROTTLED' /tmp/bs_classic_out.txt 2>/dev/null || echo 0)
+    classic_pass=$(grep -oP 'TCP\s+\S+:\s+\d+/\d+\s+passed' /tmp/bs_classic_out.txt 2>/dev/null | tail -1 || echo "0/0 passed")
     echo "  classic: ${classic_time}s (${classic_pass} PASS)"
 
     # ── blockcheckS lua-bridge ──
@@ -77,10 +77,10 @@ for run in $(seq 1 $REPEATS); do
         --skip-deps-check --no-wssize \
         > /tmp/bs_lua_out.txt 2>&1 || true
     lua_time=$(($SECONDS - t0))
-    lua_pass=$(grep -c 'OK\|THROTTLED' /tmp/bs_lua_out.txt 2>/dev/null || echo 0)
+    lua_pass=$(grep -oP 'TCP\s+\S+:\s+\d+/\d+\s+passed' /tmp/bs_lua_out.txt 2>/dev/null | tail -1 || echo "0/0 passed")
     echo "  lua-bridge: ${lua_time}s (${lua_pass} PASS)"
 
-    echo "{\"run\":$run,\"blockcheck2_sh\":$bc2_time,\"classic_time\":$classic_time,\"classic_pass\":$classic_pass,\"lua_time\":$lua_time,\"lua_pass\":$lua_pass}" >> "$RESULTS"
+    echo "{\"run\":$run,\"blockcheck2_sh\":$bc2_time,\"classic_time\":$classic_time,\"classic_pass\":\"$classic_pass\",\"lua_time\":$lua_time,\"lua_pass\":\"$lua_pass\"}" >> "$RESULTS"
     echo ""
 done
 
@@ -99,9 +99,10 @@ if not rows:
 bc2_avg = sum(r['blockcheck2_sh'] for r in rows) / len(rows)
 classic_avg = sum(r['classic_time'] for r in rows) / len(rows)
 lua_avg = sum(r['lua_time'] for r in rows) / len(rows)
-print(f'blockcheck2.sh:    {bc2_avg:.0f}s avg ({bc2_avg/$MAX:.1f}s/strategy)')
-print(f'classic:           {classic_avg:.0f}s avg ({$MAX/classic_avg:.2f} tests/sec)')
-print(f'lua-bridge:        {lua_avg:.0f}s avg ({$MAX/lua_avg:.2f} tests/sec)')
+mx = float($MAX)
+print(f'blockcheck2.sh:    {bc2_avg:.0f}s avg ({bc2_avg/mx:.1f}s/strategy)')
+print(f'classic:           {classic_avg:.0f}s avg ({mx/classic_avg:.2f} tests/sec)')
+print(f'lua-bridge:        {lua_avg:.0f}s avg ({mx/lua_avg:.2f} tests/sec)')
 print(f'')
 print(f'lua vs classic:    {classic_avg/lua_avg:.1f}x faster')
 print(f'lua vs blockcheck2: {bc2_avg/lua_avg:.1f}x faster')
