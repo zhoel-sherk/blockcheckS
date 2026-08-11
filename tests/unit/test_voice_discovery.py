@@ -246,3 +246,82 @@ def test_singbox_session_with_proxy(monkeypatch):
             assert sb is proc
 
     asyncio.run(_go())
+
+
+# ── _discover_via_gateway (mocked aiohttp WS) ─────────────────────────
+
+
+def test_discover_via_gateway_no_server_update():
+    import asyncio
+    from unittest.mock import patch
+
+    from blockchecks.checkers.voice_discovery import _discover_via_gateway
+
+    gw_msgs = [
+        {"d": {"heartbeat_interval": 1000}},
+        {"t": "READY", "d": {"user": {"id": "1"}}},
+    ]
+
+    class FakeWS:
+        def __init__(self):
+            self._msgs = list(gw_msgs)
+            self.sent = []
+
+        async def receive_json(self):
+            if not self._msgs:
+                raise asyncio.TimeoutError
+            return self._msgs.pop(0)
+
+        async def send_json(self, payload):
+            self.sent.append(payload)
+
+        async def close(self):
+            return None
+
+    gw_ws = FakeWS()
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+        def ws_connect(self, url):
+            async def _inner(*a, **k):
+                return gw_ws
+
+            return _inner()
+
+    with patch("aiohttp_socks.ProxyConnector"), patch(
+        "aiohttp.ClientSession",
+        return_value=FakeSession()), patch(
+        "blockchecks.engine.config.SOCKS5_PROXY",
+        "socks5://127.0.0.1:1080"), patch(
+        "blockchecks.checkers.voice_discovery._load_guild_channel",
+        return_value=("", "")):
+        result = asyncio.run(_discover_via_gateway("token"))
+    assert result is None
+
+
+def test_discover_multiple_gateway_layer(monkeypatch):
+    import blockchecks.checkers.voice_discovery as vd
+
+    monkeypatch.setattr(vd, "dns_discover", AsyncMock(return_value=[]))
+    monkeypatch.setattr(vd, "load_token", lambda: "tok")
+    monkeypatch.setattr(vd, "discover_voice_endpoint",
+                        AsyncMock(return_value={"ip": "9.9.9.9", "port": 50001,
+                                                "voice_ws_endpoint": "ep"}))
+    eps = asyncio.run(discover_multiple(count=1, use_dns=True))
+    assert eps and eps[0]["ip"] == "9.9.9.9"
+
+
+def test_discover_multiple_gateway_exception(monkeypatch):
+    import blockchecks.checkers.voice_discovery as vd
+
+    monkeypatch.setattr(vd, "dns_discover", AsyncMock(return_value=[]))
+    monkeypatch.setattr(vd, "load_token", lambda: "tok")
+    monkeypatch.setattr(vd, "discover_voice_endpoint",
+                        AsyncMock(side_effect=RuntimeError("down")))
+    eps = asyncio.run(discover_multiple(count=1, use_dns=True))
+    assert eps == []
