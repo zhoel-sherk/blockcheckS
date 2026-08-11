@@ -81,6 +81,7 @@ def test_get_fresh_url_fetches(tmp_path, monkeypatch):
     monkeypatch.setattr(yu, "_fetch_ytdlp_url", lambda *a, **k: (
         "https://a.googlevideo.com/videoplayback?ip=46.44.0.118"
     ))
+    yu._fetch_fail_until = 0.0
     url = yu.get_fresh_url()
     assert "googlevideo.com" in url
     assert cache.exists()

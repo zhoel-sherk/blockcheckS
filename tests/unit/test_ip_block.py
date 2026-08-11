@@ -1,6 +1,6 @@
 """Unit tests for IP-block cross-test (BC2-1)."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -42,3 +42,84 @@ def test_sni_block_detected():
     assert not r.skipped
     assert r.sni_block_likely
     assert "162.159.1.1" in r.ip_block_on
+
+
+# ── added: baseline skip / sni-block / cdn hint / preflight / report ──
+
+
+def test_baseline_fail_skips():
+    from blockchecks.checkers.ip_block import run_ip_block_cross_test
+
+    baseline = TlsResult(domain="ref.com", success=False, error="timeout")
+    with patch("blockchecks.checkers.ip_block.check_tls", return_value=baseline):
+        report = run_ip_block_cross_test("blocked.com", "ref.com")
+    assert report.skipped
+    assert "baseline failed" in report.skip_reason
+
+
+def test_sni_block_detected_when_blocked_sni_on_clean_ip():
+    from blockchecks.checkers.ip_block import run_ip_block_cross_test
+
+    clean = TlsResult(domain="x", success=True, http_status=200)
+    blocked_sni_ok = TlsResult(domain="x", success=True, http_status=200)
+    unblocked_sni_fail = TlsResult(domain="x", success=False, error="reset")
+
+    cache = MagicMock()
+    cache.primary_ip.return_value = "1.2.3.4"
+    cache.resolve.return_value = ["5.6.7.8", "9.9.9.9"]
+
+    with patch("blockchecks.checkers.ip_block.check_tls", side_effect=[
+        clean,  # baseline
+        blocked_sni_ok,  # blocked SNI @ clean IP
+        unblocked_sni_fail,  # unblocked SNI @ blocked IP
+        unblocked_sni_fail,
+    ]):
+        report = run_ip_block_cross_test("blocked.com", "ref.com", dns_cache=cache)
+    assert report.sni_block_likely
+    assert report.ip_block_on == ["5.6.7.8", "9.9.9.9"]
+
+
+def test_cdn_hint():
+    from blockchecks.checkers.ip_block import _cdn_hint
+
+    assert _cdn_hint(["104.16.1.1", "10.0.0.1"]) != ""
+    assert _cdn_hint(["10.0.0.1"]) == ""
+
+
+def test_run_ip_block_preflight_skips_ref():
+    from blockchecks.checkers.ip_block import run_ip_block_preflight
+
+    with patch(
+        "blockchecks.checkers.ip_block.run_ip_block_cross_test",
+        return_value=MagicMock(),
+    ) as mock:
+        reports = run_ip_block_preflight(["ref.com", "a.com", "b.com"], "ref.com")
+    assert len(reports) == 2
+    assert mock.call_count == 2
+
+
+def test_print_ip_block_report_skipped(capsys):
+    from blockchecks.checkers.ip_block import IpBlockReport, print_ip_block_report
+
+    report = IpBlockReport("blocked.com", "ref.com", skipped=True, skip_reason="no baseline")
+    print_ip_block_report(report)
+    assert "SKIP" in capsys.readouterr().out
+
+
+def test_print_ip_block_report_full(capsys):
+    from blockchecks.checkers.ip_block import IpBlockReport, print_ip_block_report
+
+    report = IpBlockReport("blocked.com", "ref.com")
+    report.baseline_ok = True
+    report.unblocked_ip = "1.2.3.4"
+    report.blocked_ips = ["5.6.7.8"]
+    report.sni_block_likely = True
+    report.ip_block_on = ["5.6.7.8"]
+    probe = MagicMock()
+    probe.label = "test"
+    probe.result.success = True
+    probe.result.http_status = 200
+    probe.result.error = None
+    report.probes = [probe]
+    print_ip_block_report(report)
+    assert "SNI-based block likely" in capsys.readouterr().out

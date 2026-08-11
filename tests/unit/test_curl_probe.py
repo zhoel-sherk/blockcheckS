@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import json
+from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -361,3 +363,56 @@ def test_ggc_redirect_is_google():
     assert _ggc_redirect_is_google("http://81.88.1.1/blocked") is False
     assert _ggc_redirect_is_google("https://example.ru/x") is False
     assert _ggc_redirect_is_google("") is False
+
+
+def test_curl_probe_worker_single_mode():
+    """run_payload mode=single routes to run_curl_probe_with_repeats."""
+    from blockchecks.engine._curl_probe_worker import run_payload
+
+    payload = {
+        "mode": "single",
+        "request": {
+            "domain": "discord.com",
+            "timeout": 5.0,
+            "protocol": "tls12",
+        },
+        "repeats": 1,
+        "parallel_repeats": False,
+        "repeats_mode": "fast",
+        "quick_break": False,
+    }
+    with patch("blockchecks.engine._curl_probe_worker.run_curl_probe_with_repeats") as mock:
+        mock.return_value = {"ok": True}
+        out = run_payload(payload)
+    assert out == {"ok": True}
+    mock.assert_called_once()
+
+
+def test_curl_probe_worker_main_stdin():
+    """main() reads JSON from stdin and prints JSON result."""
+    from blockchecks.engine._curl_probe_worker import main
+
+    payload = json.dumps(
+        {
+            "mode": "single",
+            "request": {"domain": "discord.com", "timeout": 5.0, "protocol": "tls12"},
+            "repeats": 1,
+        }
+    )
+    with patch("sys.stdin", StringIO(payload)), patch(
+        "blockchecks.engine._curl_probe_worker.run_payload", return_value={"ok": True}
+    ), patch("sys.stdout", new_callable=StringIO) as out:
+        rc = main([])
+    assert rc == 0
+    assert '"ok": true' in out.getvalue()
+
+
+def test_curl_probe_worker_main_no_input():
+    from blockchecks.engine._curl_probe_worker import main
+
+    with patch("sys.stdin", StringIO("")), patch(
+        "sys.stderr", new_callable=StringIO
+    ) as err:
+        rc = main([])
+    assert rc == 2
+    assert "usage:" in err.getvalue()
