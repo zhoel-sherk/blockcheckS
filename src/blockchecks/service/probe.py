@@ -7,6 +7,8 @@ GV-3: curl_cffi runs in an isolated Python subprocess via
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess as sp
 
 from blockchecks.checkers.curl_probe import CurlProbeRequest
@@ -38,7 +40,7 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
     TimeoutExpired) — a hung worker must not lose the whole batch.
     """
     try:
-        r = sp.run(
+        proc = sp.Popen(
             [
                 "sudo",
                 "ip",
@@ -49,12 +51,34 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
                 "-m",
                 "blockchecks.engine._curl_probe_worker",
             ],
-            input=json.dumps(payload),
-            capture_output=True,
+            stdin=sp.PIPE,
+            stdout=sp.PIPE,
+            stderr=sp.STDOUT,
             text=True,
-            timeout=timeout,
+            start_new_session=True,
         )
-    except sp.TimeoutExpired:
+        try:
+            out, _ = proc.communicate(input=json.dumps(payload), timeout=timeout)
+        except sp.TimeoutExpired:
+            # killpg the whole tree: subprocess timeout only kills sudo; the
+            # netns child (python worker + curl) would otherwise leak and block
+            # the namespace for later batches.
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+            proc.wait(timeout=5)
+            return {
+                "success": False,
+                "http_code": 0,
+                "latency_ms": 0,
+                "content_len": 0,
+                "content_ok": False,
+                "throttled": False,
+                "read_rate_bps": 0,
+                "error": f"timeout after {timeout:.0f}s",
+            }
+    except Exception as e:
         return {
             "success": False,
             "http_code": 0,
@@ -63,10 +87,10 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
             "content_ok": False,
             "throttled": False,
             "read_rate_bps": 0,
-            "error": f"timeout after {timeout:.0f}s",
+            "error": str(e)[:120],
         }
     try:
-        return json.loads(r.stdout)
+        return json.loads(out)
     except json.JSONDecodeError:
         return {
             "success": False,
@@ -76,5 +100,5 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
             "content_ok": False,
             "throttled": False,
             "read_rate_bps": 0,
-            "error": f"parse: {r.stdout[:100]}",
+            "error": f"parse: {out[:100]}",
         }

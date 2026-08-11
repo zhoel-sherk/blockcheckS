@@ -34,20 +34,25 @@ def test_probe_request_dict_shape():
 def test_invoke_curl_probe_worker_parses_stdout():
     payload = {"mode": "single", "request": {"domain": "x"}}
     fake = MagicMock()
-    fake.stdout = json.dumps({"success": True, "http_code": 200, "latency_ms": 12})
-    with patch("blockchecks.service.probe.sp.run", return_value=fake) as run:
+    fake.communicate.return_value = (
+        json.dumps({"success": True, "http_code": 200, "latency_ms": 12}),
+        None,
+    )
+    fake.pid = 4242
+    with patch("blockchecks.service.probe.sp.Popen", return_value=fake) as popen:
         out = invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", payload, 10.0)
     assert out["success"] is True
     assert out["http_code"] == 200
-    cmd = run.call_args.args[0]
+    cmd = popen.call_args.args[0]
     assert "blockchecks.engine._curl_probe_worker" in cmd
 
 
 @pytest.mark.unit
 def test_invoke_curl_probe_worker_bad_json():
     fake = MagicMock()
-    fake.stdout = "not-json"
-    with patch("blockchecks.service.probe.sp.run", return_value=fake):
+    fake.communicate.return_value = ("not-json", None)
+    fake.pid = 4242
+    with patch("blockchecks.service.probe.sp.Popen", return_value=fake):
         out = invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", {}, 10.0)
     assert out["success"] is False
     assert "parse:" in out["error"]
@@ -58,13 +63,18 @@ def test_invoke_curl_probe_worker_timeout_returns_failure_dict():
     """TimeoutExpired must become a failure dict, not crash the batch."""
     import subprocess
 
-    with patch(
-        "blockchecks.service.probe.sp.run",
-        side_effect=subprocess.TimeoutExpired(cmd="sudo ip netns exec", timeout=5),
-    ):
+    fake = MagicMock()
+    fake.pid = 4242
+    fake.communicate.side_effect = subprocess.TimeoutExpired(
+        cmd="sudo ip netns exec", timeout=5
+    )
+    with patch("blockchecks.service.probe.sp.Popen", return_value=fake), patch(
+        "blockchecks.service.probe.os.killpg"
+    ), patch("blockchecks.service.probe.os.getpgid", return_value=4242):
         out = invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", {}, 5.0)
     assert out["success"] is False
     assert "timeout" in out["error"]
+    fake.wait.assert_called_once_with(timeout=5)
 
 
 @pytest.mark.unit
