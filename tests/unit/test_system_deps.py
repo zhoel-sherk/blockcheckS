@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -304,3 +306,79 @@ def test_verify_blobs_missing_warns(monkeypatch, tmp_path):
     monkeypatch.setattr(sd.cfg, "BLOB_DIR", str(tmp_path / "blobs-missing"))
     report = sd.verify_system_dependencies(fetch=False)
     assert any("blobs" in w for w in report.warnings)
+
+
+# ── ensure_zapret2_vendor full (mocked HTTP, real tar) ────────────────
+
+
+def test_ensure_zapret2_vendor_success(tmp_path, monkeypatch):
+    import tarfile
+
+    # Build a fake release tarball
+    tar_dir = tmp_path / "release" / "zapret2-x"
+    tar_dir.mkdir(parents=True)
+    arch_dir = tar_dir / "binaries" / "linux-x86_64"
+    arch_dir.mkdir(parents=True)
+    (arch_dir / "nfqws2").write_bytes(b"#!bin")
+    (tar_dir / "nfq2").mkdir()
+    (tar_dir / "files" / "fake").mkdir(parents=True)
+    (tar_dir / "files" / "fake" / "stun.bin").write_bytes(b"stun")
+    (tar_dir / "lua").mkdir()
+    (tar_dir / "lua" / "zapret-lib.lua").write_text("--")
+
+    tar_path = tmp_path / "zapret2-v0.9.0.tar.gz"
+    with tarfile.open(tar_path, "w:gz") as tf:
+        tf.add(tar_dir, arcname="zapret2-v0.9.0")
+
+    meta = {
+        "tag_name": "v0.9.0",
+        "assets": [
+            {"name": "zapret2-v0.9.0.tar.gz",
+             "browser_download_url": "https://x/zapret2-v0.9.0.tar.gz"},
+        ],
+    }
+    sha_text = "aa" * 32 + "  zapret2-v0.9.0.tar.gz\n"
+
+    def fake_http_get(url, dest=None, timeout=120.0):
+        if "releases/latest" in url or "latest" in url:
+            return __import__("json").dumps(meta).encode()
+        if "sha256" in url:
+            return sha_text.encode()
+        if dest is not None:
+            dest.write_bytes(tar_path.read_bytes())
+            return dest.read_bytes()
+        return tar_path.read_bytes()
+
+    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch",
+                        lambda: "linux-x86_64")
+    monkeypatch.setattr("blockchecks.engine.system_deps._http_get", fake_http_get)
+    monkeypatch.setattr("blockchecks.engine.system_deps.ensure_dirs",
+                        lambda: None)
+    monkeypatch.setattr("blockchecks.engine.system_deps.DL_CACHE",
+                        tmp_path / "dl")
+    monkeypatch.setattr("blockchecks.engine.system_deps.DATA_DIR", tmp_path)
+    monkeypatch.setattr("blockchecks.engine.system_deps.VENDOR_ROOT",
+                        tmp_path / "zapret2")
+    monkeypatch.setattr("blockchecks.engine.system_deps.VENDOR_BIN_LINK",
+                        tmp_path / "bin" / "nfqws2")
+    monkeypatch.setattr("blockchecks.engine.system_deps.cfg",
+                        __import__("blockchecks.engine.config", fromlist=["x"]))
+    with patch("blockchecks.engine.system_deps.cfg.apply_tool_paths"):
+        nfq, blobs, lua = sd.ensure_zapret2_vendor(offline=False)
+    assert "nfqws2" in nfq
+    assert Path(blobs).is_dir()
+    assert Path(lua).is_dir()
+
+
+def test_ensure_zapret2_vendor_no_asset(tmp_path, monkeypatch):
+    meta = {"tag_name": "v1", "assets": []}
+    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch",
+                        lambda: "linux-x86_64")
+    monkeypatch.setattr("blockchecks.engine.system_deps._http_get",
+                        lambda *a, **k: __import__("json").dumps(meta).encode())
+    monkeypatch.setattr("blockchecks.engine.system_deps.ensure_dirs",
+                        lambda: None)
+    monkeypatch.setattr("blockchecks.engine.system_deps.DL_CACHE", tmp_path)
+    monkeypatch.setattr("blockchecks.engine.system_deps.DATA_DIR", tmp_path)
+    with pytest.raises(RuntimeError, match="no asset"):
+        sd.ensure_zapret2_vendor(offline=False)
