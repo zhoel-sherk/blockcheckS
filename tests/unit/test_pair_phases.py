@@ -497,3 +497,93 @@ def test_run_adaptive_pair_phase():
             )
         )
     assert phase.tcp_passed == 3
+
+
+# ── discover_voice_endpoints / register_stop_handlers / configs_dir ──
+
+
+def test_discover_voice_endpoints_mutex_error():
+    from blockchecks.cli.commands.pair_phases import discover_voice_endpoints
+
+    args = _args(discover_dns=5, auto_discover=5)
+    ctx, rc = asyncio.run(discover_voice_endpoints(args))
+    assert rc == 1
+
+
+def test_discover_voice_endpoints_dns_alive():
+    from blockchecks.cli.commands.pair_phases import discover_voice_endpoints
+
+    args = _args(discover_dns=3)
+    with patch("blockchecks.checkers.voice_dns.discover_dns_alive",
+               new=AsyncMock(return_value=[{"ip": "1.2.3.4", "port": 50004,
+                                            "hostname": "h", "source": "dns",
+                                            "stun_ms": 5, "method": "x",
+                                            "bootstrap": True}])), patch(
+        "blockchecks.checkers.voice_dns.check_discover_mutex",
+        return_value=None), patch(
+        "blockchecks.checkers.voice_discovery.load_token",
+        return_value=None):
+        ctx, rc = asyncio.run(discover_voice_endpoints(args))
+    assert rc is None
+    assert ctx.voice_ip == "1.2.3.4"
+
+
+def test_discover_voice_endpoints_auto_discover():
+    from blockchecks.cli.commands.pair_phases import discover_voice_endpoints
+
+    args = _args(auto_discover=3)
+    with patch("blockchecks.checkers.voice_discovery.discover_multiple",
+               new=AsyncMock(return_value=[{"ip": "9.9.9.9", "port": 50001,
+                                            "hostname": "h"}])), patch(
+        "blockchecks.checkers.voice_dns.check_discover_mutex",
+        return_value=None), patch(
+        "blockchecks.checkers.voice_discovery.load_token",
+        return_value=None):
+        ctx, rc = asyncio.run(discover_voice_endpoints(args))
+    assert rc is None
+    assert ctx.voice_ip == "9.9.9.9"
+
+
+def test_discover_voice_endpoints_full_voice_no_token():
+    from blockchecks.cli.commands.pair_phases import discover_voice_endpoints
+
+    args = _args(full_voice=True)
+    with patch("blockchecks.checkers.voice_dns.check_discover_mutex",
+               return_value=None), patch(
+        "blockchecks.checkers.voice_discovery.load_token",
+        return_value=None):
+        ctx, rc = asyncio.run(discover_voice_endpoints(args))
+    assert rc is None
+    assert ctx.full_voice is False
+    assert ctx.has_token is False
+
+
+def test_register_stop_handlers(monkeypatch):
+    from blockchecks.cli.commands.pair_phases import (
+        StopHandlerState,
+        register_stop_handlers,
+    )
+
+    ev = asyncio.Event()
+    loop = MagicMock()
+    state = StopHandlerState()
+    with patch("blockchecks.cli.commands.pair_phases.asyncio.get_running_loop",
+               return_value=loop):
+        register_stop_handlers(loop, state, None, ev)
+    assert loop.add_signal_handler.call_count == 3
+
+
+def test_load_strategy_items_configs_dir(tmp_path):
+    conf_dir = tmp_path / "cfgs"
+    conf_dir.mkdir()
+    (conf_dir / "tcp_a.conf").write_text("--qnum=200\n")
+    (conf_dir / "udp_voice_b.conf").write_text("--qnum=201\n")
+    args = _args(generate=False, config=None, configs_dir=str(conf_dir),
+                 user_matrix="")
+    with patch("blockchecks.cli.commands.pair_phases.StrategyLoader") as LoaderCls:
+        LoaderCls.return_value.from_config_dir.return_value = [
+            str(conf_dir / "tcp_a.conf"), str(conf_dir / "udp_voice_b.conf")
+        ]
+        res = asyncio.run(load_strategy_items(args, MagicMock()))
+    assert len(res.tcp_items) == 1
+    assert len(res.udp_items) == 1
