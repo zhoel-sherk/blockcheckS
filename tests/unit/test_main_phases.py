@@ -632,3 +632,102 @@ def test_tcp_sequential_stop_event():
                return_value="classic"):
         asyncio.run(_run_tcp_sequential(ctx, progress))
     ctx.runner.test_tcp.assert_not_awaited()
+
+
+# ── _run_tcp_adaptive / family_gates / fanout / run_pairs_phase ───────
+
+
+def test_tcp_adaptive():
+    from blockchecks.main_phases import _run_tcp_adaptive
+
+    ctx = _mk_ctx()
+    ctx.tcp_items = [MagicMock()]
+    ctx.domains = ["a.com"]
+    ctx.db = MagicMock()
+    ctx.args.resume = False
+    ctx.args.adaptive_epsilon = 0.1
+    ctx.args.no_adaptive_weights = False
+    ctx.args.timeout = 5.0
+    ctx.args.protocol = "tls12"
+    ctx.args.parallel = 2
+    ctx.args.disable_ech = False
+    aq = MagicMock()
+    aq.done = 1
+    aq.passed = 1
+    aq.weights = {}
+    aq.metrics = MagicMock()
+    aq.metrics.time_to_first_pass = 1.0
+    aq.metrics.fanout_enqueued = 0
+    aq.metrics.half_mark_jobs = False
+    progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
+    with patch("blockchecks.main_phases.build_adaptive_queue",
+               new=AsyncMock(return_value=([MagicMock()], 0))), patch(
+        "blockchecks.main_phases.run_adaptive_tcp",
+        new=AsyncMock(return_value=aq)), patch(
+        "blockchecks.main_phases.resolve_probe_backend",
+        return_value="classic"), patch(
+        "blockchecks.main_phases.persist_adaptive_weights",
+        new=AsyncMock()):
+        asyncio.run(_run_tcp_adaptive(ctx, progress))
+    ctx.aq_result = aq
+
+
+def test_tcp_family_gates():
+    from blockchecks.main_phases import _run_tcp_family_gates
+
+    ctx = _mk_ctx()
+    ctx.tcp_items = [MagicMock()]
+    ctx.domains = ["a.com"]
+    ctx.args.resume = False
+    ctx.args.timeout = 5.0
+    ctx.scan_level = "fast"
+    progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
+    with patch("blockchecks.main_phases.run_tcp_with_family_gates",
+               new=AsyncMock(return_value=([MagicMock()], 1, 0, 1))):
+        asyncio.run(_run_tcp_family_gates(ctx, progress))
+    assert progress.done == 1
+
+
+def test_tcp_fanout():
+    from blockchecks.main_phases import _run_tcp_fanout
+
+    ctx = _mk_ctx()
+    ctx.tcp_items = [MagicMock()]
+    ctx.domains = ["a.com", "b.com"]
+    ctx.args.resume = False
+    ctx.args.timeout = 5.0
+    ctx.args.protocol = "tls12"
+    ctx.curl_parallel = 2
+    progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
+    with patch("blockchecks.main_phases.resolve_probe_backend",
+               return_value="classic"), patch(
+        "blockchecks.main_phases.fanout_batches",
+        return_value=[["a.com", "b.com"]]), patch.object(
+        ctx.runner, "test_tcp_domains",
+        new=AsyncMock(return_value=[MagicMock(success=True), MagicMock(success=False)])):
+        asyncio.run(_run_tcp_fanout(ctx, progress))
+    assert progress.passed == 1
+
+
+def test_run_pairs_phase_with_working_tcp():
+    from blockchecks.main_phases import run_pairs_phase
+
+    ctx = _mk_ctx(udp_items=[MagicMock()])
+    ctx.args.tcp_only = False
+    ctx.args.pair_max = 10
+    ctx.args.resume = False
+    ctx.args.udp_timeout = 3.0
+    detail = {"name": "s1", "status": "PASS", "latency_ms": 10}
+    ctx.db.get_working_tcp_details = AsyncMock(return_value=[detail])
+    ctx.db.get_best_by_coverage = AsyncMock(return_value=[])
+    it = MagicMock()
+    it.label = "s1"
+    it.strategy = "fake:s1"
+    ctx.tcp_items = [it]
+    pair = MagicMock()
+    pair.overall = "PASS"
+    ctx.runner.test_pair_matrix = AsyncMock(return_value=[pair])
+    with patch("blockchecks.checkers.voice_dns.resolve_voice_targets",
+               return_value=[("1.2.3.4", 50004)]), patch(
+        "blockchecks.checkers.voice_dns.pair_log_domain", return_value="a.com"):
+        asyncio.run(run_pairs_phase(ctx, "1.2.3.4", 50004))
