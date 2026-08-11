@@ -202,3 +202,44 @@ def test_verify_fetch_failure(monkeypatch):
     report = sd.verify_system_dependencies(fetch=True, offline=False)
     assert report.ok is False
     assert any("auto-fetch failed" in e for e in report.errors)
+
+
+# ── _seed_blobs_from_fake / ensure_zapret2_vendor ─────────────────────
+
+
+def test_seed_blobs_from_fake(tmp_path):
+    from blockchecks.engine.system_deps import _seed_blobs_from_fake
+
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    (fake / "stun.bin").write_bytes(b"stun")
+    (fake / "custom.bin").write_bytes(b"custom")
+    blobs = tmp_path / "blobs"
+    blobs.mkdir()
+    n = _seed_blobs_from_fake(fake, blobs)
+    assert n >= 1
+    assert (blobs / "stun.bin").exists()
+
+
+def test_seed_blobs_from_fake_no_dir(tmp_path):
+    from blockchecks.engine.system_deps import _seed_blobs_from_fake
+
+    assert _seed_blobs_from_fake(tmp_path / "nope", tmp_path / "blobs") == 0
+
+
+def test_ensure_zapret2_vendor_offline():
+    from blockchecks.engine.system_deps import ensure_zapret2_vendor
+
+    with pytest.raises(RuntimeError, match="offline"):
+        ensure_zapret2_vendor(offline=True)
+
+
+def test_ensure_zapret2_vendor_bad_arch(monkeypatch):
+    from blockchecks.engine.system_deps import ensure_zapret2_vendor
+
+    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch",
+                        lambda: None)
+    monkeypatch.setattr("blockchecks.engine.system_deps.platform.machine",
+                        lambda: "weird-arch")
+    with pytest.raises(RuntimeError, match="unsupported CPU arch"):
+        ensure_zapret2_vendor(offline=False)

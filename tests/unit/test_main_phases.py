@@ -575,3 +575,60 @@ def test_step_number_helpers():
     assert _voice_step(ctx7) == 4 and _voice_step(ctx6) == 3
     assert _quic_step(ctx7) == 5 and _quic_step(ctx6) == 4
     assert _pair_step(ctx7) == 6 and _pair_step(ctx6) == 5
+
+
+# ── arm_stop_handlers / _run_tcp_sequential ───────────────────────────
+
+
+def test_arm_stop_handlers_registers():
+    from blockchecks.main_phases import arm_stop_handlers
+
+    ctx = _mk_ctx()
+    loop = MagicMock()
+    with patch("blockchecks.main_phases.asyncio.get_running_loop",
+               return_value=loop):
+        arm_stop_handlers(ctx)
+    assert loop.add_signal_handler.call_count == 3
+
+
+def test_arm_stop_handlers_signal_fallback(monkeypatch):
+    from blockchecks.main_phases import arm_stop_handlers
+
+    ctx = _mk_ctx()
+
+    def _raise(*a, **k):
+        raise NotImplementedError
+
+    loop = MagicMock()
+    loop.add_signal_handler.side_effect = _raise
+    monkeypatch.setattr("blockchecks.main_phases.signal.signal",
+                        lambda *a, **k: None)
+    with patch("blockchecks.main_phases.asyncio.get_running_loop",
+               return_value=loop):
+        arm_stop_handlers(ctx)
+
+
+def test_tcp_sequential_runs_jobs():
+    from blockchecks.main_phases import _run_tcp_sequential
+
+    ctx = _mk_ctx()
+    ctx.tcp_items = [MagicMock()]
+    progress = MagicMock()
+    ctx.runner.test_tcp = AsyncMock(return_value=MagicMock(success=True))
+    with patch("blockchecks.main_phases.resolve_probe_backend",
+               return_value="classic"):
+        asyncio.run(_run_tcp_sequential(ctx, progress))
+    ctx.runner.test_tcp.assert_awaited()
+
+
+def test_tcp_sequential_stop_event():
+    from blockchecks.main_phases import _run_tcp_sequential
+
+    ctx = _mk_ctx()
+    ctx.tcp_items = [MagicMock()]
+    ctx.stop.set()
+    progress = MagicMock()
+    with patch("blockchecks.main_phases.resolve_probe_backend",
+               return_value="classic"):
+        asyncio.run(_run_tcp_sequential(ctx, progress))
+    ctx.runner.test_tcp.assert_not_awaited()
