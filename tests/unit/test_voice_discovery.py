@@ -185,3 +185,64 @@ def test_singbox_session_unavailable(monkeypatch):
             assert sb is None
 
     asyncio.run(_go())
+
+
+# ── _manage_singbox start/stop + session with running proxy ───────────
+
+
+def test_manage_singbox_start_and_stop(monkeypatch, tmp_path):
+    import subprocess
+
+    import blockchecks.checkers.voice_discovery as vd
+
+    conf = tmp_path / "config.json"
+    conf.write_text("{}")
+    proc = MagicMock()
+    proc.poll.return_value = None
+    monkeypatch.setattr(vd, "SING_BOX_CONFIG", str(conf))
+    monkeypatch.setattr(vd, "SING_BOX_BIN", str(tmp_path / "sing-box"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: proc)
+    monkeypatch.setattr(vd.time, "sleep", lambda s: None)
+
+    vd._singbox_proc = None
+    started = vd._manage_singbox(True)
+    assert started is proc
+    assert vd._singbox_proc is proc
+
+    vd._manage_singbox(False)
+    assert vd._singbox_proc is None
+
+
+def test_manage_singbox_restart_terminates_old(monkeypatch, tmp_path):
+    import subprocess
+
+    import blockchecks.checkers.voice_discovery as vd
+
+    conf = tmp_path / "config.json"
+    conf.write_text("{}")
+    old = MagicMock()
+    old.poll.return_value = None
+    new = MagicMock()
+    new.poll.return_value = None
+    monkeypatch.setattr(vd, "SING_BOX_CONFIG", str(conf))
+    monkeypatch.setattr(vd, "SING_BOX_BIN", str(tmp_path / "sing-box"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: new)
+    monkeypatch.setattr(vd.time, "sleep", lambda s: None)
+
+    vd._singbox_proc = old
+    started = vd._manage_singbox(True)
+    assert started is new
+    old.terminate.assert_called_once()
+    vd._singbox_proc = None
+
+
+def test_singbox_session_with_proxy(monkeypatch):
+    import blockchecks.checkers.voice_discovery as vd
+
+    async def _go():
+        proc = MagicMock()
+        monkeypatch.setattr(vd, "_manage_singbox", lambda start: proc if start else None)
+        async with vd._singbox_session() as sb:
+            assert sb is proc
+
+    asyncio.run(_go())
