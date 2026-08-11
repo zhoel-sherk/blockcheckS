@@ -5,7 +5,9 @@ from __future__ import annotations
 from blockchecks.checkers.curl_probe import (
     CurlProbeRequest,
     is_googlevideo_domain,
+    is_ytcdn_domain,
     prepare_googlevideo_probe,
+    prepare_ytcdn_probe,
     worker_wall_timeout,
 )
 from blockchecks.service.lua_session import BridgeSession
@@ -34,6 +36,7 @@ def run_tcp_check_bridge(
     is_http = protocol == "http"
     is_quic = protocol == "quic"
     is_gv = not is_http and not is_quic and is_googlevideo_domain(domain)
+    is_yt = not is_http and not is_quic and is_ytcdn_domain(domain)
 
     session.bridge.truncate_events()
     session.bridge.publish(strategy_id, gen, strategy if extra_lua_desync else None)
@@ -52,6 +55,11 @@ def run_tcp_check_bridge(
         probe_req, gv_err = prepare_googlevideo_probe(domain, resolved_ip=resolved_ip)
         if gv_err:
             return gv_err
+        resolved_ip = probe_req.resolved_ip
+    elif is_yt:
+        probe_req, yt_err = prepare_ytcdn_probe(domain, resolved_ip=resolved_ip)
+        if yt_err:
+            return yt_err
         resolved_ip = probe_req.resolved_ip
     else:
         probe_req = CurlProbeRequest(

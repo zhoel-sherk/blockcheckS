@@ -13,8 +13,11 @@ import subprocess as sp
 from blockchecks.checkers.curl_probe import (
     CurlProbeRequest,
     is_googlevideo_domain,
+    is_ytcdn_domain,
     prepare_googlevideo_probe,
+    prepare_ytcdn_probe,
     worker_wall_timeout,
+    ytcdn_probe_variants,
 )
 from blockchecks.engine.config import (
     BLOB_DIR,
@@ -201,13 +204,21 @@ def _run_tcp_check(
     py = python_bin or PYTHON_BIN
     is_http = protocol == "http"
     is_gv = not is_http and is_googlevideo_domain(domain)
+    is_yt = not is_http and is_ytcdn_domain(domain)
     dport = "80" if is_http else "443"
     tmp_conf = None
 
+    ytcdn_variants: list = []
     if is_gv:
         probe_req, gv_err = prepare_googlevideo_probe(domain, resolved_ip=resolved_ip)
         if gv_err:
             return gv_err
+        resolved_ip = probe_req.resolved_ip
+    elif is_yt:
+        ytcdn_variants = ytcdn_probe_variants(domain, resolved_ip=resolved_ip)
+        if not ytcdn_variants:
+            return {"success": False, "error": "no ytcdn variants"}
+        probe_req = ytcdn_variants[0]
         resolved_ip = probe_req.resolved_ip
     else:
         probe_req = CurlProbeRequest(
@@ -276,29 +287,36 @@ def _run_tcp_check(
     try:
         data: dict = {}
         used_ip: str | None = None
-        for attempt, ip in enumerate(ips_to_try):
-            probe_req.resolved_ip = ip
-            if attempt > 0:
-                probe_req.timeout = min(timeout, RETRY_IP_TIMEOUT)
-            payload = {
-                "mode": "single",
-                "request": _probe_request_dict(probe_req),
-                "repeats": max(1, int(repeats)),
-                "parallel_repeats": bool(parallel_repeats and repeats > 1),
-                "repeats_mode": repeats_mode,
-                "quick_break": bool(quick_break),
-            }
-            wall = worker_wall_timeout(
-                probe_req.timeout,
-                repeats,
-                n_domains=1,
-                curl_parallel=1,
-                parallel_repeats=parallel_repeats,
-            )
-            data = _invoke_curl_probe_worker(ns_name, py, payload, wall)
-            data["settle_ms"] = round(settle_elapsed * 1000, 1)
-            used_ip = ip
-            if data.get("success") or attempt == len(ips_to_try) - 1:
+        # ytcdn: try each probe variant (bare → proxy → thumb) × IP candidates.
+        # classic/gv: single probe_req × IP candidates.
+        candidates = ytcdn_variants if is_yt else [probe_req]
+        done_variant = False
+        for variant in candidates:
+            for attempt, ip in enumerate(ips_to_try):
+                variant.resolved_ip = ip
+                variant.timeout = timeout if attempt == 0 else min(timeout, RETRY_IP_TIMEOUT)
+                payload = {
+                    "mode": "single",
+                    "request": _probe_request_dict(variant),
+                    "repeats": max(1, int(repeats)),
+                    "parallel_repeats": bool(parallel_repeats and repeats > 1),
+                    "repeats_mode": repeats_mode,
+                    "quick_break": bool(quick_break),
+                }
+                wall = worker_wall_timeout(
+                    variant.timeout,
+                    repeats,
+                    n_domains=1,
+                    curl_parallel=1,
+                    parallel_repeats=parallel_repeats,
+                )
+                data = _invoke_curl_probe_worker(ns_name, py, payload, wall)
+                data["settle_ms"] = round(settle_elapsed * 1000, 1)
+                used_ip = ip
+                if data.get("success"):
+                    done_variant = True
+                    break
+            if done_variant:
                 break
         if used_ip is not None:
             data["used_ip"] = used_ip
@@ -358,6 +376,14 @@ def _run_tcp_check_multi(
     for d in domains:
         if not is_http and is_googlevideo_domain(d):
             req, err = prepare_googlevideo_probe(d, resolved_ip=resolved_ips.get(d))
+            if err:
+                gv_fail[d] = err
+                continue
+            if req.resolved_ip:
+                resolved_ips[d] = req.resolved_ip
+            probe_requests.append(req)
+        elif not is_http and is_ytcdn_domain(d):
+            req, err = prepare_ytcdn_probe(d, resolved_ip=resolved_ips.get(d))
             if err:
                 gv_fail[d] = err
                 continue

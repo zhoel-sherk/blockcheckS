@@ -9,6 +9,7 @@ googlevideo videoplayback checks.
 from __future__ import annotations
 
 import concurrent.futures
+import re
 from dataclasses import dataclass, field
 
 import curl_cffi
@@ -44,6 +45,9 @@ class CurlProbeRequest:
     disable_ech: bool = False
     googlevideo: bool = False
     ggc: bool = False
+    ytcdn: bool = False
+    ytcdn_proxy: bool = False
+    ytcdn_bare: bool = False
     protocol: str = "tls12"
 
 
@@ -73,6 +77,36 @@ class CurlProbeResult:
 
 def is_googlevideo_domain(domain: str) -> bool:
     return "googlevideo" in domain.lower()
+
+
+#: YouTube family hosts (site + static CDN). SNI-blocked on some ISPs; probed
+#: with a deterministic Google-answer detector (like GGC) — no yt-dlp signature.
+_YOUTUBE_RE = re.compile(
+    r"(?:^|\.)"
+    r"(youtube\.com|youtu\.be|googlevideo\.com|ytimg\.com|ggpht\.com|"
+    r"gvt1\.com|youtubeusercontent\.com|googleusercontent\.com)"
+    r"(?:\.|$)"
+)
+
+
+def is_youtube_domain(domain: str) -> bool:
+    """True for any YouTube-family host (site, googlevideo, static CDN)."""
+    d = domain.lower().split("/")[0]
+    return bool(_YOUTUBE_RE.search(d))
+
+
+def is_ytcdn_domain(domain: str) -> bool:
+    """True for YouTube static CDN hosts (not youtube.com / googlevideo itself)."""
+    d = domain.lower().split("/")[0]
+    if not is_youtube_domain(d):
+        return False
+    return "googlevideo" not in d and "youtube.com" not in d and d != "youtu.be"
+
+
+#: Server-header fragments identifying a genuine Google frontend. The TSPU
+#: stub replies with ``nginx/nts`` (or none); Google uses gws (web), scone/gvs
+#: (googlevideo cache), sffe (static content / ytimg), etc.
+_GOOGLE_SERVER_HINTS = ("gws", "scone", "gvs", "sffe", "fife")
 
 
 def googlevideo_range_header() -> str:
@@ -130,6 +164,95 @@ def prepare_googlevideo_probe(
         ),
         None,
     )
+
+
+def prepare_ytcdn_probe(
+    domain: str,
+    *,
+    timeout: float = 5.0,
+    resolved_ip: str | None = None,
+) -> tuple[CurlProbeRequest, dict | None]:
+    """Deterministic probe for YouTube static CDN hosts (ytimg/ggpht/gvt1/...).
+
+    Like the GGC detector, a genuine Google CDN answer — any HTTP status from
+    a Google ``gws``/``scone``/``gvs`` server — proves the bypass works without
+    needing a signed URL. The probe tries up to three variants:
+
+      1. bare host: ``https://{host}/`` — any real CDN answer counts (404/403
+         still proves TLS reached Google, not the TSPU stub)
+      2. via SOCKS: the same URL through ``SOCKS5_PROXY`` (dead-socks safe:
+         empty BLOCKCHECKS_PROXY disables the fallback, like googlevideo)
+      3. host with a stable thumbnail path (i.ytimg/ggpht deterministic 200)
+
+    The first variant that returns a genuine Google answer wins. A DPI
+    timeout/RST (handled by the caller) == blocked.
+    """
+    variants = ytcdn_probe_variants(domain, timeout=timeout, resolved_ip=resolved_ip)
+    return variants[0], None
+
+
+def ytcdn_probe_variants(
+    domain: str,
+    *,
+    timeout: float = 5.0,
+    resolved_ip: str | None = None,
+) -> list[CurlProbeRequest]:
+    """Build up-to-three deterministic yt-cdn probe variants (see prepare_ytcdn_probe)."""
+    from blockchecks.engine.config import SOCKS5_PROXY
+
+    d = domain.lower().split("/")[0]
+
+    # Stable 200 path per CDN family (no signature; valid indefinitely).
+    thumb_path = ""
+    if d.endswith(".ytimg.com"):
+        thumb_path = "/vi/dQw4w9WgXcQ/0.jpg"
+    elif d.endswith(".ggpht.com"):
+        thumb_path = "/ytc/AAUvw7g0mI5qo0r5vz0uR3sM0Q6P0F0w1Q4mXlLxM.png"
+
+    variants: list[CurlProbeRequest] = []
+    bare = f"https://{d}/"
+    # Priority: stable thumbnail (deterministic 200) → SOCKS → bare host.
+    if thumb_path:
+        variants.append(
+            CurlProbeRequest(
+                domain=domain,
+                timeout=timeout,
+                resolved_ip=resolved_ip,
+                resolve_name=d,
+                curl_url=f"https://{d}{thumb_path}",
+                disable_ech=True,
+                ytcdn=True,
+                protocol="tls12",
+            )
+        )
+    if SOCKS5_PROXY:
+        variants.append(
+            CurlProbeRequest(
+                domain=domain,
+                timeout=timeout,
+                resolved_ip=resolved_ip,
+                resolve_name=d,
+                curl_url=bare if not thumb_path else f"https://{d}{thumb_path}",
+                disable_ech=True,
+                ytcdn=True,
+                ytcdn_proxy=True,
+                protocol="tls12",
+            )
+        )
+    variants.append(
+        CurlProbeRequest(
+            domain=domain,
+            timeout=timeout,
+            resolved_ip=resolved_ip,
+            resolve_name=d,
+            curl_url=bare,
+            disable_ech=True,
+            ytcdn=True,
+            ytcdn_bare=True,
+            protocol="tls12",
+        )
+    )
+    return variants
 
 
 def prepare_ggc_probe(
@@ -310,7 +433,7 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
             # the proxy= kw (socks5h = DNS through proxy); CurlOpt.PROXY setopt
             # does not map socks5h correctly and yields 403.
             get_kwargs: dict = {}
-            if req.googlevideo and SOCKS5_PROXY:
+            if (req.googlevideo or req.ytcdn_proxy) and SOCKS5_PROXY:
                 get_kwargs["proxy"] = SOCKS5_PROXY.replace("socks5://", "socks5h://")
             resp = session.get(url, timeout=curl_timeout, **get_kwargs)
     except RequestsError as e:
@@ -336,7 +459,7 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     # Russian IPs/domains. timeout/RST (handled in except) == blocked.
     if req.ggc:
         server = server_hdr.lower()
-        google_server = any(t in server for t in ("gws", "scone", "gvs"))
+        google_server = any(t in server for t in _GOOGLE_SERVER_HINTS)
         status = resp.status_code
         if status in {301, 302, 303, 307, 308} and not _ggc_redirect_is_google(loc):
             return CurlProbeResult(
@@ -359,6 +482,32 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
         return CurlProbeResult(
             success=True,
             http_code=status,
+            latency_ms=elapsed * 1000,
+            content_len=clen,
+            content_ok=clen >= 300,
+            throttled=rate < THROTTLED_MAX_BPS and clen >= 300,
+            read_rate_bps=rate,
+            error=None,
+        )
+
+    # YouTube static CDN probe (ytimg/ggpht/gvt1/usercontent): like GGC, a
+    # genuine Google answer (gws/scone/gvs Server header, any status) proves the
+    # bypass reached the real CDN. A TSPU stub replies with nginx/nts or nothing.
+    if req.ytcdn:
+        server = server_hdr.lower()
+        google_server = any(t in server for t in _GOOGLE_SERVER_HINTS)
+        if not google_server:
+            return CurlProbeResult(
+                success=False,
+                http_code=resp.status_code,
+                latency_ms=elapsed * 1000,
+                content_len=clen,
+                read_rate_bps=rate,
+                error=f"non-google server header: {server_hdr[:40]!r}",
+            )
+        return CurlProbeResult(
+            success=True,
+            http_code=resp.status_code,
             latency_ms=elapsed * 1000,
             content_len=clen,
             content_ok=clen >= 300,

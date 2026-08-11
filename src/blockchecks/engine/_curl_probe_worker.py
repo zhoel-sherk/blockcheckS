@@ -23,6 +23,9 @@ def _request_from_dict(data: dict) -> CurlProbeRequest:
         disable_ech=bool(data.get("disable_ech", False)),
         googlevideo=bool(data.get("googlevideo", False)),
         ggc=bool(data.get("ggc", False)),
+        ytcdn=bool(data.get("ytcdn", False)),
+        ytcdn_proxy=bool(data.get("ytcdn_proxy", False)),
+        ytcdn_bare=bool(data.get("ytcdn_bare", False)),
         protocol=data.get("protocol", "tls12"),
     )
 

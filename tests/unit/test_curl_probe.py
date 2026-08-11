@@ -416,3 +416,50 @@ def test_curl_probe_worker_main_no_input():
         rc = main([])
     assert rc == 2
     assert "usage:" in err.getvalue()
+
+
+# ── YouTube-family deterministic probe (ytcdn) ─────────────────────────
+
+
+def test_is_youtube_domain():
+    from blockchecks.checkers.curl_probe import is_youtube_domain
+
+    assert is_youtube_domain("youtube.com")
+    assert is_youtube_domain("www.youtube.com")
+    assert is_youtube_domain("youtu.be")
+    assert is_youtube_domain("googlevideo.com")
+    assert is_youtube_domain("i.ytimg.com")
+    assert is_youtube_domain("yt3.ggpht.com")
+    assert is_youtube_domain("gvt1.com")
+    assert not is_youtube_domain("discord.com")
+
+
+def test_is_ytcdn_domain():
+    from blockchecks.checkers.curl_probe import is_ytcdn_domain
+
+    assert is_ytcdn_domain("i.ytimg.com")
+    assert is_ytcdn_domain("yt3.ggpht.com")
+    assert is_ytcdn_domain("gvt1.com")
+    assert not is_ytcdn_domain("youtube.com")
+    assert not is_ytcdn_domain("googlevideo.com")
+    assert not is_ytcdn_domain("discord.com")
+
+
+def test_ytcdn_probe_variants_order():
+    from blockchecks.checkers.curl_probe import ytcdn_probe_variants
+
+    variants = ytcdn_probe_variants("i.ytimg.com", resolved_ip="1.2.3.4")
+    assert variants
+    # first is the stable thumbnail (deterministic 200)
+    assert any("dQw4w9WgXcQ" in v.curl_url for v in variants)
+    # bare host present
+    assert any(v.ytcdn_bare for v in variants)
+
+
+def test_ytcdn_probe_bare_no_thumb_for_gvt1():
+    from blockchecks.checkers.curl_probe import ytcdn_probe_variants
+
+    variants = ytcdn_probe_variants("gvt1.com")
+    # gvt1 has no stable thumb path → bare variant
+    assert any(v.ytcdn_bare for v in variants)
+    assert not any("/dQw4w9WgXcQ" in v.curl_url for v in variants)
