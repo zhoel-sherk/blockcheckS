@@ -1,6 +1,7 @@
 """Unit tests for data_block (provider slug, dns.db, strategies.db, hosts)."""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -151,3 +152,88 @@ def test_best_config_write(store: ProviderStore):
     # unchanged content → no rewrite churn
     path2 = store.write_best_config(content)
     assert path2 == path
+
+
+# ── provider_name resolution (network + config paths) ─────────────────
+
+def test_provider_name_reads_cfg(monkeypatch, tmp_path):
+    import blockchecks.data_block.provider as prov
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    cfg_file = cfg_dir / "config.toml"
+    cfg_file.write_text("[provider]\nname = \"llc_trc_fiord\"\n")
+    monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
+    prov._CACHE.clear()
+    assert prov.provider_name(allow_detect=False) == "llc_trc_fiord"
+
+
+def test_provider_name_auto_detect_writes(monkeypatch, tmp_path):
+    import blockchecks.data_block.provider as prov
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    cfg_file = cfg_dir / "config.toml"
+    monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
+    prov._CACHE.clear()
+    monkeypatch.setattr(prov, "_query_ipinfo", lambda timeout=5.0: "My ISP LLC")
+    name = prov.provider_name(allow_detect=True)
+    assert name == "my_isp_llc"
+    assert "name = \"my_isp_llc\"" in cfg_file.read_text()
+
+
+def test_provider_name_auto_detect_network_failure(monkeypatch, tmp_path):
+    import blockchecks.data_block.provider as prov
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    cfg_file = cfg_dir / "config.toml"
+    monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
+    prov._CACHE.clear()
+    monkeypatch.setattr(prov, "_query_ipinfo", lambda timeout=5.0: None)
+    name = prov.provider_name(allow_detect=True)
+    assert name == "default"
+    assert not cfg_file.exists()  # default is not persisted
+
+
+def test_get_provider_dir(monkeypatch, tmp_path):
+    import blockchecks.data_block.provider as prov
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    cfg_file = cfg_dir / "config.toml"
+    cfg_file.write_text("[provider]\nname = \"p1\"\n")
+    monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
+    import blockchecks.engine.config as cfg_mod
+    monkeypatch.setattr(cfg_mod, "PROJECT_DIR", str(tmp_path))
+    prov._CACHE.clear()
+    d = prov.get_provider_dir(allow_detect=False)
+    assert "p1" in str(d)
+
+
+# ── ProviderStore.sync_commit (git subprocess) ────────────────────────
+
+def test_sync_commit_no_git_repo(tmp_path, store):
+    assert store.sync_commit() is False
+
+
+def test_sync_commit_git_success(store, tmp_path, monkeypatch):
+    import subprocess
+
+    repo = store._dir.parents[1]
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / ".git").mkdir()
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: MagicMock(returncode=0))
+    assert store.sync_commit(push=False) is True
+
+
+def test_sync_commit_commit_failure(store, tmp_path, monkeypatch):
+    import subprocess
+
+    repo = store._dir.parents[1]
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / ".git").mkdir()
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: MagicMock(returncode=1, stdout="err", stderr="fail")
+    )
+    assert store.sync_commit(push=False) is False
