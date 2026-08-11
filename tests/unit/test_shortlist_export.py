@@ -103,3 +103,34 @@ async def test_shortlist_seed_db(tmp_path):
     await db.init()
     working = await db.get_working_tcp("discord.com")
     assert "seeded" in working
+
+
+# ── added: common_tcp / udp / quic / fallback / main ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_build_shortlist_common_tcp_fallback(temp_db: StateDB):
+    from blockchecks.shortlist_export import build_shortlist_entries
+
+    payload = await build_shortlist_entries(temp_db, domains=["a.com", "b.com"], limit=3)
+    assert payload["schema"] == SCHEMA
+
+
+@pytest.mark.asyncio
+async def test_build_shortlist_udp_quic_rows(temp_db: StateDB):
+    from blockchecks.shortlist_export import build_shortlist_entries
+
+    await temp_db.log_udp("u1", "voice", "PASS", 5.0, config_path="fake:blob=discord_udp")
+    payload = await build_shortlist_entries(temp_db, domains=["discord.com"], limit=3)
+    assert payload["udp"]
+
+
+def test_shortlist_export_main(tmp_path):
+    from unittest.mock import AsyncMock, patch
+
+    from blockchecks.shortlist_export import main
+
+    with patch("blockchecks.shortlist_export.export_shortlist_json",
+               new=AsyncMock(return_value={"schema": "blockchecks.shortlist/v1", "tcp": []})):
+        rc = main(["--db", str(tmp_path / "x.db"), "--output", str(tmp_path / "o.json")])
+    assert rc == 0
