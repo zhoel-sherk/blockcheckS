@@ -24,6 +24,7 @@ from blockchecks.engine.config import (
     NFQUEUE_TCP,
     NFQUEUE_UDP,
     PYTHON_BIN,
+    RETRY_IP_TIMEOUT,
     get_lua_init_scripts,
 )
 from blockchecks.engine.nfqws_config import (
@@ -38,10 +39,6 @@ from blockchecks.service.probe import (
     invoke_curl_probe_worker as _invoke_curl_probe_worker,
 )
 from blockchecks.service.probe import probe_request_dict as _probe_request_dict
-
-# Budget for retry-on-next-IP attempts after the first failed IP (keeps
-# throttled-IP worst case from N×timeout, see per-IP throttling).
-RETRY_IP_TIMEOUT = 2.0
 
 
 def _run_quic_check(

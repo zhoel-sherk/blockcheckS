@@ -9,10 +9,10 @@ import os
 import subprocess
 import time
 
+from blockchecks.engine.config import YTDLP_TIMEOUT
 from blockchecks.engine.paths import GV_URL_CACHE_FILE
 
 CACHE_TTL = 3 * 3600  # 3 hours (googlevideo URLs expire in ~6 hours)
-_YTDLP_TIMEOUT = 20  # seconds — dead SOCKS/DPI must not stall the matrix
 _FETCH_FAIL_COOLDOWN = 30 * 60  # after a failed fetch, reuse expired cache
 _fetch_fail_until = 0.0
 
@@ -159,7 +159,7 @@ def _fetch_ytdlp_url(
         cmd[1:1] = ["--proxy", proxy]
 
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=_YTDLP_TIMEOUT)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=YTDLP_TIMEOUT)
         urls = [
             line.strip()
             for line in r.stdout.splitlines()

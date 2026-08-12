@@ -185,7 +185,39 @@ SHM_BASE = _env_or("BLOCKCHECKS_SHM_BASE", "/dev/shm/blockchecks")
 DEFAULT_BRIDGE_BATCH = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH", "500"))
 DEFAULT_BRIDGE_BATCH_MAX = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH_MAX", "2000"))
 
+# AQ domain isolation: when True (default) parallel netns workers always probe
+# distinct domains (no all-youtube false positives). Disable with
+# BLOCKCHECKS_AQ_DOMAIN_ISOLATE=0 / [run] domain_isolate = false.
+AQ_DOMAIN_ISOLATE = _env_or("BLOCKCHECKS_AQ_DOMAIN_ISOLATE", "1").lower() not in (
+    "0", "false", "off", "no",
+)
+
 DEFAULT_PROBE_BACKEND = "lua_bridge"  # T-L3: lua_bridge is the standard backend
+
+# ── Tuning knobs (configurable: env BLOCKCHECKS_* or [run] in config.toml) ──
+# Probe / subprocess wall timeouts. Kept here so a throttled ISP run can lower
+# them without code edits.
+
+# Retry-on-next-IP budget after the first failed IP (classic path).
+RETRY_IP_TIMEOUT = float(_env_or("BLOCKCHECKS_RETRY_IP_TIMEOUT", "1.0"))
+# Auto-IP-pin candidate probe timeout (async_runner.ip_pin).
+PIN_TIMEOUT = float(_env_or("BLOCKCHECKS_PIN_TIMEOUT", "3.0"))
+# yt-dlp googlevideo URL fetch timeout.
+YTDLP_TIMEOUT = float(_env_or("BLOCKCHECKS_YTDLP_TIMEOUT", "20.0"))
+# DoH query timeout used across DNS helpers.
+DOH_TIMEOUT = float(_env_or("BLOCKCHECKS_DOH_TIMEOUT", "5.0"))
+# nfqws2 readiness poll / preflight probe timeout.
+NFQWS2_READY_TIMEOUT = float(_env_or("BLOCKCHECKS_NFQWS2_READY_TIMEOUT", "5.0"))
+# sudo subprocess wall timeout for netns/iptables admin calls.
+SUDO_WALL_TIMEOUT = float(_env_or("BLOCKCHECKS_SUDO_TIMEOUT", "15.0"))
+# lua bridge IPC / discovery WS timeout.
+BRIDGE_WS_TIMEOUT = float(_env_or("BLOCKCHECKS_BRIDGE_WS_TIMEOUT", "10.0"))
+# Voice sing-box process stop wait.
+SINGBOX_STOP_TIMEOUT = float(_env_or("BLOCKCHECKS_SINGBOX_STOP_TIMEOUT", "2.0"))
+# HTTP/3 probe timeout.
+HTTP3_TIMEOUT = float(_env_or("BLOCKCHECKS_HTTP3_TIMEOUT", "3.0"))
+# Composite runner / tcp_tls probe timeout.
+PROBE_DEFAULT_TIMEOUT = float(_env_or("BLOCKCHECKS_PROBE_TIMEOUT", "5.0"))
 
 
 def resolve_probe_backend(args) -> str:
@@ -249,7 +281,7 @@ def _warn_mem_low(avail: int, cap: int, base: int) -> None:
 
 
 # Sing-box SOCKS5 proxy
-SOCKS5_PROXY = _env_or("BLOCKCHECKS_PROXY", "socks5://127.0.0.1:11080")
+SOCKS5_PROXY = _env_or("BLOCKCHECKS_PROXY", "")
 
 
 # Secure DNS (Phase 9 SD)

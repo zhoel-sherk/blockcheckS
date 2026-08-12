@@ -39,10 +39,11 @@ def test_bridge_tcp_success():
 
 
 @pytest.mark.unit
-def test_bridge_tcp_retry_on_next_ip():
+def test_bridge_tcp_single_ip_no_retry():
+    """Bridge applies strategy by domain — retry-on-IP is dropped (single IP)."""
     s = _session()
     calls = []
-    results = [{"success": False, "http_code": 0, "error": "timeout"}, {"success": True, "http_code": 200}]
+    results = [{"success": True, "http_code": 200}]
 
     def fake_worker(*a, **k):
         calls.append(a)
@@ -64,8 +65,8 @@ def test_bridge_tcp_retry_on_next_ip():
             resolved_ips=["1.1.1.1", "2.2.2.2"],
         )
     assert data["success"] is True
-    assert data["used_ip"] == "2.2.2.2"
-    assert len(calls) == 2  # retried once
+    assert data["used_ip"] == "1.1.1.1"
+    assert len(calls) == 1  # no retry-on-IP for bridge
 
 
 @pytest.mark.unit

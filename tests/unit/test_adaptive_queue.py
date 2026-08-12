@@ -75,9 +75,53 @@ def test_epsilon_random_explores():
 async def test_scan_weights_db_roundtrip(temp_db):
 
     w = ScanWeights()
-    w.boost_pass("fake", ["stun"], CLUSTER_DISCORD)
+    w.boost_pass("fake", ["stun"], ["r6"])
     await temp_db.save_scan_weights(w.to_rows())
     rows = await temp_db.load_scan_weights()
     loaded = ScanWeights.from_rows(rows)
     assert loaded.family.get("fake", 0) > 1.0
     assert loaded.blob.get("stun", 0) > 0
+
+
+def test_strategy_traits_extracts_axes():
+    from blockchecks.engine.adaptive_queue import strategy_traits
+
+    tr = strategy_traits("fake:blob=stun:repeats=6:tcp_ts=-1000:ip_ttl=127")
+    assert "r6" in tr
+    assert "fool:tcp_ts" in tr
+    assert "ttl3" in tr  # 127 → bucket 3
+
+    tr2 = strategy_traits("multisplit:pos=1,midsld:seqovl=68")
+    assert "pos:1,midsld" in tr2
+
+
+def test_pop_exclude_domains_isolates():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+    from blockchecks.engine.generators.base import StrategyItem
+
+    domains = ["youtube.com", "discord.com", "aws.com"]
+    q = AdaptiveJobQueue.build(
+        [StrategyItem("s1", "fake:blob=stun:repeats=6")],
+        domains, epsilon=0.0, seed=1,
+    )
+    # первый pop — youtube
+    first = q.pop()
+    assert first.domain == "youtube.com"
+    # exclude youtube → должен вернуть другой домен
+    second = q.pop(exclude_domains={"youtube.com"})
+    assert second is not None
+    assert second.domain != "youtube.com"
+    # exclude оба занятых → fallback к любому (или None если все заняты)
+    third = q.pop(exclude_domains={"youtube.com", second.domain})
+    assert third is None or third.domain in domains
+
+
+def test_scan_weights_has_no_cluster_boost():
+    from blockchecks.engine.adaptive_queue import ScanWeights
+
+    w = ScanWeights()
+    assert not hasattr(w, "cluster")
+    w.boost_pass("fake", ["stun"], ["r6"])
+    assert w.family.get("fake") > 1.0
+    assert w.blob.get("stun") > 0
+    assert w.trait.get("r6") > 0

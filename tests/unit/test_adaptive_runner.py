@@ -302,13 +302,15 @@ async def test_bridge_worker_flushes_full_batch():
     runner._run_probe_batch = AsyncMock(side_effect=[[r] for r in results])
 
     jobs = [await _make_job(domain=f"d{i}") for i in range(2)]
-    queue.pop = MagicMock(side_effect=[jobs[0], jobs[1], None])
+    pops = iter([jobs[0], jobs[1], None])
+    queue.pop = MagicMock(side_effect=lambda **kw: next(pops))
 
     stats = _RunStats()
     progress = []
     await _bridge_worker(
         runner, queue, stats, timeout=5.0, bridge_batch=1,
         stop_event=None, on_progress=lambda d, s, p: progress.append((d, p)),
+        active_domains=set(), domain_lock=asyncio.Lock(),
     )
     assert stats.done == 2
     assert stats.passed == 1
@@ -321,13 +323,15 @@ async def test_bridge_worker_fanout_run_single():
 
     queue = MagicMock()
     job = await _make_job(fanout=True)
-    queue.pop = MagicMock(side_effect=[job, None])
+    pops = iter([job, None])
+    queue.pop = MagicMock(side_effect=lambda **kw: next(pops))
 
     runner = MagicMock()
     runner.test_tcp = AsyncMock(return_value=MagicMock(success=True))
 
     stats = _RunStats()
-    await _bridge_worker(runner, queue, stats, timeout=5.0, bridge_batch=50, stop_event=None, on_progress=None)
+    await _bridge_worker(runner, queue, stats, timeout=5.0, bridge_batch=50, stop_event=None,
+                         on_progress=None, active_domains=set(), domain_lock=asyncio.Lock())
     assert stats.done == 1
     assert stats.passed == 1
     runner.test_tcp.assert_awaited_once()

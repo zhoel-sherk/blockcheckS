@@ -58,7 +58,7 @@ exec bs full \\
   --bridge-batch 10 \
   --no-wssize \\
   --no-settle-profile \
-  --timeout 3 \\
+  --timeout 1 \\
   --allow-dns-hijack \\
   --resume \\
   --skip-prolog \\

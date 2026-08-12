@@ -2,6 +2,44 @@
 
 ## 1.2.1a — unreleased
 
+### Architecture: AQ strategy genetics + domain isolation + tuning (day-5 follow-up)
+
+**Adaptive queue works on strategy genetics, not domains.**
+- Removed cluster (domain) weight boost from `ScanWeights`. A PASS now boosts
+  the strategy's `family` (+1.0), `blob` (+0.5) and extracted **traits**
+  (+0.4): repeats / fooling / ttl-bucket / pos / desync technique
+  (`strategy_traits()`). Sibling strategies of the same genetics are tested
+  next regardless of which domain they target — Geneva-style evolution,
+  decoupled from the domain. Previously cluster boost made one domain (e.g.
+  youtube) dominate: all parallel netns probed the same domain → false
+  positives.
+- `AdaptiveJobQueue.pop(exclude_domains=...)` + shared active-domain tracker in
+  `_bridge_worker`: with `parallel=N`, the pool always probes **N distinct
+  domains** simultaneously (isolated, no all-youtube). Configurable via
+  `BLOCKCHECKS_AQ_DOMAIN_ISOLATE` / `[run] domain_isolate` (default on).
+
+**Tuning knobs — all hardcoded timeouts moved to config.**
+- New config constants (env `BLOCKCHECKS_*` or `[run]` in config.toml):
+  `RETRY_IP_TIMEOUT` (1.0), `PIN_TIMEOUT` (3.0), `YTDLP_TIMEOUT` (20.0),
+  `DOH_TIMEOUT` (5.0), `SUDO_WALL_TIMEOUT` (15.0), `HTTP3_TIMEOUT` (3.0),
+  `PROBE_DEFAULT_TIMEOUT` (5.0).
+- `[run]` now maps: timeout, bridge_batch, adaptive_epsilon, max_timeh/m,
+  retry_ip_timeout, domain_isolate. `settings.example.toml` documents all.
+
+**Bridge retry-on-IP removed.** nfqws2 bridge applies the strategy by domain
+(scan_pick via shm `strategy.id`); the destination IP does not affect desync
+selection. Single IP per probe (was: 2× per-IP timeout on every FAIL).
+
+**Proxy is optional.** Default `SOCKS5_PROXY`/`settings.proxy` is now empty —
+probes go **direct** (standard: the strategy must get a legitimate answer from
+the server). Enable via env `BLOCKCHECKS_PROXY=...` or `[tools] proxy` in
+config.toml. No CLI flag.
+
+**Speed.** `--timeout 1` + no retry-on-IP → FAIL ~1-2s instead of ~7s; E2E
+12× faster (~114 jobs/min vs ~9), 4 netns stay isolated across domains.
+
+
+
 ### Refactor + coverage — v1.2.2 day-5 (85%+ target, pre-release)
 
 - **async_runner god-file split** (1764 → ~330 lines): moved to

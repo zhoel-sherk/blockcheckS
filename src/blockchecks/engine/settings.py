@@ -39,7 +39,7 @@ class BlockchecksSettings(BaseSettings):
     pool: int = 4
     secure_dns: bool = True
     doh_server: str = ""
-    proxy: str = "socks5://127.0.0.1:11080"
+    proxy: str = ""
     unblocked_dom: str = "ripe.net"
     curl_parallel: int = 1
 

@@ -119,8 +119,15 @@ async def run_adaptive_tcp_bridge(
     Each worker accumulates jobs (cross-domain; the bridge is domain-agnostic)
     and flushes up to ``bridge_batch`` jobs per netns, so the whole netns pool is
     used in parallel instead of one serial batch at a time.
+
+    Workers share an *active_domains* set so the pool always probes distinct
+    domains simultaneously (domain isolation — no all-youtube false positives).
     """
     stats = _RunStats()
+    from blockchecks.engine.config import AQ_DOMAIN_ISOLATE
+
+    active_domains: set[str] = set()
+    domain_lock = asyncio.Lock()
     tasks = [
         asyncio.create_task(
             _bridge_worker(
@@ -131,6 +138,8 @@ async def run_adaptive_tcp_bridge(
                 bridge_batch=bridge_batch,
                 stop_event=stop_event,
                 on_progress=on_progress,
+                active_domains=active_domains if AQ_DOMAIN_ISOLATE else None,
+                domain_lock=domain_lock if AQ_DOMAIN_ISOLATE else None,
             )
         )
         for _ in range(max(1, int(workers)))
@@ -166,8 +175,20 @@ async def _bridge_worker(
     bridge_batch: int,
     stop_event: asyncio.Event | None,
     on_progress: ProgressCb | None,
+    active_domains: set[str] | None = None,
+    domain_lock: asyncio.Lock | None = None,
 ) -> None:
+    """One AQ bridge worker.
+
+    Domain isolation: workers share *active_domains* (+ lock). Each worker
+    pops jobs whose domain is not already probed by another worker, so with
+    ``parallel=N`` netns we always test N distinct domains simultaneously —
+    never all-youtube. The domain is released when the accumulated batch is
+    flushed (or a single fanout job runs).
+    """
     acc = BatchJobAccumulator(bridge_batch)
+    active_domains = active_domains or set()
+    domain_lock = domain_lock or asyncio.Lock()
 
     async def flush() -> None:
         nonlocal acc
@@ -187,6 +208,16 @@ async def _bridge_worker(
                 stats.passed += 1
             if on_progress:
                 on_progress(stats.done, stats.skipped, stats.passed)
+        async with domain_lock:
+            active_domains.difference_update(domains)
+
+    async def pop_isolated() -> AdaptiveJob | None:
+        """Pop a job whose domain is not currently probed by another worker."""
+        async with domain_lock:
+            job = queue.pop(exclude_domains=set(active_domains))
+            if job is not None:
+                active_domains.add(job.domain)
+            return job
 
     async def run_single(job: AdaptiveJob) -> None:
         results = [await runner.test_tcp(job.item, job.domain, timeout=timeout)]
@@ -198,12 +229,14 @@ async def _bridge_worker(
                 stats.passed += 1
             if on_progress:
                 on_progress(stats.done, stats.skipped, stats.passed)
+        async with domain_lock:
+            active_domains.discard(job.domain)
 
     while True:
         if stop_event and stop_event.is_set():
             await flush()
             return
-        job = queue.pop()
+        job = await pop_isolated()
         if job is None:
             await flush()
             return

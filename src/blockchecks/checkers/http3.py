@@ -9,6 +9,7 @@ import curl_cffi
 from curl_cffi.requests import RequestsError
 
 from blockchecks.checkers.tcp_tls import classify_http_status
+from blockchecks.engine.config import HTTP3_TIMEOUT
 
 _HTTP3_PROBE_URL = "https://cloudflare.com"
 
@@ -38,7 +39,7 @@ def supports_http3() -> bool:
     """Return True if curl_cffi can request HTTP/3 (blockcheck2 curl_supports_http3)."""
     try:
         with curl_cffi.Session(http_version="v3only", allow_redirects=False) as session:
-            session.get(_HTTP3_PROBE_URL, timeout=3)
+            session.get(_HTTP3_PROBE_URL, timeout=HTTP3_TIMEOUT)
         return True
     except RequestsError as exc:
         msg = str(exc).lower()

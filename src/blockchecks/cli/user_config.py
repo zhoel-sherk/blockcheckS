@@ -56,9 +56,19 @@ def apply_parser_defaults(parser: argparse.ArgumentParser, cfg: dict[str, Any]) 
             defaults["out_dir"] = str(expand_path(paths["out_dir"], default=DEFAULT_OUT_DIR))
     run = cfg.get("run") or {}
     if isinstance(run, dict):
-        for key in ("parallel", "scan_level", "timeout", "max"):
+        for key in ("parallel", "scan_level", "timeout", "max", "bridge_batch",
+                    "adaptive_epsilon", "max_timeh", "max_timem"):
             if key in run:
                 defaults[key] = run[key]
+        # Non-CLI run settings → env for engine readers.
+        env_map = {
+            "retry_ip_timeout": "BLOCKCHECKS_RETRY_IP_TIMEOUT",
+            "domain_isolate": "BLOCKCHECKS_AQ_DOMAIN_ISOLATE",
+            "bridge_batch": "BLOCKCHECKS_BRIDGE_BATCH",
+        }
+        for key, env_name in env_map.items():
+            if key in run and not os.environ.get(env_name):
+                os.environ[env_name] = str(run[key])
     tools = cfg.get("tools") or {}
     if isinstance(tools, dict):
         if tools.get("nfqws2") and not os.environ.get("BLOCKCHECKS_NFQWS2"):

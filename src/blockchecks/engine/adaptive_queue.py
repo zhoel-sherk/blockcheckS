@@ -58,6 +58,37 @@ def extract_blob_hints(strategy: str) -> list[str]:
     return hints
 
 
+def strategy_traits(strategy: str) -> list[str]:
+    """Strategy-genetics traits: repeats / fooling / ttl / pos.
+
+    Extracts coarse axes from the strategy string so a PASS on
+    ``fake:blob=stun:repeats=6:ttl=127`` boosts sibling strategies that share
+    ``repeats=6``, the same fooling kind or TTL family — Geneva-style
+    "genetically close" evolution, decoupled from the target domain.
+    """
+    traits: list[str] = []
+    add = lambda v: traits.append(v) if v not in traits else None  # noqa: E731
+
+    for m in re.finditer(r"repeats=(\d+)", strategy):
+        add(f"r{m.group(1)}")
+    for m in re.finditer(r"(tcp_ts|tcp_md5|badsid|badseq|badsum|seqovl|ip_ttl|tcp_seq|tcp_ack)",
+                         strategy):
+        add(f"fool:{m.group(1)}")
+    for m in re.finditer(r"ttl=(\d+)", strategy):
+        t = int(m.group(1))
+        bucket = 1 if t <= 8 else 2 if t <= 32 else 3 if t <= 128 else 4
+        add(f"ttl{bucket}")
+    for m in re.finditer(r"pos=([A-Za-z0-9_,]+)", strategy):
+        add(f"pos:{m.group(1)}")
+    for m in re.finditer(r"ip_ttl=(\d+)", strategy):
+        add(f"ipttl{m.group(1)}")
+    # desync technique family names embedded in the strategy string
+    for m in re.finditer(r"(hostfakesplit|fakedsplit|fakeddisorder|multisplit|multidisorder|"
+                         r"tlsrec|oob|syndata|pktmod|send|dupfake)", strategy):
+        add(f"tec:{m.group(1)}")
+    return traits
+
+
 # ── AQ7: runtime metrics ─────────────────────────────────────────────
 
 
@@ -103,32 +134,42 @@ class AdaptiveMetrics:
 
 @dataclass
 class ScanWeights:
-    """In-memory family/blob/cluster weights (persisted via StateDB)."""
+    """In-memory strategy-genetics weights (persisted via StateDB).
+
+    Works on the *strategy* genetics, not domains: a PASS on
+    ``fake:blob=stun:repeats=6`` boosts the family (``fake``), the blob
+    (``stun``) and the repeat/fooling/ttl traits, so sibling strategies of the
+    same genetics are tested next regardless of which domain they target.
+    Cluster (domain) weights were removed — domain must not bias strategy
+    priority, and 4 parallel netns must isolate domains (no all-youtube).
+    """
 
     family: dict[str, float] = field(default_factory=dict)
     blob: dict[str, float] = field(default_factory=dict)
-    cluster: dict[str, float] = field(default_factory=dict)
+    trait: dict[str, float] = field(default_factory=dict)  # repeats/fooling/ttl/pos
     family_boost: float = 1.0
     blob_boost: float = 0.5
-    cluster_boost: float = 0.25
+    trait_boost: float = 0.4
 
-    def get(self, family: str, blobs: list[str], cluster: str) -> float:
+    def get(self, family: str, blobs: list[str], traits: list[str]) -> float:
         score = self.family.get(family, 1.0)
         for b in blobs:
             score += self.blob.get(b, 0.0)
-        score += self.cluster.get(cluster, 0.0)
+        for t in traits:
+            score += self.trait.get(t, 0.0)
         return score
 
     def boost_pass(
         self,
         family: str,
         blobs: list[str],
-        cluster: str,
+        traits: list[str],
     ) -> None:
         self.family[family] = self.family.get(family, 1.0) + self.family_boost
         for b in blobs:
             self.blob[b] = self.blob.get(b, 0.0) + self.blob_boost
-        self.cluster[cluster] = self.cluster.get(cluster, 0.0) + self.cluster_boost
+        for t in traits:
+            self.trait[t] = self.trait.get(t, 0.0) + self.trait_boost
 
     def to_rows(self) -> list[tuple[str, float]]:
         rows: list[tuple[str, float]] = []
@@ -136,8 +177,8 @@ class ScanWeights:
             rows.append((f"family:{k}", v))
         for k, v in self.blob.items():
             rows.append((f"blob:{k}", v))
-        for k, v in self.cluster.items():
-            rows.append((f"cluster:{k}", v))
+        for k, v in self.trait.items():
+            rows.append((f"trait:{k}", v))
         return rows
 
     @classmethod
@@ -148,8 +189,8 @@ class ScanWeights:
                 w.family[key[7:]] = val
             elif key.startswith("blob:"):
                 w.blob[key[5:]] = val
-            elif key.startswith("cluster:"):
-                w.cluster[key[8:]] = val
+            elif key.startswith("trait:"):
+                w.trait[key[6:]] = val
         return w
 
 
@@ -165,6 +206,7 @@ class AdaptiveJob:
     family: str = ""
     cluster: str = CLUSTER_GENERAL
     blobs: list[str] = field(default_factory=list)
+    traits: list[str] = field(default_factory=list)
     fanout: bool = False  # enqueued by AQ2 sibling expansion
 
     @property
@@ -179,6 +221,7 @@ class AdaptiveJob:
             family=classify_strategy_family(item),
             cluster=cluster_domain(domain),
             blobs=extract_blob_hints(item.strategy),
+            traits=strategy_traits(item.strategy),
             fanout=fanout,
         )
 
@@ -217,7 +260,7 @@ class AdaptiveJobQueue:
         """Add job if not pending/done. Returns True if added."""
         if job.key in self._pending or job.key in self._done:
             return False
-        priority = self.weights.get(job.family, job.blobs, job.cluster)
+        priority = self.weights.get(job.family, job.blobs, job.traits)
         self._seq += 1
         self._pending[job.key] = job
         heapq.heappush(self._heap, _HeapEntry(-priority, self._seq, job.key))
@@ -227,32 +270,65 @@ class AdaptiveJobQueue:
     def enqueue_many(self, jobs: list[AdaptiveJob]) -> int:
         return sum(1 for j in jobs if self.enqueue(j))
 
-    def pop(self) -> AdaptiveJob | None:
-        """Pop next job (highest priority or ε-random)."""
+    def pop(self, exclude_domains: set[str] | None = None) -> AdaptiveJob | None:
+        """Pop next job (highest priority or ε-random).
+
+        ``exclude_domains`` — skip jobs whose domain is already being probed by
+        another worker, so N parallel netns always isolate to N distinct domains
+        (no all-youtube). When every remaining job is excluded, falls back to the
+        highest-priority job regardless.
+        """
         if not self._pending:
             return None
+        exclude = exclude_domains or set()
 
-        if self.epsilon > 0 and self._rng.random() < self.epsilon and len(self._pending) > 1:
-            key = self._rng.choice(list(self._pending.keys()))
+        if (
+            self.epsilon > 0
+            and self._rng.random() < self.epsilon
+            and len(self._pending) > 1
+        ):
+            keys = list(self._pending.keys())
+            for key in keys:
+                if self._pending[key].domain not in exclude:
+                    job = self._pending.pop(key)
+                    self._rebuild_heap()
+                    return job
+            key = self._rng.choice(keys)
             job = self._pending.pop(key)
             self._rebuild_heap()
             return job
 
+        skipped: list[_HeapEntry] = []
         while self._heap:
             entry = heapq.heappop(self._heap)
+            job = self._pending.get(entry.key)
+            if job is not None:
+                if job.domain in exclude:
+                    skipped.append(entry)
+                    continue
+                self._pending.pop(entry.key)
+                if skipped:
+                    for e in skipped:
+                        heapq.heappush(self._heap, e)
+                return job
+        # everything excluded — allow any pending job
+        if skipped:
+            entry = heapq.heappop(skipped)
             job = self._pending.pop(entry.key, None)
+            for e in skipped:
+                heapq.heappush(self._heap, e)
             if job is not None:
                 return job
         return None
 
     def mark_done(self, job: AdaptiveJob, *, passed: bool) -> int:
-        """Mark job complete; on PASS fan-out to siblings (AQ2) and boost weights (AQ4)."""
+        """Mark job complete; on PASS boost strategy genetics + fan-out (AQ2/AQ4)."""
         self._done.add(job.key)
         self._pending.pop(job.key, None)
         self.metrics.record_run(passed=passed)
         if not passed:
             return 0
-        self.weights.boost_pass(job.family, job.blobs, job.cluster)
+        self.weights.boost_pass(job.family, job.blobs, job.traits)
         return self.fanout_on_pass(job)
 
     def fanout_on_pass(self, job: AdaptiveJob) -> int:
@@ -271,7 +347,7 @@ class AdaptiveJobQueue:
     def _rebuild_heap(self) -> None:
         self._heap.clear()
         for key, job in self._pending.items():
-            priority = self.weights.get(job.family, job.blobs, job.cluster)
+            priority = self.weights.get(job.family, job.blobs, job.traits)
             self._seq += 1
             heapq.heappush(self._heap, _HeapEntry(-priority, self._seq, key))
 

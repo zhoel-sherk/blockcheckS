@@ -16,7 +16,18 @@ migrate = true
 [run]
 parallel = 4
 scan_level = "fast"
-# timeout = 5.0
+# Probe wall timeout (s). Lower on a throttled ISP to fail FAST paths quicker.
+# PASS answers arrive <125ms, so 1s is safe for the first pass.
+timeout = 1.0
+# Lua-bridge batch size. Smaller = more netns parallelism (default 500).
+bridge_batch = 10
+# Domain isolation: N parallel netns always probe N distinct domains
+# (no all-youtube false positives). Default true.
+domain_isolate = true
+# Retry-on-next-IP budget after first failed IP (classic path), seconds.
+retry_ip_timeout = 1.0
+# AQ ε-greedy exploration.
+# adaptive_epsilon = 0.1
 # max = 0
 #
 # Raspberry Pi 2 / ~1 GiB RAM (prebuild linux-arm nfqws2 elsewhere):
@@ -30,6 +41,9 @@ nfqws2 = "/opt/zapret2/nfq2/nfqws2"
 blobs = "/opt/zapret2/blobs"
 # lua_dir = "/opt/zapret2/lua"
 # python = "/path/to/.venv/bin/python"
+# Proxy is OPTIONAL — by default probes go DIRECT (the standard: the strategy
+# must get a legitimate answer from the server). Set a SOCKS5 proxy only when
+# you need egress via it (e.g. googlevideo on a DPI that drops direct):
 # proxy = "socks5://127.0.0.1:11080"
 
 [secure_dns]

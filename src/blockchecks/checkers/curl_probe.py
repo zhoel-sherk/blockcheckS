@@ -19,6 +19,7 @@ from blockchecks.checkers.dns_secure import CURLOPT_RESOLVE
 from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS, classify_http_status
 from blockchecks.engine.config import (
     CURLOPT_ECH,
+    DOH_TIMEOUT,
     GGC_RANGE_SIZE,
     GOOGLEVIDEO_RANGE_SIZE,
     MIN_READ_RATE_BPS,
@@ -148,7 +149,7 @@ def prepare_googlevideo_probe(
     resolve_name = videoplayback_host(curl_url) or domain.split("/")[0]
     dom = domain.lower().split("/")[0]
     if resolve_name and resolve_name != dom:
-        ips, err, _ = doh_query(resolve_name, pick_working_doh(), timeout=5.0)
+        ips, err, _ = doh_query(resolve_name, pick_working_doh(), timeout=DOH_TIMEOUT)
         if ips and not err:
             resolved_ip = ips[0]
 
@@ -277,7 +278,7 @@ def prepare_ggc_probe(
     ip = resolved_ip
     if not ip:
         try:
-            ips, err, _ = doh_query(host, pick_working_doh(), timeout=5.0)
+            ips, err, _ = doh_query(host, pick_working_doh(), timeout=DOH_TIMEOUT)
             if ips and not err:
                 ip = ips[0]
         except Exception:

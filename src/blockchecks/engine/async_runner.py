@@ -15,6 +15,7 @@ colorama_init(autoreset=True)
 from blockchecks.checkers.dns_secure import DnsRunCache
 from blockchecks.engine.config import (
     BLOB_DIR,
+    PIN_TIMEOUT,
     PYTHON_BIN,
 )
 from blockchecks.engine.in_ns_workers import RETRY_IP_TIMEOUT
@@ -37,7 +38,6 @@ RESET = Style.RESET_ALL
 # Auto-pin (IP-PIN): known-good strategy + short budget for probing candidate
 # IPs at startup. Pinned IPs override DoH order against per-IP throttling.
 PIN_STRATEGY = "fake:blob=stun:repeats=6:tcp_ts=-1000"
-PIN_TIMEOUT = 3.0
 PIN_SETTLE_MAX = 0.5
 # Budget for retry-on-next-IP attempts after the first failed IP (keeps
 # throttled-IP worst case from N×timeout, see per-IP throttling).
