@@ -2,6 +2,57 @@
 
 ## 1.2.1a — unreleased
 
+### Strategy audit: Geneva + nfqws2 + Flowseal coverage (day-5 follow-up 2)
+
+**Research completed** (see AGENTS.md): Geneva CCS'19 strategies.md (24
+strategies), nfqws2/zapret2 lua desync catalog (25 functions), blockcheck2
+standard (13 scripts), Flowseal zapret-discord-youtube (21 .bat, 186 profiles,
+downloaded from Win11 SMB).
+
+**New TCP strategy families (standard.py):**
+- `rst_fake` — Geneva 10-15: ACK→RST/RA duplicate on empty ACK
+  (`--payload=empty --out-range=s1<d1\nrst[:rstack][:badsum|:ip_ttl|:tcp_md5]`)
+  + exotic flag fakes (Geneva 16-18 ≈ FRAPUEN/FREACN/FRAPUN via
+  `send:tcp_flags_set=...`). 12 items.
+- `synack` — Geneva 23: SYN→SYN+ACK split handshake
+  (`synack`, `synack_split:mode=syn|synack|acksyn`). 6 items.
+- `wssize` — blockcheck2 companion `wssize:wsize=1:scale=6` (+multisplit combo).
+- `geneva_fool` — escape-hatch for non-expressible Geneva tampers via custom
+  `fool=` Lua hooks (`lua/blockchecks/geneva.lua`): bs_dataofs, bs_iplen,
+  bs_corrupt_load, bs_corrupt_wscale, bs_corrupt_uto. Requires
+  `BLOCKCHECKS_LUA_EXTRA=/…/blockcheckS/lua/blockchecks/geneva.lua` (colon-joined
+full paths). 18 items.
+
+**Flowseal gap-fix (flowseal.py):**
+- badseq-increment 2/1000/10000000 → `tcp_seq=N` (ALT4/ALT8/FTA_ALT2)
+- `tls_mod=none` (ALT8/ALT10)
+- hostfakesplit-mod `altorder=1` (ALT3)
+- `syndata\nmultidisorder` link (ALT5)
+- `fake\nmultisplit` without split params + badseq (ALT4)
+- split-pos `2,sniext+1` (ALT7)
+- pool: 6338 → 6493 tls12 items
+
+**Numeric axes synced with def.inc + Flowseal:**
+- `FAST_FOOLINGS_TCP` += tcp_seq=-3000, tcp_seq=1000000, tcp_flags_unset=ACK,
+  tcp_flags_set=SYN (Geneva seq/flag fools promoted from full-only to fast)
+- `ALL_REPEATS`/`FAST_REPEATS` += 14 (Flowseal ALT5 UDP-game)
+- `ALL_BLOBS_TCP` reordered: 0x00000000 null blob first (capped scans reach it)
+- `StandardGenerator` full scan: no per-type budget sharing (full pool now
+  emits every family completely; 12 015 → 24 210 tls12 items)
+
+**Tests:** +8 (test_geneva_audit.py) covering all new families + Flowseal gaps.
+
+**Round-robin interleave (standard.py generate):** capped scans now emit one
+strategy per family round-robin, so every technique (incl. the new families)
+is represented at any `--max` instead of letting the huge `fake` family eat
+the budget. Full pool (max≥pool size) still emits everything: 24 210 tls12
+items (was 12 015).
+
+**E2E verified (Fryazino, --max 30, timeout 2s):** rst_fake (`rst:badsum`),
+synack and wssize all produced PASS on youtube.com; no nfqws2 errors across
+the 30-strategy scan.
+
+
 ### Architecture: AQ strategy genetics + domain isolation + tuning (day-5 follow-up)
 
 **Adaptive queue works on strategy genetics, not domains.**

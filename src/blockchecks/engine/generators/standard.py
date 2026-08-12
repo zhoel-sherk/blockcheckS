@@ -284,7 +284,7 @@ ALL_FOOLINGS_IPV6 = [
 FAST_FOOLINGS_IPV6 = ["ip6_hopbyhop", "ip6_destopt"]
 
 # Extended repeats, TTL
-ALL_REPEATS = [6, 3, 1, 8, 10, 11, 12, 2, 4, 5, 7, 9, 15, 20]  # 100,260 only for tcpseg
+ALL_REPEATS = [6, 3, 1, 8, 10, 11, 12, 2, 4, 5, 7, 9, 14, 15, 20]  # 100,260 only for tcpseg
 ALL_TTL = [1, 5, 7, 12, 63, 64, 127, 128, 255, 256, 512]  # >255 = out-of-range fooling wrap/cast
 ALL_AUTOTTL = ["-1,3-20", "-2,5-15", "-3,7-12", "-4,3-20", "-5,5-15"]
 
@@ -318,10 +318,11 @@ TLS_MODS = [
 ]
 
 # All TCP blobs (extended from Flowseal) + null TLS blob from BC2 25-fake.sh
-# Null blob early so capped --max scans still exercise it
-ALL_BLOBS_TCP = ["stun", "0x00000000", "max_ru", "google", "4pda"]
+# Null blob first so capped --max scans still exercise it
+ALL_BLOBS_TCP = ["0x00000000", "stun", "max_ru", "google", "4pda"]
 
 # Foolings for fast/default scans (flags + full seq only in full)
+# Geneva flag/seq fools (tcp_flags_set/unset, tcp_seq, tcp_ack) promoted to fast
 FAST_FOOLINGS_TCP = [
     "tcp_ts=-1000",
     "",
@@ -329,8 +330,12 @@ FAST_FOOLINGS_TCP = [
     "badsum",
     "tcp_ack=-66000:tcp_ts_up",
     "tcp_md5:tcp_ts=-1000",
+    "tcp_seq=-3000",
+    "tcp_seq=1000000",
+    "tcp_flags_unset=ACK",
+    "tcp_flags_set=SYN",
 ]
-FAST_REPEATS = [6, 8, 3, 11, 12, 4]
+FAST_REPEATS = [6, 8, 3, 11, 12, 4, 14]
 
 
 def _with_ack_drop(core: str) -> str:
@@ -360,6 +365,10 @@ def _blob_abs(alias: str) -> str:
 
 TCP_FAMILIES = [
     "fake",
+    "rst_fake",
+    "synack",
+    "geneva_fool",
+    "wssize",
     "hostfake",
     "multisplit",
     "multidisorder",
@@ -559,6 +568,53 @@ class StandardGenerator(StrategyGenerator):
             "ack_drop": True,
             "send_md5": True,
         },
+        # Geneva 10-15: ACK → RST / RA duplicate (China 80-95%) on empty ACK
+        "rst_fake": {
+            "mods": [
+                "rst:badsum",
+                "rst:ip_ttl=10",
+                "rst:ip_ttl=1",
+                "rst:tcp_md5",
+                "rst:rstack:badsum",
+                "rst:rstack:ip_ttl=10",
+                "rst:rstack:ip_ttl=1",
+                "rst:badsum:tcp_md5",
+            ],
+            # Geneva 16-18: exotic flag-fakes on the duplicated packet (send)
+            "flag_fakes": [
+                "send:tcp_flags_set=FIN,RST,ACK,PSH,URG,ECE:badsum",  # ≈ FRAPUEN
+                "send:tcp_flags_set=FIN,RST,ECE,ACK,CWR:ip_ttl=10",  # ≈ FREACN
+                "send:tcp_flags_set=FIN,RST,ACK,PSH,URG:tcp_md5",  # ≈ FRAPUN
+                "send:tcp_flags_set=FIN:tcp_md5",  # F + md5 (Geneva 22-part)
+            ],
+        },
+        # Geneva 23: SYN → SYN+ACK split handshake (KZ/IN 100%)
+        # note: syn|synack (two-packet) omitted — '|' breaks nfqws2 conf splitter
+        "synack": {
+            "modes": ["synack", "synack", "acksyn"],
+            "foolings": ["", "badsum", "ip_ttl=10"],
+        },
+        # blockcheck2 20/25/30/35/50: wssize companion (wsize=1:scale=6)
+        "wssize": {
+            "sizes": ["wssize:wsize=1:scale=6"],
+            "combos": [False, True],  # True = paired with multisplit
+        },
+        # Geneva 1-9/22/24 escape-hatch: requires lua/blockchecks/geneva.lua
+        # staged via BLOCKCHECKS_LUA_EXTRA=geneva.lua (custom fool= functions).
+        "geneva_fool": {
+            "fools": [
+                "fool=bs_dataofs:badsum",
+                "fool=bs_dataofs:ip_ttl=10",
+                "fool=bs_iplen=64",
+                "fool=bs_iplen=78",
+                "fool=bs_corrupt_load",
+                "fool=bs_corrupt_load:badsum",
+                "fool=bs_corrupt_load:ip_ttl=8",
+                "fool=bs_corrupt_wscale",
+                "fool=bs_corrupt_uto",
+            ],
+            "repeats": [1, 2],
+        },
         # Voice UDP — lua-desync cores (list_udp_voice.txt parity)
         "udp_discord": {
             "blobs": ["discord_udp", "stun"],
@@ -674,7 +730,8 @@ class StandardGenerator(StrategyGenerator):
         full = scan_level == "full"
         n_types = max(1, len(types))
 
-        for idx, stype in enumerate(types):
+        prepared: dict[str, dict] = {}
+        for stype in types:
             resolved = _resolve_family_name(stype)
             family = self.STRATEGY_FAMILIES.get(resolved)
             if not family:
@@ -702,13 +759,54 @@ class StandardGenerator(StrategyGenerator):
             elif scan_level == "fast" and resolved == "fake":
                 # Limited IPv6 fooling axis on fast
                 fam["ipv6_extra"] = FAST_FOOLINGS_IPV6
+            prepared[resolved] = fam
+
+        for idx, stype in enumerate(types):
+            resolved = _resolve_family_name(stype)
+            fam = prepared.get(resolved)
+            if not fam:
+                continue
             room = max_count - len(items)
             if room <= 0:
                 break
             remaining_types = n_types - idx
-            share = max(1, room // remaining_types)
+            if full:
+                # Full scan: no per-type budget sharing — emit everything, then
+                # truncate by max_count. Equal shares would starve large
+                # families (fake 18k) when small ones (synack 6) join the pool.
+                share = room
+            else:
+                share = max(1, room // remaining_types)
             new = self._expand_family(resolved, fam, scan_level, seen, known_working)
             items.extend(new[:share])
+
+        # Capped scan (any scan_level): interleave one strategy per family
+        # round-robin so every technique (incl. new rst_fake/synack/
+        # geneva_fool/wssize) is represented instead of letting the first
+        # family eat the budget. Full pool is emitted when max_count allows.
+        expanded = {
+            t: self._expand_family(t, dict(prepared[t]), scan_level, set(), known_working)
+            for t in types
+            if t in prepared
+        }
+        if sum(len(v) for v in expanded.values()) > max_count:
+            out: list[StrategyItem] = []
+            seen_out: set[str] = set()
+            idx = 0
+            while len(out) < max_count:
+                advanced = False
+                for t in types:
+                    lst = expanded.get(t, [])
+                    if idx < len(lst):
+                        it = lst[idx]
+                        if it.strategy not in seen_out:
+                            seen_out.add(it.strategy)
+                            out.append(it)
+                        advanced = True
+                if not advanced:
+                    break
+                idx += 1
+            return out[:max_count]
 
         return items[:max_count]
 
@@ -1209,6 +1307,69 @@ class StandardGenerator(StrategyGenerator):
                             return items
         return items
 
+    def _fam_rst_fake(self, items, seen, family, scan_level, _known_working):
+        """Expand rst_fake family (Geneva ACK→RST duplicates on empty ACK)."""
+        for mod in family.get("mods", ["rst:badsum"]):
+            strat = f"--payload=empty --out-range=s1<d1\n{mod}"
+            label = f"std_rst_{mod.replace(':', '_').replace('=', '_')}"
+            self._add(items, seen, label, strat)
+            if scan_level == "single":
+                return items
+        for fake in family.get("flag_fakes", []):
+            strat = f"--payload=empty --out-range=s1<d1\n{fake}"
+            label = f"std_rst_{fake.split(':')[0]}_{fake.replace(':', '_').replace('=', '_')[:40]}"
+            self._add(items, seen, label, strat)
+            if scan_level == "single":
+                return items
+        return items
+
+    def _fam_synack(self, items, seen, family, scan_level, _known_working):
+        """Expand synack family (Geneva SYN→SA split handshake)."""
+        seen_modes: set[str] = set()
+        for mode in family.get("modes", ["synack"]):
+            if mode in seen_modes:
+                continue
+            seen_modes.add(mode)
+            core = f"synack_split:mode={mode}"
+            label = f"std_synack_{mode}"
+            self._add(items, seen, label, core)
+            if scan_level == "single":
+                return items
+        # bare synack (single-packet S→SA)
+        self._add(items, seen, "std_synack_bare", "synack")
+        for fool in family.get("foolings", [""]):
+            f = f":{fool}" if fool else ""
+            strat = f"synack{f}"
+            self._add(items, seen, f"std_synack_fool_{fool or 'nofool'}", strat)
+            if scan_level == "single":
+                return items
+        return items
+
+    def _fam_wssize(self, items, seen, family, scan_level, _known_working):
+        """Expand wssize companion family (blockcheck2 standard)."""
+        for size in family.get("sizes", ["wssize:wsize=1:scale=6"]):
+            self._add(items, seen, "std_wssize", size)
+            if scan_level == "single":
+                return items
+        for combo in family.get("combos", [False]):
+            if combo:
+                strat = f"{family['sizes'][0]}\nmultisplit:pos=1:seqovl=1"
+                self._add(items, seen, "std_wssize_multisplit", strat)
+                if scan_level == "single":
+                    return items
+        return items
+
+    def _fam_geneva_fool(self, items, seen, family, scan_level, _known_working):
+        """Expand geneva_fool family (custom fool= Lua hooks, Geneva 1-9/22/24)."""
+        for fool in family.get("fools", []):
+            for r in family.get("repeats", [1]):
+                strat = f"send:{fool}:repeats={r}"
+                label = f"std_gva_{fool.split('=')[-1].split(':')[0]}_r{r}"
+                self._add(items, seen, label, strat)
+                if scan_level == "single":
+                    return items
+        return items
+
     def _fam_http_simple(self, items, seen, family, scan_level, _known_working):
         """Expand http_simple family."""
         for variant in family["variants"]:
@@ -1332,6 +1493,10 @@ class StandardGenerator(StrategyGenerator):
         "tcp_ipfrag": "_fam_tcp_ipfrag",
         "ipfrag_tcp": "_fam_tcp_ipfrag",
         "fake_hostfake": "_fam_fake_hostfake",
+        "rst_fake": "_fam_rst_fake",
+        "synack": "_fam_synack",
+        "wssize": "_fam_wssize",
+        "geneva_fool": "_fam_geneva_fool",
         "udp_discord": "_fam_udp_discord",
         "udp_quic": "_fam_udp_quic",
         "udp_game": "_fam_udp_game",

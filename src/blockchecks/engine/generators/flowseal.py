@@ -21,8 +21,11 @@ FOOLINGS = ["tcp_ts=-1000", "tcp_md5", "badsid"]
 FOOLINGS_TS_MD5 = ["tcp_ts=-1000", "tcp_md5", "tcp_ts=-1000:tcp_md5"]
 SPLIT_POS = [1, 2, "midsld", "sniext+1", "1,midsld", "2,sniext+1"]
 SEQOVL = [480, 568, 652, 664, 679, 681]
+# Flowseal badseq-increment variants (ALT4 1000, FTA_ALT2 10000000, ALT8/ALT 2)
+BADSEQ_INCREMENTS = [2, 1000, 10000000]
 HOSTS = ["www.google.com", "ya.ru", "ozon.ru"]
 SNI_LIST = ["www.google.com", "fonts.google.com", "ya.ru"]
+TLS_MOD_NONE = "tls_mod=none"
 
 _TCP_PREFERRED = ("stun", "stun2", "max_ru", "google", "4pda", "tls_vk")
 _QUIC_PREFERRED = (
@@ -149,6 +152,17 @@ class FlowsealGenerator(StrategyGenerator):
                         f"flw_multi_{b1}+{b2}_r{r}_{fool}",
                         f"fake:blob={b1}:repeats={r}:{fool}\nfake:blob={b2}:repeats={r}:{fool}",
                     )
+        # Flowseal badseq-increment variants (ALT4/ALT8/FTA_ALT2)
+        for b1, b2 in pairs:
+            for inc in BADSEQ_INCREMENTS:
+                for r in (6, 8):
+                    yield (
+                        f"flw_multi_{b1}+{b2}_r{r}_badseq{inc}",
+                        (
+                            f"fake:blob={b1}:repeats={r}:tcp_seq={inc}\n"
+                            f"fake:blob={b2}:repeats={r}:tcp_seq={inc}"
+                        ),
+                    )
         if len(blobs) >= 3:
             for i, b1 in enumerate(blobs):
                 for j, b2 in enumerate(blobs):
@@ -214,6 +228,17 @@ class FlowsealGenerator(StrategyGenerator):
                                 f"flw_fake_{tag}_{blob}_r{r}_{host}_{fool}",
                                 f"fake:blob={blob}:repeats={r}:{fool}\n{core}",
                             )
+        # Flowseal ALT3: hostfakesplit-mod=host=...,altorder=1 (fake+hostfake)
+        for host in HOSTS[:2]:
+            for mod in ("altorder=1", ""):
+                for r in (6, 8):
+                    core = f"hostfakesplit:host={host}:tcp_ts=-1000"
+                    if mod:
+                        core += f":{mod}"
+                    yield (
+                        f"flw_fake_hf_alt3_{host.split('.')[0]}_{mod or 'plain'}_r{r}",
+                        f"fake:blob=stun:repeats={r}:tcp_ts=-1000\n{core}",
+                    )
 
     def _expand_multidisorder(self, blobs: list[str]) -> Iterator[tuple[str, str]]:
         for pos in ("1", "midsld", "1,midsld"):
@@ -243,6 +268,19 @@ class FlowsealGenerator(StrategyGenerator):
                                 f"tls_mod=rnd,dupsid,sni={sni}"
                             ),
                         )
+            # Flowseal badseq-increment (ALT4/ALT8/FTA_ALT2)
+            for inc in BADSEQ_INCREMENTS:
+                for r in (6, 8):
+                    yield (
+                        f"flw_fake_{blob}_r{r}_badseq{inc}",
+                        f"fake:blob={blob}:repeats={r}:tcp_seq={inc}",
+                    )
+            # fake-tls-mod=none (ALT8/ALT10)
+            for r in (6, 8):
+                yield (
+                    f"flw_tlsmod_none_{blob}_r{r}",
+                    f"fake:blob={blob}:repeats={r}:tcp_ts=-1000:tls_mod=none",
+                )
             for r in (6, 8):
                 yield (
                     f"flw_ipid_{blob}_r{r}",
@@ -252,6 +290,21 @@ class FlowsealGenerator(StrategyGenerator):
             for fool in FOOLINGS:
                 yield f"flw_null_r{r}_{fool}", f"fake:blob=0x00000000:repeats={r}:{fool}"
                 yield f"flw_blind_r{r}_{fool}", f"fake:repeats={r}:{fool}"
+        # Flowseal ALT5: syndata + multidisorder link
+        yield "flw_syndata_mdis", "syndata\nmultidisorder:pos=1,midsld:seqovl=1"
+        # Flowseal ALT4: fake + multisplit WITHOUT split params (default pos=2)
+        for blob in blobs[:3]:
+            for inc in (1000, 2):
+                yield (
+                    f"flw_fake_msplit_{blob}_r6_badseq{inc}",
+                    f"fake:blob={blob}:repeats=6:tcp_seq={inc}\nmultisplit",
+                )
+        # fake + multisplit with split-pos=2,sniext+1 (ALT7)
+        for blob in blobs[:2]:
+            yield (
+                f"flw_fake_msplit_{blob}_pos2sniext",
+                f"fake:blob={blob}:repeats=8:tcp_ts=-1000\nmultisplit:pos=2,sniext+1:seqovl=679",
+            )
 
     def _iter_quic(self) -> Iterator[tuple[str, str]]:
         for blob in _quic_blobs():
