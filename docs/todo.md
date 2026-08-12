@@ -527,51 +527,70 @@ blockcheckS → для каждой стратегии:
 
 ### Диагноз (подтверждён исследованием, субагенты 2026-08-12)
 
-**Главный потребитель — адаптивная очередь (~330 MB из ~407 MB анонимной памяти):**
+**Главный потребитель — адаптивная очередь (~330 MB из ~407 MB анонимной памяти).**
 
-| Структура | Размер/шт | Кол-во | Итого |
+**Уточнённые замеры (CPython 3.12.3, sys.getsizeof/tracemalloc, масштаб до 367 932 jobs):**
+
+| Структура | Без слотов | Со slots | Экономия ×367 932 |
 |---|---|---|---|
-| `AdaptiveJob` (без `__slots__`, `__dict__` оверхед) | ~586 B | 367 932 | ~215 MB |
-| `_HeapEntry` (без `__slots__`) | ~176 B | 367 932 | ~65 MB |
-| `dict _pending` | ~100 B/entry | 367 932 | ~37 MB |
-| `StrategyItem` | ~217 B | 30 661 | ~7 MB |
+| `AdaptiveJob` (obj + `__dict__` + blobs/traits) | ~500-590 B | ~88 B | ~94 MB |
+| `_HeapEntry` (obj + `__dict__`) | ~232-344 B | ~56 B | ~66-106 MB |
+| `StrategyItem` (×30 661) | ~344 B | ~64 B | ~8.6 MB |
+| `dict _pending` entry | ~52 B (не 100!) | — | ~19 MB |
+| `set _done` entry | ~42 B (план пропускал) | — | ~6-15 MB |
+| key-tuple `(label, domain)` ×2 (dict+heap) | ~56 B/шт | — | ~40 MB (план занижал) |
 
 - `AdaptiveJobQueue.build()` (`adaptive_queue.py:354-370`) материализует **всю матрицу** 30 661 стратегий × 12 доменов = **367 932 jobs сразу** при старте.
 - За 20ч-прогон используется только ~38% (≈139k jobs) — остальные 61% висят в памяти впустую.
-- **316 из 586 B на job — списки `blobs`/`traits`**, вычисленные заранее на каждый job (одинаковы для 12 доменов одного item), но нужны только при `mark_done(passed=True)` и в `ScanWeights.get`.
-- Dataclasses **без `__slots__`** → каждый объект несёт `__dict__` (~104 B оверхед).
+- **~316 B на job — списки `blobs`/`traits`**, вычисленные заранее на каждый job (одинаковы для 12 доменов одного item), но нужны только при `mark_done(passed=True)` и в `ScanWeights.get`. **Кэш должен возвращать tuples, не списки** (иначе мутация одного job испортит все 12 братьев).
+- Dataclasses **без `__slots__`** → каждый объект несёт `__dict__` (~272 B оверхед у job, ~184-296 B у heap entry).
+- **Пропущенный CPU-bottleneck:** `_rebuild_heap` на ε-ветке `pop()` (`adaptive_queue.py:294,298`) и в `pop_batch` — полный rebuild 367k = ~0.07 s (на Xeon ~0.2 s) на каждый pop; `pending_domains_for_strategy` O(n). Chunking чинит; `heapq.heapify` даёт 2.5× даже без него.
+- **`_done` set растёт монотонно (~6-15 MB), тримить НЕЛЬЗЯ** — fanout-дедупликация (`enqueue:261`) зависит от него.
+- **fanout при полной матрице — фактически no-op** (все `(label, sibling)` уже в pending/done) — не переусложнять связку с chunking.
+- **`sys.intern` не нужен** — строки уже общие через StrategyItem; трата в tuple, не строках.
+- **SQLite/WAL — НЕ проблема памяти:** wal-index ≤32 KiB, авто-чекпоинт ~4 MB, каждое батч-флаш открывает свежее aiosqlite-соединение (page cache не живёт в RSS).
 - RSS стабилен (не растёт) — разовая аллокация при `build_adaptive_queue`.
-- Второстепенное: `jobs`+`asyncio.Queue` в `_run_tcp_sequential_bridge` (`main_phases.py:690-705`) дублируют всю матрицу; `_done` set растёт монотонно (никогда не чистится).
+- Второстепенное: `jobs`+`asyncio.Queue` в `_run_tcp_sequential_bridge` (`main_phases.py:690-705`) дублируют всю матрицу (~25-30 MB, варианты B/D/E/F).
 
-### План оптимизации (safe-first)
+### План оптимизации (safe-first) — итог: 419 → ~110-130 MB
 
-#### P0 — БЕЗОПАСНЫЕ ПАТЧИ (в первую очередь, ~200 MB, ~0 риск)
-- [ ] `@dataclass(slots=True)` на `AdaptiveJob` (`adaptive_queue.py:200`) — экономия ~90-95 MB. Поля не мутируются в проде (grep подтвердил); тесты: `test_adaptive_queue.py`, `test_adaptive_runner.py`, `test_batch_probe.py`.
-- [ ] `@dataclass(order=True, slots=True)` на `_HeapEntry` (`adaptive_queue.py:229`) — экономия ~105 MB.
-- [ ] `@dataclass(slots=True)` на `StrategyItem` (`generators/base.py:9`) — экономия ~8 MB.
-- [ ] Прогнать unit + ruff + E2E smoke, замер RSS.
+**Очередь = микросекунды против сетевых проб в секунды → оптимизация НЕ замедлит подбор; slots даже ускоряют (~35%).**
 
-#### P1 — ЛЕНИВЫЕ blobs/traits (~100-155 MB)
+#### P0 — БЕЗОПАСНЫЕ ПАТЧИ (в первую очередь, ~170 MB, ~0 риск)
+- [ ] `@dataclass(slots=True)` на `AdaptiveJob` (`adaptive_queue.py:200`) — 88 B вместо 344, экономия ~94 MB. Поля не мутируются в проде (grep); `weakref`/pickle/copy не используются — `weakref_slot` не нужен.
+- [ ] `@dataclass(order=True, slots=True)` на `_HeapEntry` (`adaptive_queue.py:229`) — 56 B вместо ~232-344, экономия ~66-106 MB.
+- [ ] `@dataclass(slots=True)` на `StrategyItem` (`generators/base.py:9`) — 64 B вместо 344, экономия ~8.6 MB.
+- [ ] Удалить мёртвое поле `cluster` (`adaptive_queue.py:207,222`) — нигде не читается в `src/`.
+- [ ] `_rebuild_heap` → list-comp + `heapq.heapify` (in-place) — 2.5× быстрее rebuild (0.071 s → 0.028 s @367k).
+- [ ] Прогнать unit + ruff + E2E smoke, замер RSS (ожидание 419 → ~250 MB).
+
+**Питфоллы slots:** нет подклассов без slots (иначе вернётся `__dict__`); dataclass(slots=True) кидает TypeError если slots уже объявлен; pickle работает на protocol≥2.
+
+#### P1 — ЛЕНИВЫЕ blobs/traits + shared key (~60-100 MB)
 - [ ] Не вычислять `extract_blob_hints`/`strategy_traits` в `from_item` (`adaptive_queue.py:216-226`) на каждый job.
-- [ ] Сделать `blobs`/`traits` property + `functools.lru_cache` на `item.strategy` (идентичны для всех доменов одного item). Используются только в `ScanWeights.get` (pop) и `boost_pass` (PASS).
-- [ ] Удалить мёртвое поле `cluster` (`adaptive_queue.py:207,222`).
-- [ ] Разделяемый key-tuple: lazy `_key` кэш в `AdaptiveJob` (сейчас 4× alloc на enqueue + _done) — экономия ~20 MB.
+- [ ] `functools.lru_cache` на `(extract_blob_hints, strategy_traits)` keyed by `item.strategy`, **возвращать TUPLES** (8 B меньше + неизменяемость). Единственные чтения: `ScanWeights.get` (pop), `boost_pass` (PASS).
+- [ ] Разделяемый key-tuple: lazy `_key` в `AdaptiveJob`, один tuple на dict+heap+done (сейчас 4+ alloc на enqueue) — экономия ~40 MB (план занижал с 20).
+- [ ] `cluster` удалить (см. P0).
 
-#### P2 — CHUNKING очереди (устраняет причину, ~300-340 MB)
-- [ ] `build_chunked()` + `queue.refill()`: доливать порциями N items × домены вместо полной матрицы.
+#### P2 — CHUNKING очереди (устраняет причину, ~300 MB: пик 419→110-130)
+- [ ] `build_chunked(chunk_size=256)` — 1 чанк = 256 items × 12 доменов ≈ 3 072 jobs ≈ 1 MB.
+- [ ] `queue.refill()` при `pop() is None`: сортирует следующие 256 items по текущим весам, resume-skip per-chunk против загруженного `completed_tcp` (`main_phases.py:498-500`).
 - [ ] Интеграция в `_bridge_worker` (`adaptive_runner.py:235`) и `run_adaptive_tcp` — после `job is None` звать `refill()`.
-- [ ] Веса `ScanWeights` сохраняются между чанками (генетический буст не теряется).
+- [ ] **Веса `ScanWeights` и `_done` живут ГЛОБАЛЬНО между чанками** (генетический буст + дедупликация не теряются).
 - [ ] Opt-in: `chunk_size=None` → старое поведение (тесты не ломаются). CLI `--aq-chunk-size`.
-- [ ] Бонус: чинтит stale-priority bug (приоритеты heap замораживаются при build).
-- [ ] Чанк обязан брать ВСЕ домены выбранного item (иначе ломается googlevideo solo, `test_audit_fixes_1_0_1.py`).
+- [ ] Бонус: чинтит stale-priority bug (приоритеты heap замораживаются при build) + убирает O(n·log n) rebuild.
+- [ ] Чанк обязан брать ВСЕ домены выбранного item (иначе ломается googlevideo solo, `test_audit_fixes_1_0_1.py`, и fanout).
+
+#### Sequential-bridge (варианты B/D/E/F) — ~25-30 MB
+- [ ] Заменить `jobs` list + `asyncio.Queue` (`main_phases.py:690-705`) на generator/index, чтобы не материализовать полную матрицу.
 
 #### HEARTBEAT + динамический RSS checker + load/unload по batch
-- [ ] Фоновый периодический heartbeat (по образцу `RunDeadline`, `run_deadline.py:91-117`), сэмплит `os.getpid()` RSS независимо от режима (сейчас `memory_monitor=None` в classic, `async_runner.py:184-196`).
+- [ ] Фоновый периодический heartbeat (по образцу `RunDeadline`, `run_deadline.py:91-117`), сэмплит `os.getpid()` RSS каждые 5-10 s независимо от режима (сейчас `memory_monitor=None` в classic, `async_runner.py:184-196`).
 - [ ] При high-watermark: уменьшить `bridge_batch` (мутабелен, `async_runner.py:115`), форсить `flush()`, при критическом — `run_single` вместо батча.
 - [ ] `BatchJobAccumulator.set_batch_size()` (`batch_scheduler.py:73-76`).
 - [ ] В `_bridge_worker` (`adaptive_runner.py:235-263`) — точки RSS-чека между pop/flush.
 - [ ] Слить `_tcp_pending` через `SqliteRunStore.flush()` при спайке.
-- [ ] Снизить `MEM_MONITOR_PY_MAX_MIB` (`config.py:391`, сейчас 2048 MiB) — на 7.5 GB машине ~6% бюджета.
+- [ ] Снизить `MEM_MONITOR_PY_MAX_MIB` до ~512 MiB (`config.py:391`, сейчас 2048 — на 7.5 GB машине ~6% бюджета).
 
 #### ФЛАГ `--pi2mode` (Raspberry Pi 2 — 1 GB RAM, ARM, слабый CPU)
 - [ ] Агрессивный профиль: chunking ON (малый chunk), `--parallel 1-2`, `--bridge-batch 50`.
@@ -585,11 +604,20 @@ blockcheckS → для каждой стратегии:
 - [ ] `MEM_MONITOR_PY_MAX_MIB=2048` слишком высок.
 
 ### Верификация
-- [ ] Unit: 1030+ pass (без регрессий).
+- [ ] Unit: 1030+ pass (без регрессий) — `chunk_size=None` по умолчанию.
 - [ ] ruff clean.
 - [ ] E2E smoke 3 мин.
-- [ ] Замер RSS до/после: ожидание 419 → <200 MB (P0+P1), <100 MB (P2).
+- [ ] Замер RSS до/после: **419 → ~250 MB (P0), → ~195 MB (P1), → ~110-130 MB (P2)**. Floor = интерпретатор + SQLite + curl/nfqws2 + StrategyItems ~2 MB + `_done` ≤15 MB.
+- [ ] Скорость проб не падает (очередь μs vs сетевые s; slots ~35% быстрее attr access; chunking убирает 0.07s rebuild).
 - [ ] Данные data_block не терять.
+- [ ] Тесты-стражи: `test_adaptive_queue.py` (build/pop/fanout/ε), `test_adaptive_runner.py` (resume/stop), `test_batch_probe.py:27-28`, `test_batch_scheduler.py:26-27`, `test_audit_fixes_1_0_1.py` (googlevideo solo), `test_wave3_audit.py:19-35` (resume per-chunk).
+
+### Референсы исследования (2026-08-12, субагент + интернет)
+- `@dataclass(slots=True)` с 3.10; `weakref_slot`; TypeError если slots предопределён — https://docs.python.org/3/library/dataclasses.html
+- Slots: подкласс без slots вернёт `__dict__`; нет `__weakref__`; attr access быстрее — https://docs.python.org/3/reference/datamodel.html#object.__slots__
+- Slots память+скорость: 440→248 B/объект, ~35% быстрее — https://realpython.com/python-data-classes/
+- heapq pattern dict+heap+set (как здесь) — https://docs.python.org/3/library/heapq.html
+- SQLite WAL: wal-index ≤32 KiB, auto-checkpoint 1000 стр — https://www.sqlite.org/wal.html
 
 ---
 
