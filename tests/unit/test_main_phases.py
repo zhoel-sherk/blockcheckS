@@ -731,3 +731,91 @@ def test_run_pairs_phase_with_working_tcp():
                return_value=[("1.2.3.4", 50004)]), patch(
         "blockchecks.checkers.voice_dns.pair_log_domain", return_value="a.com"):
         asyncio.run(run_pairs_phase(ctx, "1.2.3.4", 50004))
+
+
+def test_sequential_bridge_isolates_domains():
+    """Parallel bridge workers must probe distinct domains (no all-youtube)."""
+    from blockchecks.main_phases import _run_tcp_sequential_bridge
+
+    ctx = _mk_ctx()
+    ctx.parallel = 4
+    ctx.args.resume = False
+    ctx.args.timeout = 1.0
+    ctx.runner.bridge_batch = 3
+
+    # (start_order, end_order, domains) — batches are recorded with their
+    # relative overlap; two batches that overlap in time must not share a domain.
+    probe_log: list[tuple[int, int, list[str]]] = []
+    order = {"next": 0}
+
+    async def fake_probe(items, domain, timeout, backend, domains=None):
+        doms = list(domains or [domain] * len(items))
+        start = order["next"]
+        order["next"] += 1
+        await asyncio.sleep(0.05)  # simulate parallel execution window
+        probe_log.append((start, order["next"], doms))
+        return [SimpleNamespace(success=True) for _ in items]
+
+    ctx.runner._run_probe_batch = fake_probe
+
+    from blockchecks.engine.generators.base import StrategyItem
+
+    ctx.tcp_items = [
+        StrategyItem(label=f"s{i}", strategy=f"fake:repeats={i}") for i in range(3)
+    ]
+    ctx.domains = ["a.com", "b.com", "c.com", "d.com", "e.com"]
+
+    with patch("blockchecks.engine.config.AQ_DOMAIN_ISOLATE", True):
+        ctx.stop = asyncio.Event()
+        progress = SimpleNamespace(
+            done=0, skipped=0, passed=0, report=lambda: None,
+        )
+        asyncio.run(_run_tcp_sequential_bridge(ctx, progress))
+
+    assert probe_log, "no batches probed"
+    # overlap check: for any pair of batches whose windows overlap, their
+    # domain sets must be disjoint (that is the isolation guarantee).
+    for i in range(len(probe_log)):
+        for j in range(i + 1, len(probe_log)):
+            si, ei, di = probe_log[i]
+            sj, ej, dj = probe_log[j]
+            overlap = max(si, sj) < min(ei, ej)
+            if overlap:
+                shared = set(di) & set(dj)
+                assert not shared, f"overlapping batches share domains: {shared}"
+    assert progress.done == 15, progress.done
+    assert progress.passed == 15
+
+
+def test_sequential_bridge_warns_when_isolation_off():
+    from blockchecks.main_phases import _run_tcp_sequential_bridge
+
+    ctx = _mk_ctx()
+    ctx.parallel = 2
+    ctx.args.resume = False
+    ctx.args.timeout = 1.0
+    ctx.runner.bridge_batch = 10
+
+    async def fake_probe(items, domain, timeout, backend, domains=None):
+        return [SimpleNamespace(success=True) for _ in items]
+
+    ctx.runner._run_probe_batch = fake_probe
+
+    from blockchecks.engine.generators.base import StrategyItem
+
+    ctx.tcp_items = [StrategyItem(label="s1", strategy="fake:repeats=6")]
+    ctx.domains = ["a.com", "b.com"]
+
+    with patch("blockchecks.engine.config.AQ_DOMAIN_ISOLATE", False) as iso, patch(
+        "blockchecks.main_phases.print"
+    ) as mock_print:
+        ctx.stop = asyncio.Event()
+        progress = SimpleNamespace(
+            done=0, skipped=0, passed=0, report=lambda: None,
+        )
+        asyncio.run(_run_tcp_sequential_bridge(ctx, progress))
+
+    assert iso is not None
+    warned = any("domain isolation is OFF" in str(a) for a, _ in mock_print.call_args_list)
+    assert warned, "expected isolation warning"
+    assert progress.done == 2

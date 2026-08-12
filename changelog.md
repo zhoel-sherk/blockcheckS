@@ -2,6 +2,25 @@
 
 ## 1.2.1a — unreleased
 
+### Fix: domain isolation for sequential bridge scan (false-positive risk)
+
+`_run_tcp_sequential_bridge` (used by `bs full` without `--adaptive/--fan-out`)
+probed **one domain across all 4 netns simultaneously** — the same all-youtube
+false-positive pattern we fixed for AQ earlier. Rewritten to parallel workers
+with an `active_domains` set: each netns batch is filled strategy-major
+(s1×all domains, then s2×…), so parallel netns always probe **distinct
+domains**. Gated by `[run] domain_isolate` / `BLOCKCHECKS_AQ_DOMAIN_ISOLATE`
+(default on); prints a WARNING when disabled.
+
+Also enables real parallelism for the sequential bridge path (previously 1
+netns at a time round-robin).
+
+E2E verified: benchmark.txt 6 domains → 24 probes each (was: 1 domain only).
+Unit tests: +2 (isolation overlap check + isolation-off warning). 1030 pass.
+
+Long-term run series A→F now uses this isolation (A uses `--adaptive`).
+
+
 ### Strategy audit: Geneva + nfqws2 + Flowseal coverage (day-5 follow-up 2)
 
 **Research completed** (see AGENTS.md): Geneva CCS'19 strategies.md (24

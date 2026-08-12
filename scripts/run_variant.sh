@@ -24,7 +24,7 @@ case "$VAR" in
     DOMAINS="presets/domains/coverage.txt"
     DB="logs/run_A_base.db"
     OUT="logs/run_A_base_export"
-    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --adaptive --adaptive-epsilon 0.1"
     ;;
   B)
     SESSION="bs-run-B"

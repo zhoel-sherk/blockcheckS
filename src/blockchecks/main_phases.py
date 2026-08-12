@@ -666,36 +666,110 @@ async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> Non
 
 
 async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress) -> None:
-    """Sequential domain×strategy with lua_bridge batch service."""
-    from blockchecks.service.batch_scheduler import BatchScheduler
+    """Sequential domain×strategy with lua_bridge batch service.
+
+    Uses parallel workers (one accumulator per netns) so the whole pool probes
+    concurrently. When domain isolation is enabled (``[run] domain_isolate`` /
+    ``BLOCKCHECKS_AQ_DOMAIN_ISOLATE``), each worker's batch is filled with
+    strategies of *distinct* domains — never all-youtube — avoiding
+    false-positive results from simultaneous probes to the same domain.
+    """
+    from blockchecks.engine.config import AQ_DOMAIN_ISOLATE
 
     args = ctx.args
-    scheduler = BatchScheduler(ctx.runner.bridge_batch)
+    workers = max(1, int(ctx.parallel))
+    batch_size = max(1, int(ctx.runner.bridge_batch))
+    isolate = bool(AQ_DOMAIN_ISOLATE)
+    if not isolate:
+        print(
+            f"  {Fore.YELLOW}WARNING: domain isolation is OFF (set [run] domain_isolate"
+            f"=true or BLOCKCHECKS_AQ_DOMAIN_ISOLATE=1 in settings.ini). Parallel"
+            f"netns may probe the same domain → false-positive results.{Style.RESET_ALL}"
+        )
 
-    for domain in ctx.domains:
-        if ctx.stop.is_set():
-            print(f"  {YELLOW}Stopped by signal{RESET}")
-            break
-        pending: list[StrategyItem] = []
-        for item in ctx.tcp_items:
+    jobs: list[tuple[StrategyItem, str]] = []
+    # Strategy-major order: s1×all domains, then s2×all domains … so parallel
+    # workers pulling the queue front grab *different* domains at once
+    # (domain isolation without false all-youtube batches).
+    for item in ctx.tcp_items:
+        for domain in ctx.domains:
             if args.resume and await ctx.db.has_tcp_result(item.label, domain):
                 progress.skipped += 1
                 progress.done += 1
                 continue
-            pending.append(item)
-        progress.report()
-        for batch in scheduler.iter_batches(pending):
-            if ctx.stop.is_set():
-                print(f"  {YELLOW}Stopped by signal{RESET}")
-                break
-            results = await ctx.runner._run_probe_batch(
-                batch, domain, args.timeout, "lua_bridge"
-            )
-            for r in results:
-                progress.done += 1
-                if r.success:
-                    progress.passed += 1
+            jobs.append((item, domain))
+    progress.report()
+
+    queue: asyncio.Queue = asyncio.Queue()
+    for j in jobs:
+        queue.put_nowait(j)
+
+    # active_domains = domains currently claimed by a worker's in-flight batch.
+    # A worker claims a domain when it picks a job and releases it on flush, so
+    # parallel netns never probe the same domain simultaneously (isolation).
+    active_domains: set[str] = set()
+    domain_lock = asyncio.Lock()
+    stop_event = ctx.stop
+    stats_lock = asyncio.Lock()
+    stats = {"done": progress.done, "passed": progress.passed, "skipped": progress.skipped}
+
+    async def worker() -> None:
+        acc: list[tuple[StrategyItem, str]] = []
+
+        async def flush() -> None:
+            nonlocal acc
+            if not acc:
+                return
+            items = [j[0] for j in acc]
+            doms = [j[1] for j in acc]
+            try:
+                results = await ctx.runner._run_probe_batch(
+                    items, doms[0], args.timeout, "lua_bridge", domains=doms
+                )
+            finally:
+                if isolate:
+                    async with domain_lock:
+                        active_domains.difference_update(doms)
+            async with stats_lock:
+                for r in results:
+                    stats["done"] += 1
+                    if r.success:
+                        stats["passed"] += 1
             progress.report()
+            acc = []
+
+        while True:
+            if stop_event.is_set():
+                await flush()
+                return
+            try:
+                item, dom = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                await flush()
+                return
+            if isolate:
+                conflict = False
+                async with domain_lock:
+                    if dom in active_domains:
+                        conflict = True
+                    else:
+                        active_domains.add(dom)
+                if conflict:
+                    # domain claimed by a parallel worker's in-flight batch —
+                    # return the job and wait briefly for release (no livelock).
+                    queue.put_nowait((item, dom))
+                    await asyncio.sleep(0.05)
+                    await flush()
+                    continue
+            acc.append((item, dom))
+            if len(acc) >= batch_size:
+                await flush()
+
+    tasks = [asyncio.create_task(worker()) for _ in range(workers)]
+    await asyncio.gather(*tasks)
+    progress.done = stats["done"]
+    progress.passed = stats["passed"]
+    progress.skipped = stats["skipped"]
 
 
 async def run_tcp_coverage_phase(ctx: FullRunContext) -> None:
