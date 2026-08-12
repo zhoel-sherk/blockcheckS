@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# Long-term coverage run variants (20h each). Sequential A→F plan.
+# Variant config map:
+#   A  base          coverage.txt, bridge-batch 10, timeout 1, lua-bridge
+#   B  new           coverage.txt, full pool 30000, timeout 2, geneva.lua
+#   C  adaptive      base + --fan-out --adaptive (genetics boost)
+#   D  classic       base + --classic (no lua-bridge backend)
+#   E  flowseal      coverage.txt, --tcp-sources flowseal
+#   F  stable        base + --repeats 3 --repeats-mode stable
+#
+# Usage: scripts/run_variant.sh {A|B|C|D|E|F} [hours]
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+# shellcheck disable=SC1091
+source .venv/bin/activate
+
+VAR="${1:?usage: run_variant.sh A|B|C|D|E|F [hours]}"
+HOURS="${2:-20}"
+
+case "$VAR" in
+  A)
+    SESSION="bs-run-A"
+    DOMAINS="presets/domains/coverage.txt"
+    DB="logs/run_A_base.db"
+    OUT="logs/run_A_base_export"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1"
+    ;;
+  B)
+    SESSION="bs-run-B"
+    DOMAINS="presets/domains/coverage.txt"
+    DB="logs/run_B_new.db"
+    OUT="logs/run_B_new_export"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --scan-level full --max 30000 --timeout 2"
+    export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA:-$ROOT/lua/blockchecks/geneva.lua}"
+    ;;
+  C)
+    SESSION="bs-run-C"
+    DOMAINS="presets/domains/coverage.txt"
+    DB="logs/run_C_adaptive.db"
+    OUT="logs/run_C_adaptive_export"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --fan-out --adaptive --adaptive-epsilon 0.1"
+    ;;
+  D)
+    SESSION="bs-run-D"
+    DOMAINS="presets/domains/coverage.txt"
+    DB="logs/run_D_classic.db"
+    OUT="logs/run_D_classic_export"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --classic"
+    ;;
+  E)
+    SESSION="bs-run-E"
+    DOMAINS="presets/domains/coverage.txt"
+    DB="logs/run_E_flowseal.db"
+    OUT="logs/run_E_flowseal_export"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --tcp-sources flowseal"
+    ;;
+  F)
+    SESSION="bs-run-F"
+    DOMAINS="presets/domains/coverage.txt"
+    DB="logs/run_F_stable.db"
+    OUT="logs/run_F_stable_export"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --repeats 3 --repeats-mode stable"
+    ;;
+  *)
+    echo "unknown variant: $VAR (A|B|C|D|E|F)" >&2
+    exit 2
+    ;;
+esac
+
+export BLOCKCHECKS_BLOBS="${BLOCKCHECKS_BLOBS:-$ROOT/blobs}"
+export BLOCKCHECKS_SETTINGS="${BLOCKCHECKS_SETTINGS:-$ROOT/../dpi-tester/settings.ini}"
+export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
+export PYTHONUNBUFFERED=1
+export PATH="$ROOT/.venv/bin:$PATH"
+
+mkdir -p "$OUT"
+TS="$(date +%Y%m%d_%H%M%S)"
+LOG="logs/run_${VAR}_${TS}.log"
+echo "$LOG" > "logs/run_${VAR}_LATEST.logpath"
+
+for i in 0 1 2 3; do
+  sudo ip netns del "bs-p-$i" 2>/dev/null || true
+  sudo ip link del "vh-bs-p-$i" 2>/dev/null || true
+done
+sudo pkill -9 nfqws2 2>/dev/null || true
+pkill -9 -f 'bs full --domains-file' 2>/dev/null || true
+
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux kill-session -t "$SESSION"
+fi
+
+RUNNER=$(mktemp /tmp/bs_run_${VAR}.XXXXXX.sh)
+cat >"$RUNNER" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+ulimit -n 65536
+ulimit -u 65536 || true
+cd "$ROOT"
+export PATH="$ROOT/.venv/bin:\$PATH"
+export HOME="$HOME"
+export BLOCKCHECKS_BLOBS="$BLOCKCHECKS_BLOBS"
+export BLOCKCHECKS_SETTINGS="$BLOCKCHECKS_SETTINGS"
+export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
+export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
+export PYTHONUNBUFFERED=1
+exec bs full \\
+  --max-timeh $HOURS \\
+  --domains-file $DOMAINS \\
+  --db $DB \\
+  --out-dir $OUT \\
+  --parallel 4 \\
+  $EXTRA \\
+  --allow-dns-hijack \\
+  --resume \\
+  --data-block-sync \\
+  --skip-prolog \\
+  --skip-ip-block \\
+  --skip-port-block \\
+  --isp-interface eth3
+EOF
+chmod 700 "$RUNNER"
+
+tmux new-session -d -s "$SESSION" -c "$ROOT" bash -lc "
+set -o pipefail
+source .venv/bin/activate
+export BLOCKCHECKS_PROXY=\"\${BLOCKCHECKS_PROXY-}\"
+LOG='$LOG'
+echo \"=== START \$(date -Is) variant=$VAR hours=$HOURS ulimit=\$(ulimit -n) proxy=\${BLOCKCHECKS_PROXY:-none} lua_extra=\${BLOCKCHECKS_LUA_EXTRA:-none} ===\" | tee -a \"\$LOG\"
+sudo -E env BLOCKCHECKS_PROXY=\"\${BLOCKCHECKS_PROXY-}\" BLOCKCHECKS_LUA_EXTRA=\"\${BLOCKCHECKS_LUA_EXTRA-}\" \"$RUNNER\" 2>&1 | tee -a \"\$LOG\"
+ec=\${PIPESTATUS[0]}
+rm -f \"$RUNNER\"
+echo \"=== END \$(date -Is) exit=\$ec ===\" | tee -a \"\$LOG\"
+exit \$ec
+"
+
+echo "started tmux:$SESSION variant=$VAR hours=$HOURS log=$LOG"
+echo "attach: tmux attach -t $SESSION"
+echo "domains: $DOMAINS ($(grep -c . "$DOMAINS" 2>/dev/null || echo 0) lines)"
