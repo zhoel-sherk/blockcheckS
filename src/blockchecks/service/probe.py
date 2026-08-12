@@ -43,6 +43,7 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
         proc = sp.Popen(
             [
                 "sudo",
+                "-E",
                 "ip",
                 "netns",
                 "exec",

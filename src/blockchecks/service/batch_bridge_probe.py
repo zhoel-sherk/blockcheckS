@@ -74,11 +74,15 @@ def run_tcp_check_bridge(
     probe_req.timeout = timeout
     # Retry-on-next-IP (IP-PIN): bridge/daemon already running; re-probe failed
     # domain against remaining candidate IPs with a shorter per-IP budget.
+    # Cap at 2 candidates — the bridge already applies the strategy; walking all
+    # DoH IPs (4-6) on every FAIL multiplies the 2s per-IP budget and makes a
+    # throttled run crawl.
     ips_to_try = list(resolved_ips or [])
     if resolved_ip and resolved_ip not in ips_to_try:
         ips_to_try.insert(0, resolved_ip)
     if not ips_to_try:
         ips_to_try = [resolved_ip] if resolved_ip else [None]
+    ips_to_try = ips_to_try[:2]
 
     data: dict = {}
     for attempt, ip in enumerate(ips_to_try):
