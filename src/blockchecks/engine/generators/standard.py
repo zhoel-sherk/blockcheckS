@@ -1166,7 +1166,7 @@ class StandardGenerator(StrategyGenerator):
                                 )
                                 label = (
                                     f"std_fmsh_{fake_blob}+{pattern_blob}_p{pos}_"
-                                    f"h{host.split('.')[0]}_r{r}_{fool or 'nofool'}"
+                                    f"s{seqovl}_h{host.split('.')[0]}_r{r}_{fool or 'nofool'}"
                                 )
                                 self._add(items, seen, label, strat)
                                 if scan_level == "single":
@@ -1364,7 +1364,8 @@ class StandardGenerator(StrategyGenerator):
         for fool in family.get("fools", []):
             for r in family.get("repeats", [1]):
                 strat = f"send:{fool}:repeats={r}"
-                label = f"std_gva_{fool.split('=')[-1].split(':')[0]}_r{r}"
+                tag = fool.replace("=", "_").replace(":", "_")
+                label = f"std_gva_{tag}_r{r}"
                 self._add(items, seen, label, strat)
                 if scan_level == "single":
                     return items

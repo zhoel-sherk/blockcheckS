@@ -13,8 +13,12 @@ from blockchecks.engine.generators.standard import (
     ALL_REPEATS,
     FAST_FOOLINGS_TCP,
     FAST_REPEATS,
+    TCP_FAMILIES,
     StandardGenerator,
 )
+
+# New-family label prefixes (audit additions)
+_NEW_FAM_PREFIXES = ("std_rst_", "std_synack", "std_wssize", "std_gva_")
 
 
 def _run(coro):
@@ -125,3 +129,56 @@ def test_geneva_lua_hooks_file_present():
         assert f"function {fn}" in text, fn
     # no bit32 (not available in zapret lua runtime)
     assert "bit32" not in text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_round_robin_every_family_at_small_max():
+    """Capped scans must represent every TCP family (incl. new ones)."""
+    gen = StandardGenerator(strategy_types=["all"])
+    for max_count in (21, 30, 50, 100):
+        items = await gen.generate(protocol="tls12", scan_level="full", max_count=max_count)
+        labels = "\n".join(i.label for i in items)
+        for fam in TCP_FAMILIES:
+            if fam in ("rst_fake", "synack", "wssize", "geneva_fool"):
+                prefix = {
+                    "rst_fake": "std_rst_",
+                    "synack": "std_synack",
+                    "wssize": "std_wssize",
+                    "geneva_fool": "std_gva_",
+                }[fam]
+                assert any(label.startswith(prefix) for label in labels.split("\n")), (
+                    f"family {fam} missing at max={max_count}"
+                )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_pool_sizes_stable():
+    """Pool size guards against regression (full tls12 standard, flowseal)."""
+    gen = StandardGenerator(strategy_types=["all"])
+    items = await gen.generate(protocol="tls12", scan_level="full", max_count=100000)
+    assert len(items) == 24209, f"standard full pool changed: {len(items)}"
+    fg = FlowsealGenerator()
+    fitems = await fg.generate(protocol="tls12", scan_level="full", max_count=100000)
+    assert len(fitems) == 6493, f"flowseal full pool changed: {len(fitems)}"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_full_pool_no_duplicate_labels_or_strategies():
+    gen = StandardGenerator(strategy_types=["all"])
+    items = await gen.generate(protocol="tls12", scan_level="full", max_count=100000)
+    labels = [i.label for i in items]
+    strats = [i.strategy for i in items]
+    assert len(set(labels)) == len(labels), "duplicate labels in full pool"
+    assert len(set(strats)) == len(strats), "duplicate strategies in full pool"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_new_families_single_returns_one():
+    for fam in ("rst_fake", "synack", "wssize", "geneva_fool"):
+        gen = StandardGenerator(strategy_types=[fam])
+        items = await gen.generate(protocol="tls12", scan_level="single", max_count=100)
+        assert len(items) == 1, f"{fam} single scan returned {len(items)}"
