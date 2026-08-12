@@ -55,7 +55,8 @@ exec bs full \\
   --db logs/full_coverage.db \\
   --out-dir logs/full_coverage_export \\
   --parallel 4 \\
-  --bridge-batch 100 \\
+  --bridge-batch 100 \
+  --no-wssize \\
   --no-settle-profile \\
   --allow-dns-hijack \\
   --resume \\
