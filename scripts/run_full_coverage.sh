@@ -57,7 +57,8 @@ exec bs full \\
   --parallel 4 \\
   --bridge-batch 10 \
   --no-wssize \\
-  --no-settle-profile \\
+  --no-settle-profile \
+  --timeout 3 \\
   --allow-dns-hijack \\
   --resume \\
   --skip-prolog \\
