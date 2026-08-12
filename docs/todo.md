@@ -518,3 +518,87 @@ blockcheckS → для каждой стратегии:
 - [x] 14 new unit tests (lua_bridge_edge_cases.py)
 - [x] 4 new integration tests (test_lua_bridge_compare.py)
 - [x] Live smoke: 200 strategies × 6 domains via --lua-bridge (317s total)
+
+---
+
+## CRITICAL: Потребление памяти `bs full` (~419 MB RSS)
+
+**Статус:** ОТКРЫТО — 2026-08-12 (обнаружено при long-term серии A→F, машина 7.5 GB RAM)
+
+### Диагноз (подтверждён исследованием, субагенты 2026-08-12)
+
+**Главный потребитель — адаптивная очередь (~330 MB из ~407 MB анонимной памяти):**
+
+| Структура | Размер/шт | Кол-во | Итого |
+|---|---|---|---|
+| `AdaptiveJob` (без `__slots__`, `__dict__` оверхед) | ~586 B | 367 932 | ~215 MB |
+| `_HeapEntry` (без `__slots__`) | ~176 B | 367 932 | ~65 MB |
+| `dict _pending` | ~100 B/entry | 367 932 | ~37 MB |
+| `StrategyItem` | ~217 B | 30 661 | ~7 MB |
+
+- `AdaptiveJobQueue.build()` (`adaptive_queue.py:354-370`) материализует **всю матрицу** 30 661 стратегий × 12 доменов = **367 932 jobs сразу** при старте.
+- За 20ч-прогон используется только ~38% (≈139k jobs) — остальные 61% висят в памяти впустую.
+- **316 из 586 B на job — списки `blobs`/`traits`**, вычисленные заранее на каждый job (одинаковы для 12 доменов одного item), но нужны только при `mark_done(passed=True)` и в `ScanWeights.get`.
+- Dataclasses **без `__slots__`** → каждый объект несёт `__dict__` (~104 B оверхед).
+- RSS стабилен (не растёт) — разовая аллокация при `build_adaptive_queue`.
+- Второстепенное: `jobs`+`asyncio.Queue` в `_run_tcp_sequential_bridge` (`main_phases.py:690-705`) дублируют всю матрицу; `_done` set растёт монотонно (никогда не чистится).
+
+### План оптимизации (safe-first)
+
+#### P0 — БЕЗОПАСНЫЕ ПАТЧИ (в первую очередь, ~200 MB, ~0 риск)
+- [ ] `@dataclass(slots=True)` на `AdaptiveJob` (`adaptive_queue.py:200`) — экономия ~90-95 MB. Поля не мутируются в проде (grep подтвердил); тесты: `test_adaptive_queue.py`, `test_adaptive_runner.py`, `test_batch_probe.py`.
+- [ ] `@dataclass(order=True, slots=True)` на `_HeapEntry` (`adaptive_queue.py:229`) — экономия ~105 MB.
+- [ ] `@dataclass(slots=True)` на `StrategyItem` (`generators/base.py:9`) — экономия ~8 MB.
+- [ ] Прогнать unit + ruff + E2E smoke, замер RSS.
+
+#### P1 — ЛЕНИВЫЕ blobs/traits (~100-155 MB)
+- [ ] Не вычислять `extract_blob_hints`/`strategy_traits` в `from_item` (`adaptive_queue.py:216-226`) на каждый job.
+- [ ] Сделать `blobs`/`traits` property + `functools.lru_cache` на `item.strategy` (идентичны для всех доменов одного item). Используются только в `ScanWeights.get` (pop) и `boost_pass` (PASS).
+- [ ] Удалить мёртвое поле `cluster` (`adaptive_queue.py:207,222`).
+- [ ] Разделяемый key-tuple: lazy `_key` кэш в `AdaptiveJob` (сейчас 4× alloc на enqueue + _done) — экономия ~20 MB.
+
+#### P2 — CHUNKING очереди (устраняет причину, ~300-340 MB)
+- [ ] `build_chunked()` + `queue.refill()`: доливать порциями N items × домены вместо полной матрицы.
+- [ ] Интеграция в `_bridge_worker` (`adaptive_runner.py:235`) и `run_adaptive_tcp` — после `job is None` звать `refill()`.
+- [ ] Веса `ScanWeights` сохраняются между чанками (генетический буст не теряется).
+- [ ] Opt-in: `chunk_size=None` → старое поведение (тесты не ломаются). CLI `--aq-chunk-size`.
+- [ ] Бонус: чинтит stale-priority bug (приоритеты heap замораживаются при build).
+- [ ] Чанк обязан брать ВСЕ домены выбранного item (иначе ломается googlevideo solo, `test_audit_fixes_1_0_1.py`).
+
+#### HEARTBEAT + динамический RSS checker + load/unload по batch
+- [ ] Фоновый периодический heartbeat (по образцу `RunDeadline`, `run_deadline.py:91-117`), сэмплит `os.getpid()` RSS независимо от режима (сейчас `memory_monitor=None` в classic, `async_runner.py:184-196`).
+- [ ] При high-watermark: уменьшить `bridge_batch` (мутабелен, `async_runner.py:115`), форсить `flush()`, при критическом — `run_single` вместо батча.
+- [ ] `BatchJobAccumulator.set_batch_size()` (`batch_scheduler.py:73-76`).
+- [ ] В `_bridge_worker` (`adaptive_runner.py:235-263`) — точки RSS-чека между pop/flush.
+- [ ] Слить `_tcp_pending` через `SqliteRunStore.flush()` при спайке.
+- [ ] Снизить `MEM_MONITOR_PY_MAX_MIB` (`config.py:391`, сейчас 2048 MiB) — на 7.5 GB машине ~6% бюджета.
+
+#### ФЛАГ `--pi2mode` (Raspberry Pi 2 — 1 GB RAM, ARM, слабый CPU)
+- [ ] Агрессивный профиль: chunking ON (малый chunk), `--parallel 1-2`, `--bridge-batch 50`.
+- [ ] Низкий RSS-порог, жёсткий RSS-guard.
+- [ ] Отключение тяжёлых фич: wssize/settle/ECH; уменьшенные timeouts; уменьшенный `--max`.
+- [ ] `__slots__` обязательно применены.
+
+#### Бонус-баги (найдены субагентом)
+- [ ] `_apply_provider_weights` (`adaptive_runner.py:100-101`) передаёт cluster-строку как `traits` → мусор в trait-dict. Чинить: передавать `[]`.
+- [ ] Stale-priority bug: приоритеты heap не обновляются после `boost_pass` — чинтится chunking'ом (P2).
+- [ ] `MEM_MONITOR_PY_MAX_MIB=2048` слишком высок.
+
+### Верификация
+- [ ] Unit: 1030+ pass (без регрессий).
+- [ ] ruff clean.
+- [ ] E2E smoke 3 мин.
+- [ ] Замер RSS до/после: ожидание 419 → <200 MB (P0+P1), <100 MB (P2).
+- [ ] Данные data_block не терять.
+
+---
+
+## Long-term run series A→F (2026-08-12)
+
+- [x] Скрипты: `scripts/run_variant.sh`, `run_long_term_series.sh`, `run_coverage_new.sh`, `monitor_series.sh`, docs `long_term_runs.md`.
+- [x] **Фикс доменной изоляции** (`_run_tcp_sequential_bridge` — false-positive all-youtube; параллельные worker'ы + active_domains, `[run] domain_isolate`). E2E: 6 доменов равномерно. Commit `ffb41e4`.
+- [x] Очищены 911 ложных PASS из data_block (commit `a31fa0a`).
+- [x] Вариант A → `--adaptive`.
+- [ ] Прогон A (adaptive) в процессе: 12 доменов изолированы, ~1.9/s, 0 PASS при timeout 1s (Fryazino медленный — B с timeout 2 должен дать PASS).
+- [ ] Автозапуск B→F оркестратором (`bs-series`).
+- [ ] **--resume** протестировать (мягкая остановка + перезапуск, проверить skip-счётчик).
