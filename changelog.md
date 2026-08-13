@@ -2,6 +2,24 @@
 
 ## 1.2.1a — unreleased
 
+### Fix: run_variant.sh geneva.lua env not reaching tmux session
+
+`export BLOCKCHECKS_LUA_EXTRA` inside the case block did not propagate into
+the `tmux new-session` child (tmux server does not inherit parent env) — so
+variant B ran without `geneva.lua` (85 `fool=bs_*` strategies probed
+blindly). Fixed by embedding the actual value into the tmux command line
+(and `sudo -E env`) instead of `\${VAR}` placeholders. Verified: START log now
+shows `lua_extra=/home/zhoel/workspace/blockcheckS/lua/blockchecks/geneva.lua`.
+
+**Long-term series A (adaptive, timeout 2) results:** 16 517 probes, 12
+domains isolated, **878 PASS** (vs 0 PASS at timeout 1 — Fryazino needs ≥2s).
+64 PASS from new families (tcp_ack=-66000:tcp_ts_up + TTL, rst, synack,
+wssize, gva). data_block 295 → 1 123 PASS.
+
+**--resume verified:** mid-run stop → restart skipped 42 already-tested
+(strategy,domain) pairs, tested remaining 69 (11 PASS / 58 FAIL).
+
+
 ### Perf: adaptive queue memory 442MB → ~82MB RSS (P0+P1)
 
 `bs full` held the full strategy×domain matrix (367 932 `AdaptiveJob`) at
