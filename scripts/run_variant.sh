@@ -71,6 +71,7 @@ esac
 export BLOCKCHECKS_BLOBS="${BLOCKCHECKS_BLOBS:-$ROOT/blobs}"
 export BLOCKCHECKS_SETTINGS="${BLOCKCHECKS_SETTINGS:-$ROOT/../dpi-tester/settings.ini}"
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
+export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
 export PYTHONUNBUFFERED=1
 export PATH="$ROOT/.venv/bin:$PATH"
 
@@ -124,11 +125,11 @@ chmod 700 "$RUNNER"
 tmux new-session -d -s "$SESSION" -c "$ROOT" bash -lc "
 set -o pipefail
 source .venv/bin/activate
-export BLOCKCHECKS_PROXY='$BLOCKCHECKS_PROXY'
-export BLOCKCHECKS_LUA_EXTRA='$BLOCKCHECKS_LUA_EXTRA'
+export BLOCKCHECKS_PROXY='${BLOCKCHECKS_PROXY-}'
+export BLOCKCHECKS_LUA_EXTRA='${BLOCKCHECKS_LUA_EXTRA-}'
 LOG='$LOG'
 echo \"=== START \$(date -Is) variant=$VAR hours=$HOURS ulimit=\$(ulimit -n) proxy=\${BLOCKCHECKS_PROXY:-none} lua_extra=\${BLOCKCHECKS_LUA_EXTRA:-none} ===\" | tee -a \"\$LOG\"
-sudo -E env BLOCKCHECKS_PROXY='$BLOCKCHECKS_PROXY' BLOCKCHECKS_LUA_EXTRA='$BLOCKCHECKS_LUA_EXTRA' \"$RUNNER\" 2>&1 | tee -a \"\$LOG\"
+sudo -E env BLOCKCHECKS_PROXY='${BLOCKCHECKS_PROXY-}' BLOCKCHECKS_LUA_EXTRA='${BLOCKCHECKS_LUA_EXTRA-}' \"$RUNNER\" 2>&1 | tee -a \"\$LOG\"
 ec=\${PIPESTATUS[0]}
 rm -f \"$RUNNER\"
 echo \"=== END \$(date -Is) exit=\$ec ===\" | tee -a \"\$LOG\"
