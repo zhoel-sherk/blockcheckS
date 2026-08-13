@@ -2,6 +2,24 @@
 
 ## 1.2.1a — unreleased
 
+### Perf: adaptive queue memory 442MB → ~82MB RSS (P0+P1)
+
+`bs full` held the full strategy×domain matrix (367 932 `AdaptiveJob`) at
+start: ~330MB of 419MB RSS. Fixed:
+- `@dataclass(slots=True)` on `AdaptiveJob` / `_HeapEntry` / `StrategyItem`
+  (dropped `__dict__`, 586→88 B/job, 176→56 B/heap entry).
+- `blobs`/`traits` lazy `property` + `functools.cache` keyed on strategy string
+  (shared tuple across all 12 domains, immutable) — was per-job lists, now one
+  per strategy. Removed dead `cluster` field.
+- Shared cached `key` tuple on the job.
+- `_rebuild_heap` → list-comp + `heapq.heapify` (2.5× faster rebuild).
+
+E2E smoke: RSS 442 → 82 MB (81% cut) with full 290k-job matrix, 12 domains
+isolated, no probe slowdown (queue ops are μs vs s-scale network probes).
+1030 unit pass, ruff clean. P2 chunking + heartbeat RSS-guard remain open in
+docs/todo.md (now less critical: process fits comfortably in 20h runs).
+
+
 ### Fix: domain isolation for sequential bridge scan (false-positive risk)
 
 `_run_tcp_sequential_bridge` (used by `bs full` without `--adaptive/--fan-out`)

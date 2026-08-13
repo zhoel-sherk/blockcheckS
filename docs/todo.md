@@ -556,21 +556,22 @@ blockcheckS → для каждой стратегии:
 
 **Очередь = микросекунды против сетевых проб в секунды → оптимизация НЕ замедлит подбор; slots даже ускоряют (~35%).**
 
-#### P0 — БЕЗОПАСНЫЕ ПАТЧИ (в первую очередь, ~170 MB, ~0 риск)
-- [ ] `@dataclass(slots=True)` на `AdaptiveJob` (`adaptive_queue.py:200`) — 88 B вместо 344, экономия ~94 MB. Поля не мутируются в проде (grep); `weakref`/pickle/copy не используются — `weakref_slot` не нужен.
-- [ ] `@dataclass(order=True, slots=True)` на `_HeapEntry` (`adaptive_queue.py:229`) — 56 B вместо ~232-344, экономия ~66-106 MB.
-- [ ] `@dataclass(slots=True)` на `StrategyItem` (`generators/base.py:9`) — 64 B вместо 344, экономия ~8.6 MB.
-- [ ] Удалить мёртвое поле `cluster` (`adaptive_queue.py:207,222`) — нигде не читается в `src/`.
-- [ ] `_rebuild_heap` → list-comp + `heapq.heapify` (in-place) — 2.5× быстрее rebuild (0.071 s → 0.028 s @367k).
-- [ ] Прогнать unit + ruff + E2E smoke, замер RSS (ожидание 419 → ~250 MB).
+#### P0 — БЕЗОПАСНЫЕ ПАТЧИ (в первую очередь, ~170 MB, ~0 риск) — DONE 2026-08-12
+- [x] `@dataclass(slots=True)` на `AdaptiveJob` (`adaptive_queue.py:200`) — 88 B вместо 344, экономия ~94 MB.
+- [x] `@dataclass(order=True, slots=True)` на `_HeapEntry` (`adaptive_queue.py:229`) — 56 B вместо ~232-344.
+- [x] `@dataclass(slots=True)` на `StrategyItem` (`generators/base.py:9`) — 64 B.
+- [x] Удалить мёртвое поле `cluster`.
+- [x] `_rebuild_heap` → list-comp + `heapq.heapify`.
+- [x] E2E smoke: RSS 442 → 82 MB (полная матрица 290k jobs), 12 доменов изолированы.
 
 **Питфоллы slots:** нет подклассов без slots (иначе вернётся `__dict__`); dataclass(slots=True) кидает TypeError если slots уже объявлен; pickle работает на protocol≥2.
 
-#### P1 — ЛЕНИВЫЕ blobs/traits + shared key (~60-100 MB)
-- [ ] Не вычислять `extract_blob_hints`/`strategy_traits` в `from_item` (`adaptive_queue.py:216-226`) на каждый job.
-- [ ] `functools.lru_cache` на `(extract_blob_hints, strategy_traits)` keyed by `item.strategy`, **возвращать TUPLES** (8 B меньше + неизменяемость). Единственные чтения: `ScanWeights.get` (pop), `boost_pass` (PASS).
-- [ ] Разделяемый key-tuple: lazy `_key` в `AdaptiveJob`, один tuple на dict+heap+done (сейчас 4+ alloc на enqueue) — экономия ~40 MB (план занижал с 20).
-- [ ] `cluster` удалить (см. P0).
+#### P1 — ЛЕНИВЫЕ blobs/traits + shared key (~60-100 MB) — DONE 2026-08-12
+- [x] `extract_blob_hints`/`strategy_traits` → `@functools.cache` (tuple), не считаются в `from_item`.
+- [x] `blobs`/`traits` lazy `property` на `AdaptiveJob` (одна tuple на стратегию, разделяется 12 доменами).
+- [x] Разделяемый lazy `_key` tuple (слот).
+- [x] `cluster` удалён.
+- [x] Измерено: per-job 88 B (было 586), blobs/traits/key общие 5 MB на 30 661 стратегию (было ~110-170 MB).
 
 #### P2 — CHUNKING очереди (устраняет причину, ~300 MB: пик 419→110-130)
 - [ ] `build_chunked(chunk_size=256)` — 1 чанк = 256 items × 12 доменов ≈ 3 072 jobs ≈ 1 MB.

@@ -11,6 +11,7 @@ import random
 import re
 import time
 from dataclasses import dataclass, field
+from functools import cache
 from typing import TYPE_CHECKING
 
 from blockchecks.engine.family_needs import classify_strategy_family
@@ -48,17 +49,19 @@ def sibling_domains(domain: str, all_domains: list[str]) -> list[str]:
     return [d for d in all_domains if d != domain and cluster_domain(d) == cluster]
 
 
-def extract_blob_hints(strategy: str) -> list[str]:
-    """Blob aliases referenced in a strategy string."""
+@cache
+def extract_blob_hints(strategy: str) -> tuple[str, ...]:
+    """Blob aliases referenced in a strategy string (cached, immutable tuple)."""
     hints: list[str] = []
     for m in re.finditer(r"blob=([a-zA-Z0-9_]+)", strategy):
         name = m.group(1)
         if name not in hints:
             hints.append(name)
-    return hints
+    return tuple(hints)
 
 
-def strategy_traits(strategy: str) -> list[str]:
+@cache
+def strategy_traits(strategy: str) -> tuple[str, ...]:
     """Strategy-genetics traits: repeats / fooling / ttl / pos.
 
     Extracts coarse axes from the strategy string so a PASS on
@@ -86,7 +89,7 @@ def strategy_traits(strategy: str) -> list[str]:
     for m in re.finditer(r"(hostfakesplit|fakedsplit|fakeddisorder|multisplit|multidisorder|"
                          r"tlsrec|oob|syndata|pktmod|send|dupfake)", strategy):
         add(f"tec:{m.group(1)}")
-    return traits
+    return tuple(traits)
 
 
 # ── AQ7: runtime metrics ─────────────────────────────────────────────
@@ -197,21 +200,46 @@ class ScanWeights:
 # ── AQ1: priority queue + ε-random ───────────────────────────────────
 
 
-@dataclass
+@dataclass(slots=True)
 class AdaptiveJob:
-    """One (strategy × domain) work unit."""
+    """One (strategy × domain) work unit.
+
+    ``slots=True`` + lazy ``blobs``/``traits``/``key`` cut ~250 B/job (the
+    blobs/traits lists are precomputed identically for every domain of the same
+    strategy, so a single lru-cached tuple per strategy string is shared).
+    """
 
     item: StrategyItem
     domain: str
     family: str = ""
-    cluster: str = CLUSTER_GENERAL
-    blobs: list[str] = field(default_factory=list)
-    traits: list[str] = field(default_factory=list)
     fanout: bool = False  # enqueued by AQ2 sibling expansion
+    _blobs: tuple[str, ...] | None = None
+    _traits: tuple[str, ...] | None = None
+    _key: tuple[str, str] | None = None
 
     @property
     def key(self) -> tuple[str, str]:
-        return (self.item.label, self.domain)
+        k = self._key
+        if k is None:
+            k = (self.item.label, self.domain)
+            self._key = k
+        return k
+
+    @property
+    def blobs(self) -> tuple[str, ...]:
+        b = self._blobs
+        if b is None:
+            b = extract_blob_hints(self.item.strategy)
+            self._blobs = b
+        return b
+
+    @property
+    def traits(self) -> tuple[str, ...]:
+        t = self._traits
+        if t is None:
+            t = strategy_traits(self.item.strategy)
+            self._traits = t
+        return t
 
     @classmethod
     def from_item(cls, item: StrategyItem, domain: str, *, fanout: bool = False) -> AdaptiveJob:
@@ -219,14 +247,11 @@ class AdaptiveJob:
             item=item,
             domain=domain,
             family=classify_strategy_family(item),
-            cluster=cluster_domain(domain),
-            blobs=extract_blob_hints(item.strategy),
-            traits=strategy_traits(item.strategy),
             fanout=fanout,
         )
 
 
-@dataclass(order=True)
+@dataclass(order=True, slots=True)
 class _HeapEntry:
     neg_priority: float
     seq: int
@@ -345,11 +370,16 @@ class AdaptiveJobQueue:
         return added
 
     def _rebuild_heap(self) -> None:
-        self._heap.clear()
-        for key, job in self._pending.items():
-            priority = self.weights.get(job.family, job.blobs, job.traits)
-            self._seq += 1
-            heapq.heappush(self._heap, _HeapEntry(-priority, self._seq, key))
+        self._heap = [
+            _HeapEntry(
+                -self.weights.get(job.family, job.blobs, job.traits),
+                self._seq + i,
+                key,
+            )
+            for i, (key, job) in enumerate(self._pending.items())
+        ]
+        self._seq += len(self._heap)
+        heapq.heapify(self._heap)
 
     @classmethod
     def build(

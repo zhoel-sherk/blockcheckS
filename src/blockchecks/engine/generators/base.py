@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from blockchecks.engine.store import RunStateStore
 
 
-@dataclass
+@dataclass(slots=True)
 class StrategyItem:
     label: str
     strategy: str
