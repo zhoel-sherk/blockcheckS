@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Long-term coverage run variants (20h each). Sequential A→F plan.
 # Variant config map:
-#   A  base          coverage.txt, bridge-batch 10, timeout 1, lua-bridge
+#   A  base          coverage.txt, bridge-batch 10, timeout 2, lua-bridge
 #   B  new           coverage.txt, full pool 30000, timeout 2, geneva.lua
 #   C  adaptive      base + --fan-out --adaptive (genetics boost)
 #   D  classic       base + --classic (no lua-bridge backend)
@@ -24,7 +24,7 @@ case "$VAR" in
     DOMAINS="presets/domains/coverage.txt"
     DB="logs/run_A_base.db"
     OUT="logs/run_A_base_export"
-    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --adaptive --adaptive-epsilon 0.1"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 2 --adaptive --adaptive-epsilon 0.1"
     ;;
   B)
     SESSION="bs-run-B"
@@ -39,28 +39,28 @@ case "$VAR" in
     DOMAINS="presets/domains/coverage.txt"
     DB="logs/run_C_adaptive.db"
     OUT="logs/run_C_adaptive_export"
-    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --fan-out --adaptive --adaptive-epsilon 0.1"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 2 --fan-out --adaptive --adaptive-epsilon 0.1"
     ;;
   D)
     SESSION="bs-run-D"
     DOMAINS="presets/domains/coverage.txt"
     DB="logs/run_D_classic.db"
     OUT="logs/run_D_classic_export"
-    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --classic"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 2 --classic"
     ;;
   E)
     SESSION="bs-run-E"
     DOMAINS="presets/domains/coverage.txt"
     DB="logs/run_E_flowseal.db"
     OUT="logs/run_E_flowseal_export"
-    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --tcp-sources flowseal"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 2 --tcp-sources flowseal"
     ;;
   F)
     SESSION="bs-run-F"
     DOMAINS="presets/domains/coverage.txt"
     DB="logs/run_F_stable.db"
     OUT="logs/run_F_stable_export"
-    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 1 --repeats 3 --repeats-mode stable"
+    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 2 --repeats 3 --repeats-mode stable"
     ;;
   *)
     echo "unknown variant: $VAR (A|B|C|D|E|F)" >&2
