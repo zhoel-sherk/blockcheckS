@@ -600,9 +600,15 @@ blockcheckS → для каждой стратегии:
 - [ ] `__slots__` обязательно применены.
 
 #### Бонус-баги (найдены субагентом)
-- [ ] `_apply_provider_weights` (`adaptive_runner.py:100-101`) передаёт cluster-строку как `traits` → мусор в trait-dict. Чинить: передавать `[]`.
-- [ ] Stale-priority bug: приоритеты heap не обновляются после `boost_pass` — чинтится chunking'ом (P2).
-- [ ] `MEM_MONITOR_PY_MAX_MIB=2048` слишком высок.
+- [x] `_apply_provider_weights` (`adaptive_runner.py:100-101`) передавал cluster-строку как `traits` → мусор в trait-dict. Исправлено: `strategy_traits(strat)`. (2026-08-14)
+- [ ] Stale-priority bug: приоритеты heap не обновляются после `boost_pass` — чинтится chunking'ом (P2, отложен).
+- [x] `MEM_MONITOR_PY_MAX_MIB` 2048 → 512 (`config.py:391`). (2026-08-14)
+
+#### Новые баги (найдены при long-term прогонах 2026-08-14)
+- [x] **sqlite "database is locked"** в конце прогона → `persist_adaptive_weights` не выполнился, scan_weights пуста при resume. Фикс: `PRAGMA journal_mode=WAL` + `busy_timeout=30000` в `_apply_pragmas`, retry×5 в `flush()`.
+- [x] **Веса терялись при ошибке/дедлайне**: persist перенесён в `finally` в `_run_tcp_adaptive` — теперь сохраняются даже при crash.
+- [ ] **P2 chunking отложен**: P0+P1 дали 82-286MB (стабильно), chunking рискован для рабочих прогонов. Сделать при следующем спокойном окне.
+- [ ] **Heartbeat RSS-guard отложен**: memory_monitor есть для lua_bridge, порог снижен до 512MB. Динамический RSS-checker — при следующем окне.
 
 ### Верификация
 - [ ] Unit: 1030+ pass (без регрессий) — `chunk_size=None` по умолчанию.

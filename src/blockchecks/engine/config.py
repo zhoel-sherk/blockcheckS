@@ -388,7 +388,7 @@ MEM_MONITOR_MAX_MIB = float(_env_or("BLOCKCHECKS_MEM_MAX_MIB", "512"))
 # Leak slope threshold (MiB/s over the sampling window); recycle when exceeded.
 MEM_MONITOR_LEAK_SLOPE = float(_env_or("BLOCKCHECKS_MEM_LEAK_SLOPE", "8"))
 # RSS ceiling for the Python worker (MiB); log warning (no recycle — process owner).
-MEM_MONITOR_PY_MAX_MIB = float(_env_or("BLOCKCHECKS_MEM_PY_MAX_MIB", "2048"))
+MEM_MONITOR_PY_MAX_MIB = float(_env_or("BLOCKCHECKS_MEM_PY_MAX_MIB", "512"))
 # Sampling window size (samples) for the sliding-window slope estimate.
 MEM_MONITOR_WINDOW = int(_env_or("BLOCKCHECKS_MEM_WINDOW", "12"))
 # Poll interval seconds for periodic checks inside long bridge runs.

@@ -528,23 +528,34 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         progress.done, progress.skipped, progress.passed = d, s, p
         progress.report()
 
-    ctx.aq_result = await run_adaptive_tcp(
-        ctx.runner,
-        queue,
-        timeout=args.timeout,
-        curl_parallel=ctx.curl_parallel,
-        protocol=args.protocol,
-        disable_ech=bool(getattr(args, "disable_ech", False)),
-        stop_event=ctx.stop,
-        on_progress=_progress,
-        lua_bridge=resolve_probe_backend(args) == "lua_bridge",
-        bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
-        workers=max(1, int(getattr(args, "parallel", 4) or 4)),
-    )
+    ctx.aq_result = None
+    try:
+        ctx.aq_result = await run_adaptive_tcp(
+            ctx.runner,
+            queue,
+            timeout=args.timeout,
+            curl_parallel=ctx.curl_parallel,
+            protocol=args.protocol,
+            disable_ech=bool(getattr(args, "disable_ech", False)),
+            stop_event=ctx.stop,
+            on_progress=_progress,
+            lua_bridge=resolve_probe_backend(args) == "lua_bridge",
+            bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
+            workers=max(1, int(getattr(args, "parallel", 4) or 4)),
+        )
+    finally:
+        # Persist adaptive weights even if the run crashed / hit the deadline,
+        # so a later --resume keeps the genetic boost (previously weights were
+        # lost when an early sqlite error aborted the phase before persist).
+        if ctx.aq_result is not None and not getattr(args, "no_adaptive_weights", False):
+            try:
+                await persist_adaptive_weights(ctx.db, ctx.aq_result.weights)
+            except Exception:
+                pass
+    if ctx.aq_result is None:
+        raise RuntimeError("adaptive TCP run returned without result")
     progress.done = skipped + ctx.aq_result.done
     progress.passed = ctx.aq_result.passed
-    if not getattr(args, "no_adaptive_weights", False):
-        await persist_adaptive_weights(ctx.db, ctx.aq_result.weights)
     m = ctx.aq_result.metrics
     if m.time_to_first_pass is not None:
         print(

@@ -80,8 +80,8 @@ async def _apply_provider_weights(
 
     domain_set = {d.lower() for d in domains}
     from blockchecks.engine.adaptive_queue import (
-        cluster_domain,
         extract_blob_hints,
+        strategy_traits,
     )
     from blockchecks.engine.family_needs import classify_strategy_family
     from blockchecks.engine.generators.base import StrategyItem
@@ -97,8 +97,8 @@ async def _apply_provider_weights(
         item = StrategyItem(label=strat, strategy=strat)
         fam = classify_strategy_family(item)
         blobs = extract_blob_hints(strat)
-        cl = cluster_domain(dom) if dom else ""
-        weights.boost_pass(fam, blobs, cl)
+        traits = strategy_traits(strat)
+        weights.boost_pass(fam, blobs, traits)
         boosted += 1
     if boosted:
         print(f"  [AQ] provider-preflight: boosted {boosted} approved strategies")

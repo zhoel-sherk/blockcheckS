@@ -2,6 +2,28 @@
 
 ## 1.2.1a — unreleased
 
+### Fix: sqlite "database is locked" crash + lost adaptive weights
+
+Long run A crashed at the end with `sqlite3.OperationalError: database is
+locked` in `_bridge_worker.flush`, so `persist_adaptive_weights` never ran →
+`scan_weights` empty → `--resume` lost the genetic boost and adaptive queue
+fell back to sequential pool order (new strategies probed without priority,
+0 additional PASS in 8h).
+
+Fixes:
+- `_apply_pragmas`: `PRAGMA journal_mode=WAL` + `busy_timeout=30000` (writers
+  don't block readers; parallel flushes no longer race).
+- `flush()`: retry ×5 on "database is locked" with backoff.
+- `_run_tcp_adaptive`: persist weights in `finally` — saved even on crash /
+  deadline, so resume keeps the genetic boost.
+- `_apply_provider_weights`: pass `strategy_traits(strat)` instead of the
+  cluster string as traits (garbage trait-dict entries).
+- `MEM_MONITOR_PY_MAX_MIB` 2048 → 512 (config.py).
+
+1030 unit pass, ruff clean. P2 chunking + heartbeat RSS-guard deferred (P0+P1
+already 82-286MB stable).
+
+
 ### Fix: run_variant.sh geneva.lua env not reaching tmux session
 
 `export BLOCKCHECKS_LUA_EXTRA` inside the case block did not propagate into
