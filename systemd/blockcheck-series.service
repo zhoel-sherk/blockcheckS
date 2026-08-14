@@ -1,0 +1,18 @@
+[Unit]
+Description=blockcheckS long-term run series (boot resume)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=zhoel
+Environment=HOME=@HOME@
+Environment=BS_SERIES_HOURS=20
+Environment=BS_SERIES_START=A
+ExecStart=@ROOT@/scripts/boot_resume_series.sh
+TimeoutStartSec=600
+LimitNOFILE=65536
+LimitNPROC=65536
+
+[Install]
+WantedBy=multi-user.target

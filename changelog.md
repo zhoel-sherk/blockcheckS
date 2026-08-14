@@ -2,6 +2,18 @@
 
 ## 1.2.1a — unreleased
 
+### Ops: boot-resume systemd + long-run recovery
+
+City power outage killed the run series (SIGKILL → no persist). Recovery plan:
+- `--resume` verified across reboot: +13 399 resume skip, DB 13 510→17 014,
+  PASS 588→728, adaptive re-accumulating weights.
+- `scripts/boot_resume_series.sh`: boots the series ONLY when a non-empty run
+  DB exists (no-op otherwise); guarded against double-start.
+- `scripts/install_systemd.sh` / `uninstall_systemd.sh` + `systemd/`
+  `blockcheck-series.service` (oneshot, boot resume). Installed & enabled.
+- Next outage: series auto-resumes on boot.
+
+
 ### Fix: sqlite "database is locked" crash + lost adaptive weights
 
 Long run A crashed at the end with `sqlite3.OperationalError: database is
