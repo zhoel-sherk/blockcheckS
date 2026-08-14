@@ -412,6 +412,13 @@ def _run_stop(model: BaseModel) -> int:
     return cmd_stop(_to_namespace(model))
 
 
+def _run_serve(model: BaseModel) -> int:
+    """Run the resident probe server (Unix socket core + optional HTTP bridge)."""
+    from blockchecks.cli.commands.serve import cmd_serve
+
+    return cmd_serve(_to_namespace(model))
+
+
 def build_cli_root() -> type[BaseSettings]:
     subs = _subparsers()
     from blockchecks.main import build_arg_parser
@@ -431,6 +438,9 @@ def build_cli_root() -> type[BaseSettings]:
         ),
         "full": _parser_blurb("full", raw_blurbs, "Full matrix campaign (TCP/UDP/HTTP/QUIC)"),
         "stop": _parser_blurb("stop", raw_blurbs, "Gracefully stop active full/scan/pair run"),
+        "serve": _parser_blurb(
+            "serve", raw_blurbs, "Resident probe server (Unix socket + optional HTTP bridge)"
+        ),
     }
 
     TcpCmd = _make_cmd_model(
@@ -463,6 +473,9 @@ def build_cli_root() -> type[BaseSettings]:
     StopCmd = _make_cmd_model(
         "StopCmd", model_from_subparser("StopArgs", subs["stop"]), _run_stop, blurbs["stop"]
     )
+    ServeCmd = _make_cmd_model(
+        "ServeCmd", model_from_subparser("ServeArgs", subs["serve"]), _run_serve, blurbs["serve"]
+    )
 
     class BlockchecksCli(BaseSettings):
         """bs — lightspeed DPI strategy tester (CliApp)."""
@@ -489,6 +502,7 @@ def build_cli_root() -> type[BaseSettings]:
         )
         full: CliSubCommand[FullCmd] = Field(description=blurbs["full"])  # type: ignore[valid-type]
         stop: CliSubCommand[StopCmd] = Field(description=blurbs["stop"])  # type: ignore[valid-type]
+        serve: CliSubCommand[ServeCmd] = Field(description=blurbs["serve"])  # type: ignore[valid-type]
 
         def cli_cmd(self) -> int:
             global _CLI_EXIT_CODE

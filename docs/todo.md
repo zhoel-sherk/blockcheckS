@@ -2,7 +2,7 @@
 
 Открытые задачи после **1.0.2**. Закрытые фазы и release notes: [changelog.md](../changelog.md).
 
-Приоритеты: **P1** = matrix/speed/protocol gaps; **P2** = voice/GP integration; **P3** = ML/hierarchy.
+Приоритеты: **P1** = matrix/speed/protocol gaps; **P2** = voice/GP integration; **P3** = learned bandit + service layer.
 
 ### Closed in 1.0.2
 
@@ -134,8 +134,6 @@ _(see Deferred)_
 
 | ID | Why |
 |----|-----|
-| **ML1–ML5** | Smart scan / sklearn — far corner |
-| **H1–H10** | Progressive hierarchical scan — with ML |
 | **M10** circular *scan* mode | L; export scaffold already exists |
 | **A4** | GP-side multi-domain defaults (BS B2 done) |
 | **B3** persistent nfqws2 | High risk; after B7 |
@@ -146,28 +144,77 @@ _(see Deferred)_
 
 ---
 
-## P3 — Smart scan (Phase 12) — deferred with ML
+## P3 — Learned bandit + service layer (replaces old ML1–ML5 / H1–H10)
 
-### ML ranker (sklearn)
+**2026-08-14 пересмотр:** AQ+AR — уже contextual bandit (`ScanWeights.get` = линейная
+модель `1.0 + Σ_family + Σ_blob + Σ_trait`, ε-greedy = exploration, heap = argmax,
+fanout = transfer, provider-preflight = cold-start prior). Цель старых ML/H-пунктов
+достигнута эвристикой без sklearn. Оставлены только пункты, реально нужные для
+скорости подбора. sklearn-ранкер / progressive-builder закрыты как избыточные.
 
-- [ ] **ML1** optional-dep `scikit-learn` в `[project.optional-dependencies] ml`
-- [ ] **ML2** `scripts/train_strategy_ranker.py` — export `state.db` → parquet → fit → `model.pkl`
-- [ ] **ML3** feature parser: domain (TLD, cdn_class) + strategy (family/blob/repeats/fooling)
-- [ ] **ML4** BS integration: `--ranker model.pkl` → top-K candidates
-- [ ] **ML5** retrain policy: после mass scan / drift / provider change
+### S0 — Offline strategy ranker (cold-start prior, высокий ROI)
+- [ ] **S0-1** export `state.db` tcp_results → features (domain_class × strategy_features) → parquet
+- [ ] **S0-2** fit PASS-probability model (logistic/GBDT) над `(domain_features × strategy_features)`
+- [ ] **S0-3** `--ranker model.json` → top-K кандидатов → seed в AQ (`_apply_provider_weights` point)
+- [ ] **S0-4** retrain policy: после mass scan / provider change / drift (по аналогии старого ML5)
 
-### Hierarchical progressive scan
+### S1 — Learned feature weights (upgrade bandit AQ)
+- [ ] **S1-1** выучить `w_family/w_blob/w_trait` коэффициенты из state.db вместо hard-coded 1.0/0.5/0.4
+- [ ] **S1-2** Thompson sampling / LinUCB вместо (или поверх) ε-greedy
+- [ ] **S1-3** выученная axis order (контекст: domain_class) — бывший H3/H7
+- [ ] **S1-4** интерфейс `ScanWeights` не менять; веса сохраняются в `scan_weights` (уже есть)
 
-- [ ] **H1** спецификация «облака параметров»: оси (desync, blob, fooling, ttl, repeats, split…)
-- [ ] **H2** `ProgressiveStrategyBuilder` — API: `add_axis()` → partial conf → test → branch
-- [ ] **H3** default tree order из GP `family_rank` + Fryazino facts
-- [ ] **H4** beam width B=3 — не только greedy
-- [ ] **H5** интеграция в `bs scan --progressive` / `scan_level=progressive`
-- [ ] **H6** лог partial results в DB (`partial_results`) для ML train
-- [ ] **H7** learned axis order: contextual bandit / RF на domain_class
-- [ ] **H8** provider template export из dpi-tester → A5
+### KPI / fallback (оставшиеся H-пункты)
 - [ ] **H9** benchmark vs full matrix на 10 доменах: Recall(best strategy found)
-- [ ] **H10** fallback: progressive 0 PASS → expand beam / RF top-K / full family scan
+- [ ] **H10** fallback: AQ 0 PASS → expand beam / RF top-K / full family scan
+
+### Дистилляция на слабые устройства (бывший S3 — упрощено)
+- [ ] **S3** результат S0/S1 = плоская таблица коэффициентов (w_family/w_blob/w_trait) →
+      JSON-конфиг или sqlite3-таблица, вычисляемая чистым Python/C без ONNX/ML deps.
+      Носим на MIPS/ARM роутеры с 64-128 MB RAM. (2026-08-14: уточнено — ONNX не нужен.)
+
+### Far-Future R&D (R&D backlog)
+- [ ] **RL-1** Gymnasium Env `DpiBanditEnv` (Discrete action, one-step episodes) — bandit-форма,
+      не MDP (DPI реагирует per-flow, нет агентных переходов)
+- [ ] **RL-2** DPI-эмулятор на сервере: Geneva-style NFQUEUE+scapy censors / nDPI / TSPU-rules
+      (IMC'22) — обучение PPO (sb3) vs GA/CMA-ES параллельно; gate на Fryazino holdout
+- [ ] **RL-3** PPO vs GA: GA sample-efficient для discovery (Geneva precedent); PPO только если
+      нужна context-conditional policy и есть дешёвый эмулятор. SAC не подходит (discrete).
+- [ ] **RL-4** деплой: дистиллированный tree/JSON как AQ priors; sim2real = emulator только как
+      prior-generator, никогда как ground truth (Fryazino ≠ модель)
+
+---
+
+## Service layer — `bs serve` (on-the-fly probing)
+
+**2026-08-14:** единый фоновый сервис оправдан — netns pool + bridge boot дорогая часть,
+спроектирована для reuse (`netns_pool.acquire/release`). Это тонкая обёртка над
+`AsyncTestRunner`/`ProbeBatchService`, не новый движок.
+
+### Архитектура
+- [x] **SVC-1** `service/probe_service.py`: `ProbeService(pool_size=4)` — `start()/probe()/stop()`,
+      busy() через run_control. (2026-08-14)
+- [x] **SVC-2** Ядро строго `asyncio.start_unix_server` на `STATE_DIR/blockchecks.sock` (0 deps).
+      `service/server.py` ProbeServer. (2026-08-14)
+- [x] **SVC-3** лёгкий HTTP bridge поверх сокета (stdlib, `serve_http` на 127.0.0.1). (2026-08-14)
+- [x] **SVC-4** CLI `bs serve` (--pool/--bridge-batch/--classic/--http-port). (2026-08-14)
+
+### Fair Exclusion (взаимная блокировка через run_control)
+- [x] **SVC-5** единый `run_control.lock` — serve регистрирует "serve", кампании блокируются. (2026-08-14)
+- [x] **SVC-6** активная кампания → `/probe` `423` `{"status":"busy","reason":"campaign_active","active_run":...}` (fail-fast, E2E подтверждено) (2026-08-14)
+- [x] **SVC-7** серии нет → сервис держит пул прогретым, обслуживает on-the-fly (E2E: /probe ripe.net → FAIL connect_timeout) (2026-08-14)
+
+### Контракт
+- [x] **SVC-8** `POST /probe` → `[{domain, strategy_id, status, fail_phase, latency_ms, http_code, fingerprint_matched}]`
+      — fail_phase классификатор (`classify_fail_phase`), E2E подтверждено. (2026-08-14)
+- [x] **SVC-9** `GET /status` → `{status, active_run, pool_size, started, uptime_s}`; `POST /stop`. (2026-08-14)
+- [ ] **SVC-10** systemd unit `blockcheck-serve.service` + install/uninstall (по образцу series)
+
+### Интеграция GP
+- [ ] **SVC-11** GP root-helper runner POST'ит на socket вместо exec `blockcheck2.sh`;
+      контракт `start-run` сохраняется
+- [ ] **SVC-12** MVP = TCP/TLS/HTTP; QUIC через bridge subprocess; UDP-voice отдельные аргументы
+- [ ] **SVC-13** только 4 netns → контенция guard через run_control lock namespace
 
 ---
 

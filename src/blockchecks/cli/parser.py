@@ -348,6 +348,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to wait for graceful shutdown (default 120)",
     )
 
+    serve = sub.add_parser(
+        "serve",
+        help="Run resident probe server (Unix socket + HTTP bridge, on-the-fly)",
+    )
+    serve.add_argument(
+        "--pool",
+        type=int,
+        default=None,
+        help="Netns pool size (default: effective default)",
+    )
+    serve.add_argument(
+        "--bridge-batch",
+        type=int,
+        default=500,
+        help="Lua bridge batch size (default 500)",
+    )
+    serve.add_argument(
+        "--timeout",
+        type=float,
+        default=3.0,
+        help="Default probe timeout seconds (default 3)",
+    )
+    serve.add_argument(
+        "--classic",
+        action="store_true",
+        help="Use classic backend instead of lua_bridge",
+    )
+    serve.add_argument(
+        "--http-port",
+        type=int,
+        default=None,
+        help="Also expose a thin HTTP bridge on 127.0.0.1:PORT (optional)",
+    )
+
     tcp = sub.add_parser("tcp", help="Single TCP strategy test (sync)")
     tcp.add_argument("-d", "--domain", required=True)
     tcp.add_argument("-s", "--strategy")

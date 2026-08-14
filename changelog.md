@@ -2,6 +2,27 @@
 
 ## 1.2.1a — unreleased
 
+### Service layer: `bs serve` — resident on-the-fly probe server
+
+Unix-socket core (`asyncio.start_unix_server`, 0 deps) + thin HTTP bridge
+(stdlib) for external apps (gp-control-plane). Holds a warm NetNsPool.
+
+- `service/probe_service.py`: `ProbeService(pool_size)` — start/probe/stop,
+  `busy()` via run_control; `ProbeResult` contract with `fail_phase`
+  classifier (`classify_fail_phase`: connect_timeout / tls_handshake_reset /
+  dns_resolve / http_redirect / http_<code> …).
+- `service/server.py`: `ProbeServer` — Unix socket JSON-line server +
+  optional HTTP bridge (`serve_http`); POST /probe, GET /status, POST /stop.
+- CLI `bs serve` (`--pool/--bridge-batch/--classic/--http-port`).
+- **Fair exclusion**: serve registers run.lock as "serve" (campaigns refuse to
+  start while it holds the pool); if a campaign owns the lock, /probe returns
+  423 `{status: busy, reason: campaign_active, active_run}` (fail-fast). E2E
+  verified both directions.
+- systemd `blockcheck-serve.service` (long-running) + install/uninstall
+  updated for both units.
+- Tests +7 (probe_service/server handlers). 1037 unit pass, ruff clean.
+
+
 ### Ops: boot-resume systemd + long-run recovery
 
 City power outage killed the run series (SIGKILL → no persist). Recovery plan:

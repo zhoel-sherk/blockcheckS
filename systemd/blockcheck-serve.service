@@ -1,0 +1,18 @@
+[Unit]
+Description=blockcheckS resident probe server (on-the-fly)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zhoel
+Environment=HOME=@HOME@
+ExecStart=@ROOT@/.venv/bin/bs serve --http-port 8089
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+LimitNOFILE=65536
+LimitNPROC=65536
+
+[Install]
+WantedBy=multi-user.target
