@@ -17,9 +17,12 @@ PASS (server replied) / QUIC_DROP (silent TSPU drop) / UDP_BLOCKED (ICMP port
 unreachable). Integrated into preflight → `TriageProfile.quic_drop/udp_blocked`.
 Verified live: cloudflare.com→PASS, youtube.com→QUIC_DROP (Fryazino fact).
 
-**Blobs:** +3 from Flowseal repo (2026): `tls_5ka` (5ka.ru), `quic_5ka`,
-`quic_rutube` (rutube.ru) — aliases added, `verify_blobs` 26 OK.
-`blobs/README.md` rewritten with per-blob description.
+**Blobs:** +8 from Flowseal repo (2026) — `tls_5ka`/`quic_5ka` (5ka.ru,
+PR #16589), `quic_rutube` (rutube.ru), plus `quic_funpay`/`quic_cloudflare`/
+`quic_alfabank`/`tls_funpay`/`tls_rzd` (PR #16591, Hellcat-95, closed — taken
+from commit 8c35287). Aliases added, `verify_blobs` 31 OK. New QUIC/TLS blobs
+wired into flowseal pools (full tls12 6493→10183, quic 168). `blobs/README.md`
+rewritten with per-blob description + PR sources.
 
 Tests: 1095 unit (+9), 113 quality, ruff clean.
 

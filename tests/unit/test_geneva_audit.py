@@ -161,7 +161,7 @@ async def test_pool_sizes_stable():
     assert len(items) == 24209, f"standard full pool changed: {len(items)}"
     fg = FlowsealGenerator()
     fitems = await fg.generate(protocol="tls12", scan_level="full", max_count=100000)
-    assert len(fitems) == 6493, f"flowseal full pool changed: {len(fitems)}"
+    assert len(fitems) == 10183, f"flowseal full pool changed: {len(fitems)}"
 
 
 @pytest.mark.unit

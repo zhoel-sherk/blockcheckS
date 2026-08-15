@@ -27,7 +27,7 @@ HOSTS = ["www.google.com", "ya.ru", "ozon.ru"]
 SNI_LIST = ["www.google.com", "fonts.google.com", "ya.ru"]
 TLS_MOD_NONE = "tls_mod=none"
 
-_TCP_PREFERRED = ("stun", "stun2", "max_ru", "google", "4pda", "tls_vk")
+_TCP_PREFERRED = ("stun", "stun2", "max_ru", "google", "4pda", "tls_vk", "tls_5ka", "tls_funpay", "tls_rzd")
 _QUIC_PREFERRED = (
     "quic_google",
     "quic_dbank",
@@ -36,6 +36,11 @@ _QUIC_PREFERRED = (
     "quic_vk",
     "quic_tencent",
     "quic_steam",
+    "quic_5ka",
+    "quic_rutube",
+    "quic_funpay",
+    "quic_cloudflare",
+    "quic_alfabank",
 )
 _UDP_PREFERRED = ("discord_udp", "game_udp", "quic_dbank", "stun")
 

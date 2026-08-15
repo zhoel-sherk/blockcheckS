@@ -16,6 +16,8 @@ Committed `.bin` payloads for nfqws2 `--blob=` / Flowseal-style strategies.
 | `4pda` | `tls_clienthello_4pda_to.bin` | 284 B | 4pda.to ClientHello (Flowseal) |
 | `tls_vk` | `tls_clienthello_vk_com.bin` | — | vk.com ClientHello |
 | `tls_5ka` | `tls_5ka.bin` | 654 B | **5ka.ru ClientHello (NEW, Flowseal 2026)** — Пятёрочка, обход РКН |
+| `tls_funpay` | `tls_funpay.bin` | 562 B | funpay.com ClientHello (Hellcat-95, PR #16591) |
+| `tls_rzd` | `tls_rzd.bin` | 658 B | www.rzd.ru ClientHello (Hellcat-95, PR #16591) |
 
 ## QUIC Initial blobs (UDP :443 fake payloads)
 
@@ -29,6 +31,9 @@ Committed `.bin` payloads for nfqws2 `--blob=` / Flowseal-style strategies.
 | `quic_vk` | `quic_vk.bin` | — | vk.com QUIC Initial |
 | `quic_5ka` | `quic_5ka.bin` | 1250 B | **5ka.ru QUIC Initial (NEW, Flowseal 2026)** — Пятёрочка |
 | `quic_rutube` | `quic_rutube.bin` | 1357 B | **rutube.ru QUIC Initial (NEW, Flowseal 2026)** — Rutube |
+| `quic_funpay` | `quic_funpay.bin` | 1200 B | funpay.com QUIC Initial (Hellcat-95, PR #16591) |
+| `quic_cloudflare` | `quic_cloudflare.bin` | 1200 B | www.cloudflare.com QUIC Initial (Hellcat-95, PR #16591) |
+| `quic_alfabank` | `quic_alfabank.bin` | 1200 B | alfabank.ru QUIC Initial (Hellcat-95, PR #16591) |
 | `quic_gv_kyber_1` | `quic_gv_kyber_1.bin` | — | googlevideo CDN QUIC + Kyber/ML-KEM key-share #1 |
 | `quic_gv_kyber_2` | `quic_gv_kyber_2.bin` | — | googlevideo CDN QUIC + Kyber key-share #2 |
 | `quic_gv_rr2` | `quic_gv_rr2.bin` | — | googlevideo CDN QUIC (rr2 snapshot) |
@@ -53,9 +58,11 @@ Committed `.bin` payloads for nfqws2 `--blob=` / Flowseal-style strategies.
 
 ## New blobs (2026-08)
 
-Added from Flowseal zapret-discord-youtube `bin/` (2026 tree):
+Added from Flowseal zapret-discord-youtube (2026 tree):
 - **5ka.ru** (`tls_5ka`, `quic_5ka`) — Пятёрочка (X5 Retail), россия, часто под РКН-фильтрацией.
+  Источник: [PR #16589](https://github.com/Flowseal/zapret-discord-youtube/pull/16589) (merged).
 - **rutube.ru** (`quic_rutube`) — Rutube, российский видеохостинг.
-
-Sourced from the Flowseal repo's `bin/` (same ClientHello/QUIC-Initial generators as
-the zapret-winws bundle). No network fetch at runtime — baked into the wheel.
+- **funpay.com / www.cloudflare.com / alfabank.ru** (`quic_funpay`, `quic_cloudflare`,
+  `quic_alfabank`) и **funpay.com / www.rzd.ru** (`tls_funpay`, `tls_rzd`) —
+  из [PR #16591](https://github.com/Flowseal/zapret-discord-youtube/pull/16591)
+  (Hellcat-95, закрыт без мержа; блобы взяты из коммита 8c35287).
