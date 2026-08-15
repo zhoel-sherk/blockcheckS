@@ -352,3 +352,35 @@ async def test_bridge_worker_stop_event_flushes():
     assert stats.done == 0
 
 
+
+
+@pytest.mark.unit
+async def test_bridge_worker_progress_before_batch_flush():
+    """on_progress fires incrementally (done + acc) even before a big-batch flush."""
+    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+
+    queue = MagicMock()
+    runner = MagicMock()
+    runner._run_probe_batch = AsyncMock(
+        side_effect=lambda items, domain, timeout, backend, domains=None: [
+            MagicMock(success=True) for _ in items
+        ]
+    )
+
+    # 3 jobs, bridge_batch=5 → a single flush at the end.
+    jobs = [await _make_job(domain=f"d{i}") for i in range(3)]
+    pops = iter([jobs[0], jobs[1], jobs[2], None])
+    queue.pop = MagicMock(side_effect=lambda **kw: next(pops))
+
+    stats = _RunStats()
+    progress: list[tuple[int, int]] = []
+    await _bridge_worker(
+        runner, queue, stats, timeout=5.0, bridge_batch=5,
+        stop_event=None, on_progress=lambda d, s, p: progress.append((d, p)),
+        active_domains=set(), domain_lock=asyncio.Lock(),
+    )
+    # progress reported for each accumulated job (1, 2, 3) before the flush,
+    # plus the final flush progress (3).
+    reported = [d for d, _ in progress]
+    assert 1 in reported and 2 in reported
+    assert stats.done == 3

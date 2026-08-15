@@ -256,6 +256,12 @@ async def _bridge_worker(
                     return
                 continue
 
+        # Incremental progress even before the batch flush: report completed
+        # (stats.done) plus jobs currently accumulated in this worker's batch,
+        # so a long run with bridge_batch=500 doesn't show a frozen [0/N].
+        if on_progress:
+            on_progress(stats.done + len(acc), stats.skipped, stats.passed)
+
         if acc.is_full():
             await flush()
 

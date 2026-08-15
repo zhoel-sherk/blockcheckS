@@ -16,6 +16,9 @@ class _ChunkResp:
         self._chunks = chunks
         self.iter_done = False
 
+    def close(self):
+        pass
+
     def __enter__(self):
         return self
 

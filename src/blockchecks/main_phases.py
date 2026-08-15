@@ -127,6 +127,12 @@ class FullRunContext:
     quick_break: bool = False
 
 
+# Throttle progress output to at most this often, even when the underlying
+# runner flushes progress only in large batches (bridge_batch=500). Without it
+# a long 20h run with <500 jobs would show a frozen "[0/N]" for hours.
+PROGRESS_MIN_INTERVAL = 30.0  # seconds
+
+
 @dataclass
 class TcpProgress:
     total: int
@@ -134,16 +140,21 @@ class TcpProgress:
     skipped: int = 0
     passed: int = 0
     t0: float = field(default_factory=time.perf_counter)
+    _last_report: float = field(default_factory=time.perf_counter)
 
     def report(self) -> None:
-        if self.done % 50 == 0 or self.done == self.total:
-            elapsed = time.perf_counter() - self.t0
-            rate = self.done / elapsed if elapsed > 0 else 0
-            left = (self.total - self.done) / rate if rate > 0 else 0
-            print(
-                f"  [{self.done}/{self.total}] pass={self.passed} skip={self.skipped} "
-                f"{rate:.2f}/s ETA {left / 60:.0f}m"
-            )
+        now = time.perf_counter()
+        always = self.done >= self.total or self.done % 50 == 0
+        if not always and now - self._last_report < PROGRESS_MIN_INTERVAL:
+            return
+        self._last_report = now
+        elapsed = now - self.t0
+        rate = self.done / elapsed if elapsed > 0 else 0
+        left = (self.total - self.done) / rate if rate > 0 else 0
+        print(
+            f"  [{self.done}/{self.total}] pass={self.passed} skip={self.skipped} "
+            f"{rate:.2f}/s ETA {left / 60:.0f}m"
+        )
 
 
 async def open_full_run_db(args) -> Any:

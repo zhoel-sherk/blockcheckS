@@ -780,30 +780,33 @@ def run_stream_triage_probe(
             if resolved_ip:
                 host = url.split("/")[2].split(":")[0]
                 session.curl.setopt(CURLOPT_RESOLVE, [f"{host}:443:{resolved_ip}"])
-            with session.get(
+            # curl_cffi >=0.15 Response has no context-manager protocol — use
+            # plain get() + iter_content and close explicitly.
+            resp = session.get(
                 url,
                 headers={"Range": range_header},
                 timeout=timeout,
                 stream=True,
-            ) as resp:
-                res.http_code = resp.status_code
-                for chunk in resp.iter_content(chunk_size=4096):
-                    if not chunk:
-                        continue
-                    now = time.perf_counter()
-                    total += len(chunk)
-                    window_bytes += len(chunk)
-                    window_elapsed = now - window_start
-                    if window_elapsed >= 0.5:
-                        wbps = window_bytes / window_elapsed
-                        peak_window_bps = max(peak_window_bps, wbps)
-                        window_start = now
-                        window_bytes = 0
-                    # record which windows we have passed
-                    for w in STALL_WINDOWS:
-                        if total >= w and not any(wb[0] == w for wb in passed):
-                            passed.append((w, now))
-                    last_progress = now
+            )
+            res.http_code = resp.status_code
+            for chunk in resp.iter_content(chunk_size=4096):
+                if not chunk:
+                    continue
+                now = time.perf_counter()
+                total += len(chunk)
+                window_bytes += len(chunk)
+                window_elapsed = now - window_start
+                if window_elapsed >= 0.5:
+                    wbps = window_bytes / window_elapsed
+                    peak_window_bps = max(peak_window_bps, wbps)
+                    window_start = now
+                    window_bytes = 0
+                # record which windows we have passed
+                for w in STALL_WINDOWS:
+                    if total >= w and not any(wb[0] == w for wb in passed):
+                        passed.append((w, now))
+                last_progress = now
+            resp.close()
     except RequestsError as e:
         res.error = str(e)[:150]
         res.total_bytes = total
