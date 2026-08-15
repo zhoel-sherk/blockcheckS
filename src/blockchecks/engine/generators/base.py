@@ -2,8 +2,12 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from blockchecks.engine.store import RunStateStore
+
+if TYPE_CHECKING:
+    from blockchecks.engine.triage import TriageProfile
 
 
 @dataclass(slots=True)
@@ -33,4 +37,5 @@ class StrategyGenerator(ABC):
         scan_level: str = "fast",
         max_count: int = 100,
         run_set: set = None,
+        triage: "TriageProfile | None" = None,
     ) -> list[StrategyItem]: ...

@@ -20,6 +20,8 @@ from blockchecks.checkers.port_block import (
 )
 from blockchecks.checkers.tcp_tls import check_tls
 from blockchecks.engine.config import NFQWS2_BIN, UNBLOCKED_DOM
+from blockchecks.engine.fail_phase import FailPhase
+from blockchecks.engine.triage import TriageProfile
 
 
 async def _sync_dns_to_data_block(results: list[dict]) -> None:
@@ -104,6 +106,7 @@ class PreflightReport:
     ip_reports: list[IpBlockReport] = field(default_factory=list)
     udp_16kb_blocked: bool = False
     udp_16kb_detail: str = ""
+    triage: TriageProfile | None = None
     exit_code: int = 0
     error: str = ""
 
@@ -309,6 +312,10 @@ async def run_preflight_async(
     if report.udp_16kb_detail:
         print(f"  UDP 16KB voice check: {report.udp_16kb_detail}")
 
+    triage = TriageProfile()
+    triage.udp_blocked = bool(report.udp_16kb_blocked)
+    report.triage = triage
+
     ref = report.baseline_domain or (o.unblocked_dom or UNBLOCKED_DOM).rstrip(".")
     for domain in domains:
         ips: list[str] = []
@@ -347,7 +354,69 @@ async def run_preflight_async(
             report.ip_reports.append(ip_r)
             print_ip_block_report(ip_r)
 
+        # ── Triage: L3/L4 + stream stall + per-domain phase (first probe only) ──
+        if report.triage is not None and not report.triage.unbypassable_l3:
+            _triage_domain(triage, domain, ips, o, cache)
+
     return report
+
+
+def _triage_domain(
+    triage: TriageProfile,
+    domain: str,
+    ips: list[str],
+    opts: PreflightOptions,
+    cache: Any,
+) -> None:
+    """Run L3/L4 + stream-stall triage for one domain (first probe)."""
+    from blockchecks.checkers.curl_probe import run_stream_triage_probe
+    from blockchecks.checkers.l3_probe import probe_l3
+
+    # L3/L4 blackhole check on the first resolved IP.
+    if ips:
+        r = probe_l3(ips[0], 443, timeout=min(opts.timeout, 3.0), use_raw=False)
+        if r.phase in (FailPhase.L4_SYN_DROP, FailPhase.ICMP_BLOCK, FailPhase.L4_RST_AT_SYN):
+            triage.unbypassable_l3 = True
+            triage.l3_phase = r.phase
+            print(f"  Triage {domain}: {r.phase.value} ({r.ip}:{r.port})")
+            return
+
+    # Stream stall probe (Range 0-256KB) — first domain only.
+    try:
+        resolved_ip = cache.primary_ip(domain) if cache else None
+        res = run_stream_triage_probe(
+            f"https://{domain}",
+            timeout=min(opts.timeout, 8.0),
+            resolved_ip=resolved_ip,
+        )
+        triage.stall_phase = FailPhase(res.phase) if res.phase in FailPhase.__members__ else FailPhase.UNKNOWN
+        triage.stall_at_bytes = res.stall_at_bytes
+        triage.read_rate_bps = res.read_rate_bps
+        triage.bandwidth_throttled = res.phase == "bandwidth_throttled"
+        if triage.stall_phase not in (FailPhase.PASS, FailPhase.UNKNOWN):
+            print(f"  Triage {domain}: {res.phase} @ {res.stall_at_bytes or 0}B")
+    except Exception as e:  # noqa: BLE001 — triage must never abort preflight
+        print(f"  Triage {domain}: stream probe skipped ({e})")
+
+    # Multi-profile TLS fingerprint (chrome vs firefox vs safari vs bare).
+    try:
+        from blockchecks.checkers.curl_probe import run_tls_profile_probe
+
+        fp = run_tls_profile_probe(
+            domain,
+            timeout=min(opts.timeout, 5.0),
+            resolved_ip=cache.primary_ip(domain) if cache else None,
+        )
+        triage.client_hello_len = fp.client_hello_len
+        triage.is_tls_fingerprint_blocked = fp.is_fingerprint_blocked
+        triage.requires_postquantum_awareness = fp.client_hello_len > 1400
+        triage.fingerprint_pass = dict(fp.profile_pass)
+        if fp.is_fingerprint_blocked:
+            print(f"  Triage {domain}: TLS fingerprint-blocked (chrome fails, lighter passes)")
+        elif triage.requires_postquantum_awareness:
+            print(f"  Triage {domain}: post-quantum ClientHello ~{fp.client_hello_len}B")
+    except Exception as e:  # noqa: BLE001
+        print(f"  Triage {domain}: TLS profile probe skipped ({e})")
 
 
 def check_udp_16kb(timeout: float = 5.0) -> tuple[bool, str]:

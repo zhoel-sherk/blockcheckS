@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS tcp_results (
     content_valid INTEGER DEFAULT 0,
     read_rate_bps REAL DEFAULT 0,
     error TEXT DEFAULT '',
+    fail_phase TEXT DEFAULT '',
     timestamp TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS udp_results (
@@ -127,6 +128,7 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         ("doh_server", "TEXT DEFAULT ''"),
         ("bridge_batch_id", "INTEGER DEFAULT 0"),
         ("bridge_gen", "INTEGER DEFAULT 0"),
+        ("fail_phase", "TEXT DEFAULT ''"),
     ):
         if col not in col_names:
             await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")

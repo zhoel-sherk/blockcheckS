@@ -139,8 +139,8 @@ class SqliteRunStore:
                                 """INSERT INTO tcp_results
                                    (strategy_id,domain,status,http_code,latency_ms,
                                     gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
-                                    resolved_ip,dns_verdict,doh_server)
-                                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                    resolved_ip,dns_verdict,doh_server,fail_phase)
+                                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                 (
                                     sid,
                                     entry["domain"],
@@ -155,6 +155,7 @@ class SqliteRunStore:
                                     entry["resolved_ip"],
                                     entry["dns_verdict"],
                                     entry["doh_server"],
+                                    entry.get("fail_phase", ""),
                                 ),
                             )
                         for entry in self._udp_pending:
@@ -209,6 +210,7 @@ class SqliteRunStore:
         dns_verdict: str = "",
         doh_server: str = "",
         proto: str = "tcp",
+        fail_phase: str = "",
     ) -> None:
         if self.batch_size > 0:
             self._tcp_pending.append(
@@ -227,6 +229,7 @@ class SqliteRunStore:
                     "resolved_ip": resolved_ip or "",
                     "dns_verdict": dns_verdict or "",
                     "doh_server": doh_server or "",
+                    "fail_phase": fail_phase or "",
                 }
             )
             if len(self._tcp_pending) >= self.batch_size:
@@ -240,8 +243,8 @@ class SqliteRunStore:
                 """INSERT INTO tcp_results
                    (strategy_id,domain,status,http_code,latency_ms,
                     gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
-                    resolved_ip,dns_verdict,doh_server)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    resolved_ip,dns_verdict,doh_server,fail_phase)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     sid,
                     domain,
@@ -256,6 +259,7 @@ class SqliteRunStore:
                     resolved_ip or "",
                     dns_verdict or "",
                     doh_server or "",
+                    fail_phase or "",
                 ),
             )
             await db.commit()

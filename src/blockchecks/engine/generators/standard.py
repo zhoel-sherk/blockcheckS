@@ -1,11 +1,15 @@
 """Standard hardcoded generators (blockcheck2.d/standard replicas)."""
 
 import os
+from typing import TYPE_CHECKING
 
 from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP, resolve_blob_path
 from blockchecks.engine.config import BLOB_DIR
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
 from blockchecks.engine.store import RunStateStore
+
+if TYPE_CHECKING:
+    from blockchecks.engine.triage import TriageProfile
 
 # Fooling options mapped from def.inc
 FOOLINGS_TCP = [
@@ -703,8 +707,32 @@ class StandardGenerator(StrategyGenerator):
         scan_level: str = "fast",
         max_count: int = 500,
         run_set: set = None,
+        triage: "TriageProfile | None" = None,
     ) -> list[StrategyItem]:
-        """Generate strategies from specified families, gated by protocol."""
+        """Generate strategies from specified families, gated by protocol.
+
+        ``triage`` (optional) prunes provably useless branches:
+        - unbypassable L3/IP block → empty (desync cannot help).
+        - post-quantum ClientHello → keep contextual split markers, drop static
+          numeric ``pos=N`` splits (2 TCP segments → marker-based only).
+        - TLS fingerprint-blocked → prefer impersonation-friendly families.
+        """
+        if triage is not None and not triage.bypassable:
+            return []
+
+        def _prune(items_in: list[StrategyItem]) -> list[StrategyItem]:
+            if triage is None:
+                return items_in
+            # Post-quantum ClientHello (2 TCP segments) → static numeric splits
+            # land mid-record; keep only contextual markers (sni/sniext).
+            if triage.prefer_contextual_split and triage.requires_postquantum_awareness:
+                return [
+                    it for it in items_in
+                    if not _static_numeric_split(it.strategy)
+                ]
+            return items_in
+
+        # (build happens below; both return paths apply _prune)
         items = []
         seen: set[str] = set()
         known_working = list(run_set or [])
@@ -806,9 +834,9 @@ class StandardGenerator(StrategyGenerator):
                 if not advanced:
                     break
                 idx += 1
-            return out[:max_count]
+            return _prune(out[:max_count])
 
-        return items[:max_count]
+        return _prune(items[:max_count])
 
     def _fam_udp_discord(self, items, seen, family, scan_level, _known_working):
         """Expand udp_discord family."""
@@ -1536,3 +1564,20 @@ class StandardGenerator(StrategyGenerator):
         if key not in seen:
             seen.add(key)
             items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
+
+
+def _static_numeric_split(strategy: str) -> bool:
+    """True if the strategy splits ONLY at static numeric positions.
+
+    Post-quantum ClientHellos are ~1500-1800B (2 TCP segments), so a split at a
+    bare number (``pos=2``) may land mid-record. Strategies that include any
+    contextual marker (``sniext``, ``sni``, ``host``, ``midsld``, …) stay valid.
+    """
+    import re as _re
+
+    pos_values: list[str] = []
+    for m in _re.finditer(r"pos=([^:]+)", strategy):
+        pos_values.append(m.group(1))
+    if not pos_values:
+        return False
+    return all(not _re.search(r"[A-Za-z]", value) for value in pos_values)

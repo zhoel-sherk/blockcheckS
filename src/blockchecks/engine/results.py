@@ -26,6 +26,7 @@ class TcpTestResult:
     read_rate_bps: float = 0
     error: str = ""
     used_ip: str = ""
+    fail_phase: str = ""
 
 
 def tcp_results_from_details(

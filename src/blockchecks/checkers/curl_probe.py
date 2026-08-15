@@ -707,3 +707,232 @@ def repeats_from_args(args) -> tuple[int, bool, str, bool]:
     scan_level = getattr(args, "scan_level", "fast") or "fast"
     quick_break = scan_level in ("single", "fast") and mode == "stable"
     return repeats, parallel, mode, quick_break
+
+
+# ── Stream triage probe (Phase 3/4) — NOT in the hot path ─────────────
+
+# Stall windows: bytes-read thresholds that a TSPU stream buffer may stall at.
+# Order matters — first threshold reached without further progress wins.
+STALL_WINDOWS = (7 * 1024, 16 * 1024, 42 * 1024, 64 * 1024)
+STALL_IDLE_SEC = 1.5  # no progress for this long → stall
+THROTTLE_PLATEAU_BPS = 64 * 1024  # sustained < 64 Kbps → BANDWIDTH_THROTTLED
+STALL_MIN_TOTAL = 2 * 1024  # ignore stall before at least this much arrived
+
+
+@dataclass
+class StreamTriageResult:
+    """Result of the streaming stall/QoS probe (Phase 3/4)."""
+
+    phase: str = "unknown"
+    http_code: int = 0
+    total_bytes: int = 0
+    read_rate_bps: float = 0.0
+    stall_at_bytes: int | None = None
+    stall_seconds: float = 0.0
+    plateau_bps: float = 0.0
+    error: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "phase": self.phase,
+            "http_code": self.http_code,
+            "total_bytes": self.total_bytes,
+            "read_rate_bps": round(self.read_rate_bps, 1),
+            "stall_at_bytes": self.stall_at_bytes,
+            "stall_seconds": round(self.stall_seconds, 2),
+            "plateau_bps": round(self.plateau_bps, 1),
+            "error": self.error,
+        }
+
+
+def run_stream_triage_probe(
+    url: str,
+    *,
+    timeout: float = 8.0,
+    range_header: str = "bytes=0-262143",
+    impersonate: str = "chrome124",
+    resolved_ip: str | None = None,
+) -> StreamTriageResult:
+    """Stream a large Range request and measure per-window progress.
+
+    Detects:
+    - ``data_stall_<N>k`` — bytes stopped advancing after reaching ~N KB
+      (TSPU stream-buffer stall). Maps to FailPhase.DATA_STALL_*.
+    - ``bandwidth_throttled`` — sustained read rate below the plateau.
+    - ``pass`` — stream completed / made steady progress.
+    Uses ``stream=True`` + ``iter_content`` with wall-clock per-chunk timing.
+    NOT used in the strategy hot path (that keeps buffered ``resp.content``).
+    """
+    import time
+
+    start = time.perf_counter()
+    res = StreamTriageResult()
+    # thresholds already passed, in order
+    passed: list[tuple[int, float]] = []  # (bytes, when)
+    total = 0
+    last_progress = time.perf_counter()
+    window_start = time.perf_counter()
+    window_bytes = 0
+    peak_window_bps = 0.0
+
+    try:
+        with curl_cffi.Session(impersonate=impersonate, allow_redirects=False) as session:
+            if resolved_ip:
+                host = url.split("/")[2].split(":")[0]
+                session.curl.setopt(CURLOPT_RESOLVE, [f"{host}:443:{resolved_ip}"])
+            with session.get(
+                url,
+                headers={"Range": range_header},
+                timeout=timeout,
+                stream=True,
+            ) as resp:
+                res.http_code = resp.status_code
+                for chunk in resp.iter_content(chunk_size=4096):
+                    if not chunk:
+                        continue
+                    now = time.perf_counter()
+                    total += len(chunk)
+                    window_bytes += len(chunk)
+                    window_elapsed = now - window_start
+                    if window_elapsed >= 0.5:
+                        wbps = window_bytes / window_elapsed
+                        peak_window_bps = max(peak_window_bps, wbps)
+                        window_start = now
+                        window_bytes = 0
+                    # record which windows we have passed
+                    for w in STALL_WINDOWS:
+                        if total >= w and not any(wb[0] == w for wb in passed):
+                            passed.append((w, now))
+                    last_progress = now
+    except RequestsError as e:
+        res.error = str(e)[:150]
+        res.total_bytes = total
+
+    elapsed = max(time.perf_counter() - start, 0.001)
+    res.read_rate_bps = total / elapsed
+    res.total_bytes = total
+    res.plateau_bps = peak_window_bps
+
+    # Stall detection: stopped advancing at some window boundary.
+    stall_secs = time.perf_counter() - last_progress
+    if stall_secs >= STALL_IDLE_SEC and total >= STALL_MIN_TOTAL:
+        res.stall_seconds = stall_secs
+        # find the highest passed window that we stalled at
+        stalled = [wb[0] for wb in passed]
+        if 64 * 1024 in stalled:
+            res.stall_at_bytes = 64 * 1024
+            res.phase = "data_stall_64k_plus"
+        elif 42 * 1024 in stalled:
+            res.stall_at_bytes = 42 * 1024
+            res.phase = "data_stall_42k"
+        elif 16 * 1024 in stalled:
+            res.stall_at_bytes = 16 * 1024
+            res.phase = "data_stall_16k"
+        elif 7 * 1024 in stalled:
+            res.stall_at_bytes = 7 * 1024
+            res.phase = "data_stall_7k"
+        else:
+            res.stall_at_bytes = total
+            res.phase = "data_stall_tls_cert" if total < 7 * 1024 else "data_stall_first_req"
+    elif res.error and "timeout" in res.error.lower() and total < STALL_MIN_TOTAL:
+        res.phase = "tls_silent_drop_after_sni"
+    elif peak_window_bps and peak_window_bps < THROTTLE_PLATEAU_BPS and total >= STALL_MIN_TOTAL:
+        res.phase = "bandwidth_throttled"
+    elif total > 0:
+        res.phase = "pass"
+    else:
+        res.phase = "unknown"
+    return res
+
+
+# ── Multi-profile TLS fingerprint probe (Triage: post-quantum/impersonation) ─
+
+TLS_PROFILES = ("chrome124", "firefox_120", "safari_17", None)
+PQ_CLIENTHELLO_MTU = 1400  # ClientHello larger than this → 2 TCP segments
+
+# Empirical ClientHello sizes per impersonation profile (post-quantum aware
+# browsers carry Kyber/ML-KEM key shares → 1500-1800+ B; compact stacks < 1 KB).
+TLS_PROFILE_CH_LEN = {
+    "chrome124": 1740,
+    "firefox_120": 780,
+    "safari_17": 940,
+    "bare_curl": 260,
+}
+
+
+@dataclass
+class TlsProfileResult:
+    """Baseline probe result across TLS impersonation profiles."""
+
+    profile_pass: dict[str, bool] = field(default_factory=dict)  # profile→ok
+    client_hello_len: int = 0
+    is_fingerprint_blocked: bool = False
+    error: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "profile_pass": dict(self.profile_pass),
+            "client_hello_len": self.client_hello_len,
+            "is_fingerprint_blocked": self.is_fingerprint_blocked,
+            "error": self.error,
+        }
+
+
+def run_tls_profile_probe(
+    domain: str,
+    *,
+    timeout: float = 5.0,
+    resolved_ip: str | None = None,
+) -> TlsProfileResult:
+    """Probe a domain with contrasting TLS impersonation profiles.
+
+    chrome124 (heavy, Kyber/GREASE, big ClientHello) vs firefox_120 (compact)
+    vs safari_17 (Apple stack) vs bare curl (no browser mask). Detects whether
+    DPI blocks a specific fingerprint (is_fingerprint_blocked) and estimates
+    the ClientHello size (post-quantum awareness).
+    """
+    res = TlsProfileResult()
+    for profile in TLS_PROFILES:
+        ok = _probe_tls_profile(domain, profile, timeout=timeout, resolved_ip=resolved_ip)
+        label = profile or "bare_curl"
+        res.profile_pass[label] = ok
+    # Estimate ClientHello size from the heaviest profile that succeeded
+    # (post-quantum → large CH). Fall back to chrome's nominal size.
+    for profile in ("chrome124", "safari_17", "firefox_120", "bare_curl"):
+        if res.profile_pass.get(profile, False):
+            res.client_hello_len = TLS_PROFILE_CH_LEN.get(profile, 0)
+            break
+    else:
+        res.client_hello_len = TLS_PROFILE_CH_LEN.get("chrome124", 0)
+    # Fingerprint-blocked: chrome fails but a lighter browser passes.
+    chrome_ok = res.profile_pass.get("chrome124", False)
+    others_ok = any(
+        res.profile_pass.get(p, False) for p in ("firefox_120", "safari_17")
+    )
+    bare_ok = res.profile_pass.get("bare_curl", False)
+    if not chrome_ok and (others_ok or bare_ok):
+        res.is_fingerprint_blocked = True
+    return res
+
+
+def _probe_tls_profile(
+    domain: str,
+    impersonate: str | None,
+    *,
+    timeout: float,
+    resolved_ip: str | None,
+) -> bool:
+    """One TLS GET; returns True on HTTP success (200/redirect)."""
+    from curl_cffi.requests import Session
+
+    kw: dict = {}
+    if impersonate:
+        kw["impersonate"] = impersonate
+    try:
+        with Session(allow_redirects=False, **kw) as session:
+            if resolved_ip:
+                session.curl.setopt(CURLOPT_RESOLVE, [f"{domain}:443:{resolved_ip}"])
+            resp = session.get(f"https://{domain}", timeout=timeout)
+            return resp.status_code in (200, 204, 301, 302, 307, 308)
+    except Exception:  # noqa: BLE001 — baseline probe must never raise
+        return False

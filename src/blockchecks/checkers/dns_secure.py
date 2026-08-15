@@ -6,6 +6,7 @@ Ported from dpi-tester ``dns_checker.py``; extended for blockcheckS runtime:
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 import struct
 import time
@@ -204,6 +205,41 @@ class DnsAuditResult:
     doh_error: str | None = None
 
 
+# Reserved / sinkhole / RKN-stub IP networks (DNS poisoning signatures).
+_SINKHOLE_NETS = [
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.18.0.0/15"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("240.0.0.0/4"),
+    # RFC1918 private (a poisoned answer should never be a public A record)
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    # IPv6 loopback / unspecified / documentation / ULA
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("::/128"),
+    ipaddress.ip_network("2001:db8::/32"),
+    ipaddress.ip_network("fc00::/7"),
+]
+
+
+def _sinkhole_ip(ips: list[str]) -> list[str]:
+    """Return the IPs from *ips* that fall into sinkhole/bogon networks."""
+    bad: list[str] = []
+    for raw in ips or []:
+        try:
+            ip = ipaddress.ip_address(raw.strip())
+        except ValueError:
+            continue
+        if any(ip in net for net in _SINKHOLE_NETS):
+            bad.append(str(ip))
+    return bad
+
+
 def audit_domain(
     domain: str,
     doh_url: str | None = None,
@@ -227,6 +263,18 @@ def audit_domain(
     result.doh_latency_ms = lat
     if err:
         result.doh_error = err
+
+    # Sinkhole / bogon detection: even an "overlapping" UDP+DoH answer that
+    # resolves to loopback / reserved / RKN stub subnets is DNS poisoning.
+    bad_udp = _sinkhole_ip(result.udp_ips)
+    bad_doh = _sinkhole_ip(result.doh_ips)
+    if bad_udp or bad_doh:
+        result.tampering_detected = True
+        result.verdict = "sinkhole"
+        result.description = "Sinkhole/bogon DNS answer: " + ", ".join(
+            bad_udp or bad_doh
+        )
+        return result
 
     match (bool(result.udp_ips), bool(result.doh_ips)):
         case (False, False):

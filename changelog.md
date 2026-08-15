@@ -2,6 +2,33 @@
 
 ## 1.2.1a — unreleased
 
+### Preflight Triage (Wave 1) — deterministic DPI interference profile
+
+- `engine/fail_phase.py`: `FailPhase` enum (32 tokens) — single source of
+  truth for probe failure phase (DNS/L3/SNI/stream-stall/QoS/QUIC). Dynamic
+  `http_<code>` members. `classify_fail_phase()` moved here from probe_service.
+- `engine/triage.py`: `TriageProfile` (dns_hijacked/sinkhole, unbypassable_l3,
+  stall_phase, bandwidth_throttled, quic_drop, TLS fingerprint block,
+  post-quantum awareness) + `to_dict`/`to_context` (bandit feature vector).
+- `checkers/dns_secure.py`: sinkhole/bogon answer filter (RFC1918/loopback/
+  RKN-stub) → verdict `sinkhole`.
+- `checkers/l3_probe.py`: L3/L4 classification — L4_SYN_DROP / L4_RST_AT_SYN /
+  ICMP_BLOCK (raw ICMP receiver + TCP-connect fallback).
+- `checkers/curl_probe.py`: `run_stream_triage_probe` (streaming 7-42KB stall
+  + QoS plateau detection) and `run_tls_profile_probe` (chrome124/firefox_120/
+  safari_17/bare — fingerprint-block + ClientHello size estimate).
+- `preflight.py`: builds `TriageProfile` in `run_preflight_async` (L3 + stream
+  + TLS-profile on first domain).
+- Generators: `generate(..., triage=None)` — prunes unbypassable L3 (→[]),
+  post-quantum ClientHello (drops static numeric splits, keeps markers).
+  Round-robin interleave bug fixed (idx increment placement).
+- DB: `fail_phase` column in tcp_results (migration) + `log_tcp` persists it;
+  `TcpTestResult.fail_phase` classified on failure.
+- Tests: fail_phase, l3_triage, stream_triage, triage pruning (+18). pytest-
+  xdist + pytest-timeout added (`-n 2 --dist loadfile`, `--timeout=90`).
+  1086 unit pass.
+
+
 ### Service layer: `bs serve` — resident on-the-fly probe server
 
 Unix-socket core (`asyncio.start_unix_server`, 0 deps) + thin HTTP bridge

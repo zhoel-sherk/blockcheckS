@@ -153,6 +153,15 @@ fanout = transfer, provider-preflight = cold-start prior). Цель старых
 скорости подбора. sklearn-ранкер / progressive-builder закрыты как избыточные.
 
 ### S0 — Offline strategy ranker (cold-start prior, высокий ROI)
+- [x] **FailPhase enum** (`engine/fail_phase.py`, 32 токена) — единая таксономия фаз
+      (DNS/L3/SNI/stream-stall/QoS/QUIC) + динамические http_<code>. (2026-08-15, Wave 1)
+- [x] **TriageProfile** (`engine/triage.py`) — профиль вмешательства, контекст-вектор для
+      бандита/S0; строится в preflight. (2026-08-15, Wave 1)
+- [x] **L3/L4 + sinkhole** (`checkers/l3_probe.py`, bogon-фильтр в dns_secure) (2026-08-15)
+- [x] **Stream stall + TLS fingerprint** (`run_stream_triage_probe` 7-42KB, `run_tls_profile_probe`
+      4 профиля) (2026-08-15)
+- [x] **Генераторы**: `triage` в `generate()`, отсечение L3/postquantum. (2026-08-15)
+- [x] **fail_phase** колонка в tcp_results + миграция. (2026-08-15)
 - [ ] **S0-1** export `state.db` tcp_results → features (domain_class × strategy_features) → parquet
 - [ ] **S0-2** fit PASS-probability model (logistic/GBDT) над `(domain_features × strategy_features)`
 - [ ] **S0-3** `--ranker model.json` → top-K кандидатов → seed в AQ (`_apply_provider_weights` point)

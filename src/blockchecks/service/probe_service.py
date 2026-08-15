@@ -13,13 +13,13 @@ with a thin HTTP bridge. This module is the probe *core* — no server code.
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.config import DEFAULT_POOL_SIZE
+from blockchecks.engine.fail_phase import classify_fail_phase
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.results import TcpTestResult
 from blockchecks.service.run_control import read_active_run
@@ -28,36 +28,7 @@ if TYPE_CHECKING:
     from blockchecks.checkers.dns_secure import DnsRunCache
     from blockchecks.engine.store import RunStateStore
 
-# ── fail_phase classifier (structured feedback for the online bandit) ──
-
-_PHASE_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
-    ("dns_resolve", re.compile(r"Could not resolve|Failed to resolve|getaddrinfo", re.I)),
-    ("dns_tampered", re.compile(r"TAMPERED|dns.*mismatch", re.I)),
-    ("connect_timeout", re.compile(r"timed? ?out|timeout after|Operation timed out", re.I)),
-    ("connect_refused", re.compile(r"Connection refused|ECONNREFUSED", re.I)),
-    ("tls_handshake_reset", re.compile(r"Recv failure|Connection reset|RST|WRONG_VERSION", re.I)),
-    ("tls_handshake_error", re.compile(r"SSL routines|TLS|handshake", re.I)),
-    ("http_redirect", re.compile(r"suspicious redirect", re.I)),
-    ("http_blocked", re.compile(r"403|blocked|captcha", re.I)),
-    ("ip_blocked", re.compile(r"IP.*block|blacklist|110\b", re.I)),
-)
-
-
-def classify_fail_phase(error: str, http_code: int = 0) -> str:
-    """Map a probe error string to a coarse failure phase.
-
-    Returns a compact token (e.g. ``tls_handshake_reset``) so the on-the-fly
-    bandit gets structured feedback without parsing raw logs.
-    """
-    if not error:
-        if http_code and http_code != 200:
-            return f"http_{http_code}"
-        return "unknown"
-    low = error
-    for name, pat in _PHASE_PATTERNS:
-        if pat.search(low):
-            return name
-    return "other"
+# ── fail_phase classifier imported from engine.fail_phase (single source) ──
 
 
 @dataclass
@@ -76,11 +47,12 @@ class ProbeResult:
     @classmethod
     def from_tcp_result(cls, r: TcpTestResult) -> ProbeResult:
         status = "PASS" if r.success else ("THROTTLED" if r.throttled else "FAIL")
+        phase = classify_fail_phase(r.error, r.http_code)
         return cls(
             domain=r.domain,
             strategy_id=r.item.label,
             status=status,
-            fail_phase="" if r.success else classify_fail_phase(r.error, r.http_code),
+            fail_phase="" if r.success else phase.value,
             latency_ms=round(r.latency_ms, 1),
             http_code=r.http_code,
             fingerprint_matched=bool(r.content_valid and r.http_code),

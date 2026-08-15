@@ -546,6 +546,10 @@ class AsyncTestRunner:
         result.read_rate_bps = data.get("read_rate_bps", 0)
         result.error = data.get("error", "") or ""
         result.used_ip = data.get("used_ip") or ""
+        if result.error and not result.success:
+            from blockchecks.engine.fail_phase import classify_fail_phase
+
+            result.fail_phase = classify_fail_phase(result.error, result.http_code).value
         if "bridge_applied" in data and data.get("bridge_applied") is False and result.success:
             print(
                 f"  {YELLOW}WARN: bridge PASS without APPLIED event for "
@@ -587,6 +591,7 @@ class AsyncTestRunner:
             dns_verdict=dns_verdict,
             doh_server=doh_server,
             proto=proto_db,
+            fail_phase=result.fail_phase,
         )
         if status == "PASS":
             await _save_pass_strategy_data_block(

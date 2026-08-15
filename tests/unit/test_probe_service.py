@@ -18,11 +18,17 @@ from blockchecks.service.server import ProbeServer
 @pytest.mark.unit
 def test_classify_fail_phase_maps_errors():
     assert classify_fail_phase("curl: (28) Connection timed out") == "connect_timeout"
-    assert classify_fail_phase("curl: (35) Recv failure: Connection reset") == "tls_handshake_reset"
+    assert classify_fail_phase("curl: (35) Recv failure: Connection reset") == "tls_rst_at_sni"
     assert classify_fail_phase("curl: (6) Could not resolve host") == "dns_resolve"
     assert classify_fail_phase("suspicious redirect 301 to https://x.com") == "http_redirect"
     assert classify_fail_phase("", 403) == "http_403"
     assert classify_fail_phase("") == "unknown"
+    # Phase 3 stream-stall taxonomy
+    assert classify_fail_phase("stalled at 16kb") == "data_stall_16k"
+    assert classify_fail_phase("stalled at 42kb") == "data_stall_42k"
+    assert classify_fail_phase("zero window advertised") == "zero_window_stall"
+    assert classify_fail_phase("HTTP/2 stream reset by RST_STREAM") == "h2_rst_stream"
+    assert classify_fail_phase("TLS fatal alert received") == "tls_injected_alert"
 
 
 @pytest.mark.unit
