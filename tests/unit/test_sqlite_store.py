@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from blockchecks.engine.store import open_run_store
@@ -114,3 +116,100 @@ async def test_dao_get_completed_tcp_keys(tmp_path):
 
     keys_q = await store.get_completed_tcp_keys(proto="quic")
     assert ("s3", "c.com") in keys_q
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_concurrent_append_not_lost(tmp_path, monkeypatch):
+    """A row appended AFTER flush snapshots its batch must never be cleared."""
+    store = open_run_store(tmp_path / "race.db", batch_size=10)
+    await store.init()
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+
+    # Barrier: the first ensure_strategy call inside flush runs *after* the
+    # snapshot is taken (s1 drained) — a concurrent writer appends s2 then.
+    injected = {"done": False}
+    orig_ensure = store.ensure_strategy
+
+    async def _ensure(*args, **kwargs):
+        if not injected["done"]:
+            injected["done"] = True
+            await store.log_tcp("s2", "b.com", "PASS", 20.0, 200, config_path="fake:2")
+        return await orig_ensure(*args, **kwargs)
+
+    monkeypatch.setattr(store, "ensure_strategy", _ensure)
+    await store.flush()
+    # s1 committed; s2 appended after the snapshot survives in the buffer.
+    assert len(store._tcp_pending) == 1
+    assert store._tcp_pending[0]["strategy"] == "s2"
+
+    await store.flush()
+    con = sqlite3.connect(tmp_path / "race.db")
+    rows = con.execute(
+        "SELECT s.name FROM tcp_results r JOIN strategies s ON s.id=r.strategy_id"
+    ).fetchall()
+    con.close()
+    assert {r[0] for r in rows} == {"s1", "s2"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_retry_recovers_and_clears(tmp_path, monkeypatch):
+    """A locked flush retries, commits on success, and clears last_err."""
+    import aiosqlite
+
+    store = open_run_store(tmp_path / "req.db", batch_size=10)
+    await store.init()
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+
+    calls = {"n": 0}
+    _orig_connect = aiosqlite.connect
+
+    def _connect(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _RaiseLocked()
+        return _orig_connect(*args, **kwargs)
+
+    monkeypatch.setattr(aiosqlite, "connect", _connect)
+    await store.flush()  # attempt 0 locked -> retry 1 commits
+    assert not store._tcp_pending
+    con = sqlite3.connect(tmp_path / "req.db")
+    rows = con.execute("SELECT COUNT(*) FROM tcp_results").fetchone()[0]
+    con.close()
+    assert rows == 1
+
+
+class _RaiseLocked:
+    """aiosqlite.connect() replacement that raises OperationalError on enter."""
+
+    def __init__(self):
+        import aiosqlite
+
+        self._exc = aiosqlite.OperationalError("database is locked")
+
+    async def __aenter__(self):
+        raise self._exc
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_requeues_on_failure(tmp_path, monkeypatch):
+    """Failed flush must re-queue rows so results are never lost."""
+    import aiosqlite
+
+    store = open_run_store(tmp_path / "req2.db", batch_size=10)
+    await store.init()
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+
+    def _always_locked(*args, **kwargs):
+        return _RaiseLocked()
+
+    monkeypatch.setattr(aiosqlite, "connect", _always_locked)
+    with pytest.raises(aiosqlite.OperationalError):
+        await store.flush()
+    # Rows re-queued (nothing silently dropped).
+    assert len(store._tcp_pending) == 1

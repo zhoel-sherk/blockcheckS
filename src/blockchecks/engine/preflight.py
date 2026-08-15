@@ -389,7 +389,9 @@ def _triage_domain(
             timeout=min(opts.timeout, 8.0),
             resolved_ip=resolved_ip,
         )
-        triage.stall_phase = FailPhase(res.phase) if res.phase in FailPhase.__members__ else FailPhase.UNKNOWN
+        triage.stall_phase = (
+            FailPhase(res.phase) if res.phase in FailPhase._value2member_map_ else FailPhase.UNKNOWN
+        )
         triage.stall_at_bytes = res.stall_at_bytes
         triage.read_rate_bps = res.read_rate_bps
         triage.bandwidth_throttled = res.phase == "bandwidth_throttled"

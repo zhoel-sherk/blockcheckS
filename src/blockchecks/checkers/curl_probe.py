@@ -33,7 +33,11 @@ except AttributeError:
     CURLOPT_IPRESOLVE = 113
 _CURL_IPRESOLVE_V4 = 1
 
-_SMALL_BODY_STATUSES = frozenset({101, 204, 301, 302, 303, 304, 307, 308})
+_SMALL_BODY_STATUSES = frozenset({101, 204, 206, 301, 302, 303, 307, 308})
+
+#: A same-host redirect to a block/error path is still a provider stub, not a
+#: working bypass. Blocking pages commonly redirect /block, /blocked, /stop, ...
+_BLOCK_REDIRECT_HINTS = ("/block", "blocked", "blockpage", "forbidden", "/stop", "error")
 
 
 @dataclass
@@ -386,6 +390,37 @@ def _googlevideo_follow_request(req: CurlProbeRequest, location: str) -> CurlPro
     )
 
 
+def _block_redirect_err(status: int, location: str) -> str | None:
+    """Same-host redirect to an obvious block/error path — provider stub.
+
+    ``is_suspicious_redirect`` only flags foreign-host Location values, so a
+    stub answering ``302 Location: https://<same-host>/block`` would otherwise
+    be classified as a working bypass.
+    """
+    if status not in {301, 302, 303, 307, 308}:
+        return None
+    low = (location or "").lower()
+    if any(h in low for h in _BLOCK_REDIRECT_HINTS):
+        return f"blockpage redirect {status} to {location[:80]}"
+    return None
+
+
+def _stub_body_err(req: CurlProbeRequest, resp, clen: int) -> str | None:
+    """Reject stub answers on paths that must carry binary payloads.
+
+    - 304 Not Modified without a prior conditional request is anomalous for a
+      plain GET → provider stub / uncached answer.
+    - googlevideo/ytcdn binary-API probes must never receive text/html.
+    """
+    if resp.status_code == 304 and not req.googlevideo:
+        return "http 304 without conditional request (likely stub)"
+    if (req.googlevideo or req.ytcdn or req.ggc) and resp.status_code == 200:
+        ctype = (resp.headers.get("Content-Type") or "").lower()
+        if "html" in ctype or (not ctype and clen < 300):
+            return "text/html or empty content on binary-API probe"
+    return None
+
+
 def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResult:
     """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
     import time
@@ -537,6 +572,16 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
             read_rate_bps=rate,
             error=redirect_err,
         )
+    block_redirect_err = _block_redirect_err(resp.status_code, loc)
+    if block_redirect_err:
+        return CurlProbeResult(
+            success=False,
+            http_code=resp.status_code,
+            latency_ms=elapsed * 1000,
+            content_len=clen,
+            read_rate_bps=rate,
+            error=block_redirect_err,
+        )
     if resp.status_code == 400:
         return CurlProbeResult(
             success=False,
@@ -551,6 +596,17 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     dpi_fake = any(p in body.lower() for p in DPI_FAKE_PATTERNS)
     if dpi_fake:
         content_ok = False
+
+    stub_err = _stub_body_err(req, resp, clen)
+    if stub_err:
+        return CurlProbeResult(
+            success=False,
+            http_code=resp.status_code,
+            latency_ms=elapsed * 1000,
+            content_len=clen,
+            read_rate_bps=rate,
+            error=stub_err,
+        )
 
     # Tiny 206 is OK for ordinary sites; googlevideo Range must meet size budget
     small_206 = resp.status_code == 206 and clen < 300 and not req.googlevideo

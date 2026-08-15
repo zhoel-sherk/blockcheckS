@@ -463,3 +463,99 @@ def test_ytcdn_probe_bare_no_thumb_for_gvt1():
     # gvt1 has no stable thumb path → bare variant
     assert any(v.ytcdn_bare for v in variants)
     assert not any("/dQw4w9WgXcQ" in v.curl_url for v in variants)
+
+
+def _run_plain_probe(status, body=b"", headers=None):
+    """Run run_curl_probe with a fake session returning the given response."""
+    from unittest.mock import patch
+
+    from blockchecks.checkers.curl_probe import run_curl_probe
+    from blockchecks.engine.config import GGC_HOST  # noqa: F401
+
+    class FakeCurl:
+        def setopt(self, opt, value):
+            pass
+
+    class FakeSession:
+        curl = FakeCurl()
+
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, timeout=None, **kwargs):
+            resp = MagicMock()
+            resp.status_code = status
+            resp.content = body
+            resp.headers = headers or {}
+            return resp
+
+    with patch("curl_cffi.Session", FakeSession):
+        return run_curl_probe(CurlProbeRequest(domain="example.com", timeout=5.0))
+
+
+def test_false_pass_blockpage_samehost_redirect():
+    """Same-host redirect to a block/error path must FAIL (not PASS)."""
+    r = _run_plain_probe(302, b"", {"Location": "https://example.com/block"})
+    assert r.success is False
+    assert "blockpage redirect" in (r.error or "")
+
+
+def test_false_pass_304_stub_fails():
+    """304 Not Modified without a conditional request is a stub, not a bypass."""
+    r = _run_plain_probe(304, b"")
+    assert r.success is False
+    assert "304" in (r.error or "")
+
+
+def test_legit_302_samehost_small_body_passes():
+    """A genuine same-host redirect (non-block path) still counts as reachable."""
+    r = _run_plain_probe(302, b"", {"Location": "https://example.com/next"})
+    assert r.success is True
+
+
+def test_200_html_binary_api_fails():
+    """googlevideo binary-API probe answering text/html is a stub, not a bypass."""
+    from unittest.mock import patch
+
+    from blockchecks.checkers.curl_probe import run_curl_probe
+
+    class FakeCurl:
+        def setopt(self, opt, value):
+            pass
+
+    class FakeSession:
+        curl = FakeCurl()
+
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, timeout=None, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.content = b"<html><body>blocked</body></html>" * 5
+            resp.headers = {"Content-Type": "text/html"}
+            return resp
+
+    req = CurlProbeRequest(
+        domain="googlevideo.com",
+        curl_url="https://rr1---sn-xx.googlevideo.com/videoplayback",
+        googlevideo=True,
+        disable_ech=True,
+        timeout=5.0,
+    )
+    with patch("curl_cffi.Session", FakeSession):
+        r = run_curl_probe(req)
+    assert r.success is False
+    assert "text/html" in (r.error or "")

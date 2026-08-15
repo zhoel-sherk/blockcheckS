@@ -38,6 +38,8 @@ def normalize_cli_args(argv: list[str]) -> list[str]:
 _CMD_HANDLERS: dict[str, Any] = {}
 _CLI_EXIT_CODE: int = 0
 _FULL_RUN_ACTIVE: bool = False
+# User config.toml loaded in main(); used by _to_namespace to fill db/out_dir.
+_USER_CFG: dict[str, Any] | None = None
 # Fields whose --no-<name> flag pydantic parses as negation (False) instead of
 # setting True; re-applied in _dispatch_subcommand from main()'s argv capture.
 _NO_FLAGS_CAPTURED: set[str] = set()
@@ -217,7 +219,15 @@ def _parser_blurb(name: str, blurbs: dict[str, str], fallback: str) -> str:
 def _to_namespace(model: BaseModel, **extra: Any) -> argparse.Namespace:
     data = model.model_dump()
     data.update(extra)
-    return argparse.Namespace(**data)
+    ns = argparse.Namespace(**data)
+    # CliApp path: argparse.dispatch() calls finalize_store_args() post-parse to
+    # fill None db/out_dir from config.toml / XDG defaults. CliApp bypasses
+    # dispatch(), so apply it here or bs full/scan/pair would export nowhere.
+    if _USER_CFG is not None:
+        from blockchecks.cli.user_config import finalize_store_args
+
+        finalize_store_args(ns, _USER_CFG)
+    return ns
 
 
 def _make_cmd_model(class_name: str, base: type[BaseModel], handler, doc: str = ""):
@@ -420,10 +430,19 @@ def _run_serve(model: BaseModel) -> int:
 
 
 def build_cli_root() -> type[BaseSettings]:
+    from blockchecks.cli.user_config import apply_parser_defaults
+
     subs = _subparsers()
     from blockchecks.main import build_arg_parser
 
     full_parser = build_arg_parser()
+    # Apply config.toml defaults to the SAME parsers the pydantic models are
+    # derived from (otherwise defaults silently live only on the unused `probe`
+    # parser and bs full/scan/pair ignore [paths] db/out_dir + [run] ...).
+    if _USER_CFG is not None:
+        for sub_parser in subs.values():
+            apply_parser_defaults(sub_parser, _USER_CFG)
+        apply_parser_defaults(full_parser, _USER_CFG)
     shortcuts = collect_cli_shortcuts(*subs.values(), full_parser)
     raw_blurbs = _subcommand_blurbs()
 
@@ -526,6 +545,8 @@ def main(argv: list[str] | None = None) -> int:
     ensure_dirs()
     configure_logging()
     cfg = load_user_config()
+    global _USER_CFG
+    _USER_CFG = cfg
     paths_cfg = cfg.get("paths") if isinstance(cfg.get("paths"), dict) else {}
     migrate_on = True if paths_cfg.get("migrate") is None else bool(paths_cfg.get("migrate"))
     migrate_legacy_state_db(enabled=migrate_on)
