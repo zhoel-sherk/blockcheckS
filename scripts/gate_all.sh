@@ -28,8 +28,9 @@ else
 fi
 
 if [ "${1:-}" = "--integration" ]; then
-  echo "=== gate: integration (sudo, ~10 min) ==="
-  sudo -n "$PY" -m pytest tests/integration/ -m integration -q
+  echo "=== gate: integration (sudo, ~10-15 min) ==="
+  # E2E netns tests run long — raise pytest-timeout for the integration suite.
+  sudo -n "$PY" -m pytest tests/integration/ -m integration -q --timeout=600
 fi
 
 echo "ALL GATES PASSED"

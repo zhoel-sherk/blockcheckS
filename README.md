@@ -1,9 +1,9 @@
 # blockcheckS — lightspeed DPI strategy tester
 
-[![version](https://img.shields.io/badge/version-1.2.1a-blue)](#)
+[![version](https://img.shields.io/badge/version-1.3.0-green)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-389%20passed-success)](#)
+[![tests](https://img.shields.io/badge/tests-1097%20passed-success)](#)
 
 **Твой провайдер режет YouTube, Discord и Telegram через DPI?**
 *blockcheckS за 10 минут найдёт работающий обход из 10 000+ комбинаций,
@@ -15,9 +15,13 @@
 > checkpoint/resume, SQLite-стейт и экспорт готового конфига для Keenetic.
 
 - ⚡ **1 тест/сек** — 33× быстрее blockcheck.sh (0.43 тест/сек)
-- 🔍 **10 886 стратегий** — StandardGenerator: 17 TCP-семей + HTTP :80 + QUIC + UDP voice
+- 🔍 **10 886+ стратегий** — StandardGenerator: TCP-семей + HTTP :80 + QUIC + UDP voice
 - 🎭 **Браузерный JA4** — curl_cffi с Chrome 124 BoringSSL (не палится как скрипт)
-- 🏊 **Netns pool** — пресозданные изолированные namespace'ы, ни один пакет не уходит мимо
+- 🏊 **Netns pool** — пресозданные изолированные namespace'ы
+- 🔬 **Preflight Triage** — детерминированный профиль DPI до скана (DNS/L3/SNI/
+  stream-stall/QoS/QUIC/TLS-fingerprint) → отсечение бесполезных веток генераторов
+- 🧬 **Adaptive queue** — генетический буст PASS-стратегий по family/blob/traits
+- 🛰️ **`bs serve`** — резидентный on-the-fly probe server (Unix socket + HTTP)
 - 📊 **TCP×UDP матрицы** — ищет пары стратегий для голоса Discord
 - 💾 **Checkpoint/resume** — упал роутер? Продолжи с места, SQLite помнит всё
 - 📦 **nfconf export** — готовый конфиг для Keenetic, Linux, OpenWrt

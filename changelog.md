@@ -1,6 +1,49 @@
 # blockcheckS Changelog
 
-## 1.2.1a — unreleased
+## 1.3.0 — stable (2026-08-15)
+
+**Stable release.** Branched from `alpha` (99 commits). Verified: 1097 unit,
+113 quality, 17 integration (sudo E2E), ruff clean; clean-venv wheel install.
+
+### Release highlights
+
+- **Preflight Triage (Wave 1 + Wave 2)** — deterministic DPI interference
+  profile built before the strategy scan:
+  - `FailPhase` enum (32 tokens) + `TriageProfile` (dns/sinkhole, unbypassable
+    L3, stream-stall 7-42KB, QoS throttle, QUIC drop, TLS fingerprint block,
+    post-quantum awareness) — feeds generators (branch pruning) + bandit/S0
+    context vector.
+  - L3/L4 SYN/ICMP probe (`checkers/l3_probe.py`), raw QUIC Initial probe
+    (`checkers/quic_raw.py`), streaming stall probe, multi-profile TLS
+    fingerprint (chrome/firefox/safari/bare), Lua TTL-RST feedback.
+- **`bs serve`** — resident on-the-fly probe server (Unix socket core + HTTP
+  bridge), fair exclusion via run_control (423 busy when campaign active).
+- **Memory: adaptive queue RSS 442MB → ~82MB** (slots + lazy traits + shared
+  keys); sqlite WAL + flush retry (no "database is locked"); AQ weights
+  persist on crash/deadline.
+- **Domain isolation** for sequential bridge scan (no all-youtube false
+  positives); long-term series A→F + boot-resume systemd.
+- **Blobs: +8** from Flowseal 2026 (5ka, rutube, funpay, cloudflare, alfabank,
+  rzd) — verify_blobs 31 OK.
+- **XDG hardening:** state/logs/blob-cache dirs 0700; legacy `state.db`
+  migration to XDG.
+- **pytest-xdist + pytest-timeout** (`-n 2 --dist loadfile`) — full unit in
+  ~40s.
+
+### Breaking / migration
+- `classify_fail_phase` moved from `service/probe_service.py` to
+  `engine/fail_phase.py` (single source; service re-imports).
+- `tcp_results` gained `fail_phase` column (auto-migration via schema).
+
+### Upgrading from 1.2.1a
+```bash
+pip install -U blockchecks
+# run state auto-migrates (state.db → XDG); existing DBs get fail_phase column.
+```
+
+---
+
+## 1.2.1a — unreleased (alpha history)
 
 ### Wave 2 — Lua TTL-RST feedback + raw QUIC Initial probe
 

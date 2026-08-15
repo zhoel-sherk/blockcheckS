@@ -38,3 +38,11 @@
 | **BC2** | blockcheck2.sh parity — foolings list, repeats logic, family ordering |
 | **shortlist** | JSON export of best strategies per domain for GP control-plane |
 | **JA4** | Browser TLS fingerprint — curl_cffi impersonates Chrome 124 BoringSSL |
+| **FailPhase** | Enum (32 tokens) классификации фазы сбоя пробы (DNS/L3/SNI/stall/QoS/QUIC/http) — единый источник для bandit/S0 и генераторов |
+| **TriageProfile** | Детерминированный профиль вмешательства DPI из preflight: dns/sinkhole, unbypassable L3, stream-stall 7-42KB, QoS throttle, QUIC drop, TLS-fingerprint block, post-quantum |
+| **L3/L4 probe** | `checkers/l3_probe.py` — SYN-проба + ICMP Type 3 → L4_SYN_DROP / L4_RST_AT_SYN / ICMP_BLOCK |
+| **QUIC-drop probe** | `checkers/quic_raw.py` — raw QUIC Initial over UDP :443 → PASS / QUIC_DROP / UDP_BLOCKED |
+| **stream triage** | `run_stream_triage_probe` — streaming Range-запрос с per-window замером (7/16/42/64KB stall, QoS plateau) |
+| **TLS fingerprint** | `run_tls_profile_probe` — контрастные профили chrome/firefox/safari/bare → fingerprint-block + ClientHello размер |
+| **rst_in** | DPI-инжектированный RST (scan_bridge Lua) — `bridge_rst_in` + TTL → `fail_phase=TLS_RST_AT_SNI` |
+| **bs serve** | Резидентный on-the-fly probe server (Unix socket + HTTP bridge); Fair Exclusion через run_control |

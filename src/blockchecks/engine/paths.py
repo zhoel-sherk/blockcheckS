@@ -137,6 +137,13 @@ def ensure_dirs() -> None:
     ):
         path.mkdir(parents=True, exist_ok=True)
         reclaim_sudo_ownership(path)
+    # Sensitive dirs: state + runtime logs hold probe results / lock files;
+    # restrict to owner (0700) so other local users can't read raw DPI data.
+    for path in (STATE_DIR, RUNTIME_LOGS_DIR, BLOB_CACHE_DIR):
+        try:
+            path.chmod(0o700)
+        except OSError:
+            pass
 
 
 def _sudo_reclaim_ids() -> tuple[int, int] | None:

@@ -15,4 +15,5 @@ include docs/todo.md
 include docs/guide.md
 include docs/package.md
 include changelog.md
+recursive-include systemd *.service
 recursive-include src/blockchecks *.py

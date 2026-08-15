@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blockchecks"
-version = "1.2.1a"
+version = "1.3.0"
 description = "Lightspeed DPI strategy tester for zapret2/nfqws2"
 readme = "README.md"
 license = {text = "MIT"}
@@ -51,6 +51,7 @@ where = ["src"]
 "blockchecks/presets/strategies" = ["presets/strategies/*.tls", "presets/strategies/*.txt"]
 "blockchecks/presets/domains" = ["presets/domains/*.txt"]
 "blockchecks/presets/voice" = ["presets/voice/*.txt"]
+"blockchecks/systemd" = ["systemd/*.service"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

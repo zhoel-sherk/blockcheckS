@@ -35,6 +35,15 @@ def test_ensure_dirs_creates_tree(tmp_path, monkeypatch):
     paths.ensure_dirs()
     assert (tmp_path / "data" / "export").is_dir()
     assert (tmp_path / "cache" / "pycache").is_dir()
+    # sensitive dirs must be 0700 (owner-only)
+    import stat as _stat
+
+    for d in (
+        tmp_path / "state",
+        tmp_path / "state" / "logs",
+        tmp_path / "cache" / "blob-cache",
+    ):
+        assert (_stat.S_IMODE(d.stat().st_mode) & 0o777) == 0o700, d
 
 
 @pytest.mark.unit

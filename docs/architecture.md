@@ -166,6 +166,38 @@ flowchart TD
   domGV --> ytdlp --> cache --> signedURL --> nfqTCP --> curlVP --> resultChunk
 ```
 
+## Preflight Triage (Wave 1 + Wave 2)
+
+Before the strategy scan, `run_preflight_async` builds a deterministic
+`TriageProfile` of the ISP/DPI interference:
+
+```
+preflight (run_preflight_async)
+ ├── DNS audit (UDP vs DoH) → dns_hijacked / dns_sinkhole
+ ├── L3/L4 probe (l3_probe) → unbypassable_l3 (SYN drop / ICMP block / RST)
+ ├── stream triage (curl_probe) → stall 7-42KB + QoS plateau → requires_window_clamp
+ ├── TLS fingerprint (curl_probe) → fingerprint-block + post-quantum CH
+ └── raw QUIC Initial (quic_raw) → quic_drop / udp_blocked
+```
+The `TriageProfile` is passed to `StrategyGenerator.generate(triage=…)`:
+- `unbypassable_l3` → generators return `[]` (desync cannot help).
+- post-quantum CH → static numeric `pos=N` splits dropped (marker-based kept).
+- `requires_window_clamp` / `prefer_quic` bias family ordering.
+It also exposes `to_context()` — a compact feature vector for the online
+bandit / S0 offline ranker. Per-probe failure phases are persisted to
+`tcp_results.fail_phase` (via `classify_fail_phase`), and Lua `rst_in` events
+(TTL of DPI RST) map to `TLS_RST_AT_SNI`.
+
+## Service layer — `bs serve`
+
+Resident on-the-fly probe server (`service/probe_service.py` + `server.py`):
+- **Unix socket core** (`asyncio.start_unix_server`, no deps) + thin HTTP bridge.
+- Holds a warm `NetNsPool` — probes a domain/strategy without paying boot cost.
+- **Fair exclusion**: while a long-term campaign owns `run.lock`, `/probe`
+  returns `423 busy/campaign_active` (fail-fast); otherwise serves requests.
+- Contract: `POST /probe {domains, strategies, protocol, timeout}` →
+  `[{domain, strategy_id, status, fail_phase, latency_ms, http_code, fingerprint_matched}]`.
+
 ## DNS resolution
 
 **Default:** DoH pre-resolve (`dns_secure` / `prepare_dns_for_run`) when secure DNS

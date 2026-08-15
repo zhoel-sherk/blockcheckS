@@ -74,3 +74,43 @@ async def test_migration_adds_fail_phase_column(tmp_path):
     cols = [r[1] for r in con.execute("PRAGMA table_info(tcp_results)")]
     assert "fail_phase" in cols
     con.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dao_get_working_quic_proto_details(tmp_path):
+    store = open_run_store(tmp_path / "w.db")
+    await store.init()
+    await store.log_tcp("q1", "x.com", "PASS", 50.0, 200, config_path="fake:quic", proto="quic")
+    await store.log_tcp("q2", "x.com", "FAIL", 50.0, 0, config_path="fake:quic2", proto="quic")
+    await store.flush()
+
+    quic = await store.get_working_quic("x.com")
+    assert "q1" in quic and "q2" not in quic
+
+    proto = await store.get_working_proto("x.com", "quic")
+    assert proto == ["q1"]
+
+    details = await store.get_working_proto_details("x.com", "quic")
+    assert details and details[0]["name"] == "q1"
+    assert details[0]["status"] == "PASS"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dao_get_completed_tcp_keys(tmp_path):
+    store = open_run_store(tmp_path / "c.db")
+    await store.init()
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store.log_tcp("s2", "b.com", "FAIL", 10.0, 0, config_path="fake:2")
+    await store.log_tcp("s3", "c.com", "PASS", 10.0, 200, config_path="fake:3", proto="quic")
+    await store.flush()
+
+    keys = await store.get_completed_tcp_keys()
+    assert ("s1", "a.com") in keys
+    assert ("s2", "b.com") in keys
+    # quic proto excluded by default (tcp only)
+    assert ("s3", "c.com") not in keys
+
+    keys_q = await store.get_completed_tcp_keys(proto="quic")
+    assert ("s3", "c.com") in keys_q
