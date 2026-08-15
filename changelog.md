@@ -2,6 +2,28 @@
 
 ## 1.2.1a — unreleased
 
+### Wave 2 — Lua TTL-RST feedback + raw QUIC Initial probe
+
+**Lua TTL-RST (structured feedback):** scan_bridge already emitted
+`STRATEGY_FAIL {reason=rst_in, ttl=...}` but it was dropped. Now:
+- `BridgeEvent.ttl` parsed + `is_rst_in()`.
+- `batch_bridge_probe` attaches `bridge_rst_in` / `bridge_rst_in_ttl`.
+- `_tcp_result_from_data` classifies → `TcpTestResult.fail_phase=TLS_RST_AT_SNI`
+  + `rst_in_ttl` (in-memory; no schema change).
+
+**Raw QUIC Initial probe (`checkers/quic_raw.py`):** one-shot UDP :443 probe
+with real baked QUIC Initial blob (fallback synthetic RFC 9000). Classifies
+PASS (server replied) / QUIC_DROP (silent TSPU drop) / UDP_BLOCKED (ICMP port
+unreachable). Integrated into preflight → `TriageProfile.quic_drop/udp_blocked`.
+Verified live: cloudflare.com→PASS, youtube.com→QUIC_DROP (Fryazino fact).
+
+**Blobs:** +3 from Flowseal repo (2026): `tls_5ka` (5ka.ru), `quic_5ka`,
+`quic_rutube` (rutube.ru) — aliases added, `verify_blobs` 26 OK.
+`blobs/README.md` rewritten with per-blob description.
+
+Tests: 1095 unit (+9), 113 quality, ruff clean.
+
+
 ### Preflight Triage (Wave 1) — deterministic DPI interference profile
 
 - `engine/fail_phase.py`: `FailPhase` enum (32 tokens) — single source of

@@ -546,7 +546,13 @@ class AsyncTestRunner:
         result.read_rate_bps = data.get("read_rate_bps", 0)
         result.error = data.get("error", "") or ""
         result.used_ip = data.get("used_ip") or ""
-        if result.error and not result.success:
+        result.rst_in_ttl = int(data.get("bridge_rst_in_ttl") or 0)
+        if data.get("bridge_rst_in") and not result.success:
+            # DPI injected a RST after the SNI was seen (scan_bridge detector).
+            from blockchecks.engine.fail_phase import FailPhase
+
+            result.fail_phase = FailPhase.TLS_RST_AT_SNI.value
+        elif result.error and not result.success:
             from blockchecks.engine.fail_phase import classify_fail_phase
 
             result.fail_phase = classify_fail_phase(result.error, result.http_code).value

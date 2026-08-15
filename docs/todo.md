@@ -660,6 +660,13 @@ blockcheckS → для каждой стратегии:
 - [ ] Stale-priority bug: приоритеты heap не обновляются после `boost_pass` — чинтится chunking'ом (P2, отложен).
 - [x] `MEM_MONITOR_PY_MAX_MIB` 2048 → 512 (`config.py:391`). (2026-08-14)
 
+#### Wave 2 — Lua TTL-RST + raw QUIC (2026-08-15, DONE)
+- [x] `BridgeEvent.ttl` + `is_rst_in()`; rst_in → `fail_phase=TLS_RST_AT_SNI` + `rst_in_ttl`.
+- [x] `checkers/quic_raw.py`: raw QUIC Initial (реальный блоб + RFC9000 fallback);
+      PASS/QUIC_DROP/UDP_BLOCKED. В preflight → `triage.quic_drop`.
+      Live: cloudflare PASS, youtube QUIC_DROP (Fryazino).
+- [x] Блобы +3 (tls_5ka/quic_5ka/quic_rutube) из Flowseal 2026; README с описанием.
+
 #### Новые баги (найдены при long-term прогонах 2026-08-14)
 - [x] **sqlite "database is locked"** в конце прогона → `persist_adaptive_weights` не выполнился, scan_weights пуста при resume. Фикс: `PRAGMA journal_mode=WAL` + `busy_timeout=30000` в `_apply_pragmas`, retry×5 в `flush()`.
 - [x] **Веса терялись при ошибке/дедлайне**: persist перенесён в `finally` в `_run_tcp_adaptive` — теперь сохраняются даже при crash.

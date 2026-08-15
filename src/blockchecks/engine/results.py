@@ -27,6 +27,7 @@ class TcpTestResult:
     error: str = ""
     used_ip: str = ""
     fail_phase: str = ""
+    rst_in_ttl: int = 0
 
 
 def tcp_results_from_details(

@@ -17,6 +17,7 @@ class BridgeEvent:
     gen: int = 0
     id: int = 0
     reason: str = ""
+    ttl: int = 0
     raw: dict | None = None
 
     @classmethod
@@ -35,8 +36,13 @@ class BridgeEvent:
             gen=int(data.get("gen") or 0),
             id=int(data.get("id") or 0),
             reason=str(data.get("reason") or ""),
+            ttl=int(data.get("ttl") or 0),
             raw=data,
         )
+
+    def is_rst_in(self) -> bool:
+        """True if this event is a DPI-injected inbound RST (scan_bridge)."""
+        return self.event == "STRATEGY_FAIL" and self.reason == "rst_in"
 
 
 @dataclass(frozen=True)

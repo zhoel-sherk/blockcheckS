@@ -118,3 +118,50 @@ def test_quic_bridge_probe_bad_json():
         data = _run_quic_bridge_probe("bs-p0", "py", "discord.com", 5.0, None)
     assert data["success"] is False
     assert "parse" in data["error"]
+
+
+def _session_rst_in(ttl: int = 70):
+    from blockchecks.service.lua_bridge_ipc import BridgeEvent
+
+    bridge = MagicMock()
+    bridge.truncate_events.return_value = None
+    bridge.publish.return_value = None
+    bridge.drain_events.return_value = [
+        BridgeEvent.from_line(
+            f'{{"event": "STRATEGY_FAIL", "reason": "rst_in", "gen": 1, "ttl": {ttl}}}'
+        ),
+    ]
+    s = MagicMock()
+    s.ns_name = "bs-p0"
+    s.bridge = bridge
+    return s
+
+
+@pytest.mark.unit
+def test_bridge_rst_in_attached():
+    s = _session_rst_in(ttl=70)
+    with patch(
+        "blockchecks.service.batch_bridge_probe.invoke_curl_probe_worker",
+        return_value={"success": False, "error": "curl: (35) Recv failure"},
+    ):
+        data = run_tcp_check_bridge(
+            s, 1, 1, "fake:blob=stun:repeats=6:tcp_ts=-1000", "discord.com", 5.0, "py"
+        )
+    assert data["bridge_rst_in"] is True
+    assert data["bridge_rst_in_ttl"] == 70
+
+
+@pytest.mark.unit
+def test_bridge_event_parses_ttl():
+    from blockchecks.service.lua_bridge_ipc import BridgeEvent
+
+    ev = BridgeEvent.from_line(
+        '{"event": "STRATEGY_FAIL", "reason": "rst_in", "gen": 3, "ttl": 65}'
+    )
+    assert ev.is_rst_in() is True
+    assert ev.ttl == 65
+    assert ev.gen == 3
+
+    plain = BridgeEvent.from_line('{"event": "APPLIED", "id": 2, "gen": 3}')
+    assert plain.is_rst_in() is False
+    assert plain.ttl == 0

@@ -14,6 +14,13 @@ from blockchecks.service.lua_session import BridgeSession
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 
 
+def _attach_rst_in(data: dict, events: list) -> None:
+    """Attach DPI RST-injection details (scan_bridge STRATEGY_FAIL rst_in)."""
+    rst_in = [e for e in events if e.is_rst_in()]
+    data["bridge_rst_in"] = bool(rst_in)
+    data["bridge_rst_in_ttl"] = max((e.ttl for e in rst_in), default=0)
+
+
 def run_tcp_check_bridge(
     session: BridgeSession,
     strategy_id: int,
@@ -49,6 +56,7 @@ def run_tcp_check_bridge(
         events = session.bridge.drain_events(since_gen=gen)
         data["bridge_events"] = [e.event for e in events]
         data["bridge_applied"] = any(e.event == "APPLIED" for e in events)
+        _attach_rst_in(data, events)
         return data
 
     if is_gv:
@@ -114,6 +122,7 @@ def run_tcp_check_bridge(
     events = session.bridge.drain_events(since_gen=gen)
     data["bridge_events"] = [e.event for e in events]
     data["bridge_applied"] = any(e.event == "APPLIED" for e in events)
+    _attach_rst_in(data, events)
     return data
 
 

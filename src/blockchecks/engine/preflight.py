@@ -418,6 +418,24 @@ def _triage_domain(
     except Exception as e:  # noqa: BLE001
         print(f"  Triage {domain}: TLS profile probe skipped ({e})")
 
+    # Raw QUIC Initial drop probe (host default netns, one-shot UDP :443).
+    try:
+        from blockchecks.checkers.quic_raw import probe_quic_initial
+
+        qip = ips[0] if ips else cache.primary_ip(domain) if cache else None
+        if qip:
+            qr = probe_quic_initial(qip, 443, timeout=min(opts.timeout, 3.0))
+            triage.quic_drop = qr.phase in (
+                FailPhase.QUIC_DROP, FailPhase.UDP_BLOCKED,
+            )
+            triage.udp_blocked = qr.phase == FailPhase.UDP_BLOCKED
+            print(
+                f"  Triage {domain}: QUIC Initial {qr.phase.value}"
+                f" ({qr.blob_used})"
+            )
+    except Exception as e:  # noqa: BLE001
+        print(f"  Triage {domain}: QUIC probe skipped ({e})")
+
 
 def check_udp_16kb(timeout: float = 5.0) -> tuple[bool, str]:
     """UDP voice-traffic >16KB check (dpi-detector analogue).
