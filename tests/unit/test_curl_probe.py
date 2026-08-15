@@ -158,6 +158,7 @@ def test_no_options_kwarg_in_probe_sources():
     paths = [
         root / "checkers" / "curl_probe.py",
         root / "engine" / "_curl_probe_worker.py",
+        root / "engine" / "in_ns_workers.py",
         root / "engine" / "async_runner.py",
         root / "engine" / "test_runner.py",
     ]
@@ -189,7 +190,7 @@ def test_curl_probe_worker_batch_mode():
     }
 
     with patch(
-        "blockchecks.engine._curl_probe_worker.run_curl_probe_batch",
+        "blockchecks.checkers.curl_probe.run_curl_probe_batch",
         return_value=fake_out,
     ) as mock_batch:
         out = run_payload(
@@ -381,7 +382,7 @@ def test_curl_probe_worker_single_mode():
         "repeats_mode": "fast",
         "quick_break": False,
     }
-    with patch("blockchecks.engine._curl_probe_worker.run_curl_probe_with_repeats") as mock:
+    with patch("blockchecks.checkers.curl_probe.run_curl_probe_with_repeats") as mock:
         mock.return_value = {"ok": True}
         out = run_payload(payload)
     assert out == {"ok": True}

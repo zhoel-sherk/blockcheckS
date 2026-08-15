@@ -441,8 +441,10 @@ class AdaptiveJobQueue:
     async def filter_resume(self, check, *, chunk_size: int = 512) -> int:
         """Drop pending jobs where *check(job)* is True. Returns skip count.
 
-        Checks run in chunks — unbounded gather over 100k+ jobs exhausts
-        threads/FDs when *check* opens SQLite (EMFILE / can't start new thread).
+        The queue stays pure — I/O (e.g. SQLite completed-key lookup) lives in
+        the caller's *check* callback. Checks run in chunks — unbounded gather
+        over 100k+ jobs exhausts threads/FDs when *check* opens SQLite
+        (EMFILE / can't start new thread).
         """
         import asyncio
 

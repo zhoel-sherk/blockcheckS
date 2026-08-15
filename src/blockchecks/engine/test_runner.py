@@ -127,10 +127,18 @@ class TestRunner:
                 self.ns_name,
                 self._python,
                 "-m",
-                "blockchecks.engine._curl_probe_worker",
+                "blockchecks.engine.in_ns_workers",
+                "--mode",
+                "curl",
             ]
         else:
-            cmd = [self._python, "-m", "blockchecks.engine._curl_probe_worker"]
+            cmd = [
+                self._python,
+                "-m",
+                "blockchecks.engine.in_ns_workers",
+                "--mode",
+                "curl",
+            ]
 
         wall = worker_wall_timeout(
             timeout,
@@ -286,7 +294,9 @@ class TestRunner:
         cmd = [
             self._python,
             "-m",
-            "blockchecks.engine._probe_worker",
+            "blockchecks.engine.in_ns_workers",
+            "--mode",
+            "udp",
             ip,
             str(port),
             str(timeout),

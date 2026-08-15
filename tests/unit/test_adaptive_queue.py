@@ -125,3 +125,25 @@ def test_scan_weights_has_no_cluster_boost():
     assert w.family.get("fake") > 1.0
     assert w.blob.get("stun") > 0
     assert w.trait.get("r6") > 0
+
+
+@pytest.mark.asyncio
+async def test_filter_resume_pure_check():
+    """filter_resume stays I/O-free — the caller supplies the check callback."""
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    q = AdaptiveJobQueue()
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q.enqueue(AdaptiveJob.from_item(item, "discord.com"))
+    q.enqueue(AdaptiveJob.from_item(item, "youtube.com"))
+
+    # pure callback: drop discord.com only (no DB, no I/O).
+    async def _check(job: AdaptiveJob) -> bool:
+        return job.domain == "discord.com"
+
+    skipped = await q.filter_resume(_check, chunk_size=1)
+    assert skipped == 1
+    assert len(q) == 1
+    remaining = q.pop()
+    assert remaining is not None
+    assert remaining.domain == "youtube.com"

@@ -44,7 +44,9 @@ def test_invoke_curl_probe_worker_parses_stdout():
     assert out["success"] is True
     assert out["http_code"] == 200
     cmd = popen.call_args.args[0]
-    assert "blockchecks.engine._curl_probe_worker" in cmd
+    assert "blockchecks.engine.in_ns_workers" in cmd
+    assert "--mode" in cmd
+    assert "curl" in cmd
 
 
 @pytest.mark.unit

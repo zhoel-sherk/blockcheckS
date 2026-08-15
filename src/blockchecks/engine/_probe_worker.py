@@ -1,22 +1,15 @@
-"""Subprocess entry for UDP voice probe inside netns (no sys.path hacks)."""
+"""Subprocess entry for UDP voice probe inside netns (proxy to in_ns_workers).
+
+Kept for back-compat (``python -m blockchecks.engine._probe_worker``); the
+implementation now lives in ``blockchecks.engine.in_ns_workers``.
+"""
 
 from __future__ import annotations
 
 import json
 import sys
 
-
-def run_probe(ip: str, port: int, timeout: float, try_burst: bool = False) -> dict:
-    from blockchecks.checkers.udp_voice import voice_udp_probe
-
-    ok, lat, detail, method = voice_udp_probe(ip, port, timeout, try_burst=try_burst)
-    return {
-        "success": ok,
-        "latency_ms": round(lat, 1),
-        "detail": detail,
-        "method": method,
-        "burst": try_burst,
-    }
+from blockchecks.engine.in_ns_workers import run_udp_worker_probe as run_probe
 
 
 def main(argv: list[str] | None = None) -> int:

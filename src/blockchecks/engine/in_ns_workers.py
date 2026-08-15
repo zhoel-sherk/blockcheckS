@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess as sp
+import sys
 
 from blockchecks.checkers.curl_probe import (
     CurlProbeRequest,
@@ -668,4 +669,116 @@ async def _save_pass_strategy_data_block(
         )
     except Exception:
         pass
+
+
+# ── Subprocess entries (integrated from _curl_probe_worker / _probe_worker) ──
+#
+# These run inside a netns as ``python -m blockchecks.engine.in_ns_workers
+# --mode curl|udp`` (see service/probe.py and engine/test_runner.py). They read
+# a JSON payload from stdin and write a JSON result to stdout, preserving the
+# exact contract the standalone _probe_worker / _curl_probe_worker modules had.
+
+
+def _curl_request_from_dict(data: dict) -> CurlProbeRequest:
+    return CurlProbeRequest(
+        domain=data["domain"],
+        timeout=float(data.get("timeout", 5.0)),
+        resolved_ip=data.get("resolved_ip"),
+        resolve_name=data.get("resolve_name"),
+        curl_url=data.get("curl_url"),
+        disable_ech=bool(data.get("disable_ech", False)),
+        googlevideo=bool(data.get("googlevideo", False)),
+        ggc=bool(data.get("ggc", False)),
+        ytcdn=bool(data.get("ytcdn", False)),
+        ytcdn_proxy=bool(data.get("ytcdn_proxy", False)),
+        ytcdn_bare=bool(data.get("ytcdn_bare", False)),
+        protocol=data.get("protocol", "tls12"),
+    )
+
+
+def run_curl_worker_payload(payload: dict) -> dict:
+    """Run a curl probe payload (single or batch) → result dict."""
+    from blockchecks.checkers.curl_probe import (
+        CurlProbeBatch,
+        run_curl_probe_batch,
+        run_curl_probe_with_repeats,
+    )
+
+    mode = payload.get("mode", "single")
+    if mode == "batch":
+        batch = CurlProbeBatch(
+            requests=[_curl_request_from_dict(r) for r in payload.get("requests", [])],
+            curl_parallel=int(payload.get("curl_parallel", 4)),
+            repeats=int(payload.get("repeats", 1)),
+            parallel_repeats=bool(payload.get("parallel_repeats", False)),
+            repeats_mode=str(payload.get("repeats_mode", "fast")),
+            quick_break=bool(payload.get("quick_break", False)),
+        )
+        return run_curl_probe_batch(batch)
+
+    req = _curl_request_from_dict(payload["request"])
+    repeats = int(payload.get("repeats", 1))
+    parallel = bool(payload.get("parallel_repeats", False))
+    return run_curl_probe_with_repeats(
+        req,
+        repeats=repeats,
+        parallel_repeats=parallel,
+        repeats_mode=str(payload.get("repeats_mode", "fast")),
+        quick_break=bool(payload.get("quick_break", False)),
+    )
+
+
+def run_udp_worker_probe(ip: str, port: int, timeout: float, try_burst: bool = False) -> dict:
+    """Run a UDP voice probe → result dict (former _probe_worker.run_probe)."""
+    from blockchecks.checkers.udp_voice import voice_udp_probe
+
+    ok, lat, detail, method = voice_udp_probe(ip, port, timeout, try_burst=try_burst)
+    return {
+        "success": ok,
+        "latency_ms": round(lat, 1),
+        "detail": detail,
+        "method": method,
+        "burst": try_burst,
+    }
+
+
+def _dispatch_worker_main(argv: list[str] | None = None) -> int:
+    """Dispatch subprocess invocation by ``--mode`` (curl|udp)."""
+    args = argv if argv is not None else list(sys.argv[1:])
+    mode = "curl"
+    if "--mode" in args:
+        i = args.index("--mode")
+        if i + 1 < len(args):
+            mode = args[i + 1]
+            args = [a for a in args if a != "--mode"]
+            # remove the mode value too
+            args = [a for a in args if a not in ("curl", "udp")]
+    if mode == "udp":
+        try_burst = "--burst" in args
+        args = [a for a in args if a != "--burst"]
+        if len(args) != 3:
+            print(
+                "usage: python -m blockchecks.engine.in_ns_workers --mode udp IP PORT TIMEOUT [--burst]",
+                file=sys.stderr,
+            )
+            return 2
+        ip, port_s, timeout_s = args
+        data = run_udp_worker_probe(ip, int(port_s), float(timeout_s), try_burst=try_burst)
+        print(json.dumps(data))
+        return 0
+    # curl mode — JSON payload on stdin (or argv[0])
+    raw = sys.stdin.read() if not args else args[0]
+    if not raw:
+        print(
+            "usage: echo JSON | python -m blockchecks.engine.in_ns_workers --mode curl",
+            file=sys.stderr,
+        )
+        return 2
+    payload = json.loads(raw)
+    print(json.dumps(run_curl_worker_payload(payload)))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_dispatch_worker_main())
 

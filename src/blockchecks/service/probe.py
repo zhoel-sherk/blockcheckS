@@ -1,7 +1,7 @@
 """Public curl probe worker API (netns subprocess).
 
 GV-3: curl_cffi runs in an isolated Python subprocess via
-``blockchecks.engine._curl_probe_worker`` — never inline ``options=``.
+``blockchecks.engine.in_ns_workers --mode curl`` — never inline ``options=``.
 """
 
 from __future__ import annotations
@@ -50,7 +50,9 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
                 ns_name,
                 py,
                 "-m",
-                "blockchecks.engine._curl_probe_worker",
+                "blockchecks.engine.in_ns_workers",
+                "--mode",
+                "curl",
             ],
             stdin=sp.PIPE,
             stdout=sp.PIPE,
