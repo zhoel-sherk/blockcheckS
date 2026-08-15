@@ -243,9 +243,9 @@ class Nfqws2Manager:
         # payload + desync and must not be wrapped again — otherwise nfqws2
         # gets a duplicate --payload / a garbage --lua-desync and exits.
         if strategy.strip().startswith("--"):
-            from blockchecks.service.lua_conf import _split_cli_args
+            from blockchecks.engine.conf_builder import split_cli_args
 
-            lines.extend(_split_cli_args(strategy))
+            lines.extend(split_cli_args(strategy))
         else:
             lines.append("--payload=tls_client_hello")
             lines.append(f"--lua-desync={strategy}")

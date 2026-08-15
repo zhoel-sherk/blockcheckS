@@ -19,6 +19,7 @@ from blockchecks.checkers.curl_probe import (
     worker_wall_timeout,
     ytcdn_probe_variants,
 )
+from blockchecks.engine.conf_builder import add_blobs_from_strategy, split_cli_args
 from blockchecks.engine.config import (
     BLOB_DIR,
     NFQUEUE_TCP,
@@ -28,10 +29,8 @@ from blockchecks.engine.config import (
     get_lua_init_scripts,
 )
 from blockchecks.engine.nfqws_config import (
-    _add_blobs_from_strategy,
     _build_inline_nfqws_lines,
     _build_quic_nfqws_lines,
-    _split_cli_args,
     _sudo,
 )
 from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon
@@ -556,7 +555,7 @@ def _run_udp_check(
             raw_line = raw_line.strip()
             if not raw_line:
                 continue
-            config_lines.extend(_split_cli_args(raw_line))
+            config_lines.extend(split_cli_args(raw_line))
         import tempfile as _tf2
 
         _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf")
@@ -576,7 +575,7 @@ def _run_udp_check(
         for lua in get_lua_init_scripts():
             if os.path.exists(lua):
                 config_lines.append(f"--lua-init=@{lua}")
-        _add_blobs_from_strategy(config_lines, strategy)
+        add_blobs_from_strategy(config_lines, strategy)
         if not any(line.startswith("--blob=") for line in config_lines):
             blob = os.path.join(BLOB_DIR, "discord_udp.bin")
             if os.path.exists(blob):
@@ -586,7 +585,7 @@ def _run_udp_check(
             if not raw_line:
                 continue
             if raw_line.startswith("--"):
-                config_lines.extend(_split_cli_args(raw_line))
+                config_lines.extend(split_cli_args(raw_line))
             else:
                 config_lines.append(f"--lua-desync={raw_line}")
         import tempfile as _tf2

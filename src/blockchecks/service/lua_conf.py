@@ -1,4 +1,8 @@
-"""Bridge conf generation — flat nfqws2 conf with scan_pick batch strategies."""
+"""Bridge conf generation — flat nfqws2 conf with scan_pick batch strategies.
+
+CLI arg parsing / ``<`` escaping and filter-line building are shared with the
+engine-side config builders via ``blockchecks.engine.conf_builder``.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +12,14 @@ import tempfile
 from pathlib import Path
 
 from blockchecks.engine.blob_aliases import append_blob_cli_lines, extract_blob_names
+from blockchecks.engine.conf_builder import (
+    build_filter_lines,
+    escape_conf_lt,
+    sanitize_arg_for_conf,
+    split_cli_args,
+)
 from blockchecks.engine.config import (
     BLOB_DIR,
-    NFQUEUE_TCP,
-    NFQUEUE_UDP,
     get_blockchecks_lua_scripts,
     get_lua_init_scripts,
 )
@@ -40,60 +48,6 @@ def blockchecks_lua_init_lines(extra: list[str] | None = None) -> list[str]:
     return lines
 
 
-def _strategy_filter_lines(protocol: str) -> list[str]:
-    if protocol == "http":
-        return [
-            f"--qnum={NFQUEUE_TCP}",
-            "--filter-tcp=80",
-            "--filter-l3=ipv4",
-            "--filter-l7=http",
-            "--ipcache-lifetime=0",
-            "--bind-fix4",
-            "--payload=http_req",
-        ]
-    if protocol == "quic":
-        return [
-            f"--qnum={NFQUEUE_UDP}",
-            "--filter-udp=443",
-            "--filter-l3=ipv4",
-            "--filter-l7=quic",
-            "--ipcache-lifetime=0",
-            "--bind-fix4",
-            "--payload=quic_initial",
-        ]
-    return [
-        f"--qnum={NFQUEUE_TCP}",
-        "--filter-tcp=443",
-        "--filter-l3=ipv4",
-        "--filter-l7=tls",
-        "--ipcache-lifetime=0",
-        "--bind-fix4",
-        "--payload=tls_client_hello",
-    ]
-
-
-def _split_cli_args(raw_line: str) -> list[str]:
-    out: list[str] = []
-    for arg in raw_line.split(" --"):
-        arg = arg.strip()
-        if not arg:
-            continue
-        if not arg.startswith("--"):
-            arg = "--" + arg
-        out.append(arg)
-    return out
-
-
-def _escape_conf_lt(cli: str) -> str:
-    """Escape '<' in a CLI arg so nfqws2 can read it from an @conf file.
-
-    nfqws2's conf splitter treats a bare '<' (e.g. ``--out-range=s1<d1``) as a
-    bad token and fails with "failed to split command line options". Quoting or
-    ``\\<`` both work; we use ``\\<`` (plain backslash escape).
-    """
-    return cli.replace("<", "\\<")
-
-
 def _append_strategy_desyncs(lines: list[str], strategy: str, strategy_n: int) -> None:
     tag = f":strategy={strategy_n}"
     for raw_line in strategy.split("\n"):
@@ -101,11 +55,11 @@ def _append_strategy_desyncs(lines: list[str], strategy: str, strategy_n: int) -
         if not raw_line:
             continue
         if raw_line.startswith("--"):
-            for cli in _split_cli_args(raw_line):
-                lines.append(_escape_conf_lt(cli))
+            for cli in split_cli_args(raw_line):
+                lines.append(sanitize_arg_for_conf(cli))
         else:
             desync = raw_line if ":strategy=" in raw_line else raw_line + tag
-            lines.append(f"--lua-desync={_escape_conf_lt(desync)}")
+            lines.append(f"--lua-desync={escape_conf_lt(desync)}")
 
 
 def build_bridge_conf(
@@ -124,7 +78,7 @@ def build_bridge_conf(
             lines.append(f"--lua-init=@{lua}")
     for path in stage_blockchecks_lua(ipc_dir, extra_lua_init):
         lines.append(f"--lua-init=@{path}")
-    lines.extend(_strategy_filter_lines(protocol))
+    lines.extend(build_filter_lines(protocol))
     lines.append("--lua-desync=bs_poll_strategy")
     lines.append("--lua-desync=smart_fallback")
     lines.append("--lua-desync=scan_pick")

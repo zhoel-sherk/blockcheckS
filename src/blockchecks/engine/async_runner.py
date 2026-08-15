@@ -42,6 +42,7 @@ PIN_SETTLE_MAX = 0.5
 # Budget for retry-on-next-IP attempts after the first failed IP (keeps
 # throttled-IP worst case from N×timeout, see per-IP throttling).
 
+from blockchecks.engine.conf_builder import add_blobs_from_strategy, split_cli_args
 from blockchecks.engine.in_ns_workers import (
     _is_quic_dropped,
     _quic_fallback_variants,
@@ -52,10 +53,8 @@ from blockchecks.engine.in_ns_workers import (
     _save_pass_strategy_data_block,
 )
 from blockchecks.engine.nfqws_config import (
-    _add_blobs_from_strategy,
     _build_inline_nfqws_lines,
     _build_quic_nfqws_lines,
-    _split_cli_args,
     _sudo,
 )
 from blockchecks.engine.results import (
@@ -90,6 +89,10 @@ __all__ = [
     "RETRY_IP_TIMEOUT",
     "BLOB_DIR",
 ]
+
+# Legacy re-exports (module-private names kept for test/back-compat).
+_add_blobs_from_strategy = add_blobs_from_strategy
+_split_cli_args = split_cli_args
 
 class AsyncTestRunner:
     """Parallel strategy tester using NetNsPool + asyncio.Semaphore."""

@@ -144,9 +144,10 @@ def test_lua_scripts_exist_in_repo() -> None:
 
 def test_build_bridge_conf_escapes_lt(tmp_path: Path) -> None:
     """nfqws2 conf splitter rejects a bare '<' — it must be escaped."""
-    from blockchecks.service.lua_conf import _escape_conf_lt, build_bridge_conf
+    from blockchecks.engine.conf_builder import escape_conf_lt
+    from blockchecks.service.lua_conf import build_bridge_conf
 
-    assert _escape_conf_lt("--out-range=s1<d1") == "--out-range=s1\\<d1"
+    assert escape_conf_lt("--out-range=s1<d1") == "--out-range=s1\\<d1"
 
     ipc = tmp_path / "ipc"
     ipc.mkdir()

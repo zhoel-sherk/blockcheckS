@@ -50,3 +50,13 @@ def test_build_tls_nfqws_config_unchanged():
     assert "--filter-tcp=443" in text
     assert "--filter-l7=tls" in text
     assert "--payload=tls_client_hello" in text
+
+
+def test_build_inline_escapes_lt():
+    """S3 audit fix: '<' in a strategy must be escaped in the @conf, else
+    nfqws2's conf splitter fails with 'failed to split command line options'."""
+    lines = _build_inline_nfqws_lines("--out-range=s1<d1 --in-range=-s1", "tls12")
+    text = "\n".join(lines)
+    assert "--out-range=s1\\<d1" in text
+    assert "--in-range=-s1" in text
+    assert "s1<d1" not in text

@@ -1,4 +1,10 @@
-"""Build nfqws2 config text: keenetic shell-env and raw flat conf."""
+"""Build nfqws2 config text: keenetic shell-env, raw flat conf, CLI sanitization.
+
+Single source for nfqws2 CLI arg parsing / escaping shared by ``nfqws_config``
+(in-namespace + sync workers) and ``service.lua_conf`` (bridge backend). The two
+formerly kept duplicate ``_split_cli_args`` and only ``lua_conf`` had the ``<``
+escape — that asymmetry is fixed here.
+"""
 
 from __future__ import annotations
 
@@ -7,10 +13,16 @@ import re
 import time
 
 from blockchecks.engine.blob_aliases import (
+    append_blob_cli_lines,
     blob_cli_lines,
     extract_blob_names,
 )
-from blockchecks.engine.config import BLOB_DIR, get_lua_init_scripts
+from blockchecks.engine.config import (
+    BLOB_DIR,
+    NFQUEUE_TCP,
+    NFQUEUE_UDP,
+    get_lua_init_scripts,
+)
 
 # Keenetic Entware layout (override via prefix=)
 DEFAULT_KEENETIC_PREFIX = "/opt/etc/nfqws2"
@@ -25,6 +37,76 @@ DEFAULT_UDP_PAYLOAD = (
     "wireguard_initiation,wireguard_response,wireguard_cookie,"
     "stun,discord_ip_discovery,mtproto_initial,unknown"
 )
+
+
+def split_cli_args(raw_line: str) -> list[str]:
+    """Split a line of nfqws2 CLI args on `` --`` boundaries.
+
+    A strategy line like ``--filter-tcp=443 --payload=tls_client_hello`` is
+    split into distinct nfqws2 CLI flags for @file confs.
+    """
+    out = []
+    for arg in raw_line.split(" --"):
+        arg = arg.strip()
+        if not arg:
+            continue
+        if not arg.startswith("--"):
+            arg = "--" + arg
+        out.append(arg)
+    return out
+
+
+def escape_conf_lt(cli: str) -> str:
+    """Escape ``<`` in a CLI arg so nfqws2 can read it from an @conf file.
+
+    nfqws2's conf splitter treats a bare ``<`` (e.g. ``--out-range=s1<d1``) as a
+    bad token and fails with "failed to split command line options". Quoting or
+    ``\\<`` both work; we use ``\\<`` (plain backslash escape).
+    """
+    return cli.replace("<", "\\<")
+
+
+def sanitize_arg_for_conf(cli: str) -> str:
+    """Escape a single CLI arg for embedding in an @conf file."""
+    return escape_conf_lt(cli)
+
+
+def add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
+    """Parse strategy for blob=NAME and seqovl_pattern=NAME; add --blob lines."""
+    append_blob_cli_lines(lines, extract_blob_names(strategy), BLOB_DIR)
+
+
+def build_filter_lines(protocol: str) -> list[str]:
+    """Shared nfqws2 filter/payload lines for a protocol (tls|http|quic)."""
+    if protocol == "http":
+        return [
+            f"--qnum={NFQUEUE_TCP}",
+            "--filter-tcp=80",
+            "--filter-l3=ipv4",
+            "--filter-l7=http",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+            "--payload=http_req",
+        ]
+    if protocol == "quic":
+        return [
+            f"--qnum={NFQUEUE_UDP}",
+            "--filter-udp=443",
+            "--filter-l3=ipv4",
+            "--filter-l7=quic",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+            "--payload=quic_initial",
+        ]
+    return [
+        f"--qnum={NFQUEUE_TCP}",
+        "--filter-tcp=443",
+        "--filter-l3=ipv4",
+        "--filter-l7=tls",
+        "--ipcache-lifetime=0",
+        "--bind-fix4",
+        "--payload=tls_client_hello",
+    ]
 
 
 def _ensure_strategy_n(strategy: str, n: int) -> str:
