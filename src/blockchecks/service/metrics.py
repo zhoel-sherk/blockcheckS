@@ -49,52 +49,74 @@ class _Window:
         self.samples.clear()
 
 
-def process_rss_bytes(pid: int) -> int:
-    """RSS in bytes for *pid* (0 on any error)."""
-    try:
-        import psutil
+def _proc_status_value(pid: int, field: str) -> int:
+    """Parse ``/proc/<pid>/status`` field (e.g. VmRSS) → bytes, 0 on any error.
 
-        return int(psutil.Process(pid).memory_info().rss or 0)
-    except Exception:
+    Value is printed in kB; multiplied by 1024. Handles process races
+    (process may exit mid-read) and permission errors gracefully.
+    """
+    try:
+        with open(f"/proc/{pid}/status", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith(f"{field}:"):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].strip().isdigit():
+                        return int(parts[1]) * 1024
+                    return 0
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
         return 0
+    return 0
+
+
+def process_rss_bytes(pid: int) -> int:
+    """RSS in bytes for *pid* (0 on any error). Stdlib /proc reader (no psutil)."""
+    return _proc_status_value(pid, "VmRSS")
 
 
 def process_vms_bytes(pid: int) -> int:
-    """VMS in bytes for *pid* (0 on any error)."""
-    try:
-        import psutil
-
-        return int(psutil.Process(pid).memory_info().vms or 0)
-    except Exception:
-        return 0
+    """VMS in bytes for *pid* (0 on any error). Stdlib /proc reader (no psutil)."""
+    return _proc_status_value(pid, "VmSize")
 
 
 def find_nfqws2_pids(ns_name: str) -> list[int]:
-    """PID list of nfqws2 running inside *ns_name* (psutil, no subprocess).
+    """PID list of nfqws2 running inside *ns_name* (stdlib /proc, no subprocess).
 
     Matches the netns inode of each nfqws2 process against the bind-mounted
     namespace file under ``/var/run/netns/<name>``.  Avoids ``sudo ip netns
     exec pgrep`` in the hot probe loop, which stalls under parallel bridge
     workers (blocking subprocess + race on shared state).
+
+    Handles process races (a process may exit while we iterate /proc): every
+    /proc access is guarded against FileNotFoundError / ProcessLookupError /
+    PermissionError / OSError.
     """
     try:
         ns_file = f"/var/run/netns/{ns_name}"
         ns_inode = os.stat(ns_file).st_ino
     except OSError:
         return []
-    try:
-        import psutil
-    except ImportError:
-        return []
     pids: list[int] = []
-    for proc in psutil.process_iter(["pid", "name"]):
+    try:
+        proc_dirs = os.listdir("/proc")
+    except OSError:
+        return []
+    for entry in proc_dirs:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
         try:
-            if (proc.info.get("name") or "") != "nfqws2":
+            # Only consider nfqws2-named processes (cheap comm read first).
+            try:
+                with open(f"/proc/{pid}/comm", encoding="utf-8", errors="replace") as cf:
+                    comm = cf.read().strip()
+            except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
                 continue
-            link = os.readlink(f"/proc/{proc.pid}/ns/net")
+            if comm != "nfqws2":
+                continue
+            link = os.readlink(f"/proc/{pid}/ns/net")
             if link.endswith(f"[{ns_inode}]"):
-                pids.append(proc.pid)
-        except (psutil.Error, OSError):
+                pids.append(pid)
+        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
             continue
     return pids
 
