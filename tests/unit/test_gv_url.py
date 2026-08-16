@@ -74,6 +74,8 @@ def test_get_fresh_url_from_cache(tmp_path, monkeypatch):
 
 
 def test_get_fresh_url_fetches(tmp_path, monkeypatch):
+    import shutil
+
     import blockchecks.checkers.youtube_url as yu
 
     cache = tmp_path / "gv.json"
@@ -81,6 +83,9 @@ def test_get_fresh_url_fetches(tmp_path, monkeypatch):
     monkeypatch.setattr(yu, "_fetch_ytdlp_url", lambda *a, **k: (
         "https://a.googlevideo.com/videoplayback?ip=46.44.0.118"
     ))
+    # CI has no yt-dlp in PATH/venv (it lives in the optional `youtube` extra).
+    # Mock the binary lookup so get_fresh_url reaches the fetch branch.
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/yt-dlp")
     yu._fetch_fail_until = 0.0
     url = yu.get_fresh_url()
     assert "googlevideo.com" in url
