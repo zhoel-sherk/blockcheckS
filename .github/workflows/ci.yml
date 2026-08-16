@@ -12,6 +12,6 @@ jobs:
           python-version: "3.12"
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: pytest matrix_debt_w1 + matrix_generator
-        run: python -m pytest tests/unit/test_matrix_debt_w1.py tests/unit/test_matrix_generator.py -q -p no:cacheprovider
+      - name: pytest metrics + mutation
+        run: python -m pytest tests/unit/test_metrics.py tests/unit/test_mutation.py -q -p no:cacheprovider
       - run: echo "done"
