@@ -3,7 +3,7 @@
 [![version](https://img.shields.io/badge/version-1.3.2-green)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1097%20passed-success)](#)
+[![tests](https://img.shields.io/badge/tests-1266%20passed-success)](#)
 
 **Твой провайдер режет YouTube, Discord и Telegram через DPI?**
 *blockcheckS за 10 минут найдёт работающий обход из 10 000+ комбинаций,
@@ -22,10 +22,15 @@
   stream-stall/QoS/QUIC/TLS-fingerprint) → отсечение бесполезных веток генераторов
 - 🧬 **Adaptive queue** — генетический буст PASS-стратегий по family/blob/traits
 - 🛰️ **`bs serve`** — резидентный on-the-fly probe server (Unix socket + HTTP)
+- 🧩 **`bs mcp`** — MCP-мост (FastMCP, stdio) для LLM-клиентов (Claude/Cursor/opencode)
+- 🧪 **Статический валидатор** — офлайн-проверка стратегий до netns (9+ правил,
+  fuzz-устойчив) + кастомные Lua (`lua/custom/`, `manifest.toml` с included/excluded)
 - 📊 **TCP×UDP матрицы** — ищет пары стратегий для голоса Discord
 - 💾 **Checkpoint/resume** — упал роутер? Продолжи с места, SQLite помнит всё
-- 📦 **nfconf export** — готовый конфиг для Keenetic, Linux, OpenWrt
+- 📦 **nfconf export** — готовый конфиг для Keenetic, Linux, OpenWrt (+ `--ipset`
+  из DNS-кэша, IP→CIDR через ip2net)
 - 🤖 **Zapret2 auto-fetch** — сам скачает nfqws2 с GitHub, если нет локально
+- 🍓 **Raspberry Pi 2+ (armv7l)** — установка без компиляции (stdlib /proc, без psutil)
 
 ---
 
@@ -37,9 +42,10 @@
 4. [Установка](#установка)
 5. [CLI команды](#cli-команды)
 6. [Пресеты](#пресеты)
-7. [Документация](#документация)
-8. [For contributors](#for-contributors)
-9. [Дисклеймер](#дисклеймер)
+7. [Экспорт конфига для роутера](#экспорт-конфига-для-роутера)
+8. [Документация](#документация)
+9. [For contributors](#for-contributors)
+10. [Дисклеймер](#дисклеймер)
 
 ---
 
@@ -107,14 +113,23 @@ plain wheel их не найдёт. Это осознанное решение (
 
 **nfqws2 / zapret2** — blockcheckS сам скачает официальный релиз
 [bol-van/zapret2](https://github.com/bol-van/zapret2) при первом запуске в
-`~/.local/share/blockcheckS/zapret2/`. Если nfqws2 уже стоит в `/opt/zapret2` —
-использует его. Отключить авто-фетч: `--no-fetch-deps`.
+`~/.local/share/blockcheckS/zapret2/` (под armv7l/arm64 — `binaries/linux-arm`).
+Если nfqws2 уже стоит в `/opt/zapret2` — использует его. Отключить авто-фетч:
+`--no-fetch-deps`.
 
 **Блобы** (fake payloads) — в репо `blobs/` (без скачивания). Override:
 `BLOCKCHECKS_BLOBS`. Опционально: `scripts/install_blobs.sh` для extras на хосте.
 Flowseal-техники: `--tcp-sources flowseal` / `-M flowseal-fast`
 ([Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube);
 howto: [docs/cookbook/blobs.md](docs/cookbook/blobs.md)).
+
+**Raspberry Pi 2+ (armv7l)** — все обязательные зависимости имеют armv7l
+wheels на PyPI (psutil убран → stdlib `/proc`), поэтому установка **без
+компиляции**:
+```bash
+bash scripts/setup-standalone.sh    # venv + pip install + smoke
+# подробности: docs/install-rpi.md
+```
 
 Юнит-тесты запускаются **без root**:
 ```bash
@@ -134,8 +149,9 @@ pytest -m "not integration"
 | `bs udp` | Один UDP-конфиг (sync) | `sudo bs udp -c configs/udp_voice__fake_r6.conf` |
 | `bs composite` | Композитный TCP+UDP конфиг | `sudo bs composite -c configs/composite_discord.conf` |
 | `bs bench-settle` | Калибровка settle/curl таймаутов | `sudo bs bench-settle -d discord.com` |
+| `bs serve` | Резидентный probe server (Unix socket + HTTP) | `sudo bs serve --pool 2` |
 | `bs mcp` | MCP-сервер (stdio) для LLM-клиентов | `bs-mcp` (см. [docs/mcp.md](docs/mcp.md)) |
-| `bc-nfconf` | Экспорт nfqws2-конфигов из БД | `bc-nfconf --db state.db --out-dir output` |
+| `bc-nfconf` | Экспорт nfqws2-конфигов из БД (+`--ipset`) | `bc-nfconf --db state.db --out-dir output --ipset` |
 
 Флаги, которые стоит знать: `--resume`, `--preset`, `-M`, `--generate`,
 `--tcp-sources`, `--parallel`, `--max`, `--scan-level`, `--repeats`,
@@ -168,6 +184,25 @@ bs pair -d discord.com -M gp-voice           # голосовые UDP-страт
 
 ---
 
+## Экспорт конфига для роутера
+
+После прогона blockcheckS экспортирует готовые nfqws2-конфиги из best-стратегий
+в XDG-каталог:
+
+```bash
+# default: ~/.local/share/blockcheckS/export/nfqws2_<ts>.conf (+ raw, user.list)
+bc-nfconf --db logs/run.db --out-dir /path/to/out
+
+# Добавить IP-фильтр из DNS-кэша (без DNS на роутере):
+#   малые наборы → --ipset-ip inline, большие → user.ipset
+bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset
+```
+
+На Keenetic скопируйте `nfqws2_*.conf` → `/opt/etc/nfqws2/nfqws2.conf`.
+Детали: [configs/README.md](configs/README.md).
+
+---
+
 ## Документация
 
 | Документ | О чём |
@@ -179,7 +214,7 @@ bs pair -d discord.com -M gp-voice           # голосовые UDP-страт
 | [MCP Server](docs/mcp.md) | Установка MCP в Claude Desktop / Cursor / opencode |
 | [Raspberry Pi (armv7l)](docs/install-rpi.md) | Установка на RPi 2+ без компиляции |
 | [Glossary](docs/glossary.md) | Терминология: netns, NFQUEUE, pair matrix, ... |
-| [Changelog](changelog.md) | История версий (1.0.0 → 1.0.2) |
+| [Changelog](changelog.md) | История версий (1.3.2 и ранее) |
 | [Roadmap](docs/todo.md) | Бэклог: P1 (скорость), P2 (voice/GP), P3 (ML) |
 
 Cookbook: [add checker](docs/cookbook/add-checker.md) ·
