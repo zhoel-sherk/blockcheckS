@@ -12,7 +12,7 @@ Committed `.bin` payloads for nfqws2 `--blob=` / Flowseal-style strategies.
 | Alias | File | Size | Source / note |
 |---|---|---|---|
 | `google` / `tls_clienthello` | `tls_clienthello_www_google_com.bin` | 681 B | www.google.com ClientHello (Flowseal bin) — базовый Google-фейк |
-| `max_ru` | `tls_clienthello_max_ru.bin` | 664 B | max.ru ClientHello (Flowseal) — подтверждён на Fryazino |
+| `max_ru` | `tls_clienthello_max_ru.bin` | 664 B | max.ru ClientHello (Flowseal) — подтверждён на LLC Fiord |
 | `4pda` | `tls_clienthello_4pda_to.bin` | 284 B | 4pda.to ClientHello (Flowseal) |
 | `tls_vk` | `tls_clienthello_vk_com.bin` | 517 B | vk.com ClientHello |
 | `tls_5ka` | `tls_5ka.bin` | 654 B | **5ka.ru ClientHello (NEW, Flowseal 2026)** — Пятёрочка, обход РКН |

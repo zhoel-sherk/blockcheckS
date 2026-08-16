@@ -220,7 +220,7 @@ pytest -m "not integration"
   `src/blockchecks/checkers/curl_probe.py`.
 
 **QUIC / HTTP-3 блокировка — механизм (исследовано 2026-08)**
-- **QUIC как протокол НЕ заблокирован** на Fryazino: `check_http3('cloudflare.com')`
+- **QUIC как протокол НЕ заблокирован** на LLC Fiord: `check_http3('cloudflare.com')`
   → HTTP 301 (работает), низкоуровневый QUIC Initial к Cloudflare IP отвечает
   (1200B), до `vk.com` / голого `googlevideo.com` QUIC доходит.
 - **Блокировка по SNI, не по IP**: тот же Google IP `74.125.108.234` (rr-диапазон)

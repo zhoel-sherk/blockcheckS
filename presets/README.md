@@ -48,7 +48,7 @@ bs scan -d discord.com -M blockcheckS-best     # Our best strategies
 
 ### Протокол-специфичные расширения (`.http` / `.quic` / `.udp`)
 
-Протокольные пресеты (bc2-parity-*, fryazino-*, gv5-*) используют расширение
+Протокольные пресеты (bc2-parity-*, fiord-*, gv5-*) используют расширение
 под протокол: `.http` (HTTP :80), `.quic` (QUIC), `.udp` (voice UDP). Их
 можно передавать через `-M` как обычно. При одном basename в нескольких
 расширениях приоритет: `.tls` → `.txt` → `.http` → `.quic` → `.udp`

@@ -1,4 +1,4 @@
-# GP-verified TCP strategies — confirmed working on Fryazino.net
+# GP-verified TCP strategies — confirmed working on LLC Fiord
 # Source: GP state.sqlite3, top-10 by domain coverage (53-54 domains)
 #
 # BEST pattern: fake+blob with tcp_ts=-1000 (Flowseal ALT2 mapped)

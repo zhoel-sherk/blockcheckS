@@ -158,7 +158,7 @@ jobs:
       - name: Integration (requires real nfqws2 + netns on host)
         run: |
           # The integration suite needs a probe host with nfqws2 + sudo + netns
-          # (Fryazino network). GitHub runners lack these, so we can only run
+          # (LLC Fiord network). GitHub runners lack these, so we can only run
           # the subset that is safe without them; the rest run manually via:
           #   scripts/release_smoke.sh  (probe host, sudo)
           if ! command -v nfqws2 >/dev/null 2>&1; then

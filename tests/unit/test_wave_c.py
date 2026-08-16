@@ -51,7 +51,7 @@ def test_tcp_tls_no_empty_user_agent(monkeypatch):
     assert "'User-Agent': ''" not in src
 
 
-def test_dpi_fake_patterns_fryazino_only():
+def test_dpi_fake_patterns_fiord_only():
     decoded = [p.decode() for p in DPI_FAKE_PATTERNS]
     assert set(decoded) == {"roskomnadzor", "rkn.gov.ru", "blockpage", "utmblock"}
 

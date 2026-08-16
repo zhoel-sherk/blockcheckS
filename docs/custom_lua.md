@@ -150,7 +150,7 @@ end
 
 ### Риски
 
-- Слишком агрессивный `rndsni` может сломать TLS fingerprint parity с curl_cffi (JA4) — тестировать на Fryazino
+- Слишком агрессивный `rndsni` может сломать TLS fingerprint parity с curl_cffi (JA4) — тестировать на LLC Fiord
 - QUIC структура жёстче TLS — мутировать только documented safe offsets
 
 ---
@@ -778,7 +778,7 @@ end
 описаны в `lua/custom/manifest.toml` (included/excluded) и валидируются
 `static_validator`: excluded → error, undocumented → warning.
 
-blockcheckS fallback (БЕЗ кастомного lua, для Fryazino): multiline `fake\nfake`.
+blockcheckS fallback (БЕЗ кастомного lua, для LLC Fiord): multiline `fake\nfake`.
 
 Preset: `presets/strategies/gp-custom-dupfake.tls` (dupfake-строки активны + BS-fallback).
 
