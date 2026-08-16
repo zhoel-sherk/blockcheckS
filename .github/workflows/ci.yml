@@ -12,6 +12,6 @@ jobs:
           python-version: "3.12"
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: pytest netns_pool only
-        run: python -m pytest tests/unit/test_netns_pool.py -q -p no:cacheprovider
+      - name: pytest nfconf only
+        run: python -m pytest tests/unit/test_nfconf.py -q -p no:cacheprovider
       - run: echo "done"
