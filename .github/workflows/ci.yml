@@ -12,6 +12,6 @@ jobs:
           python-version: "3.12"
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: pytest nfqws2_manager clean plugins
-        run: python -m pytest tests/unit/test_nfqws2_manager.py -p no:randomly -p no:cov -p no:xdist -q
+      - name: pytest nfqws2_manager (no -n in addopts now)
+        run: python -m pytest tests/unit/test_nfqws2_manager.py -q -p no:cacheprovider
       - run: echo "done"
