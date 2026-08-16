@@ -39,3 +39,6 @@ htmlcov/
 
 # local tooling (act GitHub runner, etc.)
 bin/
+
+# local agent onboarding file (not committed)
+AGENTS.md
