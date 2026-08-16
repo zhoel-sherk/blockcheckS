@@ -2,15 +2,6 @@
 name: blockcheckS-mcp
 description: Use when working with blockcheckS (DPI strategy tester for zapret2/nfqws2): checking long-term campaign status, querying found strategies, triage, generating nfqws2 router configs, or using MCP tools get_series_status / query_strategies / triage_domain / dbg_* / generate_router_config.
 ---
-
-# blockcheckS MCP Skill (обезличенная копия)
-
-> Эта копия — для репо/публичного использования. Локальная версия живёт в
-> `~/.config/opencode/skills/blockcheckS-mcp/SKILL.md` (с путями под конкретный
-> хост). Здесь локальные пути заменены на `<PROJECT_DIR>` / XDG-обозначения.
-
----
-
 # blockcheckS MCP — инструменты и воркфлоу
 
 blockcheckS — массовый тестер DPI-стратегий (zapret2/nfqws2). MCP-сервер
@@ -81,13 +72,5 @@ dbg_probe_raw(domain, strategy) → одиночная проверка (dry_run
 - `dbg_validate_strategy_syntax` — офлайн, полезен до отправки стратегии в netns.
 - Пресеты имеют расширения под протокол: `.tls/.txt/.http/.quic/.udp` (приоритет .tls).
 - Кастомные lua регистрируются в `lua/custom/manifest.toml` (included/excluded параметры).
-
-## Установка локального скилла
-
-```bash
-mkdir -p ~/.config/opencode/skills/blockcheckS-mcp
-cp docs/mcp-skill.md ~/.config/opencode/skills/blockcheckS-mcp/SKILL.md
-# затем заменить <PROJECT_DIR> на фактический путь проекта
-```
 
 Перезапустить opencode — скилл `blockcheckS-mcp` станет доступен.
