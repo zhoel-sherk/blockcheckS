@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -154,3 +155,108 @@ def test_main_returns_zero(tmp_path, monkeypatch):
     )):
         rc = main(["--limit", "1"])
     assert rc == 0
+
+
+# ── ipset export (data_block DNS cache, provider-agnostic) ─────────────
+
+
+def _fake_provider_dir(tmp_path, provider, records):
+    """Write data_block/providers/<provider>/dns.db with one domain per record."""
+    import sqlite3
+
+    prov = tmp_path / "providers" / provider
+    prov.mkdir(parents=True)
+    con = sqlite3.connect(str(prov / "dns.db"))
+    con.execute(
+        "CREATE TABLE dns_records (domain TEXT PRIMARY KEY, ips TEXT, checked_at TEXT)"
+    )
+    for dom, ips in records.items():
+        con.execute(
+            "INSERT INTO dns_records (domain, ips, checked_at) VALUES (?,?,?)",
+            (dom, ",".join(ips), "2026-08-16T00:00:00"),
+        )
+    con.commit()
+    con.close()
+    return tmp_path / "providers"
+
+
+def test_collect_domain_ips_uses_all_providers(tmp_path, monkeypatch):
+    _fake_provider_dir(tmp_path, "p1", {"youtube.com": ["1.2.3.4"]})
+    _fake_provider_dir(tmp_path, "p2", {"youtube.com": ["5.6.7.8"], "discord.com": ["9.9.9.9"]})
+    monkeypatch.setattr(
+        "blockchecks.data_block.provider.iter_provider_dirs",
+        lambda allow_detect=True: sorted((tmp_path / "providers").iterdir()),
+    )
+    monkeypatch.setattr("blockchecks.nfconf._find_ip2net", lambda: None)
+    from blockchecks.nfconf import collect_domain_ips
+
+    ips = collect_domain_ips(["youtube.com", "discord.com"])
+    # first provider that has youtube.com wins (p1), p2 discord adds 9.9.9.9
+    assert "1.2.3.4" in ips
+    assert "9.9.9.9" in ips
+    assert "5.6.7.8" not in ips  # youtube.com already covered by p1
+
+
+def test_collect_domain_ips_missing_db_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "blockchecks.data_block.provider.iter_provider_dirs", lambda allow_detect=True: []
+    )
+    from blockchecks.nfconf import collect_domain_ips
+
+    assert collect_domain_ips(["a.com"]) == []
+
+
+def test_resolve_ipset_for_export_inline(tmp_path, monkeypatch):
+    monkeypatch.setattr("blockchecks.nfconf._find_ip2net", lambda: None)
+    monkeypatch.setattr(
+        "blockchecks.nfconf.collect_domain_ips", lambda domains, use_all_providers=True: ["1.1.1.1", "2.2.2.2"]
+    )
+    from blockchecks.nfconf import resolve_ipset_for_export
+
+    ips, ipset_file = resolve_ipset_for_export(["a.com"], out_dir=str(tmp_path))
+    assert ips == ["1.1.1.1", "2.2.2.2"]
+    assert ipset_file is None
+
+
+def test_resolve_ipset_for_export_file_over_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr("blockchecks.nfconf._find_ip2net", lambda: None)
+    many = [f"10.0.{i}.1" for i in range(100)]
+    monkeypatch.setattr(
+        "blockchecks.nfconf.collect_domain_ips", lambda domains, use_all_providers=True: many
+    )
+    from blockchecks.nfconf import resolve_ipset_for_export
+
+    ips, ipset_file = resolve_ipset_for_export(["a.com"], out_dir=str(tmp_path))
+    assert ips is None
+    assert ipset_file is not None
+    assert Path(ipset_file).exists()
+    assert len(Path(ipset_file).read_text().splitlines()) == 100
+
+
+def test_maybe_aggregate_ips_without_ip2net(monkeypatch):
+    monkeypatch.setattr("blockchecks.nfconf._find_ip2net", lambda: None)
+    from blockchecks.nfconf import maybe_aggregate_ips
+
+    assert maybe_aggregate_ips(["1.1.1.1", "1.1.1.1", "2.2.2.2"]) == ["1.1.1.1", "2.2.2.2"]
+
+
+def test_export_configs_passes_ipset_to_builders(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    store = _store()
+    store.get_best_tcp = AsyncMock(return_value=[{"strategy": "fake:a"}])
+    store.get_working_tcp = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "blockchecks.nfconf.resolve_ipset_for_export",
+        lambda domains, out_dir, use_all_providers=True: (["1.2.3.4"], None),
+    )
+    with patch("blockchecks.nfconf.build_keenetic_conf") as kc, \
+         patch("blockchecks.nfconf.build_raw_conf") as raw:
+        kc.return_value = "k"
+        raw.return_value = "r"
+        asyncio.run(
+            export_configs(
+                store=store, domain="d.com", limit=1, out_dir=str(out), use_ipset=True
+            )
+        )
+    assert kc.call_args.kwargs["ipset_ips"] == ["1.2.3.4"]
+    assert raw.call_args.kwargs["ipset_ips"] == ["1.2.3.4"]

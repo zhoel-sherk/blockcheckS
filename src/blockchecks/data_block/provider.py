@@ -165,3 +165,27 @@ def get_provider_dir(allow_detect: bool = True) -> Path:
 
     name = provider_name(allow_detect=allow_detect)
     return Path(PROJECT_DIR) / "data_block" / "providers" / name
+
+
+def iter_provider_dirs(allow_detect: bool = True) -> list[Path]:
+    """All provider dirs under data_block/providers/ (agnostic to host provider).
+
+    Returns current provider first (if its dir exists), then every other
+    provider dir. Used when aggregating DNS/IP data across providers — the repo
+    is shared/public, so multiple providers can be present.
+    """
+    from blockchecks.engine.config import PROJECT_DIR
+
+    base = Path(PROJECT_DIR) / "data_block" / "providers"
+    if not base.is_dir():
+        return []
+    current = get_provider_dir(allow_detect=allow_detect)
+    ordered: list[Path] = []
+    seen: set[Path] = set()
+    if current.is_dir():
+        ordered.append(current)
+        seen.add(current)
+    for entry in sorted(base.iterdir()):
+        if entry.is_dir() and entry not in seen:
+            ordered.append(entry)
+    return ordered

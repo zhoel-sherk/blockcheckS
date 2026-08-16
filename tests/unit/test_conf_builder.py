@@ -209,3 +209,45 @@ def test_validate_custom_lua_params_optional_allowed():
     assert validate_custom_lua_params(
         "dupfake:blob=stun:repeats=6:optional"
     ) == []
+
+
+def test_build_raw_conf_ipset_ips_inline():
+    conf = build_raw_conf(
+        tcp_strategies=["fake:blob=stun"], udp_strategies=[], ipset_ips=["1.2.3.4", "5.6.7.8"]
+    )
+    assert "--ipset-ip=1.2.3.4,5.6.7.8" in conf
+
+
+def test_build_raw_conf_ipset_file():
+    conf = build_raw_conf(
+        tcp_strategies=["fake:blob=stun"], udp_strategies=[], ipset_file="/tmp/u.ipset"
+    )
+    assert "--ipset=@/tmp/u.ipset" in conf
+
+
+def test_build_raw_conf_ipset_file_wins_over_ips():
+    conf = build_raw_conf(
+        tcp_strategies=["fake:blob=stun"], udp_strategies=[],
+        ipset_ips=["1.2.3.4"], ipset_file="/tmp/u.ipset",
+    )
+    assert "--ipset=@/tmp/u.ipset" in conf
+    assert "--ipset-ip" not in conf
+
+
+def test_build_raw_conf_no_ipset_by_default():
+    conf = build_raw_conf(tcp_strategies=["fake:blob=stun"], udp_strategies=[])
+    assert "--ipset" not in conf
+
+
+def test_build_keenetic_conf_ipset_ips():
+    conf = build_keenetic_conf(
+        tcp_strategies=["fake:blob=stun"], udp_strategies=[], ipset_ips=["1.2.3.4"]
+    )
+    assert "--ipset-ip=1.2.3.4" in conf
+
+
+def test_build_keenetic_conf_ipset_file():
+    conf = build_keenetic_conf(
+        tcp_strategies=["fake:blob=stun"], udp_strategies=[], ipset_file="/etc/bs/user.ipset"
+    )
+    assert "--ipset=@/etc/bs/user.ipset" in conf

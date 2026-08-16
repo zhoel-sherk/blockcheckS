@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -80,6 +81,114 @@ async def collect_export_strategies(
     return tcp_strats, udp_strats, quic_strats
 
 
+_IP2NET_CANDIDATES = (
+    "/opt/zapret2/binaries/linux-x86_64/ip2net",
+    "/opt/zapret2/ip2net/ip2net",
+)
+
+_IPSET_INLINE_LIMIT = 64  # > this many IPs → write a file instead of inline
+
+
+def _find_ip2net() -> str | None:
+    """Return a usable ip2net binary path, or None."""
+    import shutil
+
+    for cand in _IP2NET_CANDIDATES:
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return shutil.which("ip2net")
+
+
+def maybe_aggregate_ips(ips: list[str]) -> list[str]:
+    """Aggregate raw IPs into CIDR subnets via ip2net when available.
+
+    Falls back to a plain dedup list when ip2net is missing. Provider-agnostic:
+    only collapses the input list, never reads data_block itself.
+    """
+    ip2net = _find_ip2net()
+    unique = list(dict.fromkeys(ips))
+    if not ip2net or not unique:
+        return unique
+    try:
+        proc = subprocess.run(
+            [ip2net, "-4"],
+            input="\n".join(unique) + "\n",
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode == 0:
+            out = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+            if out:
+                return out
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return unique
+
+
+def collect_domain_ips(
+    domains: list[str],
+    *,
+    use_all_providers: bool = True,
+) -> list[str]:
+    """Collect IPs for *domains* from data_block DNS cache, provider-agnostic.
+
+    Reads dns.db of the current provider first; when *use_all_providers* is set
+    (default) it also reads every other provider under data_block/providers/
+    so the exported ipset works regardless of which provider populated the repo.
+    Never raises; missing dns.db / unparseable records are skipped.
+    """
+    from blockchecks.data_block.provider import get_provider_dir, iter_provider_dirs
+    from blockchecks.data_block.store import ProviderStore
+
+    domain_set = {d.strip().rstrip(".") for d in domains if d and d.strip()}
+    if not domain_set:
+        return []
+    provider_dirs = iter_provider_dirs()
+    if not use_all_providers:
+        provider_dirs = [d for d in provider_dirs if d == get_provider_dir()]
+    ips: list[str] = []
+    seen_domains: set[str] = set()
+    for prov_dir in provider_dirs:
+        store = ProviderStore(prov_dir)
+        recs = store.load_dns_records_sync() or {}
+        for domain, (domain_ips, _ts) in recs.items():
+            key = domain.strip().rstrip(".")
+            if key not in domain_set or key in seen_domains:
+                continue
+            seen_domains.add(key)
+            ips.extend(ip.strip() for ip in domain_ips if ip and ip.strip())
+    return maybe_aggregate_ips(ips)
+
+
+def resolve_ipset_for_export(
+    domains: list[str],
+    *,
+    out_dir: str,
+    use_all_providers: bool = True,
+) -> tuple[list[str] | None, str | None]:
+    """Return (ipset_ips, ipset_file) for export_configs.
+
+    - ≤ _IPSET_INLINE_LIMIT IPs → inline ``ipset_ips`` (no file).
+    - more → write ``user.ipset`` (one IP/CIDR per line) and return
+      ``ipset_file`` pointing at it.
+    Both None when no IPs found.
+    """
+    ips = collect_domain_ips(domains, use_all_providers=use_all_providers)
+    if not ips:
+        return None, None
+    if len(ips) <= _IPSET_INLINE_LIMIT:
+        return ips, None
+    ipset_path = os.path.join(out_dir, "user.ipset")
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        with open(ipset_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(ips) + "\n")
+    except OSError:
+        return ips, None
+    return None, ipset_path
+
+
 async def export_configs(
     *,
     db_path: str | None = None,
@@ -93,6 +202,8 @@ async def export_configs(
     domains_file: str | None = None,
     timestamp: str | None = None,
     common_only: bool = True,
+    use_ipset: bool = False,
+    use_all_providers: bool = True,
 ) -> dict:
     """Write keenetic + raw conf (+ user.list). Returns paths dict.
 
@@ -127,6 +238,12 @@ async def export_configs(
     user_list = os.path.join(out_dir, "user.list")
 
     comment = f"domain={domain} limit={limit} tcp={len(tcp_s)} udp={len(udp_s)} quic={len(quic_s)}"
+    ipset_ips: list[str] | None = None
+    ipset_file: str | None = None
+    if use_ipset:
+        ipset_ips, ipset_file = resolve_ipset_for_export(
+            domains, out_dir=out_dir, use_all_providers=use_all_providers
+        )
     keenetic = build_keenetic_conf(
         tcp_strategies=tcp_s,
         udp_strategies=udp_s,
@@ -136,6 +253,8 @@ async def export_configs(
         mode=mode,
         domains=domains,
         comment=comment,
+        ipset_ips=ipset_ips,
+        ipset_file=ipset_file,
     )
     raw = build_raw_conf(
         tcp_strategies=tcp_s,
@@ -146,6 +265,8 @@ async def export_configs(
         else os.path.join(prefix, "blobs"),
         domains=domains,
         comment=comment,
+        ipset_ips=ipset_ips,
+        ipset_file=ipset_file,
     )
     with open(keenetic_path, "w", encoding="utf-8") as f:
         f.write(keenetic)
@@ -155,7 +276,10 @@ async def export_configs(
 
     from blockchecks.engine.paths import reclaim_sudo_ownership
 
-    for artifact in (keenetic_path, raw_path, user_list):
+    artifacts = [keenetic_path, raw_path, user_list]
+    if ipset_file:
+        artifacts.append(ipset_file)
+    for artifact in artifacts:
         reclaim_sudo_ownership(Path(artifact))
 
     if own_store:
@@ -198,6 +322,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Export best per-domain strategies instead of COMMON intersection",
     )
+    p.add_argument(
+        "--ipset",
+        action="store_true",
+        help="Add nfqws2 --ipset filter from data_block DNS cache (domains' IPs, "
+        "all providers); small sets inline via --ipset-ip, large sets as user.ipset",
+    )
+    p.add_argument(
+        "--no-all-providers",
+        action="store_true",
+        help="With --ipset: use only the current host provider's dns.db",
+    )
     args = p.parse_args(argv)
 
     result = asyncio.run(
@@ -211,6 +346,8 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode,
             domains_file=args.domains_file,
             common_only=not args.no_common_only,
+            use_ipset=args.ipset,
+            use_all_providers=not args.no_all_providers,
         )
     )
     print(f"  keenetic: {result['keenetic']}")

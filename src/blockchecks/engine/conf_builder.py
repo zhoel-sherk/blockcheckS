@@ -248,8 +248,15 @@ def build_keenetic_conf(
     mode: str = "auto",
     domains: list[str] | None = None,
     comment: str = "",
+    ipset_ips: list[str] | None = None,
+    ipset_file: str | None = None,
 ) -> str:
-    """Keenetic / Entware nfqws2.conf (shell env variables)."""
+    """Keenetic / Entware nfqws2.conf (shell env variables).
+
+    ``ipset_ips`` → emit ``--ipset-ip=<comma list>``; ``ipset_file`` → emit
+    ``--ipset=@<path>``. Both are optional and never both set (file wins if
+    both given). Uses nfqws2-native ipset filtering (no zapret2 ipset scripts).
+    """
     quic_strategies = quic_strategies or [
         "fake:blob=quic_initial:repeats=11",
     ]
@@ -264,6 +271,10 @@ def build_keenetic_conf(
             blob_names.append(base)
 
     base_parts = _lua_init_lines(prefix) + blob_cli_lines(blob_names, blobs_dir)
+    if ipset_file:
+        base_parts.append(f"--ipset=@{ipset_file}")
+    elif ipset_ips:
+        base_parts.append("--ipset-ip=" + ",".join(ipset_ips))
     base_args = "\n ".join(base_parts)
 
     # circular needs inbound until s5556 + outbound until s34228 (manual.md)
@@ -385,8 +396,14 @@ def build_raw_conf(
     qnum_tcp: int = 200,
     comment: str = "",
     domains: list[str] | None = None,
+    ipset_ips: list[str] | None = None,
+    ipset_file: str | None = None,
 ) -> str:
-    """Flat nfqws2 @file conf without keenetic ISP/MODE wrappers."""
+    """Flat nfqws2 @file conf without keenetic ISP/MODE wrappers.
+
+    ``ipset_ips`` → emit ``--ipset-ip=<comma list>``; ``ipset_file`` → emit
+    ``--ipset=@<path>``. Both optional, never both set (file wins).
+    """
     quic_strategies = quic_strategies or []
     lines: list[str] = []
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -412,6 +429,11 @@ def build_raw_conf(
         if base not in blob_names:
             blob_names.append(base)
     lines.extend(blob_cli_lines(blob_names, blobs_dir))
+
+    if ipset_file:
+        lines.append(f"--ipset=@{ipset_file}")
+    elif ipset_ips:
+        lines.append("--ipset-ip=" + ",".join(ipset_ips))
 
     if domains:
         lines.append("--hostlist-domains=" + ",".join(domains))

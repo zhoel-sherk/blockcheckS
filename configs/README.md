@@ -53,6 +53,26 @@ bc-nfconf --db logs/run.db --out-dir /path/to/out
 `nfqws2_*.conf` в `/opt/etc/nfqws2/nfqws2.conf` (или через
 `etc/nfqws2/nfqws2.conf` в init-скрипте).
 
+### Опция `--ipset` (фильтр по IP вместо hostlist)
+
+По умолчанию конфиг фильтрует домены через `--hostlist-domains=` (nfqws2 сам
+резолвит DNS на роутере). Для надёжности без DNS на роутере можно добавить
+готовый IP-фильтр из DNS-кэша blockcheckS (`data_block`):
+
+```bash
+# IP доменов из data_block (все провайдеры) → --ipset-ip / user.ipset
+bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset
+
+# Только текущий провайдер:
+bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset --no-all-providers
+```
+
+- Малое число IP (≤64) → inline `--ipset-ip=1.2.3.4,...` в конфиге.
+- Большое → отдельный `user.ipset` (один IP/CIDR на строку) + `--ipset=@user.ipset`.
+- IP агрегируются в CIDR через `ip2net`, если бинарник доступен.
+- Использует нативные флаги nfqws2 (`--ipset`), без скриптов zapret2/ipset —
+  устойчиво к изменениям zapret2.
+
 ## Отличие от presets/strategies/
 
 | | `configs/*.conf` | `presets/strategies/*.tls/.txt/.http/.quic/.udp` |
