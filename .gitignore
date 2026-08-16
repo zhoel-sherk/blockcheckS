@@ -42,3 +42,6 @@ bin/
 
 # local agent onboarding file (not committed)
 AGENTS.md
+
+# local MCP planning/notes (not committed)
+mcp/
