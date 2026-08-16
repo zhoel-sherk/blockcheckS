@@ -13,6 +13,6 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - run: echo "install done $(date +%s)"
-      - name: pytest full -n0
-        run: python -m pytest -m "not integration and not quality and not mutation" -n 0 -q
+      - name: pytest full -x --tb=short
+        run: python -m pytest -m "not integration and not quality and not mutation" -n 0 -x --tb=short -q
       - run: echo "done $(date +%s)"
