@@ -66,13 +66,23 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 | A | `triage_domain` | Preflight Triage домена (L3/DNS/TLS/QUIC) + рекомендации генераторов |
 | A | `find_working_strategy` | AQ-поиск стратегий с `time_limit_sec` (≤60) |
 | A | `generate_router_config` | nfqws2 .conf для Keenetic / OpenWrt / Linux |
-| A | `get_service_status` | Статус демона (pool, uptime, активная серия) |
+| A | `get_service_status` | Статус демона (pool, uptime, активная серия) — требует `bs serve` |
+| A | `get_series_status` | Статус кампании **напрямую из диска** (run.lock + state.db) — без демона; работает пока серия A→F владеет pool |
+| A2 | `query_strategies` | Топ-стратегии для домена из state.db (read-only, без демона/root) |
+| A2 | `get_presets` | Список strategy/domain пресетов из `presets/` (read-only) |
+| A2 | `stop_campaign` | Graceful stop активной кампании через демон (`bs serve`) |
 | B | `dbg_probe_raw` | Одиночная проба стратегии, `dry_run_db=True` по умолчанию |
 | B | `dbg_inspect_lua_ipc` | Трейс событий Lua bridge (APPLIED / rst_in / ttl) |
 | B | `dbg_validate_strategy_syntax` | Офлайн-валидация CLI-аргументов nfqws2 |
 | B | `dbg_dump_pool_state` | netns pool, PID nfqws2, stale run.lock |
 
 Ресурсы: `blockchecks://presets/manifest`, `blockchecks://telemetry/active_run`.
+
+> **Без демона работают**: `get_series_status`, `query_strategies`, `get_presets`,
+> `dbg_validate_strategy_syntax` + ресурс `presets/manifest`.
+> **Требуют `bs serve`**: `triage_domain`, `find_working_strategy`,
+> `generate_router_config`, `get_service_status`, `stop_campaign`, `dbg_probe_raw`,
+> `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`.
 
 ---
 
@@ -149,6 +159,10 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 
 Actions: `probe` `status` `triage` `find_strategy` `generate_config`
 `dbg_probe` `dbg_inspect_lua` `dbg_dump_pool` `get_telemetry` `stop`.
+
+Инструменты `get_series_status`, `query_strategies`, `get_presets` читают
+состояние напрямую из `run.lock` / `state.db` / `presets/` и **не требуют** ни
+демона, ни сокета (работают во время активной серии A→F).
 
 ---
 

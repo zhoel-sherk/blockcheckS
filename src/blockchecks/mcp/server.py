@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 from blockchecks.engine.config import PROJECT_DIR
-from blockchecks.engine.paths import STATE_DIR
+from blockchecks.engine.paths import RUNTIME_LOGS_DIR, STATE_DIR
 
 # ---------------------------------------------------------------------------
 # FastMCP Server Initialization & Constants
@@ -242,6 +242,288 @@ async def get_service_status() -> dict[str, Any]:
     if not response.get("ok"):
         raise RuntimeError(f"Status check failed: {response.get('error', 'Unknown error')}")
     return response.get("data", {})
+
+
+@mcp.tool()
+async def get_series_status() -> dict[str, Any]:
+    """
+    Reads the long-term campaign status directly from disk (run.lock + state.db)
+    — no daemon required. Works while A→F series owns the pool (when `bs serve`
+    refuses to start) and in headless runs. Read-only; never touches the DB.
+    """
+
+    from blockchecks.service.run_control import read_active_run
+
+    info = read_active_run()
+    if info is None:
+        return {"active": False, "running": None}
+
+    started = info.started_at
+    uptime_h = 0.0
+    try:
+        from datetime import datetime
+
+        t0 = datetime.fromisoformat(started)
+        uptime_h = round((datetime.now().astimezone() - t0.astimezone()).total_seconds() / 3600, 2)
+    except Exception:
+        pass
+
+    payload: dict[str, Any] = {
+        "active": True,
+        "running": info.command,
+        "pid": info.pid,
+        "started_at": started,
+        "uptime_h": uptime_h,
+        "db": info.db_path,
+        "cwd": info.cwd,
+        "argv": list(info.argv),
+    }
+    # Key flags for quick human glance.
+    argv = list(info.argv)
+    for flag, dest in (
+        ("--parallel", "parallel"),
+        ("--scan-level", "scan_level"),
+        ("--repeats", "repeats"),
+        ("--max", "max"),
+    ):
+        if flag in argv:
+            i = argv.index(flag)
+            if i + 1 < len(argv):
+                payload[dest] = argv[i + 1]
+    payload["backend"] = "classic" if "--classic" in argv else "lua_bridge"
+    payload["adaptive"] = "--adaptive" in argv or "--fan-out" in argv
+
+    # DB progress (read-only, tolerant of WAL/locks).
+    db_path = info.db_path
+    if db_path:
+        db = Path(db_path)
+        if not db.is_absolute():
+            db = (Path(info.cwd or Path.cwd()) / db).resolve()
+        if db.is_file():
+            payload.update(_read_db_progress(db))
+
+    # Progress line `[done/total] pass=N rate ETA` from the run log, if any.
+    payload["progress"] = _read_progress_line(info)
+    payload["state_dir"] = str(STATE_DIR)
+    payload["logs_dir"] = str(RUNTIME_LOGS_DIR)
+    return payload
+
+
+def _read_db_progress(db_path: Path) -> dict[str, Any]:
+    """Read test counters from a state.db (read-only sqlite, never writes)."""
+    import sqlite3
+
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+    except sqlite3.Error:
+        return {"db_error": "cannot open read-only"}
+    try:
+        cur = con.cursor()
+        total = cur.execute("SELECT COUNT(*) FROM tcp_results").fetchone()[0]
+        passed = cur.execute("SELECT COUNT(*) FROM tcp_results WHERE status='PASS'").fetchone()[0]
+        rates = {}
+        for phase, cnt in cur.execute(
+            "SELECT fail_phase, COUNT(*) FROM tcp_results "
+            "WHERE status='FAIL' AND fail_phase != '' GROUP BY fail_phase ORDER BY COUNT(*) DESC LIMIT 3"
+        ).fetchall():
+            rates[str(phase)] = int(cnt)
+        return {
+            "tcp_total": int(total),
+            "tcp_pass": int(passed),
+            "top_fail_phases": rates,
+        }
+    except sqlite3.Error as err:
+        return {"db_error": str(err)}
+    finally:
+        con.close()
+
+
+def _read_progress_line(info) -> str:
+    """Best-effort parse of `[done/total] pass=N skip=M rate ETA` from run logs.
+
+    The campaign prints progress to stdout; run_<VAR>_LATEST.logpath points at
+    the log file (owned by the invoking user, readable without root).
+    """
+    import re
+
+    logpath = _latest_run_logpath(info)
+    if not logpath:
+        return ""
+    try:
+        lines = logpath.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        m = re.search(r"\[(\d+)/(\d+)\]\s+pass=(\d+)", line)
+        if m:
+            return line.strip()
+    return ""
+
+
+def _latest_run_logpath(info) -> Path | None:
+    """Resolve the variant's stdout log file (run_<VAR>_*.log).
+
+    Variant letter (A..F) is the first token after ``run_`` in the db filename,
+    e.g. logs/run_A_base.db → A, logs/run_C_adaptive.db → C. The LATEST pointer
+    file (logs/run_<VAR>_LATEST.logpath) has the exact stdout path. Logs live in
+    the project ``logs/`` dir (cwd of the campaign), not XDG RUNTIME_LOGS_DIR.
+    """
+    import glob
+
+    variant = ""
+    db_name = str(info.db_path or "").split("/")[-1] if info.db_path else ""
+    if db_name.startswith("run_") and "_" in db_name:
+        variant = db_name.split("_", 2)[1][:1]
+    if not variant:
+        return None
+
+    cwd = Path(info.cwd or Path.cwd())
+    for logs_dir in (cwd / "logs", RUNTIME_LOGS_DIR):
+        ptr = logs_dir / f"run_{variant}_LATEST.logpath"
+        if ptr.is_file():
+            try:
+                target = Path(ptr.read_text(encoding="utf-8").strip())
+                if target.exists():
+                    return target
+            except OSError:
+                pass
+        matches = sorted(
+            glob.glob(str(logs_dir / f"run_{variant}_*.log")),
+            key=lambda p: p,
+        )
+        if matches:
+            return Path(matches[-1])
+    return None
+
+
+# ---------------------------------------------------------------------------
+# LAYER A2: Campaign Data & Control (read-only local + daemon stop)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def query_strategies(
+    domain: str,
+    status: str = "PASS",
+    limit: int = 20,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Returns top working strategies for a domain from state.db (read-only).
+    Reads the latest PASS/THROTTLED result per strategy ordered by latency.
+    db_path defaults to the campaign DB from run.lock, else the XDG default.
+    """
+    import sqlite3
+
+    path = _resolve_db_path(db_path)
+    if path is None or not path.exists():
+        return [{"error": f"state.db not found: {path}"}]
+
+    allowed = {"PASS", "THROTTLED", "FAIL", "ALL"}
+    status_key = status.upper()
+    if status_key not in allowed:
+        raise ValueError(f"Invalid status '{status}'. Allowed: {', '.join(sorted(allowed))}")
+
+    statuses = ("PASS", "THROTTLED") if status_key in ("PASS", "THROTTLED", "ALL") else (status_key,)
+    limit = max(1, min(int(limit), 100))
+
+    def _query() -> list[dict[str, Any]]:
+
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
+        except sqlite3.Error as err:
+            return {"error": f"cannot open {path}: {err}"}
+        try:
+            cur = con.cursor()
+            placeholders = ",".join("?" for _ in statuses)
+            rows = cur.execute(
+                f"""SELECT s.name, t.latency_ms, t.http_code, t.status, t.timestamp, t.fail_phase
+                    FROM strategies s
+                    JOIN tcp_results t ON t.strategy_id = s.id
+                    WHERE s.proto='tcp' AND t.domain=? AND t.status IN ({placeholders})
+                      AND t.id = (
+                        SELECT t2.id FROM tcp_results t2
+                        WHERE t2.strategy_id = s.id AND t2.domain=?
+                        ORDER BY t2.id DESC LIMIT 1
+                      )
+                    ORDER BY t.latency_ms ASC
+                    LIMIT ?""",
+                (domain, *statuses, domain, limit),
+            )
+            cols = ["strategy", "latency_ms", "http_code", "status", "timestamp", "fail_phase"]
+            return [dict(zip(cols, r)) for r in rows.fetchall()]
+        except sqlite3.Error as err:
+            return {"error": str(err)}
+        finally:
+            con.close()
+
+    return await asyncio.to_thread(_query)
+
+
+@mcp.tool()
+async def get_presets(kind: str = "strategies") -> list[dict[str, Any]]:
+    """
+    Lists available strategy or domain presets from presets/ (read-only).
+    kind: 'strategies' | 'domains'. Returns name → entry count.
+    """
+    import glob as _glob
+
+    kind = kind.lower()
+    if kind not in ("strategies", "domains"):
+        raise ValueError(f"Invalid kind '{kind}'. Allowed: strategies, domains")
+
+    base = Path(PROJECT_DIR) / "presets"
+    patterns = (
+        ("strategies", [str(base / "strategies" / "*.tls"), str(base / "strategies" / "*.txt")]),
+        ("domains", [str(base / "domains" / "*.txt")]),
+    )[0 if kind == "strategies" else 1]
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for pattern in patterns[1]:
+        for f in sorted(_glob.glob(pattern)):
+            name = Path(f).stem
+            if name in seen:
+                continue
+            seen.add(name)
+            try:
+                count = sum(
+                    1 for line in Path(f).read_text(encoding="utf-8", errors="replace").splitlines()
+                    if line.strip() and not line.strip().startswith("#")
+                )
+            except OSError:
+                count = 0
+            out.append({"name": name, "kind": kind, "count": count})
+    return out
+
+
+@mcp.tool()
+async def stop_campaign(wait: float = 30.0) -> dict[str, Any]:
+    """
+    Gracefully stops the active long-term campaign via the daemon socket
+    (action=stop → SIGTERM → flush → export). Requires `bs serve` to be up.
+    """
+    response = await _send_daemon_request("stop", {}, timeout=min(wait + 5.0, 90.0))
+    return response.get("data", {}) or response
+
+
+def _resolve_db_path(db_path: str | None) -> Path | None:
+    """Active campaign DB from run.lock, else XDG default state.db."""
+    from blockchecks.engine.paths import DEFAULT_DB_PATH
+    from blockchecks.service.run_control import read_active_run
+
+    if db_path:
+        p = Path(os.path.expanduser(db_path))
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        return p
+    info = read_active_run()
+    if info and info.db_path:
+        p = Path(info.db_path)
+        if not p.is_absolute():
+            p = (Path(info.cwd or Path.cwd()) / p).resolve()
+        return p
+    return DEFAULT_DB_PATH
 
 
 # ---------------------------------------------------------------------------

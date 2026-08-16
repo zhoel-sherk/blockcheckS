@@ -235,3 +235,223 @@ def test_get_manifest_path_resolves_dev_tree():
     path = get_manifest_path()
     assert path.exists()
     assert path.name == "manifest.toml"
+
+
+
+
+# ── get_series_status (local, no daemon) ──────────────────────────────
+
+
+def _make_active_info(db_path, cwd=".", argv=None):
+    from blockchecks.service.run_control import ActiveRunInfo
+
+    return ActiveRunInfo(
+        pid=4242,
+        command="full",
+        started_at="2026-08-16T15:31:00+00:00",
+        db_path=str(db_path),
+        cwd=cwd,
+        argv=argv or ["full", "--db", str(db_path), "--parallel", "4"],
+    )
+
+
+def _make_state_db(path):
+    import sqlite3
+
+    con = sqlite3.connect(str(path))
+    con.execute(
+        "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, strategy_id TEXT, "
+        "domain TEXT, status TEXT, http_code INTEGER, latency_ms REAL, "
+        "gateway_ws_ms REAL, content_valid INTEGER, read_rate_bps REAL, "
+        "error TEXT, timestamp TEXT, resolved_ip TEXT, dns_verdict TEXT, "
+        "doh_server TEXT, bridge_batch_id INTEGER, bridge_gen INTEGER, fail_phase TEXT)"
+    )
+    con.executemany(
+        "INSERT INTO tcp_results (domain, status, fail_phase, timestamp) VALUES (?,?,?,?)",
+        [
+            ("a.com", "PASS", "", "2026-08-16T15:00:00"),
+            ("b.com", "FAIL", "connect_timeout", "2026-08-16T15:00:01"),
+            ("c.com", "FAIL", "connect_timeout", "2026-08-16T15:00:02"),
+            ("d.com", "FAIL", "http_redirect", "2026-08-16T15:00:03"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+
+def _patch_run_control(monkeypatch, info):
+    import blockchecks.mcp.server as ms
+    import blockchecks.service.run_control as rc
+
+    monkeypatch.setattr(rc, "read_active_run", lambda: info)
+    monkeypatch.setattr(ms, "_latest_run_logpath", lambda info: None)
+
+
+async def test_get_series_status_active(tmp_path, monkeypatch):
+    db = tmp_path / "run_A_base.db"
+    _make_state_db(db)
+    from blockchecks.mcp.server import get_series_status
+
+    info = _make_active_info(db, cwd=str(tmp_path), argv=["full", "--db", str(db), "--parallel", "4"])
+    _patch_run_control(monkeypatch, info)
+
+    result = await get_series_status()
+    assert result["active"] is True
+    assert result["running"] == "full"
+    assert result["pid"] == 4242
+    assert result["tcp_total"] == 4
+    assert result["tcp_pass"] == 1
+    assert result["top_fail_phases"].get("connect_timeout") == 2
+    assert result["backend"] == "lua_bridge"
+
+
+async def test_get_series_status_inactive(monkeypatch):
+    from blockchecks.mcp.server import get_series_status
+
+    _patch_run_control(monkeypatch, None)
+    result = await get_series_status()
+    assert result == {"active": False, "running": None}
+
+
+async def test_get_series_status_classic_backend(tmp_path, monkeypatch):
+    db = tmp_path / "run_D_classic.db"
+    _make_state_db(db)
+    from blockchecks.mcp.server import get_series_status
+
+    info = _make_active_info(
+        db,
+        cwd=str(tmp_path),
+        argv=["full", "--db", str(db), "--classic", "--scan-level", "full"],
+    )
+    _patch_run_control(monkeypatch, info)
+
+    result = await get_series_status()
+    assert result["backend"] == "classic"
+    assert result["scan_level"] == "full"
+
+
+async def test_get_series_status_progress_line(tmp_path, monkeypatch):
+    db = tmp_path / "run_B_new.db"
+    _make_state_db(db)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    logfile = logs / "run_B_20260816_183059.log"
+    logfile.write_text("  [850/412212] pass=104 skip=0 1.76/s ETA 3903m\n")
+    from blockchecks.mcp.server import get_series_status
+
+    info = _make_active_info(db, cwd=str(tmp_path))
+    import blockchecks.service.run_control as rc
+
+    monkeypatch.setattr(rc, "read_active_run", lambda: info)
+
+    result = await get_series_status()
+    assert result["progress"] == "[850/412212] pass=104 skip=0 1.76/s ETA 3903m"
+
+
+# ── query_strategies / get_presets / stop_campaign ────────────────────
+
+
+def _make_full_db(path):
+    """State db with strategies + tcp_results tables (as sqlite_store)."""
+    import sqlite3
+
+    con = sqlite3.connect(str(path))
+    con.execute(
+        "CREATE TABLE strategies (id INTEGER PRIMARY KEY, name TEXT, proto TEXT, flags TEXT)"
+    )
+    con.execute(
+        "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, "
+        "domain TEXT, status TEXT, http_code INTEGER, latency_ms REAL, "
+        "timestamp TEXT, fail_phase TEXT)"
+    )
+    con.executemany(
+        "INSERT INTO strategies (name, proto) VALUES (?,?)",
+        [
+            ("std_fake_a", "tcp"),
+            ("std_fake_b", "tcp"),
+            ("std_fake_c", "tcp"),
+        ],
+    )
+    con.executemany(
+        "INSERT INTO tcp_results (strategy_id, domain, status, http_code, latency_ms, timestamp, fail_phase) VALUES (?,?,?,?,?,?,?)",
+        [
+            (1, "a.com", "PASS", 200, 80.0, "2026-08-16T10:00:00", ""),
+            (2, "a.com", "PASS", 200, 120.0, "2026-08-16T10:00:01", ""),
+            (3, "a.com", "FAIL", 0, 0.0, "2026-08-16T10:00:02", "connect_timeout"),
+            (1, "a.com", "FAIL", 0, 0.0, "2026-08-16T10:00:03", "connect_timeout"),  # later, replaces pass
+        ],
+    )
+    con.commit()
+    con.close()
+
+
+async def test_query_strategies_returns_top_by_latency(tmp_path):
+    db = tmp_path / "run_A_base.db"
+    _make_full_db(db)
+    from blockchecks.mcp.server import query_strategies
+
+    result = await query_strategies("a.com", status="PASS", limit=10, db_path=str(db))
+    assert isinstance(result, list)
+    # Latest result per strategy: a→FAIL (overrides pass), b→PASS, c→FAIL.
+    assert len(result) == 1
+    assert result[0]["strategy"] == "std_fake_b"
+    assert result[0]["status"] == "PASS"
+
+
+async def test_query_strategies_fail_status(tmp_path):
+    db = tmp_path / "run_A_base.db"
+    _make_full_db(db)
+    from blockchecks.mcp.server import query_strategies
+
+    result = await query_strategies("a.com", status="FAIL", limit=10, db_path=str(db))
+    assert all(r["status"] == "FAIL" for r in result)
+    assert any(r["fail_phase"] == "connect_timeout" for r in result)
+
+
+async def test_query_strategies_invalid_status(tmp_path):
+    db = tmp_path / "run_A_base.db"
+    _make_full_db(db)
+    from blockchecks.mcp.server import query_strategies
+
+    with pytest.raises(ValueError, match="Invalid status"):
+        await query_strategies("a.com", status="BOGUS", db_path=str(db))
+
+
+async def test_get_presets(tmp_path, monkeypatch):
+    import blockchecks.mcp.server as ms
+
+    strat_dir = tmp_path / "presets" / "strategies"
+    dom_dir = tmp_path / "presets" / "domains"
+    strat_dir.mkdir(parents=True)
+    dom_dir.mkdir()
+    (strat_dir / "flowseal-fast.tls").write_text("s1\ns2\ns3\n")
+    (strat_dir / "shortlist-tls12.tls").write_text("x\n")
+    (dom_dir / "benchmark.txt").write_text("a.com\nb.com\n# comment\nc.com\n")
+    monkeypatch.setattr(ms, "PROJECT_DIR", str(tmp_path))
+
+    strats = await ms.get_presets("strategies")
+    assert {p["name"]: p["count"] for p in strats} == {
+        "flowseal-fast": 3,
+        "shortlist-tls12": 1,
+    }
+    doms = await ms.get_presets("domains")
+    assert {p["name"]: p["count"] for p in doms} == {"benchmark": 3}
+
+
+async def test_get_presets_invalid_kind():
+    from blockchecks.mcp.server import get_presets
+
+    with pytest.raises(ValueError, match="Invalid kind"):
+        await get_presets("blobs")
+
+
+async def test_stop_campaign_delegates_to_daemon(monkeypatch):
+    from blockchecks.mcp import server as ms
+
+    async def fake_send(action, payload, timeout=30.0, socket_path=None):
+        assert action == "stop"
+        return {"ok": True, "error": None, "data": {"status": "stopping"}}
+
+    monkeypatch.setattr(ms, "_send_daemon_request", fake_send)
+    result = await ms.stop_campaign()
+    assert result.get("status") == "stopping"
