@@ -127,6 +127,19 @@ jobs:
         run: |
           mutmut run
           mutmut results
+          python -c "
+          import json
+          from pathlib import Path
+          p = Path('mutants/mutmut-cicd-stats.json')
+          s = json.loads(p.read_text()) if p.exists() else {}
+          survived = int(s.get('survived') or 0)
+          total = int(s.get('total') or 0)
+          if survived:
+              raise SystemExit(f'mutmut: {survived} survivors / {total} mutants')
+          if total <= 0:
+              raise SystemExit(f'mutmut: total={total}; no mutants checked')
+          print(f'mutmut OK: killed={s.get(\"killed\")} no_tests={s.get(\"no_tests\")} total={total}')
+          "
 
   integration:
     if: github.event_name == 'workflow_dispatch'
@@ -140,6 +153,16 @@ jobs:
           cache: "pip"
           cache-dependency-path: pyproject.toml
       - name: Install package
-        run: pip install -e ".[dev]"
-      - name: Integration placeholder
-        run: echo "Run scripts/release_smoke.sh on the probe host with sudo"
+        run: pip install -e ".[mcp,dev]"
+      - name: Integration (requires real nfqws2 + netns on host)
+        run: |
+          # The integration suite needs a probe host with nfqws2 + sudo + netns
+          # (Fryazino network). GitHub runners lack these, so we can only run
+          # the subset that is safe without them; the rest run manually via:
+          #   scripts/release_smoke.sh  (probe host, sudo)
+          if ! command -v nfqws2 >/dev/null 2>&1; then
+            echo "nfqws2 not present on runner — run tests/integration on the probe host:"
+            echo "  sudo scripts/release_smoke.sh"
+            exit 0
+          fi
+          python -m pytest tests/integration -m integration -q --timeout=600

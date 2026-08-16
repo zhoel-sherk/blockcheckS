@@ -77,7 +77,7 @@ addopts = "-m \"not integration and not quality and not mutation\""
 target-version = "py310"
 line-length = 100
 src = ["src", "tests"]
-extend-exclude = ["tmp-scripts", ".cursor-audit"]
+extend-exclude = ["tmp-scripts", ".cursor-audit", "vulture-whitelist.py"]
 
 [tool.ruff.lint]
 select = [
@@ -138,8 +138,8 @@ nest_exempt_parts = ["/generators/"]
 target_dirs = ["src"]
 
 [tool.vulture]
-paths = ["src/blockchecks"]
-min_confidence = 80
+paths = ["src/blockchecks", "vulture-whitelist.py"]
+min_confidence = 60
 ignore_names = [
     "main",
     "visit_*",
@@ -265,6 +265,7 @@ composite = ["src/blockchecks/checkers/composite_runner.py", "src/blockchecks/cl
 bench-settle = ["src/blockchecks/cli/commands/bench_settle.py"]
 full = ["src/blockchecks/main.py", "src/blockchecks/main_phases.py"]
 stop = ["src/blockchecks/cli/commands/stop.py"]
+serve = ["src/blockchecks/cli/commands/serve.py", "src/blockchecks/service/server.py", "src/blockchecks/service/probe_service.py"]
 
 [tool.blockchecks.settings]
 env_prefix = "BLOCKCHECKS_"

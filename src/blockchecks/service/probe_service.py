@@ -101,6 +101,7 @@ class ProbeService:
         bridge_batch: int = 500,
         lua_extra: list[str] | None = None,
         python_path: str | None = None,
+        default_timeout: float = 3.0,
     ):
         self.pool_size = int(pool_size or DEFAULT_POOL_SIZE)
         self.db = db
@@ -110,6 +111,7 @@ class ProbeService:
         self.lua_extra = list(lua_extra or [])
         self.python_path = python_path
         self.lua_bridge = True if lua_bridge is None else bool(lua_bridge)
+        self.default_timeout = float(default_timeout or 3.0)
         self.runner: AsyncTestRunner | None = None
         self.started = False
         self._lock = asyncio.Lock()
