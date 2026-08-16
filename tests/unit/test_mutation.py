@@ -24,7 +24,15 @@ def test_mutmut_config_present() -> None:
 @pytest.mark.mutation
 @pytest.mark.slow
 def test_mutmut_no_survivors() -> None:
-    """Run mutmut using [tool.mutmut] only — prefer CI workflow_dispatch for this."""
+    """Run mutmut and fail on any surviving mutant.
+
+    mutmut 3.7.0 exits 0 even when mutants survive (status is printed via
+    emoji + a summary), so parsing stdout is unreliable. After a run it writes
+    ``mutants/mutmut-cicd-stats.json`` with explicit ``survived``/``killed``/
+    ``total``/``no_tests`` counters — that is the stable CI contract we gate on.
+    """
+    import json
+
     mutmut = shutil.which("mutmut") or str(PROJECT_ROOT / ".venv" / "bin" / "mutmut")
     if not shutil.which("mutmut") and not (PROJECT_ROOT / ".venv" / "bin" / "mutmut").is_file():
         pytest.skip("mutmut not installed (pip install -e '.[dev]')")
@@ -41,10 +49,24 @@ def test_mutmut_no_survivors() -> None:
     if proc.returncode != 0:
         pytest.fail(f"mutmut run failed ({proc.returncode}):\n{out}")
 
-    # mutmut 3 prints survivors in results; treat non-zero as fail above.
-    # Soft check: no "survived" count in a failure-oriented summary if present.
-    low = out.lower()
-    if "survived" in low and "0 survived" not in low and "survived: 0" not in low:
-        # Heuristic — CI job also checks mutmut results explicitly.
-        if any(tok in low for tok in ("survived mutants", " mutants survived", "survivor")):
-            pytest.fail(f"mutmut reported survivors:\n{out}")
+    stats_path = PROJECT_ROOT / "mutants" / "mutmut-cicd-stats.json"
+    if not stats_path.is_file():
+        pytest.fail(
+            f"mutmut did not write {stats_path} (run aborted early?). "
+            f"stdout tail:\n{out[-2000:]}"
+        )
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    survived = int(stats.get("survived") or 0)
+    total = int(stats.get("total") or 0)
+    killed = int(stats.get("killed") or 0)
+    no_tests = int(stats.get("no_tests") or 0)
+    suspicious = int(stats.get("suspicious") or 0)
+    if survived:
+        pytest.fail(
+            f"mutmut: {survived} survivors out of {total} mutants "
+            f"(killed={killed}, no_tests={no_tests}, suspicious={suspicious}). "
+            f"See 'mutmut results' and 'mutants/' for details."
+        )
+    # Sanity: the run must have actually executed mutants.
+    if total <= 0:
+        pytest.fail(f"mutmut reported total={total}; no mutants were checked.")

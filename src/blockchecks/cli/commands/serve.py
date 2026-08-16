@@ -21,6 +21,7 @@ def cmd_serve(args) -> int:
         pool_size=pool,
         lua_bridge=not bool(getattr(args, "classic", False)),
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
+        default_timeout=float(getattr(args, "timeout", 3.0) or 3.0),
     )
     server = ProbeServer(service)
 

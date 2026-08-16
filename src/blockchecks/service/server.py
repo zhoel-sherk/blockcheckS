@@ -79,7 +79,7 @@ class ProbeServer:
             domains=domains,
             strategies=strategies,
             protocol=str(req.get("protocol") or "tls12"),
-            timeout=float(req.get("timeout") or 3.0),
+            timeout=float(req.get("timeout") or self.service.default_timeout),
             repeats=int(req.get("repeats") or 1),
         )
         return await self.service.probe(r)
