@@ -1,5 +1,21 @@
 # blockcheckS Changelog
 
+## 1.3.2 — ipset export + RPi2 support + LLC Fiord (2026-08-16)
+
+**Release 1.3.2.** Features:
+
+- **`bc-nfconf --ipset`**: add nfqws2 IP filter from data_block DNS cache,
+  provider-agnostic (all providers under `data_block/providers/`). Small sets
+  inline via `--ipset-ip`, large as `user.ipset` + `--ipset=@`; IPs aggregated
+  to CIDR via ip2net when available. Uses nfqws2-native flags (no zapret2
+  scripts).
+- **Raspberry Pi 2+ (armv7l) installable without gcc**: dropped `psutil`
+  (no armv7l wheels) → stdlib `/proc` readers (`metrics.py`: VmRSS/VmSize,
+  `/proc/*/ns/net`), race-safe. `scripts/setup-standalone.sh` + CI
+  `armv7l-smoke` (docker linux/arm/v7) + `docs/install-rpi.md`.
+- **Public naming**: replaced `Fryazino.net` references with public
+  "LLC Fiord" (preset filenames `fiord-*`, manifest, docs, changelog).
+
 ## 1.3.1 — hotfix + refactor (2026-08-16)
 
 **Hotfix + structural refactor.** Alpha→master merge (8 commits). Verified:

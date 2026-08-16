@@ -1,6 +1,6 @@
 # blockcheckS — lightspeed DPI strategy tester
 
-[![version](https://img.shields.io/badge/version-1.3.1-green)](#)
+[![version](https://img.shields.io/badge/version-1.3.2-green)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 [![tests](https://img.shields.io/badge/tests-1097%20passed-success)](#)
