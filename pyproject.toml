@@ -64,7 +64,7 @@ markers = [
     "quality: static gates (AST, vulture, mccabe, SIM, archon)",
     "mutation: mutmut survivors gate (slow)",
 ]
-addopts = "-m \"not integration and not quality and not mutation\" --timeout=90"
+addopts = "-m \"not integration and not quality and not mutation\""
 
 [tool.ruff]
 target-version = "py310"
