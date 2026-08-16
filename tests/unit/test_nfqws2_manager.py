@@ -198,7 +198,9 @@ def test_start_daemon_launches(tmp_path):
     ), patch("blockchecks.service.nfqws2.inject_debug_and_daemon",
              return_value=(None, None)), patch(
         "blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.5
-    ), patch("blockchecks.service.nfqws2._reclaim_debug_log"):
+    ), patch("blockchecks.service.nfqws2._wait_nfqws2_gone",
+             return_value=True), patch(
+        "blockchecks.service.nfqws2._reclaim_debug_log"):
         settle = start_daemon("bs-p-0", str(conf))
     assert settle == 0.5
 
