@@ -51,12 +51,14 @@ def list_presets() -> None:
                 count = sum(1 for line in pf if line.strip() and not line.startswith("#"))
             print(f"  {f.stem:25s} {count} domains")
     print(f"{Fore.CYAN}Strategy presets (presets/strategies/):{RESET}")
+    strategy_exts = (".tls", ".txt", ".http", ".quic", ".udp")
     for f in sorted(
-        glob.glob(os.path.join(PROJECT_DIR, "presets/strategies", "*.tls"))
-        + glob.glob(os.path.join(PROJECT_DIR, "presets/strategies", "*.txt"))
+        path
+        for ext in strategy_exts
+        for path in glob.glob(os.path.join(PROJECT_DIR, "presets/strategies", f"*{ext}"))
     ):
         name = os.path.basename(f)
-        for ext in (".tls", ".txt"):
+        for ext in strategy_exts:
             if name.endswith(ext):
                 name = name[: -len(ext)]
                 break
