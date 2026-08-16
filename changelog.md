@@ -1,5 +1,16 @@
 # blockcheckS Changelog
 
+## 1.3.4 — hotfix: wheel presets on Debian/Ubuntu (2026-08-17)
+
+**Hotfix.** On Debian/Ubuntu system Python `sys.prefix` is `/usr` but distutils
+installs wheel data-files under `/usr/local/blockchecks` — `_resolve_project_dir`
+only probed `sys.prefix/blockchecks`, so strategy/domain presets and configs
+were unreachable in wheel installs (e.g. fresh VPS).
+
+- `_resolve_project_dir`: also probe `sys.prefix/local/blockchecks`.
+- Test: `_resolve_project_dir` finds the `/usr/local/blockchecks` data dir.
+- Bump 1.3.4.
+
 ## 1.3.3 — hotfix: vendor blobs symlinks (2026-08-17)
 
 **Hotfix.** On machines without `/opt/zapret2` (e.g. a fresh VPS), the

@@ -23,10 +23,17 @@ def _resolve_project_dir() -> str:
     ``sys.prefix/blockchecks`` (PEP 427 install scheme), not inside
     site-packages — check it as a fallback so a plain ``pip install`` wheel is
     self-sufficient.
+
+    On Debian/Ubuntu system Python ``sys.prefix`` is ``/usr`` but distutils
+    installs data under ``/usr/local/blockchecks`` — also probe
+    ``sys.prefix/local/blockchecks`` so presets/configs are found.
     """
     candidates = [_REPO_CANDIDATE, _PARENT, _PACKAGE_DIR]
-    if sys.prefix != _PARENT:
-        candidates.append(os.path.join(sys.prefix, "blockchecks"))
+    prefix_roots = [sys.prefix]
+    if os.path.dirname(sys.prefix) != sys.prefix:
+        prefix_roots.append(os.path.join(sys.prefix, "local"))
+    for root in prefix_roots:
+        candidates.append(os.path.join(root, "blockchecks"))
     for candidate in candidates:
         if os.path.isdir(os.path.join(candidate, "configs")):
             return candidate

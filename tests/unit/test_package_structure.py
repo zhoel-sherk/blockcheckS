@@ -18,7 +18,7 @@ class TestPackageImport:
         """blockchecks.__version__ is a non-empty string."""
         import blockchecks
 
-        assert blockchecks.__version__ == "1.3.3"
+        assert blockchecks.__version__ == "1.3.4"
         assert isinstance(blockchecks.__version__, str)
 
 
@@ -187,3 +187,27 @@ class TestDependencies:
         import pytest
 
         assert hasattr(pytest, "mark")
+
+
+def test_resolve_project_dir_wheel_prefix_local(tmp_path, monkeypatch):
+    """Wheel on Debian/Ubuntu: sys.prefix=/usr but data lands in
+    /usr/local/blockchecks — _resolve_project_dir must find prefix/local."""
+    import blockchecks.engine.config as cfg
+
+    # Simulate editable repo absent: package dir without configs, no repo root.
+    pkg = tmp_path / "site-packages" / "blockchecks"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    # data under <prefix>/local/blockchecks
+    local_pkg = tmp_path / "usr" / "local" / "blockchecks"
+    (local_pkg / "configs").mkdir(parents=True)
+    (local_pkg / "presets").mkdir()
+
+    monkeypatch.setattr(cfg, "_REPO_CANDIDATE", str(tmp_path / "repo"))
+    monkeypatch.setattr(cfg, "_PARENT", str(tmp_path / "site-packages"))
+    monkeypatch.setattr(cfg, "_PACKAGE_DIR", str(pkg))
+    monkeypatch.setattr(cfg.sys, "prefix", str(tmp_path / "usr"))
+
+    resolved = cfg._resolve_project_dir()
+    assert resolved == str(local_pkg), f"got {resolved}"
+    assert os.path.isdir(os.path.join(resolved, "configs"))
