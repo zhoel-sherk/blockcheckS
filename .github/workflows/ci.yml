@@ -6,9 +6,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Serialize runs per branch: GitHub free runners cancel a second parallel
+# job on the same repo — run test+quality in one job to avoid the "runner
+# received shutdown signal" cancellations seen with parallel jobs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -25,21 +33,13 @@ jobs:
       - name: Pytest (unit)
         run: pytest -m "not integration and not quality and not mutation"
 
-  quality:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install package
-        run: pip install -e ".[dev]"
       - name: Quality gates
         run: pytest -m quality
 
   mutation:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,6 +55,7 @@ jobs:
   integration:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
