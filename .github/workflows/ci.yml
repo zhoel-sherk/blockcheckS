@@ -12,6 +12,7 @@ jobs:
           python-version: "3.12"
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: pytest 2nd half
-        run: python -m pytest $(ls tests/unit/test_*.py | tail -54) -q -p no:cacheprovider -n 0 -v 2>-q -p no:cacheprovider -n 21 | tail -40
+      - name: pytest 2nd half verbose
+        run: |
+          python -m pytest $(ls tests/unit/test_*.py | tail -54) -n 0 --tb=short 2>&1 | grep -E "PASSED|FAILED|passed|failed|%\]" | tail -30
       - run: echo "half2 done"
