@@ -1,5 +1,16 @@
 # blockcheckS Changelog
 
+## 1.3.3 — hotfix: vendor blobs symlinks (2026-08-17)
+
+**Hotfix.** On machines without `/opt/zapret2` (e.g. a fresh VPS), the
+auto-fetched zapret2 vendor created blob symlinks pointing at the staging
+directory, which is deleted after the atomic move — every blob dangled and
+nfqws2 failed with "cannot access file .../blobs/stun.bin".
+
+- `_seed_blobs_from_fake` now creates **relative** symlinks
+  (`../files/fake/...`) so they survive `staging.rename(VENDOR_ROOT)`.
+- Test: symlinks valid after the rename; missing fake dir → 0.
+
 ## 1.3.2 — ipset export + RPi2 support + LLC Fiord (2026-08-16)
 
 **Release 1.3.2.** Features:

@@ -202,7 +202,12 @@ def _path_ok(path: str | Path) -> bool:
 
 
 def _seed_blobs_from_fake(fake_dir: Path, blobs_dir: Path) -> int:
-    """Copy/symlink common fake payloads into blobs_dir. Returns count."""
+    """Copy/symlink common fake payloads into blobs_dir. Returns count.
+
+    Symlinks are created RELATIVE to ``blobs_dir`` (``../files/fake/...``) so
+    they survive the ``staging.rename(VENDOR_ROOT)`` in ``ensure_zapret2_vendor``
+    (absolute staging paths would dangle after the move). Falls back to a copy.
+    """
     blobs_dir.mkdir(parents=True, exist_ok=True)
     if not fake_dir.is_dir():
         return 0
@@ -224,7 +229,7 @@ def _seed_blobs_from_fake(fake_dir: Path, blobs_dir: Path) -> int:
             n += 1
             continue
         try:
-            os.symlink(src, dest)
+            os.symlink(os.path.relpath(src, blobs_dir), dest)
         except OSError:
             shutil.copy2(src, dest)
         n += 1
@@ -234,7 +239,7 @@ def _seed_blobs_from_fake(fake_dir: Path, blobs_dir: Path) -> int:
         if dest.exists():
             continue
         try:
-            os.symlink(src, dest)
+            os.symlink(os.path.relpath(src, blobs_dir), dest)
             n += 1
         except OSError:
             try:

@@ -382,3 +382,32 @@ def test_ensure_zapret2_vendor_no_asset(tmp_path, monkeypatch):
     monkeypatch.setattr("blockchecks.engine.system_deps.DATA_DIR", tmp_path)
     with pytest.raises(RuntimeError, match="no asset"):
         sd.ensure_zapret2_vendor(offline=False)
+
+
+def test_seed_blobs_creates_relative_symlinks_survive_rename(tmp_path):
+    """_seed_blobs_from_fake symlinks must be relative so they survive the
+    staging.rename(VENDOR_ROOT) in ensure_zapret2_vendor (bug: absolute
+    staging paths dangled after the move)."""
+    staging = tmp_path / "staging"
+    fake = staging / "files" / "fake"
+    blobs = staging / "blobs"
+    fake.mkdir(parents=True)
+    (fake / "stun.bin").write_bytes(b"STUNBLOB")
+
+    n = sd._seed_blobs_from_fake(fake, blobs)
+    assert n >= 1
+    link = blobs / "stun.bin"
+    assert link.is_symlink()
+    # Must be RELATIVE (not an absolute staging path)
+    assert not str(link.readlink()).startswith("/")
+
+    # Simulate the atomic move: rename staging → vendor root.
+    vendor = tmp_path / "vendor"
+    staging.rename(vendor)
+    moved_link = vendor / "blobs" / "stun.bin"
+    assert moved_link.is_file(), "symlink dangles after rename"
+    assert moved_link.read_bytes() == b"STUNBLOB"
+
+
+def test_seed_blobs_handles_missing_fake_dir(tmp_path):
+    assert sd._seed_blobs_from_fake(tmp_path / "nope", tmp_path / "blobs") == 0
