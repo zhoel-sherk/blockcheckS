@@ -12,6 +12,6 @@ jobs:
           python-version: "3.12"
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: pytest test_lua_session only
-        run: python -m pytest tests/unit/test_lua_session.py -q -p no:cacheprovider
+      - name: pytest 5 files from 2nd half
+        run: python -m pytest $(ls tests/unit/test_*.py | tail -54 | head -5) -q -p no:cacheprovider
       - run: echo "done"
