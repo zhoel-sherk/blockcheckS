@@ -13,5 +13,6 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - run: echo "install done $(date +%s)"
-      - run: sleep 60
-      - run: echo "done $(date +%s)"
+      - name: pytest collect only
+        run: python -m pytest --collect-only -q
+      - run: echo "collect done $(date +%s)"
