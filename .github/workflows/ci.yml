@@ -13,5 +13,5 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - name: pytest 2nd half
-        run: python -m pytest $(ls tests/unit/test_*.py | tail -54) -q -p no:cacheprovider -n 2
+        run: python -m pytest $(ls tests/unit/test_*.py | tail -54) -q -p no:cacheprovider -n 0 -v 2>-q -p no:cacheprovider -n 21 | tail -40
       - run: echo "half2 done"
