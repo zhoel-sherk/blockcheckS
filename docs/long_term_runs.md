@@ -8,17 +8,18 @@ the full pool (incl. the new Geneva/Flowseal audit families).
 
 | Var | DB | Method | Key params |
 |---|---|---|---|
-| A | `logs/run_A_base.db` | Baseline | coverage.txt, bridge-batch 10, timeout 1, lua-bridge |
-| B | `logs/run_B_new.db` | Full new pool | coverage.txt, `--max 30000` (all 24 209 std + gaps), timeout 2, `geneva.lua` |
-| C | `logs/run_C_adaptive.db` | Adaptive | `--fan-out --adaptive --adaptive-epsilon 0.1` |
+| A | `logs/run_A_base.db` | Adaptive baseline | coverage.txt, bridge-batch 10, timeout 2, lua-bridge, `--adaptive --adaptive-epsilon 0.1` |
+| B | `logs/run_B_new.db` | Full new pool | coverage.txt, `--max 30000`, timeout 2, `--scan-level full`, `geneva.lua` |
+| C | `logs/run_C_adaptive.db` | Adaptive + fan-out | `--fan-out --adaptive --adaptive-epsilon 0.1` |
 | D | `logs/run_D_classic.db` | Classic backend | `--classic` (no lua-bridge) |
-| E | `logs/run_E_flowseal.db` | Flowseal-only | `--tcp-sources flowseal` (6 493) |
+| E | `logs/run_E_flowseal.db` | Flowseal-only | `--tcp-sources flowseal` |
 | F | `logs/run_F_stable.db` | Stable repeats | `--repeats 3 --repeats-mode stable` |
 
 All runs:
 - domains: `presets/domains/coverage.txt` (~40)
 - `--max-timeh 20 --resume --data-block-sync --parallel 4 --bridge-batch 10`
 - `--allow-dns-hijack --skip-prolog/ip-block/port-block --isp-interface eth3`
+- `--no-wssize --no-settle-profile --timeout 2` (все варианты)
 - PASS exported to `data_block/providers/<provider>/strategies.db` (`pass_strategies`)
 
 ## Launch

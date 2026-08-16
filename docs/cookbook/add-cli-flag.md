@@ -12,6 +12,12 @@ p.add_argument("--my-flag", action="store_true", help="...")
 
 For `bs full`, also add to [`main.py`](../src/blockchecks/main.py) parser if not shared.
 
+> **pydantic CliApp negation (1.3.x):** the main `bs` entry parses via
+> pydantic-settings `CliApp` (models derived from parser actions). A flag named
+> `--no-xxx` is parsed by pydantic as a *negation* (always False). If you add a
+> genuinely-named `--no-<field>` flag, register it in `_NO_PREFIX_FIELDS`
+> (`cli/cliapp.py`), or it will silently never become True.
+
 ## 2. Propagate to runner
 
 | Command | Propagate to |
@@ -29,7 +35,8 @@ Path defaults come from [`engine/paths.py`](../src/blockchecks/engine/paths.py)
 
 User overrides: `~/.config/blockcheckS/config.toml` via
 [`cli/user_config.py`](../src/blockchecks/cli/user_config.py) — loaded in
-`parser.main()` before `parse_args`.
+`cliapp.main()` (`load_user_config` → `apply_parser_defaults` → `build_cli_root`);
+`finalize_store_args()` fills `db`/`out_dir` from `[paths]`/XDG on the CliApp path.
 
 For machine-specific tool paths, prefer `BLOCKCHECKS_*` in
 [`engine/config.py`](../src/blockchecks/engine/config.py) or `[tools]` in

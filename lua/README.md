@@ -10,7 +10,8 @@ Loaded via `--lua-init` when `--lua-bridge` is enabled. См. также
 lua/blockchecks/
 ├── init.lua           # 50ms timer fallback для strategy.id poll
 ├── scan_bridge.lua    # scan_pick оркестратор + bs_poll_strategy + smart_fallback
-└── write_ipc.lua      # NDJSON IPC (APPLIED / STRATEGY_FAIL) + strategy.id/gen
+├── write_ipc.lua      # NDJSON IPC (APPLIED / STRATEGY_FAIL) + strategy.id/gen
+└── geneva.lua         # custom fool= functions (не входит в default init-цепочку)
 ```
 
 - `scan_bridge.lua` — обрабатывает payload'ы `tls_client_hello`, `http_req`,
@@ -20,6 +21,10 @@ lua/blockchecks/
 - `write_ipc.lua` — атомарная запись событий + чтение `strategy.id` / `strategy.gen`.
 - `init.lua` — таймерный фолбэк для случаев, когда ClientHello не проходит
   через nfqws2 (порт/протокол вне фильтра).
+- `geneva.lua` — custom `fool=bs_*` функции (Geneva-атаки). **Не** входит в
+  дефолтную `--lua-init` цепочку; подключается только через
+  `BLOCKCHECKS_LUA_EXTRA=.../geneva.lua` (variant B long-term, standalone
+  `run_coverage_new.sh`).
 
 ## Backend map: что через Lua bridge, что через classic
 

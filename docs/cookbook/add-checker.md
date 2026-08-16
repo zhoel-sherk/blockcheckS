@@ -21,7 +21,7 @@ class MyResult:
 def check_my_thing(target: str, timeout: float = 5.0) -> MyResult: ...
 ```
 
-Keep I/O in the checker; runners only orchestrate netns/nfqueue.
+Keep I/O in the checker; runners orchestrate netns/nfqueue, workers run probes.
 
 ## 3. Wire into runner
 
@@ -29,9 +29,13 @@ Keep I/O in the checker; runners only orchestrate netns/nfqueue.
 |--------|------|
 | [`async_runner.py`](../src/blockchecks/engine/async_runner.py) | `bs scan`, `bs pair`, `bs full` |
 | [`test_runner.py`](../src/blockchecks/engine/test_runner.py) | `bs tcp`, `bs udp` (sync) |
+| [`in_ns_workers.py`](../src/blockchecks/engine/in_ns_workers.py) | subprocess probe worker (`--mode curl\|udp`) |
+| [`base_worker.py`](../src/blockchecks/engine/base_worker.py) | `Worker` ABC (`execute_probe` step) |
 
-For async batch tests, prefer calling checker from subprocess code in
-`_run_one_job` or import via [`_probe_worker.py`](../src/blockchecks/engine/_probe_worker.py).
+For async batch tests, prefer calling the checker from the subprocess worker
+(`python -m blockchecks.engine.in_ns_workers --mode curl`, see
+[`service/probe.py`](../src/blockchecks/service/probe.py)); the old
+`_probe_worker.py`/`_curl_probe_worker.py` are back-compat proxies only.
 
 ## 4. Unit test
 

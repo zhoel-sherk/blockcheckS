@@ -10,6 +10,7 @@ Not part of the installable `blockchecks` package; not run by CI.
 | `run_bs_tcp_debug.sh` | Single-strategy nfqws2 debug run (known-good baseline) | `bash dev/run_bs_tcp_debug.sh` |
 | `run_gp_debug.sh` | GP-verified strategy regression with debug output | `bash dev/run_gp_debug.sh` |
 | `functional_smoke.sh` | End-to-end functional test of every `bs` subcommand (sudo) | `bash dev/functional_smoke.sh` |
+| `byedpi_bench.py` | byedpi/ciadpi strategy micro-benchmark | `python3 dev/byedpi_bench.py` |
 
 ## Test-campaign smoke scripts (in `scripts/`)
 

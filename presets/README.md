@@ -10,6 +10,7 @@ bs scan --preset discord              # 22 Discord domains
 bs scan --preset google-youtube       # 23 YouTube CDN domains
 bs scan -d discord.com --preset critical   # -d + preset: all preset domains
 bs scan --preset coverage             # 40 domains, full GP coverage
+bs scan --preset coverage-tcp         # 14 domains, lean TCP default for bs full
 bs scan --preset benchmark            # 6 domains, lightweight test
 bs scan --preset pi2                  # 3 domains, Pi2 / low-RAM lean
 bs scan --preset cloudflare           # 9 Cloudflare domains
@@ -17,6 +18,9 @@ bs scan --preset amazon-aws           # 11 AWS domains
 bs scan --preset diagnostic           # 1 domain: web.telegram.org
 bs scan --list-presets                # list domain + strategy presets
 ```
+
+`denylist.txt` (28 domains) is a filter list applied to the domain set — it is
+not selectable as a preset.
 
 ## Strategy presets (`presets/strategies/`)
 
@@ -68,7 +72,7 @@ bs scan --preset critical -M gp-verified --scan-level single
 # Settle × curl timeout grid (needs sudo + nfqws2)
 sudo bs bench-settle -d discord.com -M timeout-benchmark
 
-# Lean mass run default (13 domains, denylist applied)
+# Lean mass run default (14 domains, coverage-tcp)
 sudo bs full --scan-level fast --max 100 --preset benchmark
 # or explicit:
 sudo bs full --domains-file presets/domains/coverage-tcp.txt --max 100
@@ -171,10 +175,17 @@ Export winners for GP orchestrator (replaces blockcheck2 stdout parsing):
 
 ```bash
 python3 -m blockchecks.shortlist_export --db state.db -o logs/shortlist.json
-scripts/export_shortlist_json.sh state.db logs/shortlist.json
 
 # Import back into presets / seed state.db
 python3 -m blockchecks.shortlist_import -i logs/shortlist.json --seed-db --db state.db
 ```
+
+## Registry (`presets/manifest.toml`, 1.3.1)
+
+`manifest.toml` indexes every strategy (27) + domain (11) preset: type, family,
+tags, description, source, domain counts. Kept in sync by
+`scripts/gen_presets_manifest.py check|counts` and validated by
+`tests/unit/test_presets_integrity.py`. `denylist.txt` (28 domains) is a filter
+list, not selectable as a preset (`RESERVED_DOMAIN_FILES`).
 
 Schema: `blockchecks.shortlist/v1` — see `logs/shortlist.json` example after export.

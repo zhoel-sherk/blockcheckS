@@ -1,5 +1,59 @@
 # blockcheckS Changelog
 
+## 1.3.1 — hotfix + refactor (2026-08-16)
+
+**Hotfix + structural refactor.** Alpha→master merge (8 commits). Verified:
+1155 unit, 118 quality, 22 integration (sudo E2E), ruff + vulture clean;
+clean-venv wheel install (version 1.3.1).
+
+### Fixed
+- **run:** incremental `TcpProgress` (main_phases) — a long bridge run no longer
+  shows a frozen `[0/N]`; stream-triage context-manager bug — curl_cffi >=0.15
+  `Response` has no context-manager protocol (`run_stream_triage_probe` now uses
+  plain `get()` + `iter_content` + `close()`).
+- **audit:** `sqlite_store.flush` race — rows drained atomically under
+  `_flush_lock` before any await (a concurrent `log_tcp` from a parallel worker
+  can no longer be erased by `clear()` mid-commit); `last_err` cleared on
+  successful retry; failed flush re-queues rows. curl_probe False PASS closed
+  (same-host blockpage 30x, 304 without conditional, text/html on binary-API
+  probes). preflight triage phase casing fixed (`FailPhase._value2member_map_`).
+  CliApp now applies `config.toml` `[paths] db/out_dir` + `[run]` and calls
+  `finalize_store_args` — nfconf export works on the main `bs` path.
+- **bridge:** nfqws2 drop-privilege (nobody/65534) writable dir `0777` +
+  `strategy.*` files `0666` (was root-only 0755/0644 → daemon died / APPLIED
+  never written); pkill/start race drain (`_wait_nfqws2_gone`) before binding a
+  replacement nfqws2.
+
+### Refactor (behavior-preserving)
+- **conf:** single-source nfqws2 arg sanitization in `engine/conf_builder.py`
+  (`split_cli_args`, `escape_conf_lt`, `sanitize_arg_for_conf`,
+  `build_filter_lines`, `add_blobs_from_strategy`); `nfqws_config.py` and
+  `service/lua_conf.py` import from it. The `<` escape (audit S3) now applies in
+  the classic/sync path too.
+- **generators:** `standard.py` decomposed 1583 → ~880 LOC facade +
+  `engine/generators/families/{split,fake,tamper}.py` + `_helpers.py`
+  (`StrategyParams` typed axes). Output byte-identical (parity verified).
+- **workers:** new `engine/base_worker.py` (`Worker` ABC +
+  `BaseInNsWorker` + `WorkerContext`); subprocess entries `_probe_worker` /
+  `_curl_probe_worker` folded into `in_ns_workers.py` as
+  `python -m blockchecks.engine.in_ns_workers --mode curl|udp` (old modules kept
+  as back-compat proxies).
+
+### Chore / Test
+- **presets:** `presets/manifest.toml` registry (27 strategies + 11 domains) +
+  `scripts/gen_presets_manifest.py` + `tests/unit/test_presets_integrity.py`.
+- **integration:** `tests/integration/test_sqlite_concurrency.py` (8 concurrent
+  writers, 0 row loss) + `test_netns_leak.py` (netns/veth/nfqws2/run.lock
+  cleanup).
+
+### Upgrading from 1.3.0
+```bash
+pip install -U blockchecks
+# No DB migration; same CLI. Bridge IPC dirs auto-fix permissions on boot.
+```
+
+---
+
 ## 1.3.0 — stable (2026-08-15)
 
 **Stable release.** Branched from `alpha` (99 commits). Verified: 1097 unit,
@@ -295,21 +349,6 @@ config.toml. No CLI flag.
 12× faster (~114 jobs/min vs ~9), 4 netns stay isolated across domains.
 
 
-
-### Refactor + coverage — v1.2.2 day-5 (85%+ target, pre-release)
-
-- **async_runner god-file split** (1764 → ~330 lines): moved to
-   (models),  (config builders),
-   (netns probe workers). async_runner keeps
-  AsyncTestRunner +  re-exports so external imports and monkeypatch
-  paths keep working.
-- **Coverage 73% → 85%** across 18 core modules: added test_tcp_tls (13),
-  test_lua_session (7), test_batch_bridge_probe (6), test_async_runner_methods (7),
-  test_in_ns_workers (5), plus retry/config/multi/quic/udp coverage. pytest-cov
-  and pytest-randomly added to dev deps (randomly required by mutmut).
-- mutmut scoped to 15 modules; mutmut run requires test fixes for mutants/
-  cwd (tests reading non-mutated sources) — documented, gate stays
-  workflow_dispatch.
 
 ### Refactor + coverage — v1.2.2 day-5 (85%+ target, pre-release)
 

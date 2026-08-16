@@ -64,7 +64,7 @@ src/blockchecks/engine/
 **Почему отдельный модуль перевода, а не правка существующего кода:**
 
 - `byedpi_translator` не импортирует `async_runner`, `in_ns_workers`, `nfqws_config` — тестируется изолированно, переиспользуется любым фронтендом.
-- `byedpi_matrix_generator` — **отдельный source**, а не новая семья в `StandardGenerator`: у byedpi свои native one-liners (`-o`, `-q`, `-n`, `-A`, `-M`), которых нет в nfqws2. Полный пул покрывает **только** переводимый срез стратегий.
+- `byedpi_matrix_generator` — **отдельный source**, а не новая семья в `StandardGenerator`: у byedpi свои native one-liners (`-o`, `-q`, `-n`, `-M`), которых нет в nfqws2. Полный пул покрывает **только** переводимый срез стратегий.
 - MatrixGenerator.REGISTRY уже поддерживает `--generate byedpi` — CLI не меняется.
 
 **Исполнение одной стратегии (target):**
@@ -142,12 +142,12 @@ bs scan --engine byedpi --generate byedpi
 
 Отдельный source (`engine/byedpi_matrix_generator.py`, ~140 строк), зарегистрирован в `MatrixGenerator.REGISTRY["byedpi"]`.
 
-- **native** (~18 one-liners): OOB/disoob (`-o`, `-q`), fake-sni (`-n {sni}`), split/disorder ladders, TLS rec split, md5sig, mod-http (`-M`, HTTP-only), fake-tls-mod (`-Qr`).
-- **translated** (~14 seeds): nfqws2-строки через `translate()`; label `byedpi:<strategy>`.
+- **native** (18 one-liners): OOB/disoob (`-o`, `-q`), fake-sni (`-n {sni}`), split/disorder ladders, TLS rec split, md5sig, mod-http (`-M`, HTTP-only), fake-tls-mod (`-Qr`).
+- **translated** (15 seeds): nfqws2-строки через `translate()`; label `byedpi:<strategy>`.
 - Dedup по argv; `max_count` уважается; HTTP-мод фильтрует `-M`-строки.
 - Тесты: `tests/unit/test_byedpi_matrix_generator.py` (8 кейсов).
 
-Итого полный пул: **~28 стратегий** (tls12) / HTTP-подмножество.
+Итого полный пул: **31 стратегия** (tls12) / HTTP-подмножество.
 
 ### 4.3 `ByedpiManager` — план (~120 строк)
 

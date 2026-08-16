@@ -213,6 +213,10 @@ end
 
 `write_ipc` → append JSON line to `$WRITABLE/events.ndjson`.
 
+> **Backlog (§4):** `mark_tamper`/`write_ipc(desync, ...)` — концепт. В реализованном
+> `write_ipc.lua` сигнатура `bs_write_ipc(event_tbl)` (без первого `desync`-аргумента);
+> `TAMPER`-событие не эмитится — только `APPLIED` / `STRATEGY_FAIL`.
+
 ### Python side
 
 - `async_runner`: после curl читать `events.ndjson` → статус `TAMPER` / `PARTIAL_BLOCK`
@@ -389,7 +393,7 @@ async_runner.test_tcp()
   pool.release(ns) → _cleanup_ns: pkill nfqws2 + iptables -F OUTPUT
 ```
 
-Код: `async_runner.py` (`_run_tcp_check`), `service/nfqws2.py` (`start_daemon`), `service/netns_pool.py` (`_cleanup_ns`).
+Код: `engine/in_ns_workers.py` (`_run_tcp_check`), `service/nfqws2.py` (`start_daemon`), `service/netns_pool.py` (`_cleanup_ns`).
 
 #### Бюджет времени на один TLS-probe (FAIL, wssize retry)
 
@@ -685,7 +689,7 @@ NetNsPool worker bs-p-0 (persistent across many strategies)
 | Phase | Deliverable |
 |-------|-------------|
 | **7.1** | `lua/blockchecks/init.lua`, `scan_bridge.lua`, `write_ipc()` |
-| **7.2** | `Nfqws2Ipc` Python module + `/dev/shm` layout |
+| **7.2** | `LuaBridge` Python module (`service/lua_bridge_ipc.py`) + `/dev/shm` layout |
 | **7.3** | `build_bridge_conf()` + rolling batch iterator |
 | **7.4** | `AsyncTestRunner` branch: `--lua-bridge` + `--bridge-batch 500` |
 | **7.5** | Persistent iptables on worker acquire (не `-A` per test) |
@@ -781,13 +785,14 @@ Preset: `presets/strategies/gp-custom-dupfake.tls` (comments only today).
 
 ## 9. Интеграция в blockcheckS (чеклист)
 
-### 9.1 ProbeBatchService (`service/batch_probe.py`) — ✅ done
+### 9.1 ProbeBatchService (`service/batch_service.py`) — ✅ done
 
 Единый сервис batch-прогона: **boot batch → probe ×N → shutdown**.
 
 | Backend | Когда | nfqws2 lifecycle |
 |---------|-------|------------------|
-| `classic` | default, fan-out, pair UDP bootstrap | restart per probe (внутри batch — sequential) |
+| `lua_bridge` | **default** (с 1.3.1), fan-out, pair UDP bootstrap | one daemon per batch (rolling conf) |
+| `classic` | явный `--classic` / `--probe-backend classic` | restart per probe (внутри batch — sequential) |
 | `lua_bridge` | `--lua-bridge` | один daemon на batch N (`scan_pick` + shm) |
 
 ```python
@@ -828,19 +833,18 @@ class LuaBridge:
 
 ### 9.4 async_runner branch
 
-- `--lua-bridge` → `ProbeBatchService` backend `lua_bridge`
-- default → `classic` (или per-probe `test_tcp` вне batch paths)
+- default backend → `lua_bridge` (`DEFAULT_PROBE_BACKEND`); `--classic` /
+  `--probe-backend {classic,lua_bridge}` явно выбирают.
 - shm cleanup: `netns_pool`, `run_control.run_session`
 
 ### 9.5 DB schema extensions (deferred)
 
 | Column | Source |
 |--------|--------|
-| `fail_fast` | `STRATEGY_FAIL` event |
-| `tamper_reason` | `TAMPER` event |
-| `mut_seed` | lua_state log |
-| `probe_gen` | `strategy.gen` mismatch detection |
-| `batch_id`, `batch_wall_ms` | batch service logs (v1: log only) |
+| `fail_phase` | `classify_fail_phase` (добавлено в 1.3.0) |
+| `bridge_batch_id`, `bridge_gen` | batch service logs (v1: log only) |
+| `rst_in_ttl` | `STRATEGY_FAIL`/`rst_in` event (in-memory) |
+| ~~`fail_fast`/`tamper_reason`/`mut_seed`/`probe_gen`~~ | backlog — не реализовано |
 
 ### 9.6 Тесты
 
@@ -899,7 +903,7 @@ class LuaBridge:
 `circular` оставить для **keenetic export** и production failover ([conf_builder.py](https://github.com/zhoel-sherk/blockcheckS/blob/alpha/src/blockchecks/engine/conf_builder.py) scaffold).
 
 > **Примечание:** это уже реализовано — `scan_pick` + `/dev/shm` IPC + `smart_fallback`
-> (см. `lua/blockchecks/`, `service/lua_bridge_ipc.py`, `service/batch_probe.py`).
+> (см. `lua/blockchecks/`, `service/lua_bridge_ipc.py`, `service/batch_service.py`).
 
 ---
 

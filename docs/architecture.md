@@ -1,6 +1,6 @@
 # Architecture — blockcheckS
 
-Canonical data-flow reference for the async scan path (1.1+).
+Canonical data-flow reference for the async scan path (1.3.1+).
 
 ## Main runtime flow (`bs scan` / `bs pair` / `bs full`)
 
@@ -76,20 +76,22 @@ Pi2 / ~1 GB RAM: keep `--parallel 1` (max 2).
 | Preset path jail | [`cli/presets.py`](../src/blockchecks/cli/presets.py) |
 | Preflight | [`engine/preflight.py`](../src/blockchecks/engine/preflight.py) |
 | Parallel TCP/UDP/pair | [`engine/async_runner.py`](../src/blockchecks/engine/async_runner.py) |
-| Curl probe public API | [`engine/probe.py`](../src/blockchecks/engine/probe.py) |
-| Curl probe subprocess | [`engine/_curl_probe_worker.py`](../src/blockchecks/engine/_curl_probe_worker.py) |
+| Probe worker contract | [`engine/base_worker.py`](../src/blockchecks/engine/base_worker.py) (Worker ABC + BaseInNsWorker) |
+| Curl probe public API | [`service/probe.py`](../src/blockchecks/service/probe.py) |
+| Curl/UDP subprocess | [`engine/in_ns_workers.py`](../src/blockchecks/engine/in_ns_workers.py) (`python -m blockchecks.engine.in_ns_workers --mode curl\|udp`); `_probe_worker.py`/`_curl_probe_worker.py` are back-compat proxies |
 | Sync single-ns | [`engine/test_runner.py`](../src/blockchecks/engine/test_runner.py) |
 | Adaptive runner / queue | `adaptive_runner.py`, `adaptive_queue.py` |
 | TCP fan-out | [`engine/tcp_fanout.py`](../src/blockchecks/engine/tcp_fanout.py) |
-| nfqws2 lifecycle | [`engine/nfqws2.py`](../src/blockchecks/engine/nfqws2.py) |
-| netns + iptables | `netns_pool.py`, `firewall.py` |
+| nfqws2 lifecycle | [`service/nfqws2.py`](../src/blockchecks/service/nfqws2.py) (+ `service/nfqws2_settle.py` `_wait_nfqws2_gone`) |
+| netns + iptables | `service/netns_pool.py`, `service/firewall.py` |
 | System deps / zapret2 fetch | [`engine/system_deps.py`](../src/blockchecks/engine/system_deps.py) |
 | XDG paths | [`engine/paths.py`](../src/blockchecks/engine/paths.py) |
 | TLS / content / DoH | `checkers/tcp_tls`, `curl_probe`, `dns_secure` |
 | Voice UDP / discover | `udp_voice`, `voice_dns`, `voice_discovery` |
 | Composite config test | [`checkers/composite_runner.py`](../src/blockchecks/checkers/composite_runner.py) |
-| Export keenetic | `nfconf.py`, `conf_builder.py` |
+| Export keenetic | `nfconf.py`, `engine/conf_builder.py` (single-source arg sanitization) |
 | Persistence | `engine/store/` (RunStateStore / SqliteRunStore) |
+| Strategy families | `engine/generators/families/{split,fake,tamper}.py` + `_helpers.py` (StrategyParams) |
 
 ## Canonical vs legacy paths
 
@@ -210,8 +212,8 @@ lookups. `--no-secure-dns` skips DoH.
 
 - Entry points: `bs`, `bc-main`, `bc-nfconf`
 - `blockchecks.engine.StrategyItem`, `StateDB`, `matrix_fingerprint`
-- `blockchecks.engine.probe.invoke_curl_probe_worker`, `probe_request_dict`
-- `blockchecks.engine.nfqws2.start_daemon`, `Nfqws2Manager`
+- `blockchecks.service.probe.invoke_curl_probe_worker`, `probe_request_dict`
+- `blockchecks.service.nfqws2.start_daemon`, `Nfqws2Manager`
 - `blockchecks.checkers.TlsResult`, `check_tls`
 - `conf_builder.build_keenetic_conf`, `build_raw_conf`
 - `engine.preset_paths.resolve_domain_preset`, `resolve_strategy_preset` (CLI re-exports)

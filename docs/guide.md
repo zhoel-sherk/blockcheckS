@@ -142,7 +142,7 @@ pytest -m "not integration"    # Windows/Linux без root
 sudo pytest -m integration     # Linux + nfqws2
 ```
 
-Конфиг pytest — в `pyproject.toml` (`addopts = -m "not integration"`).
+Конфиг pytest — в `pyproject.toml` (`addopts = -m "not integration and not quality and not mutation"`).
 
 Unit покрывает контракты: `PYTHON_BIN`, checkpoint/resume, `run_set`,
 sqlite single-connection, UA, stale PASS, package imports.
@@ -173,8 +173,8 @@ pytest -m "not integration"
 
 ## Известные ограничения (post-package audit)
 
-1. `bs scan` сейчас принудительно ставит `auto_discover=False` — флаг на scan
-   бесполезен, пока это не уберут.
+1. `bs scan` сейчас принудительно ставит `auto_discover=None` — флаг на scan
+   бесполезен, пока это не уберут (см. [architecture.md](architecture.md)).
 2. Multi-endpoint discovery сохраняет список, но pair гоняет только `eps[0]`.
 3. `stderr=PIPE` у nfqws2 без drain на success — риск pipe fill на болтливом бинаре.
 4. В git лучше не держать `state.db` и `*.egg-info` (gitignore + untrack).
@@ -194,7 +194,7 @@ pytest -m "not integration"
 
 **Все стратегии FAIL / parse: / timeout**
 - nfqws2 крашнулся при старте? Проверь `BLOCKCHECKS_NFQWS2_DEBUG=1 bs tcp ...`.
-- Увеличь таймаут: `--timeout 20` (дефолт 10).
+- Увеличь таймаут: `--timeout 20` (дефолт 3).
 - Проверь iptables: `sudo iptables -L OUTPUT -n | grep NFQUEUE`.
 - Для googlevideo.com: это известная проблема — IP `142.251.x.x` блокируется на уровне IP (не SNI).
 
