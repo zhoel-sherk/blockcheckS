@@ -12,5 +12,5 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e ".[dev]"
-      - name: full file -n 0
-        run: pytest tests/unit/test_nfqws2_manager.py -q -n 0
+      - name: full file no randomly
+        run: pytest tests/unit/test_nfqws2_manager.py -v -n 0 -p no:randomly --tb=short
