@@ -72,5 +72,3 @@ dbg_probe_raw(domain, strategy) → одиночная проверка (dry_run
 - `dbg_validate_strategy_syntax` — офлайн, полезен до отправки стратегии в netns.
 - Пресеты имеют расширения под протокол: `.tls/.txt/.http/.quic/.udp` (приоритет .tls).
 - Кастомные lua регистрируются в `lua/custom/manifest.toml` (included/excluded параметры).
-
-Перезапустить opencode — скилл `blockcheckS-mcp` станет доступен.
