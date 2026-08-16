@@ -241,8 +241,9 @@ def test_start_with_hostlist(tmp_path):
     proc = MagicMock()
     proc.poll.return_value = None
     proc.pid = 55
-    with patch("blockchecks.service.nfqws2.get_nfqws2_bin",
-               return_value="/x/nfqws2"), patch(
+    with patch.object(mgr, "_launch") as mlaunch, patch(
+        "blockchecks.service.nfqws2.get_nfqws2_bin",
+        return_value="/x/nfqws2"), patch(
         "blockchecks.service.nfqws2.subprocess.Popen", return_value=proc
     ), patch("blockchecks.service.nfqws2.wait_nfqws2_ready"), patch(
         "blockchecks.service.nfqws2._reclaim_debug_log"), patch(
@@ -258,7 +259,7 @@ def test_start_with_hostlist(tmp_path):
         "blockchecks.service.nfqws2.os.unlink"), patch(
         "blockchecks.service.nfqws2.time.sleep"):
         mgr.start("fake:blob=stun", hostlist=["discord.com"], qnum=200)
-    assert mgr._pid == 55
+    assert mlaunch.called
     assert len(mgr._temp_files) == 2  # hostlist + conf
     mgr.stop()
 
