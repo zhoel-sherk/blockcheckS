@@ -84,6 +84,10 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 > `generate_router_config`, `get_service_status`, `stop_campaign`, `dbg_probe_raw`,
 > `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`.
 
+> **Скилл для LLM-агентов**: [docs/mcp-skill.md](mcp-skill.md) — шпаргалка
+> по инструментам, fair-exclusion правило и воркфлоу-цепочки (обезличенная
+> копия локального `~/.config/opencode/skills/blockcheckS-mcp/SKILL.md`).
+
 ---
 
 ## 4. Конфигурация клиентов
