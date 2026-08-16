@@ -81,6 +81,8 @@ def test_preflight_aborts_on_baseline_fail():
 
 @pytest.mark.unit
 def test_preflight_skips_domain_on_prolog():
+    cache = MagicMock()
+    cache.resolve.return_value = ["1.2.3.4"]
     with (
         patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "")),
         patch("blockchecks.engine.preflight.run_prolog", return_value=True),
@@ -88,25 +90,31 @@ def test_preflight_skips_domain_on_prolog():
         patch("blockchecks.engine.preflight.print_port_block_report"),
         patch("blockchecks.engine.preflight.run_ip_block_cross_test"),
         patch("blockchecks.engine.preflight.print_ip_block_report"),
+        patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
+        patch("blockchecks.engine.preflight._triage_domain"),
     ):
         r = run_preflight(
             ["discord.com"],
-            PreflightOptions(skip_nfqws2_check=True, skip_ip_block=True),
+            PreflightOptions(skip_nfqws2_check=True, skip_ip_block=True, dns_cache=cache),
         )
     assert "discord.com" in r.skip_domains
 
 
 @pytest.mark.unit
 def test_preflight_force_keeps_domain():
+    cache = MagicMock()
+    cache.resolve.return_value = ["1.2.3.4"]
     with (
         patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "")),
         patch("blockchecks.engine.preflight.run_prolog", return_value=True),
         patch("blockchecks.engine.preflight.run_port_block_probe"),
         patch("blockchecks.engine.preflight.print_port_block_report"),
+        patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
+        patch("blockchecks.engine.preflight._triage_domain"),
     ):
         r = run_preflight(
             ["discord.com"],
-            PreflightOptions(skip_nfqws2_check=True, skip_ip_block=True, force=True),
+            PreflightOptions(skip_nfqws2_check=True, skip_ip_block=True, force=True, dns_cache=cache),
         )
     assert "discord.com" not in r.skip_domains
 
@@ -268,7 +276,8 @@ def test_preflight_async_full():
         "blockchecks.engine.preflight.run_prolog", return_value=False), patch(
         "blockchecks.engine.preflight.run_ip_block_cross_test",
         return_value=MagicMock()), patch(
-        "blockchecks.engine.preflight.print_ip_block_report"):
+        "blockchecks.engine.preflight.print_ip_block_report"), patch(
+        "blockchecks.engine.preflight._triage_domain"):
         report = asyncio.run(run_preflight_async(["discord.com"], opts))
     assert report.exit_code == 0
     assert report.baseline_ok is True
