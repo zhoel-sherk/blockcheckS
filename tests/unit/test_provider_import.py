@@ -35,7 +35,7 @@ def test_normalize_cli_strategy():
 
 def test_write_shortlist_presets(tmp_path):
     summary = {
-        "provider_id": "fryazino",
+        "provider_id": "fiord",
         "generated_at": "2026-01-01",
         "shortlist": {"discord.com": {"tls12": "fake:blob=stun:repeats=6:tcp_ts=-1000"}},
     }

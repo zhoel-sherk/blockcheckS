@@ -67,8 +67,8 @@ source = "bc2-parity suite"
 file = "blockcheckS-best.tls"
 type = "tls"
 family = "tcp"
-tags = ["best", "fryazino", "fake-blob"]
-description = "Confirmed best TCP strategies on Fryazino.net (fake+blob tcp_ts=-1000)"
+tags = ["best", "fiord", "fake-blob"]
+description = "Confirmed best TCP strategies on LLC Fiord (fake+blob tcp_ts=-1000)"
 source = "blockcheckS internal"
 
 [strategies.flowseal-fast]
@@ -79,44 +79,44 @@ tags = ["flowseal", "fast"]
 description = "Flowseal-derived fast TCP strategies"
 source = "Flowseal ALT2 mapping"
 
-[strategies.fryazino-http]
-file = "fryazino-http.http"
+[strategies.fiord-http]
+file = "fiord-http.http"
 type = "http"
 family = "http"
-tags = ["fryazino", "http"]
-description = "Imported Fryazino HTTP strategies (provider_summary)"
+tags = ["fiord", "http"]
+description = "Imported LLC Fiord HTTP strategies (provider_summary)"
 source = "provider_import"
 
-[strategies.fryazino-quic]
-file = "fryazino-quic.quic"
+[strategies.fiord-quic]
+file = "fiord-quic.quic"
 type = "quic"
 family = "quic"
-tags = ["fryazino", "quic"]
-description = "Imported Fryazino QUIC strategies (provider_summary)"
+tags = ["fiord", "quic"]
+description = "Imported LLC Fiord QUIC strategies (provider_summary)"
 source = "provider_import"
 
-[strategies.fryazino-tls12]
-file = "fryazino-tls12.tls"
+[strategies.fiord-tls12]
+file = "fiord-tls12.tls"
 type = "tls"
 family = "tcp"
-tags = ["fryazino", "tls12"]
-description = "Imported Fryazino TLS 1.2 strategies (provider_summary)"
+tags = ["fiord", "tls12"]
+description = "Imported LLC Fiord TLS 1.2 strategies (provider_summary)"
 source = "provider_import"
 
-[strategies.fryazino-tls13]
-file = "fryazino-tls13.tls"
+[strategies.fiord-tls13]
+file = "fiord-tls13.tls"
 type = "tls"
 family = "tcp"
-tags = ["fryazino", "tls13"]
-description = "Imported Fryazino TLS 1.3 strategies (provider_summary)"
+tags = ["fiord", "tls13"]
+description = "Imported LLC Fiord TLS 1.3 strategies (provider_summary)"
 source = "provider_import"
 
-[strategies.fryazino-udp_voice]
-file = "fryazino-udp_voice.udp"
+[strategies.fiord-udp_voice]
+file = "fiord-udp_voice.udp"
 type = "udp"
 family = "udp_voice"
-tags = ["fryazino", "voice", "discord_udp"]
-description = "Imported Fryazino UDP voice strategies (discord_udp blob)"
+tags = ["fiord", "voice", "discord_udp"]
+description = "Imported LLC Fiord UDP voice strategies (discord_udp blob)"
 source = "provider_import"
 
 [strategies.gp-custom-dupfake]
@@ -163,8 +163,8 @@ source = "blockcheck2.d/custom"
 file = "gp-verified.tls"
 type = "tls"
 family = "tcp"
-tags = ["gp", "verified", "fryazino"]
-description = "GP-verified TCP strategies confirmed on Fryazino.net (top-10 by coverage)"
+tags = ["gp", "verified", "fiord"]
+description = "GP-verified TCP strategies confirmed on LLC Fiord (top-10 by coverage)"
 source = "GP state.sqlite3"
 
 [strategies.gp-voice]

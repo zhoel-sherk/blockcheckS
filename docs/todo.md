@@ -91,7 +91,7 @@ _(none — E3 closed in Wave2)_
 - [x] **L-batch-4** Fan-out: classic per-strategy + one-time warning при `--lua-bridge` (bridge внутри fan-out wave не совместим)
 - [x] **L-batch-5** Тесты `test_batch_probe.py`, dead_flags для `full`; docs `custom_lua.md` §9
 
-**Статус:** ProbeBatchService готов (1.1.x); T-L1 короткие прогоны на Fryazino — в работе.
+**Статус:** ProbeBatchService готов (1.1.x); T-L1 короткие прогоны на LLC Fiord — в работе.
 
 **Поэтапный переход default → lua_bridge (1.3.1 — переключён):**
 
@@ -101,13 +101,13 @@ _(none — E3 closed in Wave2)_
 
 | Этап | Gate | Действие |
 |------|------|----------|
-| **T-L1** | ProbeBatchService + full sequential/AQ на Fryazino | `--lua-bridge` на `scan`/`full`; `--lua-bridge-compare` без drift |
+| **T-L1** | ProbeBatchService + full sequential/AQ на LLC Fiord | `--lua-bridge` на `scan`/`full`; `--lua-bridge-compare` без drift |
 | **T-L2** | smart-fallback (§6 custom_lua) или P0-2 inline curl | снизить FAIL timeout wall на full matrix |
 | **T-L3** | 2× full run PASS rate ±1% vs classic baseline | **flip default:** `probe_backend=lua_bridge` без флага |
 | **T-L4** | после T-L3 | CLI `--classic` / `--probe-backend classic` — явный legacy; deprecate `--lua-bridge` (alias) |
 | **T-L5** | optional | env `BLOCKCHECKS_PROBE_BACKEND`; CI gate только `--lua-bridge-compare` на subset |
 
-- [x] **L-transition-1** (T-L1) Fryazino: `bs scan --lua-bridge --max 200` + `bs full --lua-bridge` subset, compare green — smoke 2026-08-05: scan/compare/full OK, 0 PASS на random custom (ожидаемо); drift 0 — DONE (1.3.1)
+- [x] **L-transition-1** (T-L1) LLC Fiord: `bs scan --lua-bridge --max 200` + `bs full --lua-bridge` subset, compare green — smoke 2026-08-05: scan/compare/full OK, 0 PASS на random custom (ожидаемо); drift 0 — DONE (1.3.1)
 - [ ] **L-transition-2** (T-L2) smart-fallback NDJSON poll → early curl abort в `ProbeBatchService`
 - [x] **L-transition-3** (T-L3) Flip default backend to `lua_bridge` — DONE (1.3.1, `config.DEFAULT_PROBE_BACKEND`)
 - [x] **L-transition-4** (T-L4) Добавить `--classic` и `--probe-backend {classic,lua_bridge}` — DONE (1.3.1, `add_backend_args`)
@@ -143,7 +143,7 @@ _(see Deferred)_
 | **B7** nftables vmap | Optional host-shared POC; not needed for netns parallel |
 | **GV-2** Playwright | Optional yt-dlp alternative |
 | **unblock-pro** | External heuristics port |
-| **ipset-lists** | Независимость от zapret2/ipset (antifilter/antizapret/reestr IP-листы для внешнего nfqws2-хостинга). Сейчас не требуется: Fryazino-стратегии не зависят от IP-листов, в blockcheckS ipset не используется. Скрипты-референс: `/opt/zapret2/ipset/` (create_ipset.sh, get_*.sh). Реализовать при необходимости внешнего деплоя с IP-блокировками. |
+| **ipset-lists** | Независимость от zapret2/ipset (antifilter/antizapret/reestr IP-листы для внешнего nfqws2-хостинга). Сейчас не требуется: LLC Fiord-стратегии не зависят от IP-листов, в blockcheckS ipset не используется. Скрипты-референс: `/opt/zapret2/ipset/` (create_ipset.sh, get_*.sh). Реализовать при необходимости внешнего деплоя с IP-блокировками. |
 
 ---
 
@@ -189,11 +189,11 @@ fanout = transfer, provider-preflight = cold-start prior). Цель старых
 - [ ] **RL-1** Gymnasium Env `DpiBanditEnv` (Discrete action, one-step episodes) — bandit-форма,
       не MDP (DPI реагирует per-flow, нет агентных переходов)
 - [ ] **RL-2** DPI-эмулятор на сервере: Geneva-style NFQUEUE+scapy censors / nDPI / TSPU-rules
-      (IMC'22) — обучение PPO (sb3) vs GA/CMA-ES параллельно; gate на Fryazino holdout
+      (IMC'22) — обучение PPO (sb3) vs GA/CMA-ES параллельно; gate на LLC Fiord holdout
 - [ ] **RL-3** PPO vs GA: GA sample-efficient для discovery (Geneva precedent); PPO только если
       нужна context-conditional policy и есть дешёвый эмулятор. SAC не подходит (discrete).
 - [ ] **RL-4** деплой: дистиллированный tree/JSON как AQ priors; sim2real = emulator только как
-      prior-generator, никогда как ground truth (Fryazino ≠ модель)
+      prior-generator, никогда как ground truth (LLC Fiord ≠ модель)
 
 ---
 
@@ -485,7 +485,7 @@ blockcheckS → для каждой стратегии:
 
 **Что сделать:** см. Phase 1–8 в [byedpi_engine.md](byedpi_engine.md) (§5 Roadmap).
 
-**Ограничения:** см. §7 byedpi_engine.md. `badsum`/`tcp_ts_up` — SKIP. UDP/QUIC — nfqws2. Не тестировался на Fryazino — нужен живой прогон.
+**Ограничения:** см. §7 byedpi_engine.md. `badsum`/`tcp_ts_up` — SKIP. UDP/QUIC — nfqws2. Не тестировался на LLC Fiord — нужен живой прогон.
 
 ---
 
@@ -667,7 +667,7 @@ blockcheckS → для каждой стратегии:
 - [x] `BridgeEvent.ttl` + `is_rst_in()`; rst_in → `fail_phase=TLS_RST_AT_SNI` + `rst_in_ttl`.
 - [x] `checkers/quic_raw.py`: raw QUIC Initial (реальный блоб + RFC9000 fallback);
       PASS/QUIC_DROP/UDP_BLOCKED. В preflight → `triage.quic_drop`.
-      Live: cloudflare PASS, youtube QUIC_DROP (Fryazino).
+      Live: cloudflare PASS, youtube QUIC_DROP (LLC Fiord).
 - [x] Блобы +3 (tls_5ka/quic_5ka/quic_rutube) из Flowseal 2026; README с описанием.
 
 #### Новые баги (найдены при long-term прогонах 2026-08-14)
@@ -700,6 +700,6 @@ blockcheckS → для каждой стратегии:
 - [x] **Фикс доменной изоляции** (`_run_tcp_sequential_bridge` — false-positive all-youtube; параллельные worker'ы + active_domains, `[run] domain_isolate`). E2E: 6 доменов равномерно. Commit `ffb41e4`.
 - [x] Очищены 911 ложных PASS из data_block (commit `a31fa0a`).
 - [x] Вариант A → `--adaptive`.
-- [ ] Прогон A (adaptive) в процессе: 12 доменов изолированы, ~1.9/s, 0 PASS при timeout 1s (Fryazino медленный — B с timeout 2 должен дать PASS).
+- [ ] Прогон A (adaptive) в процессе: 12 доменов изолированы, ~1.9/s, 0 PASS при timeout 1s (LLC Fiord медленный — B с timeout 2 должен дать PASS).
 - [ ] Автозапуск B→F оркестратором (`bs-series`).
 - [ ] **--resume** протестировать (мягкая остановка + перезапуск, проверить skip-счётчик).

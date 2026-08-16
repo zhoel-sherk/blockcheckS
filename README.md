@@ -177,6 +177,7 @@ bs pair -d discord.com -M gp-voice           # голосовые UDP-страт
 | [Package Layout](docs/package.md) | XDG-пути, деревья, import graph |
 | [Database Schema](docs/database.md) | ER-диаграмма, SQL examples, checkpoint logic |
 | [MCP Server](docs/mcp.md) | Установка MCP в Claude Desktop / Cursor / opencode |
+| [Raspberry Pi (armv7l)](docs/install-rpi.md) | Установка на RPi 2+ без компиляции |
 | [Glossary](docs/glossary.md) | Терминология: netns, NFQUEUE, pair matrix, ... |
 | [Changelog](changelog.md) | История версий (1.0.0 → 1.0.2) |
 | [Roadmap](docs/todo.md) | Бэклог: P1 (скорость), P2 (voice/GP), P3 (ML) |

@@ -30,7 +30,7 @@ def _run_scan(extra_args: list[str], *, max_strategies: int = 10) -> subprocess.
     """Run bs scan with lua-bridge-compare, return CompletedProcess.
 
     Runs the child in its own process group so that a subprocess timeout can
-    kill the whole tree (sudo -> bs -> nfqws2). On Fryazino the per-strategy
+    kill the whole tree (sudo -> bs -> nfqws2). On LLC Fiord the per-strategy
     ``--timeout 5`` keeps FAIL paths short; ``--lua-bridge-compare`` doubles
     the work (classic + bridge), so the wall budget is generous.
     """

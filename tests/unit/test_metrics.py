@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -43,26 +43,67 @@ def test_process_rss_returns_zero_on_error():
         assert process_rss_bytes(999999) == 0
 
 
+def test_proc_status_value_parses_kb_to_bytes():
+    from blockchecks.service.metrics import _proc_status_value
+
+    def _open(path, *args, **kwargs):
+        return _TextIO("Name:\tnfqws2\nVmRSS:\t  1234 kB\nVmSize:\t 5678 kB\n")
+
+    with patch("blockchecks.service.metrics.open", side_effect=_open):
+        assert _proc_status_value(1, "VmRSS") == 1234 * 1024
+        assert _proc_status_value(1, "VmSize") == 5678 * 1024
+        assert _proc_status_value(1, "VmPeak") == 0  # field absent
+
+
+def test_proc_status_value_handles_missing_field():
+    from blockchecks.service.metrics import _proc_status_value
+
+    def _open(path, *args, **kwargs):
+        return _TextIO("Name:\tnfqws2\n")
+
+    with patch("blockchecks.service.metrics.open", side_effect=_open):
+        assert _proc_status_value(1, "VmRSS") == 0
+
+
+def test_proc_status_value_handles_proc_race():
+    from blockchecks.service.metrics import _proc_status_value
+
+    def _open(path, *args, **kwargs):
+        raise FileNotFoundError
+
+    with patch("blockchecks.service.metrics.open", side_effect=_open):
+        assert _proc_status_value(1, "VmRSS") == 0
+
+
 def test_find_nfqws2_pids_matches_netns_inode():
-    """psutil path: only nfqws2 whose /proc ns/net inode equals the ns file inode."""
-    fake_procs = []
-    for pid in (1234, 5678):
-        p = MagicMock()
-        p.pid = pid
-        p.info = {"name": "nfqws2"}
-        fake_procs.append(p)
+    """stdlib path: only nfqws2 whose /proc ns/net inode equals the ns file inode."""
+
+    def _listdir(path):
+        if path == "/proc":
+            return ["1234", "5678", "9999"]
+        raise OSError("unexpected listdir")
 
     def _readlink(path):
         if "/1234/" in path:
             return "net:[99]"
         if "/5678/" in path:
             return "net:[100]"
-        raise OSError("not found")
+        raise FileNotFoundError
+
+    def _open(path, *args, **kwargs):
+        if path == "/proc/1234/comm":
+            return _TextIO("nfqws2")
+        if path == "/proc/5678/comm":
+            return _TextIO("nfqws2")
+        if path == "/proc/9999/comm":
+            return _TextIO("nginx")
+        raise FileNotFoundError
 
     with (
         patch("blockchecks.service.metrics.os.stat") as mock_stat,
+        patch("blockchecks.service.metrics.os.listdir", side_effect=_listdir),
         patch("blockchecks.service.metrics.os.readlink", side_effect=_readlink),
-        patch("psutil.process_iter", return_value=iter(fake_procs)),
+        patch("blockchecks.service.metrics.open", side_effect=_open),
     ):
         mock_stat.return_value.st_ino = 99
         assert find_nfqws2_pids("bs-p0") == [1234]
@@ -74,15 +115,87 @@ def test_find_nfqws2_pids_missing_ns_file():
 
 
 def test_find_nfqws2_pids_skips_non_nfqws2():
-    p = MagicMock()
-    p.pid = 777
-    p.info = {"name": "nginx"}
+    def _listdir(path):
+        if path == "/proc":
+            return ["777"]
+        raise OSError("unexpected listdir")
+
+    def _readlink(path):
+        raise FileNotFoundError
+
+    def _open(path, *args, **kwargs):
+        if path == "/proc/777/comm":
+            return _TextIO("nginx")
+        raise FileNotFoundError
+
     with (
         patch("blockchecks.service.metrics.os.stat") as mock_stat,
-        patch("psutil.process_iter", return_value=iter([p])),
+        patch("blockchecks.service.metrics.os.listdir", side_effect=_listdir),
+        patch("blockchecks.service.metrics.os.readlink", side_effect=_readlink),
+        patch("blockchecks.service.metrics.open", side_effect=_open),
     ):
         mock_stat.return_value.st_ino = 99
         assert find_nfqws2_pids("bs-p0") == []
+
+
+def test_find_nfqws2_pids_handles_proc_races():
+    """Processes that vanish mid-iteration are skipped, not raised."""
+    import builtins
+
+    real_open = builtins.open
+
+    def _listdir(path):
+        if path == "/proc":
+            return ["1111", "2222"]
+        raise OSError("unexpected listdir")
+
+    def _readlink(path):
+        if "/1111/" in path:
+            return "net:[99]"
+        raise ProcessLookupError  # 2222 vanished before readlink
+
+    def _open(path, *args, **kwargs):
+        if path == "/proc/1111/comm":
+            return _TextIO("nfqws2")
+        if path == "/proc/2222/comm":
+            raise ProcessLookupError  # vanished mid-read
+        return real_open(path, *args, **kwargs)
+
+    with (
+        patch("blockchecks.service.metrics.os.stat") as mock_stat,
+        patch("blockchecks.service.metrics.os.listdir", side_effect=_listdir),
+        patch("blockchecks.service.metrics.os.readlink", side_effect=_readlink),
+        patch("blockchecks.service.metrics.open", side_effect=_open),
+    ):
+        mock_stat.return_value.st_ino = 99
+        assert find_nfqws2_pids("bs-p0") == [1111]
+
+
+class _TextIO:
+    """Minimal file-like for comm/status mock."""
+
+    def __init__(self, text: str):
+        self._lines = text.splitlines(keepends=True)
+        self._idx = 0
+
+    def read(self) -> str:
+        return "".join(self._lines)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._idx >= len(self._lines):
+            raise StopIteration
+        line = self._lines[self._idx]
+        self._idx += 1
+        return line
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 def test_monitor_flags_rss_ceiling():

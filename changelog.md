@@ -112,7 +112,7 @@ pip install -U blockchecks
 with real baked QUIC Initial blob (fallback synthetic RFC 9000). Classifies
 PASS (server replied) / QUIC_DROP (silent TSPU drop) / UDP_BLOCKED (ICMP port
 unreachable). Integrated into preflight → `TriageProfile.quic_drop/udp_blocked`.
-Verified live: cloudflare.com→PASS, youtube.com→QUIC_DROP (Fryazino fact).
+Verified live: cloudflare.com→PASS, youtube.com→QUIC_DROP (LLC Fiord fact).
 
 **Blobs:** +8 from Flowseal repo (2026) — `tls_5ka`/`quic_5ka` (5ka.ru,
 PR #16589), `quic_rutube` (rutube.ru), plus `quic_funpay`/`quic_cloudflare`/
@@ -216,7 +216,7 @@ blindly). Fixed by embedding the actual value into the tmux command line
 shows `lua_extra=/home/zhoel/workspace/blockcheckS/lua/blockchecks/geneva.lua`.
 
 **Long-term series A (adaptive, timeout 2) results:** 16 517 probes, 12
-domains isolated, **878 PASS** (vs 0 PASS at timeout 1 — Fryazino needs ≥2s).
+domains isolated, **878 PASS** (vs 0 PASS at timeout 1 — LLC Fiord needs ≥2s).
 64 PASS from new families (tcp_ack=-66000:tcp_ts_up + TTL, rst, synack,
 wssize, gva). data_block 295 → 1 123 PASS.
 
@@ -307,7 +307,7 @@ is represented at any `--max` instead of letting the huge `fake` family eat
 the budget. Full pool (max≥pool size) still emits everything: 24 210 tls12
 items (was 12 015).
 
-**E2E verified (Fryazino, --max 30, timeout 2s):** rst_fake (`rst:badsum`),
+**E2E verified (LLC Fiord, --max 30, timeout 2s):** rst_fake (`rst:badsum`),
 synack and wssize all produced PASS on youtube.com; no nfqws2 errors across
 the 30-strategy scan.
 
@@ -385,7 +385,7 @@ config.toml. No CLI flag.
 - **Settle profile auto-load could break `bs full`**: a stale
   `/root/.cache/blockcheckS/settle_profile.json` with `curl_timeout=0.5s`
   (from an earlier bench on a faster network) turned every TCP probe into a
-  500ms FAIL on throttled Fryazino. `auto_load_profile` now rejects profiles
+  500ms FAIL on throttled LLC Fiord. `auto_load_profile` now rejects profiles
   whose defaults demand `curl_timeout < 2.0` (AUTO_LOAD_MIN_CURL) with a
   warning; explicit `--settle-profile` still forces. +3 unit tests.
 - **`--data-block-sync` committed but never pushed**: `maybe_sync_data_block`
@@ -410,19 +410,19 @@ config.toml. No CLI flag.
   tcp/udp are single-shot sync commands without the AsyncTestRunner auto-pin
   path, so declaring the flags there tripped the dead-CLI-flags gate.
 - Integration `test_lua_bridge_compare`: wall timeout 300→500s, per-strategy
-  `--timeout 5` (FAIL paths stay short on throttled Fryazino), child runs in
+  `--timeout 5` (FAIL paths stay short on throttled LLC Fiord), child runs in
   its own process group and `killpg` cleans the whole sudo→bs→nfqws2 tree on
   timeout (no leaked procs / stale run.lock / PID-reuse false conflict);
   `test_lua_bridge_single_strategy` now probes 1 strategy (was silently 10).
 
-### Added — IP pinning (hosts-analog) + retry-on-next-IP vs Fryazino per-IP throttling
+### Added — IP pinning (hosts-analog) + retry-on-next-IP vs LLC Fiord per-IP throttling
 
 - **`--fixed-ip <path>`** (env `BLOCKCHECKS_FIXED_IP`): hosts-analog pin file
   (`domain IP` or `IP domain` per line, `#` comments). Default (no flag) is
   **`data_block/providers/<provider>/hosts`** — the same Windows anti-hijack
   hosts file, so one file feeds both blockcheckS and a hand-copied Windows
   hosts. Pinned IPs override DoH order, so the Cloudflare DoH rotation can no
-  longer land on a Fryazino-throttled discord IP (e.g. `162.159.136.232`).
+  longer land on a LLC Fiord-throttled discord IP (e.g. `162.159.136.232`).
   See `byedpi_engine.md` §5 Phase 6 diagnosis.
 - **Auto-pin at startup**: unless `--no-auto-pin`, the runner probes each
   cached domain's candidate IPs with `fake:blob=stun` (PIN_STRATEGY) and pins
@@ -450,7 +450,7 @@ config.toml. No CLI flag.
   test/sec; compares with `bs scan --classic` baseline.
 - First results (discord.com, 5 strategies): nfqws2 15.19s / 0.33 t/s / 3-5
   PASS vs byedpi 10.72s / 0.47 t/s / 3-5 PASS → **1.19× speedup**, stable;
-  nfqws2 classic flaky on Fryazino. Documented in `byedpi_engine.md` §5 Phase 6.
+  nfqws2 classic flaky on LLC Fiord. Documented in `byedpi_engine.md` §5 Phase 6.
 - Note: ciadpi `-l <file>` (no `@` prefix, unlike nfqws2 blob syntax).
 
 ### Docs — refresh `docs/custom_lua.md` (paths + done/backlog markers)
@@ -493,7 +493,7 @@ config.toml. No CLI flag.
   PASS; `bs scan --classic` → `backend=classic` PASS.
 - **Trottling confirmation**: GP control-plane standard discovery on
   discord.com shows pervasive `code=28` timeouts across dozens of strategies
-  (Fryazino throttling), while fake+tls_mod strategies (`fake_default_tls +
+  (LLC Fiord throttling), while fake+tls_mod strategies (`fake_default_tls +
   tls_mod rnd`, `luaexec patmod`) succeed — the same pattern blockcheckS finds
   (`fake:blob=...:tcp_ts=-1000`). Not a blockcheckS bug.
 - dead_cli_flags now covers tcp/udp for the new backend dests.
@@ -523,7 +523,7 @@ config.toml. No CLI flag.
   existing, config/disabled), `_is_quic_dropped` (4).
 - `docs/guide.md` QUIC fallback section added.
 
-### Investigated — QUIC/HTTP-3 blocking mechanism on Fryazino (2026-08)
+### Investigated — QUIC/HTTP-3 blocking mechanism on LLC Fiord (2026-08)
 
 - **QUIC as a protocol is NOT blocked**: `check_http3('cloudflare.com')` → 301;
   raw QUIC Initial to a Cloudflare IP gets a reply; QUIC reaches `vk.com` and
@@ -610,7 +610,7 @@ config.toml. No CLI flag.
 
 - `checkers/curl_probe.py` — googlevideo videoplayback probes now route through
   `SOCKS5_PROXY` (`BLOCKCHECKS_PROXY`, default `socks5://127.0.0.1:11080`).
-  Direct egress to the googlevideo CDN is DPI-blocked on Fryazino, so without a
+  Direct egress to the googlevideo CDN is DPI-blocked on LLC Fiord, so without a
   proxy every GV probe timed out / 403'd even though yt-dlp had a fresh signed
   URL. The proxy is passed per-request via the `proxy=` kwarg as
   `socks5h://…` (DNS through proxy); the `CurlOpt.PROXY` setopt path does not
@@ -628,7 +628,7 @@ config.toml. No CLI flag.
 - **Removed obsolete/one-off scripts** from `scripts/`: `flag_campaign.py`,
   `retest_failed.py`, `b2_smoke_benchmark.sh`, `export_shortlist.sh` (dup of
   `bc-nfconf`), `export_shortlist_json.sh`, `gv5_quic_smoke.sh` (QUIC blocked
-  on Fryazino), `gv_e2e_smoke.sh`. Removed `dev/oc_*` OpenCode API smokes
+  on LLC Fiord), `gv_e2e_smoke.sh`. Removed `dev/oc_*` OpenCode API smokes
   (unrelated to testing).
 - **Added repeatable functional-test scripts** in `scripts/`:
   - `smoke_scan.sh` — quick `bs scan` on a known-good matrix; backend selectable
@@ -892,7 +892,7 @@ netns-изоляцией, adaptive queue и XDG layout.
 - **XDG layout:** `~/.config/blockcheckS/config.toml`, `~/.local/state/blockcheckS/` (state.db, export, logs, shortlists), `~/.cache/blockcheckS/`
 - **DAO:** `engine/store/` — `RunStateStore` / `SqliteRunStore`; `db_logger.py` → deprecation shim
 - **Docs:** `docs/cookbook/gp-bridge.md`, repeats glossary, `docs/package.md`, onboarding split
-- **Scripts:** `scripts/release_smoke.sh` (Fryazino gate + B5 shortlist round-trip), `scripts/flag_campaign.py`
+- **Scripts:** `scripts/release_smoke.sh` (LLC Fiord gate + B5 shortlist round-trip), `scripts/flag_campaign.py`
 
 ### Changed
 
@@ -926,5 +926,5 @@ netns-изоляцией, adaptive queue и XDG layout.
 ### Quality
 
 - Unit tests via `pytest -m "not integration"`; `ruff check src tests` clean
-- Fryazino release smoke + flag campaign product gates (BC2 parity markers, pair resume, shortlist/nfconf)
+- LLC Fiord release smoke + flag campaign product gates (BC2 parity markers, pair resume, shortlist/nfconf)
 - Install contract: editable/checkout required for `configs/` (ONB-7); blobs on host `/opt/zapret2/blobs/`

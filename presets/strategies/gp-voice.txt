@@ -1,4 +1,4 @@
-# Discord Voice UDP strategies — confirmed working on Fryazino.net
+# Discord Voice UDP strategies — confirmed working on LLC Fiord
 # Requires: /opt/zapret2/blobs/discord_udp.bin (1200B, Flowseal ACTIVE_DISCORD_UDP.bin)
 # nfqws2: --filter-udp=50000-50100 --filter-l7=discord,stun --payload=discord_ip_discovery,stun
 
