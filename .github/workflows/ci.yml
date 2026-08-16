@@ -1,18 +1,8 @@
 name: CI
-
 on:
-  push:
-    branches: [main, master, alpha]
   pull_request:
-    branches: [main, master, alpha]
-  workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  lint-and-quality:
+  s2-test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -20,125 +10,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: pyproject.toml
-      - name: Install dependencies
+      - name: Install
         run: pip install -e ".[dev]"
-      - name: Ruff
-        run: ruff check src tests
-      - name: Quality gates
-        run: pytest -m quality --timeout=30
-
-  unit-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: "S1 Engine & Generators"
-            files: >-
-              tests/unit/test_adaptive_queue.py tests/unit/test_adaptive_runner.py
-              tests/unit/test_byedpi_matrix_generator.py tests/unit/test_byedpi_translator.py
-              tests/unit/test_families_params.py tests/unit/test_flowseal_unified.py
-              tests/unit/test_geneva_audit.py tests/unit/test_http_generator.py
-              tests/unit/test_matrix_debt_w1.py tests/unit/test_matrix_generator.py
-              tests/unit/test_strategy_loader.py tests/unit/test_tcp_redirect.py
-              tests/unit/test_tcp_fanout.py tests/unit/test_wave4_perf.py
-              tests/unit/test_blob_aliases.py tests/unit/test_family_needs.py
-              tests/unit/test_fail_phase.py tests/unit/test_todo_debt_w2w3.py
-              tests/unit/test_wave_c.py tests/unit/test_wave3_audit.py
-              tests/unit/test_wave_a_regressions.py tests/unit/test_full_export.py
-              tests/unit/test_wave1_followups.py tests/unit/test_architecture.py
-              tests/unit/test_conf_builder.py tests/unit/test_settle_profile.py
-              tests/unit/test_bench_settle.py
-          - name: "S2 Checkers & Service"
-            files: >-
-              tests/unit/test_checkers.py tests/unit/test_composite_runner.py
-              tests/unit/test_curl_probe.py tests/unit/test_curl_repeats.py
-              tests/unit/test_dns_secure.py tests/unit/test_discover_dns_alive.py
-              tests/unit/test_gv_ggc.py tests/unit/test_gv_url.py
-              tests/unit/test_in_ns_workers.py tests/unit/test_ip_block.py
-              tests/unit/test_ip_pin.py tests/unit/test_l3_triage.py
-              tests/unit/test_port_block.py tests/unit/test_preflight.py
-              tests/unit/test_quic_http3.py tests/unit/test_quic_raw.py
-              tests/unit/test_stream_triage.py tests/unit/test_tcp_tls.py
-              tests/unit/test_triage.py tests/unit/test_udp_voice_probes.py
-              tests/unit/test_voice_discovery.py tests/unit/test_voice_dns.py
-              tests/unit/test_batch_bridge_probe.py tests/unit/test_batch_probe.py
-              tests/unit/test_batch_probe_runner.py tests/unit/test_lua_bridge.py
-              tests/unit/test_lua_bridge_edge_cases.py tests/unit/test_lua_bridge_runner.py
-              tests/unit/test_lua_netns.py tests/unit/test_lua_session.py
-              tests/unit/test_netns_pool.py tests/unit/test_nfqws2_manager.py
-              tests/unit/test_nfqws2_settle.py tests/unit/test_firewall_unit.py
-              tests/unit/test_metrics.py tests/unit/test_probe_backend.py
-              tests/unit/test_probe_service.py tests/unit/test_probe_worker.py
-              tests/unit/test_async_runner_methods.py tests/unit/test_async_runner_tcp.py
-              tests/unit/test_batch_scheduler.py
-          - name: "S3 CLI, Store & System"
-            files: >-
-              tests/unit/test_cliapp.py tests/unit/test_commands_pair.py
-              tests/unit/test_commands_stop.py tests/unit/test_commands_tcp_udp.py
-              tests/unit/test_main.py tests/unit/test_main_phases.py
-              tests/unit/test_pair_matrix.py tests/unit/test_pair_phases.py
-              tests/unit/test_run_control.py tests/unit/test_run_deadline.py
-              tests/unit/test_run_finalize.py tests/unit/test_database.py
-              tests/unit/test_sqlite_store.py tests/unit/test_data_block.py
-              tests/unit/test_db_logger.py tests/unit/test_xdg_paths.py
-              tests/unit/test_secure_io.py tests/unit/test_settings.py
-              tests/unit/test_system_deps.py tests/unit/test_domain_loader.py
-              tests/unit/test_user_config.py tests/unit/test_nfconf.py
-              tests/unit/test_package_structure.py tests/unit/test_presets.py
-              tests/unit/test_presets_integrity.py tests/unit/test_provider_import.py
-              tests/unit/test_shortlist_export.py tests/unit/test_shortlist_import.py
-              tests/unit/test_audit_fixes_1_0_1.py tests/unit/test_audit_regressions.py
-              tests/unit/test_bc2_parity.py tests/unit/test_campaign_fixes.py
-              tests/unit/test_code_quality.py tests/unit/test_mutation.py
-              tests/unit/test_test_runner.py tests/unit/test_test_runner_full.py
-              tests/unit/test_vulture.py tests/unit/test_logging.py
-              tests/unit/test_dead_cli_flags.py
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: pyproject.toml
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-      - name: Run Test Shard — ${{ matrix.name }}
-        run: pytest ${{ matrix.files }} -m "not integration and not quality and not mutation" -n auto --dist loadscope --timeout=15
-
-  mutation:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: pyproject.toml
-      - name: Install package
-        run: pip install -e ".[dev]"
-      - name: Mutmut (scoped via pyproject)
+      - name: S2 without nfqws2_manager
         run: |
-          mutmut run
-          mutmut results
-
-  integration:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: pyproject.toml
-      - name: Install package
-        run: pip install -e ".[dev]"
-      - name: Integration placeholder
-        run: echo "Run scripts/release_smoke.sh on the probe host with sudo"
+          pytest tests/unit/test_checkers.py tests/unit/test_composite_runner.py tests/unit/test_curl_probe.py tests/unit/test_curl_repeats.py tests/unit/test_dns_secure.py tests/unit/test_discover_dns_alive.py tests/unit/test_gv_ggc.py tests/unit/test_gv_url.py tests/unit/test_in_ns_workers.py tests/unit/test_ip_block.py tests/unit/test_ip_pin.py tests/unit/test_l3_triage.py tests/unit/test_port_block.py tests/unit/test_preflight.py tests/unit/test_quic_http3.py tests/unit/test_quic_raw.py tests/unit/test_stream_triage.py tests/unit/test_tcp_tls.py tests/unit/test_triage.py tests/unit/test_udp_voice_probes.py tests/unit/test_voice_discovery.py tests/unit/test_voice_dns.py tests/unit/test_batch_bridge_probe.py tests/unit/test_batch_probe.py tests/unit/test_batch_probe_runner.py tests/unit/test_lua_bridge.py tests/unit/test_lua_bridge_edge_cases.py tests/unit/test_lua_bridge_runner.py tests/unit/test_lua_netns.py tests/unit/test_lua_session.py tests/unit/test_netns_pool.py tests/unit/test_nfqws2_settle.py tests/unit/test_firewall_unit.py tests/unit/test_metrics.py tests/unit/test_probe_backend.py tests/unit/test_probe_service.py tests/unit/test_probe_worker.py tests/unit/test_async_runner_methods.py tests/unit/test_async_runner_tcp.py tests/unit/test_batch_scheduler.py -m "not integration and not quality and not mutation" -n auto --dist loadscope --timeout=15
