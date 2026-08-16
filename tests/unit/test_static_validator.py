@@ -116,3 +116,22 @@ def test_strategy_validation_result_repr() -> None:
     r = StrategyValidationResult(strategy="abc")
     assert r.strategy == "abc"
     assert r.issues == []
+
+
+def test_custom_lua_excluded_param_is_error() -> None:
+    result = validate_strategy("dupfake:blob=stun:repeats=6:pos=1")
+    codes = [i.code for i in result.issues if i.severity == "error"]
+    assert "custom_lua_excluded" in codes
+
+
+def test_custom_lua_undocumented_param_is_warning() -> None:
+    result = validate_strategy("dupfake:blob=stun:repeats=6:mystery_param=1")
+    assert result.is_valid  # warning only, not an error
+    codes = [i.code for i in result.issues]
+    assert "custom_lua_undocumented" in codes
+
+
+def test_custom_lua_allowed_params_clean() -> None:
+    result = validate_strategy("dupfake:blob=stun:repeats=6:tcp_ts=-1000")
+    assert result.is_valid
+    assert not [i for i in result.issues if i.code.startswith("custom_lua")]

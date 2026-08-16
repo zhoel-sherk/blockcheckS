@@ -1,0 +1,47 @@
+# blockcheckS custom Lua registry (lua/custom/manifest.toml)
+#
+# Описывает кастомные nfqws2 Lua-функции: какой файл нужен на хосте, и какие
+# параметры стратегии с ними совместимы (included) / несовместимы (excluded).
+#
+# Схема записи ([[lua]]):
+#   name      — имя функции в стратегии (например `dupfake:blob=...`)
+#   file      — файл в lua/custom/ (для экспорт-комментария # --lua-customN)
+#   description — однострочное описание
+#   included  — параметры, которые функция поддерживает (передаются в arg)
+#   excluded  — параметры, с которыми функция НЕ работает (конфликт)
+#
+# Параметр считается «распознанным», если присутствует как `key=` в стратегии.
+# Валидация: параметр из excluded → error; параметр не из included и не из
+# excluded → warning «недокументированный параметр». Резолвится в
+# `engine/conf_builder.load_custom_lua_manifest()`.
+
+version = 1
+
+[[lua]]
+name = "dupfake"
+file = "dupfake.lua"
+description = "atomic multi-blob fake (winws --dpi-desync=fake --repeats=N аналог)"
+# dupfake читает desync.arg: blob (обязателен), repeats, optional; apply_fooling
+# применяет tcp_ts / badsum и т.п. — поэтому fooling-параметры допустимы.
+included = [
+  "blob",
+  "repeats",
+  "tcp_ts",
+  "tcp_ack",
+  "tcp_seq",
+  "ip_ttl",
+  "ip_autottl",
+  "optional",
+  "tls_mod",
+  "sni",
+]
+# Не имеет смысла с dupfake: позиционные/сегментирующие десинк-параметры
+# и окно/сегменты работают только со stock-ядрами split-семейств.
+excluded = [
+  "pos",
+  "seqovl",
+  "seqovl_pattern",
+  "pattern",
+  "wssize",
+  "wsize",
+]

@@ -74,7 +74,7 @@ presets/lua/            # опциональные one-liner стратегии
 | 4 | Smart-fallback → Python | **P1** — file + timer | inbound partial, curl early abort |
 | 5 | `/dev/shm` hot-swap strategy | **P1** — file poll | orchestrator `scan_pick` |
 | — | `scan_pick` (детерминизм) | **P1** | WRITABLE, batch conf |
-| — | `dupfake` atomic hook | **P1** | custom desync function |
+| — | `dupfake` atomic hook | **✅ done** (lua/custom/) | custom desync function |
 | — | `circular` для matrix | **❌** | production failover only |
 
 **P0** = уже в upstream (`tls_mod=rnd`, `standard_failure_detector`). **P1** = кастом Lua без fork C. **P2** = патч nfqws2 (T3-4).
@@ -756,7 +756,7 @@ Python: `id=7` → curl → точно знаем strategy 7. Todo **M10** circu
 
 ### 8.2 `dupfake` — atomic multi-blob
 
-Keenetic custom Lua (`dupfake:blob=stun+max_ru:...`) — один hook, один atomic send pattern. blockcheckS fallback: multiline `fake\nfake`. Кастом:
+Keenetic custom Lua (`dupfake:blob=stun+max_ru:...`) — один hook, один atomic send pattern (аналог winws `--dpi-desync=fake --repeats=N`). **Реализован** в `lua/custom/dupfake.lua` (перенесён с Keenetic-роутера, проверен в проде):
 
 ```lua
 function dupfake(ctx, desync)
@@ -764,7 +764,23 @@ function dupfake(ctx, desync)
 end
 ```
 
-Preset: `presets/strategies/gp-custom-dupfake.tls` (comments only today).
+Подключение: `--lua-init=@.../dupfake.lua` после `zapret-auto.lua` (или
+`BLOCKCHECKS_LUA_EXTRA=$PWD/lua/custom/dupfake.lua`).
+
+Экспорт конфигов (`bc-nfconf`, MCP `generate_router_config`) добавляет
+комментарий-ссылку при стратегии с `dupfake:`:
+```conf
+# --lua-custom1 " #Лежит в blockcheckS/lua/custom/dupfake.lua
+--lua-desync=dupfake:blob=tls_clienthello:repeats=6:tcp_ts=-1000
+```
+
+Параметры dupfake (blob/repeats/… совместимые; pos/seqovl/wssize — нет)
+описаны в `lua/custom/manifest.toml` (included/excluded) и валидируются
+`static_validator`: excluded → error, undocumented → warning.
+
+blockcheckS fallback (БЕЗ кастомного lua, для Fryazino): multiline `fake\nfake`.
+
+Preset: `presets/strategies/gp-custom-dupfake.tls` (dupfake-строки активны + BS-fallback).
 
 ### 8.3 `condition` / progressive scan (H2)
 

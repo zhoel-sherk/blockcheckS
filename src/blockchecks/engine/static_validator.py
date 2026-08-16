@@ -265,6 +265,15 @@ def _validate_single(
             )
         )
 
+    # ── custom Lua manifest params (excluded → error, undocumented → warning) ──
+    from blockchecks.engine.conf_builder import validate_custom_lua_params
+
+    for msg in validate_custom_lua_params(raw):
+        if "is excluded" in msg:
+            result.issues.append(ValidationIssue("custom_lua_excluded", msg, "error"))
+        else:
+            result.issues.append(ValidationIssue("custom_lua_undocumented", msg, "warning"))
+
     return result
 
 

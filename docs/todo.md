@@ -143,6 +143,7 @@ _(see Deferred)_
 | **B7** nftables vmap | Optional host-shared POC; not needed for netns parallel |
 | **GV-2** Playwright | Optional yt-dlp alternative |
 | **unblock-pro** | External heuristics port |
+| **ipset-lists** | Независимость от zapret2/ipset (antifilter/antizapret/reestr IP-листы для внешнего nfqws2-хостинга). Сейчас не требуется: Fryazino-стратегии не зависят от IP-листов, в blockcheckS ipset не используется. Скрипты-референс: `/opt/zapret2/ipset/` (create_ipset.sh, get_*.sh). Реализовать при необходимости внешнего деплоя с IP-блокировками. |
 
 ---
 

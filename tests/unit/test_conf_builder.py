@@ -115,3 +115,97 @@ def test_build_keenetic_conf_no_blobs_dir(tmp_path):
     with patch("blockchecks.engine.conf_builder.BLOB_DIR", str(tmp_path / "blobs")):
         conf = build_keenetic_conf(tcp_strategies=["fake:a"], udp_strategies=[])
     assert "NFQWS_BASE_ARGS=" in conf
+
+
+def test_custom_lua_comment_dupfake():
+    from blockchecks.engine.conf_builder import custom_lua_comment
+
+    hint = custom_lua_comment("dupfake:blob=tls_clienthello:repeats=6:tcp_ts=-1000")
+    assert hint is not None
+    assert "lua/custom/dupfake.lua" in hint
+    assert hint.startswith("# --lua-custom1")
+
+
+def test_custom_lua_comment_unknown_function_defaults():
+    from blockchecks.engine.conf_builder import custom_lua_comment
+
+    hint = custom_lua_comment("mystery_core:pos=1")
+    assert hint is None  # only registered custom functions trigger a hint
+
+
+def test_custom_lua_comment_stock_no_hint():
+    from blockchecks.engine.conf_builder import custom_lua_comment
+
+    for strat in (
+        "fake:blob=stun:repeats=6",
+        "hostfakesplit:nofake2:tcp_ts=-1000:repeats=1",
+        "multisplit:pos=1:seqovl=568",
+    ):
+        assert custom_lua_comment(strat) is None
+
+
+def test_build_raw_conf_includes_custom_lua_hint():
+    conf = build_raw_conf(
+        tcp_strategies=["dupfake:blob=tls_clienthello:repeats=6:tcp_ts=-1000"],
+        udp_strategies=[],
+    )
+    assert "lua/custom/dupfake.lua" in conf
+    assert "# --lua-custom1" in conf
+
+
+def test_build_keenetic_conf_includes_custom_lua_hint():
+    conf = build_keenetic_conf(
+        tcp_strategies=["dupfake:blob=stun+max_ru:repeats=6:tcp_ts=-1000"],
+        udp_strategies=[],
+    )
+    assert "lua/custom/dupfake.lua" in conf
+    assert "# --lua-custom1" in conf
+
+
+def test_build_raw_conf_no_hint_for_stock():
+    conf = build_raw_conf(
+        tcp_strategies=["fake:blob=stun:repeats=6"],
+        udp_strategies=[],
+    )
+    assert "lua-custom1" not in conf
+
+
+def test_load_custom_lua_manifest_has_dupfake():
+    from blockchecks.engine.conf_builder import load_custom_lua_manifest
+
+    m = load_custom_lua_manifest()
+    assert "dupfake" in m
+    assert m["dupfake"]["file"] == "dupfake.lua"
+    assert "blob" in m["dupfake"]["included"]
+    assert "pos" in m["dupfake"]["excluded"]
+
+
+def test_validate_custom_lua_params_excluded():
+    from blockchecks.engine.conf_builder import validate_custom_lua_params
+
+    issues = validate_custom_lua_params("dupfake:blob=stun:repeats=6:pos=1")
+    assert any("excluded" in i and "pos" in i for i in issues)
+
+
+def test_validate_custom_lua_params_undocumented():
+    from blockchecks.engine.conf_builder import validate_custom_lua_params
+
+    issues = validate_custom_lua_params("dupfake:blob=stun:repeats=6:mystery=1")
+    assert any("undocumented" in i and "mystery" in i for i in issues)
+
+
+def test_validate_custom_lua_params_ok():
+    from blockchecks.engine.conf_builder import validate_custom_lua_params
+
+    assert validate_custom_lua_params(
+        "dupfake:blob=stun:repeats=6:tcp_ts=-1000"
+    ) == []
+    assert validate_custom_lua_params("fake:blob=stun:repeats=6") == []
+
+
+def test_validate_custom_lua_params_optional_allowed():
+    from blockchecks.engine.conf_builder import validate_custom_lua_params
+
+    assert validate_custom_lua_params(
+        "dupfake:blob=stun:repeats=6:optional"
+    ) == []

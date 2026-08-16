@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from typing import Any
 
 from blockchecks.engine.blob_aliases import (
     append_blob_cli_lines,
@@ -37,6 +38,103 @@ DEFAULT_UDP_PAYLOAD = (
     "wireguard_initiation,wireguard_response,wireguard_cookie,"
     "stun,discord_ip_discovery,mtproto_initial,unknown"
 )
+
+# Custom Lua functions that must live on the target host (not in stock
+# zapret-lib / zapret-auto). Registered in lua/custom/manifest.toml with
+# included/excluded params. Export emits a deploy comment pointing at the
+# file in this repo.
+
+_CUSTOM_LUA_MANIFEST: dict[str, dict[str, Any]] | None = None
+
+
+def load_custom_lua_manifest() -> dict[str, dict[str, Any]]:
+    """Load lua/custom/manifest.toml → {fn: {file, included, excluded}}.
+
+    Cached. Falls back to an empty dict on any read/parse error (never raises).
+    """
+    global _CUSTOM_LUA_MANIFEST
+    if _CUSTOM_LUA_MANIFEST is not None:
+        return _CUSTOM_LUA_MANIFEST
+    import tomllib
+
+    from blockchecks.engine.config import LUA_CUSTOM_DIR
+
+    manifest_path = os.path.join(LUA_CUSTOM_DIR, "manifest.toml")
+    registry: dict[str, dict[str, Any]] = {}
+    try:
+        with open(manifest_path, "rb") as f:
+            data = tomllib.load(f)
+        for entry in data.get("lua", []):
+            name = str(entry.get("name") or "").lower()
+            if not name:
+                continue
+            registry[name] = {
+                "file": str(entry.get("file") or f"{name}.lua"),
+                "included": list(entry.get("included") or []),
+                "excluded": list(entry.get("excluded") or []),
+                "description": str(entry.get("description") or ""),
+            }
+    except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
+        pass
+    _CUSTOM_LUA_MANIFEST = registry
+    return registry
+
+
+def custom_lua_comment(strategy: str) -> str | None:
+    """Return a deploy comment if *strategy* needs a custom Lua function.
+
+    Looks for desync cores in the strategy string that are registered in
+    ``lua/custom/manifest.toml`` (e.g. ``dupfake:blob=…``). Returns e.g.
+    ``# --lua-custom1 " #Лежит в blockcheckS/lua/custom/dupfake.lua``
+    or ``None`` when no custom function is used. Never raises.
+    """
+    low = strategy.lower()
+    for fn, meta in load_custom_lua_manifest().items():
+        if re.search(rf"(?:^|:|=){re.escape(fn)}:", low):
+            return f'# --lua-custom1 " #Лежит в blockcheckS/lua/custom/{meta["file"]}'
+    return None
+
+
+def _strategy_params(strategy: str) -> dict[str, str]:
+    """Parse ``key=value`` params from a strategy core (multiline-aware)."""
+    params: dict[str, str] = {}
+    for part in strategy.split("\\n"):
+        for m in re.finditer(r"(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)=([^:\s]+)", part):
+            key, val = m.group(1), m.group(2)
+            if key not in params:
+                params[key] = val
+    return params
+
+
+def validate_custom_lua_params(strategy: str) -> list[str]:
+    """Return issues for a strategy using a custom Lua function.
+
+    Checks the custom function's manifest params: an *excluded* param present in
+    the strategy is a conflict (error), a param neither included nor excluded is
+    undocumented (warning). Returns a list of human-readable messages, empty if
+    no custom function is used or all params are allowed.
+    """
+    low = strategy.lower()
+    for fn, meta in load_custom_lua_manifest().items():
+        if not re.search(rf"(?:^|:|=){re.escape(fn)}:", low):
+            continue
+        params = _strategy_params(strategy)
+        included = set(meta.get("included") or [])
+        excluded = set(meta.get("excluded") or [])
+        issues: list[str] = []
+        for key in params:
+            if key in excluded:
+                issues.append(
+                    f"{fn}: param '{key}' is excluded (custom Lua {meta['file']} "
+                    f"does not support it)"
+                )
+            elif key not in included and key not in ("optional",):
+                issues.append(
+                    f"{fn}: param '{key}' undocumented for {meta['file']} "
+                    f"(add to included/excluded in lua/custom/manifest.toml)"
+                )
+        return issues
+    return []
 
 
 def split_cli_args(raw_line: str) -> list[str]:
@@ -240,6 +338,11 @@ def build_keenetic_conf(
     ]
     if comment:
         hdr.append(f"# {comment}")
+    # Deploy hint when a strategy needs a custom Lua file from lua/custom/.
+    for strat in list(tcp_strategies) + list(udp_strategies) + list(quic_strategies):
+        hint = custom_lua_comment(strat)
+        if hint and hint not in hdr:
+            hdr.append(hint)
     if domains:
         hdr.append(
             f"# domains ({len(domains)}): "
@@ -290,6 +393,11 @@ def build_raw_conf(
     lines.append(f"# blockcheckS raw nfqws2 conf — {ts}")
     if comment:
         lines.append(f"# {comment}")
+    # Deploy hint when a strategy needs a custom Lua file from lua/custom/.
+    for strat in list(tcp_strategies) + list(udp_strategies) + list(quic_strategies):
+        hint = custom_lua_comment(strat)
+        if hint and hint not in lines:
+            lines.append(hint)
     lines.append(f"--qnum={qnum_tcp}")
     lines.append("--ipcache-lifetime=0")
     lines.append("--bind-fix4")

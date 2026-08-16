@@ -41,6 +41,7 @@ PACKAGE_DIR = _PACKAGE_DIR
 CONFIGS_DIR = os.path.join(PROJECT_DIR, "configs")
 REPO_BLOBS_DIR = os.path.join(PROJECT_DIR, "blobs")
 REPO_LUA_DIR = os.path.join(PROJECT_DIR, "lua", "blockchecks")
+LUA_CUSTOM_DIR = os.path.join(PROJECT_DIR, "lua", "custom")
 _BLOCKCHECKS_LUA_NAMES = ("write_ipc.lua", "scan_bridge.lua", "init.lua")
 
 

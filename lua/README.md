@@ -7,12 +7,14 @@ Loaded via `--lua-init` when `--lua-bridge` is enabled. См. также
 ## Структура
 
 ```
-lua/blockchecks/
-├── init.lua           # 50ms timer fallback для strategy.id poll
-├── scan_bridge.lua    # scan_pick оркестратор + bs_poll_strategy + smart_fallback
-├── write_ipc.lua      # NDJSON IPC (APPLIED / STRATEGY_FAIL) + strategy.id/gen
-└── geneva.lua         # custom fool= functions (не входит в default init-цепочку)
+lua/
+├── blockchecks/         # bridge-цепочка прогона (scan_bridge, write_ipc, init, geneva)
+└── custom/              # кастомные скрипты для экспорта на Keenetic/внешний хост
+    ├── dupfake.lua      # dupfake: atomic multi-blob (winws fake+repeats аналог)
+    └── README.md        # как подключать, маппинг, export-комментарий --lua-custom1
 ```
+
+`lua/blockchecks/`:
 
 - `scan_bridge.lua` — обрабатывает payload'ы `tls_client_hello`, `http_req`,
   `quic_initial` (`bs_l7_ok`). Для каждого ClientHello/HTTP-запроса/QUIC
@@ -25,6 +27,12 @@ lua/blockchecks/
   дефолтную `--lua-init` цепочку; подключается только через
   `BLOCKCHECKS_LUA_EXTRA=.../geneva.lua` (variant B long-term, standalone
   `run_coverage_new.sh`).
+
+`lua/custom/` — кастомные nfqws2 Lua-скрипты, которые выносите на
+роутер/внешний хост (например `dupfake.lua`). Экспорт конфигов
+(`bc-nfconf`, MCP `generate_router_config`) добавляет комментарий-ссылку
+`# --lua-custom1 " #Лежит в blockcheckS/lua/custom/<file>.lua`, если стратегия
+использует такую функцию. См. `lua/custom/README.md`.
 
 ## Backend map: что через Lua bridge, что через classic
 
