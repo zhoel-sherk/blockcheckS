@@ -36,3 +36,6 @@ mutants/
 .coverage
 coverage.xml
 htmlcov/
+
+# local tooling (act GitHub runner, etc.)
+bin/
