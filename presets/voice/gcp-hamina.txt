@@ -1,4 +1,0 @@
-# Discord Voice GCP Hamina endpoints — regenerated via bs.py voice-discover
-# Format: IP:PORT  (UDP STUN probe)
-# Source: voice_dns.py cache, finland{N}.discord.gg DNS bulk
-# Regenerate: python3 -c "from blockchecks.checkers.voice_dns import discover; ..."

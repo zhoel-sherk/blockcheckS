@@ -474,7 +474,16 @@ async def get_presets(kind: str = "strategies") -> list[dict[str, Any]]:
 
     base = Path(PROJECT_DIR) / "presets"
     patterns = (
-        ("strategies", [str(base / "strategies" / "*.tls"), str(base / "strategies" / "*.txt")]),
+        (
+            "strategies",
+            [
+                str(base / "strategies" / "*.tls"),
+                str(base / "strategies" / "*.txt"),
+                str(base / "strategies" / "*.http"),
+                str(base / "strategies" / "*.quic"),
+                str(base / "strategies" / "*.udp"),
+            ],
+        ),
         ("domains", [str(base / "domains" / "*.txt")]),
     )[0 if kind == "strategies" else 1]
 

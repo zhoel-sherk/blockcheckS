@@ -100,9 +100,32 @@ def test_every_strategy_line_parses(path: Path):
 @pytest.mark.unit
 def test_strategy_loader_reads_every_preset():
     """StrategyLoader.from_file (the runtime reader) accepts every preset."""
-    for path in list(STRATEGIES_DIR.glob("*.tls")) + list(STRATEGIES_DIR.glob("*.txt")):
-        loaded = StrategyLoader.from_file(str(path))
-        assert loaded, f"{path.name} loaded empty"
+    ext_globs = ["*.tls", "*.txt", "*.http", "*.quic", "*.udp"]
+    for ext in ext_globs:
+        for path in STRATEGIES_DIR.glob(ext):
+            loaded = StrategyLoader.from_file(str(path))
+            assert loaded, f"{path.name} loaded empty"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "name,expected_suffix",
+    [
+        ("flowseal-fast", ".tls"),
+        ("bc2-parity-http", ".http"),
+        ("bc2-parity-quic", ".quic"),
+        ("bc2-parity-voice", ".udp"),
+        ("gp-custom-http", ".txt"),
+        # same basename exists as .tls and .http → .tls wins (priority)
+        ("http-tls-dual", ".tls"),
+    ],
+)
+def test_resolve_strategy_preset_all_extensions(name: str, expected_suffix: str) -> None:
+    from blockchecks.engine.preset_paths import resolve_strategy_preset
+
+    path = resolve_strategy_preset(name)
+    assert path.suffix == expected_suffix, f"{name} resolved to {path.suffix}, want {expected_suffix}"
+    assert path.is_file()
 
 
 @pytest.mark.unit

@@ -25,7 +25,8 @@ not selectable as a preset.
 ## Strategy presets (`presets/strategies/`)
 
 BlockcheckS user-matrix format (one strategy per line, `#` comments).
-`-M` accepts basename with or without `.tls` / `.txt`.
+`-M` accepts a basename with or without an extension. Supported extensions
+(priority order): `.tls`, `.txt`, `.http`, `.quic`, `.udp`.
 
 ```bash
 bs scan -d discord.com -M gp-verified          # GP top-10 strategies
@@ -34,13 +35,28 @@ bs scan -d discord.com -M flowseal-fast        # curated Flowseal techniques
 # Upstream bats: https://github.com/Flowseal/zapret-discord-youtube
 # `bs full` default --tcp-sources includes flowseal (M8)
 bs scan -d discord.com -M http-tls-dual.tls     # M6 TLS side (pair with .http)
-bs scan -d discord.com -M gp-verified.tls      # same (extension stripped)
+bs scan -d discord.com -M http-tls-dual         # same (extension stripped)
 bs scan -d discord.com -M gp-custom-tls12      # GP custom TLS 1.2 test
 bs scan -d discord.com -M gp-custom-tls13      # GP custom TLS 1.3 test
-bs scan -d discord.com -M gp-voice             # Discord Voice UDP
+bs scan -d discord.com -M gp-voice             # Discord Voice UDP (.txt)
+bs scan -d discord.com -M bc2-parity-quic      # QUIC parity set (.quic)
+bs scan -d discord.com -M bc2-parity-http      # HTTP :80 parity set (.http)
+bs scan -d discord.com -M bc2-parity-voice     # UDP voice parity set (.udp)
 bs scan -d discord.com -M blockcheckS-best     # Our best strategies
 # unknown -M name → exit code 1
 ```
+
+### Протокол-специфичные расширения (`.http` / `.quic` / `.udp`)
+
+Протокольные пресеты (bc2-parity-*, fryazino-*, gv5-*) используют расширение
+под протокол: `.http` (HTTP :80), `.quic` (QUIC), `.udp` (voice UDP). Их
+можно передавать через `-M` как обычно. При одном basename в нескольких
+расширениях приоритет: `.tls` → `.txt` → `.http` → `.quic` → `.udp`
+(например `http-tls-dual` резолвится в `.tls`).
+
+> **Не путать с `configs/`**: пресеты здесь — наборы `--lua-desync`-строк
+> для перебора (`-M`). `configs/*.conf` — готовые полные nfqws2-конфиги
+> (`-c` / `--tcp-sources configs`). См. `configs/README.md`.
 
 ## Voice discover (pair / udp)
 

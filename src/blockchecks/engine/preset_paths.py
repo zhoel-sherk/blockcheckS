@@ -88,13 +88,21 @@ def resolve_domain_preset(name: str) -> Path:
     raise FileNotFoundError(filename)
 
 
+# Strategy preset extensions, most common first (priority order when a
+# basename exists with several extensions).
+_STRATEGY_EXTS = (".tls", ".txt", ".http", ".quic", ".udp")
+
+
 def resolve_strategy_preset(name: str) -> Path:
-    """Resolve presets/strategies/{name}.tls|.txt inside user or bundled jail."""
-    base = normalize_preset_name(name, strip_suffixes=(".tls", ".txt", ".quic"))
+    """Resolve presets/strategies/{name}.* inside user or bundled jail.
+
+    Supported extensions (priority order): .tls, .txt, .http, .quic, .udp.
+    """
+    base = normalize_preset_name(name, strip_suffixes=_STRATEGY_EXTS)
     for root in (_user_strategies_dir(), _bundled_strategies_dir()):
         if not root.is_dir():
             continue
-        for ext in (".tls", ".txt"):
+        for ext in _STRATEGY_EXTS:
             hit = _resolve_under(root, f"{base}{ext}")
             if hit is not None:
                 return hit
