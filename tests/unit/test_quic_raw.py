@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import socket
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -10,7 +12,6 @@ from blockchecks.checkers.quic_raw import (
     QuicRawResult,
     _parse_icmp,
     _synthetic_rfc9000_initial,
-    load_quic_initial,
     probe_quic_initial,
 )
 from blockchecks.engine.fail_phase import FailPhase
@@ -18,7 +19,15 @@ from blockchecks.engine.fail_phase import FailPhase
 
 @pytest.mark.unit
 def test_load_quic_initial_real_blob():
-    packet, name = load_quic_initial()
+    # _QUIC_BLOB_CANDIDATES points at /opt/zapret2/blobs (absent on CI). Point
+    # it at the repo blob so the real-binary parse path is exercised everywhere.
+    repo_blob = Path(__file__).resolve().parents[2] / "blobs" / "quic_initial_www_google_com.bin"
+    if not repo_blob.is_file():
+        pytest.skip("quic_initial_www_google_com.bin not in repo")
+    import blockchecks.checkers.quic_raw as qr
+
+    with patch.object(qr, "_QUIC_BLOB_CANDIDATES", (repo_blob,)):
+        packet, name = qr.load_quic_initial()
     assert len(packet) >= 40
     assert packet[0] & 0x80  # LONG header
     assert name.endswith(".bin")
