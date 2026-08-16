@@ -52,6 +52,7 @@ jobs:
               tests/unit/test_wave1_followups.py tests/unit/test_architecture.py
               tests/unit/test_conf_builder.py tests/unit/test_settle_profile.py
               tests/unit/test_bench_settle.py
+              tests/unit/test_static_validator.py tests/unit/test_static_validator_fuzzing.py
           - name: "S2 Checkers & Service"
             files: >-
               tests/unit/test_checkers.py tests/unit/test_composite_runner.py

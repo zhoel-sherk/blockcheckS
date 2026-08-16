@@ -626,10 +626,9 @@ async def dbg_validate_strategy_syntax(
     missing blobs, unescaped '<' symbols), and returns sanitized config lines.
     """
     from blockchecks.engine.conf_builder import escape_conf_lt, split_cli_args
+    from blockchecks.engine.static_validator import validate_strategy
 
-    conflicts: list[str] = []
-
-    # Static sanity checks without requiring network daemon
+    # Static sanity checks without requiring network daemon.
     tokens = strategy_cli.strip().split()
     if not tokens:
         return StrategySyntaxCheck(
@@ -640,15 +639,15 @@ async def dbg_validate_strategy_syntax(
             detected_conflicts=["Strategy string is empty"],
         )
 
-    # Validate desync techniques
-    has_split = any("--dpi-desync=split" in t or "split2" in t or "multisplit" in t for t in tokens)
-    has_fake = any("fake" in t for t in tokens)
-
-    if has_split and not any("--dpi-desync-split-pos" in t for t in tokens):
-        conflicts.append("Split desync selected without specifying --dpi-desync-split-pos")
-
-    if has_fake and not any("--dpi-desync-fake-tls" in t or "--dpi-desync-fake-quic" in t or "--dpi-desync-fake-http" in t for t in tokens):
-        conflicts.append("Fake desync method specified without defining a fake payload source/blob")
+    # Unified semantics from engine.static_validator (single source of truth).
+    result = validate_strategy(strategy_cli)
+    conflicts = [
+        i.message
+        for i in result.issues
+        if i.severity == "error"
+    ]
+    if not conflicts:
+        conflicts = [i.message for i in result.issues if i.severity == "warning"]
 
     # Unified sanitization from conf_builder (single source of truth 1.3.1).
     escaped_lines = [escape_conf_lt(t) for t in split_cli_args(strategy_cli)]

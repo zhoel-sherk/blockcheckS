@@ -41,6 +41,7 @@ dev = [
     "vulture>=2.14",
     "pytest-archon>=0.0.6",
     "mutmut>=3.6",
+    "hypothesis>=6.0",
 ]
 discovery = ["aiohttp-socks>=0.11.0", "aiohttp>=3.9"]
 youtube = ["yt-dlp>=2024.1.0"]
