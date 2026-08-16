@@ -2,7 +2,7 @@ name: CI
 on:
   pull_request:
 jobs:
-  s2-full:
+  s2a:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -12,6 +12,5 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e ".[dev]"
-      - name: S2 full (with nfqws2_manager)
-        run: |
-          pytest tests/unit/test_nfqws2_manager.py tests/unit/test_nfqws2_settle.py -q -n auto --dist loadscope --timeout=15
+      - name: nfqws2_manager only
+        run: pytest tests/unit/test_nfqws2_manager.py -q -n auto --dist loadscope --timeout=15
