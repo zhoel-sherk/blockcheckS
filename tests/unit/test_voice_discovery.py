@@ -255,6 +255,8 @@ def test_discover_via_gateway_no_server_update():
     import asyncio
     from unittest.mock import patch
 
+    pytest.importorskip("aiohttp_socks")
+
     from blockchecks.checkers.voice_discovery import _discover_via_gateway
 
     gw_msgs = [
