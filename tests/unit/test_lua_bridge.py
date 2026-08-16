@@ -131,6 +131,31 @@ def test_events_file_world_writable_for_dropped_uid(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_bridge_writable_dir_world_writable_for_dropped_uid(tmp_path: Path) -> None:
+    """nfqws2 runs as nobody (65534) after setuid; it must chdir + create
+    .staging/strategy.* inside the writable dir. root:root 0755 lets it chdir
+    but NOT create files → daemon dies / APPLIED never written. Must be 0777."""
+    bridge = LuaBridge("bs-p-wd", shm_base=tmp_path)
+    bridge.setup()
+    assert (bridge.paths.base.stat().st_mode & 0o777) == 0o777
+    bridge.teardown()
+
+
+@pytest.mark.unit
+def test_published_strategy_files_world_writable(tmp_path: Path) -> None:
+    """Published strategy.id/ready must be 0666 so the dropped-uid nfqws2
+    process can rewrite them between batches."""
+    bridge = LuaBridge("bs-p-pub", shm_base=tmp_path)
+    bridge.setup()
+    bridge.publish(1, 7, "fake:blob=stun:repeats=6")
+    for name in ("strategy.id", "strategy.gen", "strategy.ready", "strategy.cmd"):
+        p = bridge.paths.base / name
+        assert p.is_file(), name
+        assert (p.stat().st_mode & 0o777) == 0o666, name
+    bridge.teardown()
+
+
+@pytest.mark.unit
 def test_lua_scripts_exist_in_repo() -> None:
     from blockchecks.engine.config import get_blockchecks_lua_scripts
 

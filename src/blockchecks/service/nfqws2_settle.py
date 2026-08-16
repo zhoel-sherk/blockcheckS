@@ -51,3 +51,21 @@ def wait_nfqws2_ready(
         if settle_poll > 0:
             time.sleep(settle_poll)
     return time.perf_counter() - start
+
+
+def _wait_nfqws2_gone(ns_name: str, *, max_wait: float = 2.0, poll_interval: float = 0.05) -> bool:
+    """Poll until nfqws2 is gone from the netns (post-pkill drain).
+
+    pkill(9) is asynchronous — the dying daemon can hold the NFQUEUE socket for
+    a few ms. If we bind a replacement too early it dies with a queue conflict
+    (settle spikes + "PASS without APPLIED"). Returns True when gone/never was
+    there, False on timeout.
+    """
+    start = time.perf_counter()
+    deadline = start + max(0.0, max_wait)
+    while time.perf_counter() < deadline:
+        if not nfqws2_running_in_ns(ns_name):
+            return True
+        if poll_interval > 0:
+            time.sleep(poll_interval)
+    return not nfqws2_running_in_ns(ns_name)

@@ -22,7 +22,10 @@ from blockchecks.engine.config import (
     get_nfqws2_bin,
     nfqws2_debug_conf_line,
 )
-from blockchecks.service.nfqws2_settle import wait_nfqws2_ready
+from blockchecks.service.nfqws2_settle import (
+    _wait_nfqws2_gone,
+    wait_nfqws2_ready,
+)
 
 
 def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
@@ -98,6 +101,11 @@ def start_daemon(
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            # pkill is async: the old daemon may still hold the NFQUEUE socket
+            # when the new one binds, causing the new daemon to die (settle
+            # spikes, "PASS without APPLIED" warnings). Wait for it to actually
+            # disappear before starting the replacement.
+            _wait_nfqws2_gone(ns_name, max_wait=2.0)
         # @config must be the only argument; daemon/debug are inside the file
         cmd = [
             "sudo",

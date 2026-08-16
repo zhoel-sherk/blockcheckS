@@ -91,3 +91,46 @@ def test_wait_min_wait_floor():
             ):
                 elapsed = wait_nfqws2_ready("bs-p0", max_wait=0.1, poll_interval=0.05, min_wait=0.5)
     assert elapsed >= 0.5
+
+
+def test_wait_nfqws2_gone_returns_true_when_never_there():
+    """_wait_nfqws2_gone: nfqws2 absent → returns True immediately."""
+    from blockchecks.service.nfqws2_settle import _wait_nfqws2_gone
+
+    running = MagicMock(return_value=False)
+    with patch("blockchecks.service.nfqws2_settle.nfqws2_running_in_ns", running):
+        assert _wait_nfqws2_gone("bs-p0", max_wait=0.5) is True
+
+
+def test_wait_nfqws2_gone_polls_until_gone():
+    """pkill is async; _wait_nfqws2_gone polls until the daemon disappears."""
+    from blockchecks.service.nfqws2_settle import _wait_nfqws2_gone
+
+    running = MagicMock(side_effect=[True, True, False])
+    sleep = MagicMock()
+    with patch("blockchecks.service.nfqws2_settle.nfqws2_running_in_ns", running):
+        with patch("blockchecks.service.nfqws2_settle.time.sleep", sleep):
+            assert _wait_nfqws2_gone("bs-p0", max_wait=1.0, poll_interval=0.05) is True
+    assert running.call_count == 3
+
+
+def test_wait_nfqws2_gone_timeout():
+    """If nfqws2 never disappears within max_wait, return False (caller decides)."""
+    from blockchecks.service.nfqws2_settle import _wait_nfqws2_gone
+
+    running = MagicMock(return_value=True)
+    t = {"now": 0.0}
+
+    def fake_perf():
+        return t["now"]
+
+    def fake_sleep(dt):
+        t["now"] += dt
+
+    with patch("blockchecks.service.nfqws2_settle.nfqws2_running_in_ns", running):
+        with patch("blockchecks.service.nfqws2_settle.time.sleep", side_effect=fake_sleep):
+            with patch(
+                "blockchecks.service.nfqws2_settle.time.perf_counter",
+                side_effect=fake_perf,
+            ):
+                assert _wait_nfqws2_gone("bs-p0", max_wait=0.3, poll_interval=0.1) is False

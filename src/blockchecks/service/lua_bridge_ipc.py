@@ -80,7 +80,11 @@ class LuaBridge:
 
     def setup(self) -> None:
         self.paths.base.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.paths.base, 0o755)
+        # nfqws2 drops privileges to nobody/overflow (uid 65534) and must be
+        # able to chdir + create staging files here. 0o755 (root:root) lets it
+        # chdir but NOT create .staging / strategy.* files → the daemon dies or
+        # the bridge never sees APPLIED. World-writable dir fixes both.
+        os.chmod(self.paths.base, 0o777)
         self._init_events()
 
     def _init_events(self) -> None:
@@ -111,6 +115,7 @@ class LuaBridge:
             src = staging / name
             if src.is_file():
                 os.replace(src, self.paths.base / name)
+                os.chmod(self.paths.base / name, 0o666)
 
         shutil.rmtree(staging, ignore_errors=True)
 
