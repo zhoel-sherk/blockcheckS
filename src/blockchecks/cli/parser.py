@@ -658,6 +658,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
     )
 
+    sub.add_parser(
+        "mcp",
+        help="Model Context Protocol server (stdio) bridging LLM → bs serve daemon",
+    )
+
     bench = sub.add_parser("bench-settle", help="Benchmark nfqws2 settle × curl timeout (A9)")
     bench.add_argument("-d", "--domain", default="discord.com")
     bench.add_argument("-s", "--strategy", default=None, help="Single inline strategy")

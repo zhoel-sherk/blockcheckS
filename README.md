@@ -134,6 +134,7 @@ pytest -m "not integration"
 | `bs udp` | Один UDP-конфиг (sync) | `sudo bs udp -c configs/udp_voice__fake_r6.conf` |
 | `bs composite` | Композитный TCP+UDP конфиг | `sudo bs composite -c configs/composite_discord.conf` |
 | `bs bench-settle` | Калибровка settle/curl таймаутов | `sudo bs bench-settle -d discord.com` |
+| `bs mcp` | MCP-сервер (stdio) для LLM-клиентов | `bs-mcp` (см. [docs/mcp.md](docs/mcp.md)) |
 | `bc-nfconf` | Экспорт nfqws2-конфигов из БД | `bc-nfconf --db state.db --out-dir output` |
 
 Флаги, которые стоит знать: `--resume`, `--preset`, `-M`, `--generate`,
@@ -175,6 +176,7 @@ bs pair -d discord.com -M gp-voice           # голосовые UDP-страт
 | [Architecture](docs/architecture.md) | Data flow, module map, voice discovery flow |
 | [Package Layout](docs/package.md) | XDG-пути, деревья, import graph |
 | [Database Schema](docs/database.md) | ER-диаграмма, SQL examples, checkpoint logic |
+| [MCP Server](docs/mcp.md) | Установка MCP в Claude Desktop / Cursor / opencode |
 | [Glossary](docs/glossary.md) | Терминология: netns, NFQUEUE, pair matrix, ... |
 | [Changelog](changelog.md) | История версий (1.0.0 → 1.0.2) |
 | [Roadmap](docs/todo.md) | Бэклог: P1 (скорость), P2 (voice/GP), P3 (ML) |

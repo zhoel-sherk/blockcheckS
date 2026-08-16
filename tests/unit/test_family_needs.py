@@ -118,3 +118,68 @@ def test_run_family_gates_stop_event():
     )
     assert done == 0
     runner.test_tcp.assert_not_called()
+
+
+def test_map_triage_to_generators_empty_profile_falls_back_standard():
+    from blockchecks.engine.family_needs import map_triage_to_generators
+    from blockchecks.engine.triage import TriageProfile
+
+    assert map_triage_to_generators(TriageProfile()) == ["standard_fast"]
+
+
+def test_map_triage_to_generators_stall_phase():
+    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.engine.family_needs import map_triage_to_generators
+    from blockchecks.engine.triage import TriageProfile
+
+    result = map_triage_to_generators(TriageProfile(stall_phase=FailPhase.DATA_STALL_16K))
+    assert result == ["wssize", "wsize"]
+
+
+def test_map_triage_to_generators_rst_at_sni():
+    from blockchecks.engine.family_needs import map_triage_to_generators
+    from blockchecks.engine.triage import TriageProfile
+
+    result = map_triage_to_generators(TriageProfile(rst_at_sni=True))
+    assert result == ["split", "multisplit", "fake", "fakedsplit"]
+
+
+def test_map_triage_to_generators_quic_drop():
+    from blockchecks.engine.family_needs import map_triage_to_generators
+    from blockchecks.engine.triage import TriageProfile
+
+    result = map_triage_to_generators(TriageProfile(quic_drop=True))
+    assert result == ["quic_fake", "quic_ipfrag"]
+
+
+def test_map_triage_to_generators_combined_deduped():
+    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.engine.family_needs import map_triage_to_generators
+    from blockchecks.engine.triage import TriageProfile
+
+    profile = TriageProfile(
+        rst_at_sni=True,
+        stall_phase=FailPhase.DATA_STALL_16K,
+        quic_drop=True,
+    )
+    result = map_triage_to_generators(profile)
+    assert result == [
+        "wssize",
+        "wsize",
+        "split",
+        "multisplit",
+        "fake",
+        "fakedsplit",
+        "quic_fake",
+        "quic_ipfrag",
+    ]
+    assert len(result) == len(set(result))
+
+
+def test_map_triage_to_generators_unknown_stall_ignored():
+    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.engine.family_needs import map_triage_to_generators
+    from blockchecks.engine.triage import TriageProfile
+
+    result = map_triage_to_generators(TriageProfile(stall_phase=FailPhase.UNKNOWN))
+    assert result == ["standard_fast"]

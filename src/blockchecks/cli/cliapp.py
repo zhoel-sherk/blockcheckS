@@ -429,6 +429,13 @@ def _run_serve(model: BaseModel) -> int:
     return cmd_serve(_to_namespace(model))
 
 
+def _run_mcp(model: BaseModel) -> int:
+    """Run the MCP server over stdio (bridges LLM → bs serve daemon)."""
+    from blockchecks.cli.commands.mcp import cmd_mcp
+
+    return cmd_mcp(_to_namespace(model))
+
+
 def build_cli_root() -> type[BaseSettings]:
     from blockchecks.cli.user_config import apply_parser_defaults
 
@@ -459,6 +466,9 @@ def build_cli_root() -> type[BaseSettings]:
         "stop": _parser_blurb("stop", raw_blurbs, "Gracefully stop active full/scan/pair run"),
         "serve": _parser_blurb(
             "serve", raw_blurbs, "Resident probe server (Unix socket + optional HTTP bridge)"
+        ),
+        "mcp": _parser_blurb(
+            "mcp", raw_blurbs, "Model Context Protocol server (stdio) bridging LLM → bs serve daemon"
         ),
     }
 
@@ -495,6 +505,9 @@ def build_cli_root() -> type[BaseSettings]:
     ServeCmd = _make_cmd_model(
         "ServeCmd", model_from_subparser("ServeArgs", subs["serve"]), _run_serve, blurbs["serve"]
     )
+    McpCmd = _make_cmd_model(
+        "McpCmd", model_from_subparser("McpArgs", subs["mcp"]), _run_mcp, blurbs["mcp"]
+    )
 
     class BlockchecksCli(BaseSettings):
         """bs — lightspeed DPI strategy tester (CliApp)."""
@@ -522,6 +535,7 @@ def build_cli_root() -> type[BaseSettings]:
         full: CliSubCommand[FullCmd] = Field(description=blurbs["full"])  # type: ignore[valid-type]
         stop: CliSubCommand[StopCmd] = Field(description=blurbs["stop"])  # type: ignore[valid-type]
         serve: CliSubCommand[ServeCmd] = Field(description=blurbs["serve"])  # type: ignore[valid-type]
+        mcp: CliSubCommand[McpCmd] = Field(description=blurbs["mcp"])  # type: ignore[valid-type]
 
         def cli_cmd(self) -> int:
             global _CLI_EXIT_CODE
