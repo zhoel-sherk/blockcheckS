@@ -198,7 +198,9 @@ def test_start_daemon_launches(tmp_path):
     ), patch("blockchecks.service.nfqws2.inject_debug_and_daemon",
              return_value=(None, None)), patch(
         "blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.5
-    ), patch("blockchecks.service.nfqws2._reclaim_debug_log"):
+    ), patch("blockchecks.service.nfqws2._wait_nfqws2_gone",
+             return_value=True), patch(
+        "blockchecks.service.nfqws2._reclaim_debug_log"):
         settle = start_daemon("bs-p-0", str(conf))
     assert settle == 0.5
 
@@ -250,7 +252,11 @@ def test_start_with_hostlist(tmp_path):
     ), patch("blockchecks.service.nfqws2.BLOB_DIR", str(tmp_path)), patch(
         "blockchecks.engine.blob_aliases.append_blob_cli_lines"), patch(
         "blockchecks.engine.blob_aliases.extract_blob_names", return_value=[]
-    ):
+    ), patch("blockchecks.service.nfqws2.os.getpgid",
+             return_value=999), patch(
+        "blockchecks.service.nfqws2.os.killpg"), patch(
+        "blockchecks.service.nfqws2.os.unlink"), patch(
+        "blockchecks.service.nfqws2.time.sleep"):
         mgr.start("fake:blob=stun", hostlist=["discord.com"], qnum=200)
     assert mgr._pid == 55
     assert len(mgr._temp_files) == 2  # hostlist + conf
