@@ -223,6 +223,21 @@ class ProbeServer:
             return self._envelope({"status": "error", "error": f"generate_config failed: {err}"})
 
     async def _handle_dbg_probe(self, req: dict) -> dict:
+        # MCP client sends singular domain/strategy/fake_blob; map to the
+        # batch probe contract (domains[]/strategies[]).
+        domain = str(req.get("domain") or "").strip()
+        strategy = str(req.get("strategy") or "").strip()
+        if domain and not req.get("domains"):
+            req["domains"] = [domain]
+        if strategy and not req.get("strategies"):
+            req["strategies"] = [strategy]
+        # fake_blob is injected into the strategy string when supplied.
+        blob = str(req.get("fake_blob") or "").strip()
+        if blob:
+            req["strategies"] = [
+                s if "blob=" in s else f"fake:blob={blob}"
+                for s in (req.get("strategies") or [])
+            ]
         dry = bool(req.get("dry_run_db", True))
         if not dry:
             req["dry_run_db"] = False
@@ -304,6 +319,11 @@ class ProbeServer:
         self.socket_path.unlink(missing_ok=True)
         self._server = await asyncio.start_unix_server(self._client, str(self.socket_path))
         os.chmod(self.socket_path, 0o600)
+        # When launched via sudo, reclaim ownership so user-space MCP/CLI
+        # clients (running as SUDO_UID) can connect to the socket.
+        from blockchecks.engine.paths import reclaim_sudo_ownership
+
+        reclaim_sudo_ownership(self.socket_path)
         print(f"  [serve] listening on {self.socket_path}")
         async with self._server:
             await self._stop.wait()

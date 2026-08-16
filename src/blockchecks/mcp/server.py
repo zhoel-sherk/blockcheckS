@@ -280,17 +280,23 @@ async def dbg_probe_raw(
             raw_error=response.get("error", "Unknown daemon error"),
         )
 
+    # Daemon returns the batch contract: data["results"][0] for single-shot.
     res = response.get("data", {})
+    results = res.get("results") or []
+    r = results[0] if results else res
+    status = "PASS" if (r.get("status") == "PASS" or r.get("success")) else (
+        "TIMEOUT" if r.get("fail_phase") == "connect_timeout" else "FAIL"
+    )
     return ProbeResult(
         domain=domain,
         strategy=strategy,
-        status="PASS" if res.get("success") else "FAIL",
-        http_code=res.get("http_code"),
-        latency_ms=res.get("latency_ms", 0.0),
-        bytes_read=res.get("bytes_read", 0),
-        fail_phase=res.get("fail_phase"),
-        rst_in_ttl=res.get("rst_in_ttl"),
-        raw_error=res.get("error"),
+        status=status,
+        http_code=r.get("http_code") or None,
+        latency_ms=r.get("latency_ms", 0.0),
+        bytes_read=r.get("bytes_read", 0),
+        fail_phase=r.get("fail_phase") or None,
+        rst_in_ttl=r.get("rst_in_ttl"),
+        raw_error=r.get("error") or r.get("raw_error"),
     )
 
 

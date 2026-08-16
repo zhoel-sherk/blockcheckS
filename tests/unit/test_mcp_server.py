@@ -75,12 +75,16 @@ async def fake_daemon(tmp_path, monkeypatch):
                 writer.write(
                     _ok(
                         {
-                            "success": True,
-                            "http_code": 200,
-                            "latency_ms": 95.0,
-                            "bytes_read": 1234,
-                            "fail_phase": "",
-                            "rst_in_ttl": None,
+                            "results": [
+                                {
+                                    "status": "PASS",
+                                    "http_code": 200,
+                                    "latency_ms": 95.0,
+                                    "bytes_read": 1234,
+                                    "fail_phase": "",
+                                    "error": "",
+                                }
+                            ]
                         }
                     )
                 )
