@@ -74,7 +74,7 @@ jobs:
               tests/unit/test_nfqws2_settle.py tests/unit/test_firewall_unit.py
               tests/unit/test_metrics.py tests/unit/test_probe_backend.py
               tests/unit/test_probe_service.py tests/unit/test_probe_worker.py
-              tests/unit/test_mcp_server.py tests/unit/test_async_runner_methods.py
+              tests/unit/test_http_server.py tests/unit/test_mcp_server.py tests/unit/test_async_runner_methods.py
               tests/unit/test_async_runner_tcp.py
               tests/unit/test_batch_scheduler.py
           - name: "S3 CLI, Store & System"

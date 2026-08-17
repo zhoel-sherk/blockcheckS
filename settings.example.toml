@@ -49,3 +49,8 @@ blobs = "/opt/zapret2/blobs"
 [secure_dns]
 # enabled = true
 # doh_server = "https://cloudflare-dns.com/dns-query"
+
+[http]
+# Bearer token for the `bs serve` HTTP bridge (--http-port). Required for any
+# /api/* route except /api/health. Also read from env BLOCKCHECKS_HTTP_TOKEN.
+# token = "change-me"

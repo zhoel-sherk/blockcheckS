@@ -1,9 +1,11 @@
-"""blockcheckS probe server — Unix socket core + thin HTTP bridge.
+"""blockcheckS probe server — Unix socket core + authenticated HTTP bridge.
 
 Core is strictly ``asyncio.start_unix_server`` (no deps). Clients send a
 single-line JSON request (``{"cmd": "probe"|"status"|"stop", ...}``) and get a
-single-line JSON response. A lightweight HTTP layer can sit in front of the
-socket (or call the same ``handle_request`` directly).
+single-line JSON response. An authenticated HTTP layer (Bearer token) can sit
+in front of the socket (or call the same ``handle_request`` directly) and
+expose the same actions for external orchestrators (e.g. gp-control-plane),
+plus an SSE stream for on-the-fly operation progress.
 """
 
 from __future__ import annotations
@@ -11,22 +13,44 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
+from typing import Any
 
 from blockchecks.engine.paths import STATE_DIR
 from blockchecks.service.probe_service import ProbeRequest, ProbeService
 
 SOCKET_PATH = STATE_DIR / "blockchecks.sock"
 
+SSE_HEARTBEAT_SECONDS = 15.0
+HTTP_HEADER_READ_TIMEOUT = 30.0
+
+
+def _authorization_token(authorization: str | None) -> str | None:
+    """Parse ``Authorization: Bearer <token>`` -> token or None."""
+    if not isinstance(authorization, str):
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
 
 class ProbeServer:
-    """Unix-socket JSON line server over ProbeService."""
+    """Unix-socket JSON line server over ProbeService.
+
+    Also owns an in-process event bus for SSE: callers can subscribe with
+    ``subscribe_events()`` and receive dict events published via
+    ``publish_event()`` (probe results, triage/find-strategy progress).
+    """
 
     def __init__(self, service: ProbeService, socket_path: str | Path | None = None):
         self.service = service
         self.socket_path = Path(socket_path or SOCKET_PATH)
         self._server: asyncio.AbstractServer | None = None
+        self._http: asyncio.AbstractServer | None = None
         self._stop = asyncio.Event()
+        self._event_subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
 
     # ── envelope ──
 
@@ -82,7 +106,15 @@ class ProbeServer:
             timeout=float(req.get("timeout") or self.service.default_timeout),
             repeats=int(req.get("repeats") or 1),
         )
-        return await self.service.probe(r)
+        self.publish_event(
+            {"type": "probe_start", "domains": domains, "strategies": strategies}
+        )
+        resp = await self.service.probe(r)
+        for result in resp.get("results") or []:
+            if isinstance(result, dict):
+                self.publish_event({"type": "probe_result", **result})
+        self.publish_event({"type": "probe_done", "count": len(resp.get("results") or [])})
+        return resp
 
     async def _handle_status(self) -> dict:
         campaign = self.service.busy()
@@ -312,6 +344,65 @@ class ProbeServer:
         except Exception as err:
             return self._envelope({"status": "error", "error": f"get_telemetry failed: {err}"})
 
+    # ── event bus (SSE) ──
+
+    def publish_event(self, event: dict[str, Any]) -> None:
+        """Fan out an event dict to all SSE subscribers (non-blocking)."""
+        for queue in list(self._event_subscribers):
+            if queue.full():
+                # Drop oldest event on a stalled subscriber rather than blocking.
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    def subscribe_events(self, maxsize: int = 256) -> asyncio.Queue[dict[str, Any]]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=maxsize)
+        self._event_subscribers.add(queue)
+        return queue
+
+    def unsubscribe_events(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
+        self._event_subscribers.discard(queue)
+
+    async def _stream_events(self, writer: asyncio.StreamWriter) -> None:
+        """Write SSE frames until the client disconnects or the server stops."""
+        queue = self.subscribe_events()
+        last_heartbeat = time.monotonic()
+        try:
+            while not self._stop.is_set():
+                timeout = max(0.5, last_heartbeat + SSE_HEARTBEAT_SECONDS - time.monotonic())
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    try:
+                        writer.write(b": heartbeat\n\n")
+                        await writer.drain()
+                    except (ConnectionError, OSError):
+                        break
+                    last_heartbeat = time.monotonic()
+                    continue
+                event_type = str(event.get("type") or "event")
+                payload = json.dumps(event, separators=(",", ":")).encode("utf-8")
+                try:
+                    writer.write(f"event: {event_type}\n".encode())
+                    writer.write(b"data: ")
+                    writer.write(payload)
+                    writer.write(b"\n\n")
+                    await writer.drain()
+                except (ConnectionError, OSError):
+                    break
+        finally:
+            self.unsubscribe_events(queue)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (ConnectionError, OSError):
+                pass
+
     # ── socket lifecycle ──
 
     async def serve(self) -> None:
@@ -352,66 +443,156 @@ class ProbeServer:
                 pass
 
 
-    async def serve_http(self, host: str = "127.0.0.1", port: int = 8089) -> None:
-        """Thin HTTP bridge over the same request handlers (stdlib only).
+    @staticmethod
+    async def _read_http_request(reader: asyncio.StreamReader) -> tuple[str, str, str | None, bytes] | None:
+        """Read one HTTP request -> (method, path, authorization, body) or None."""
+        request_line = await asyncio.wait_for(reader.readline(), timeout=HTTP_HEADER_READ_TIMEOUT)
+        if not request_line:
+            return None
+        parts = request_line.decode("utf-8", "replace").strip().split(" ", 2)
+        if len(parts) != 3:
+            return None
+        method, path, _ = parts
+        authorization: str | None = None
+        content_length = 0
+        while True:
+            line = await reader.readline()
+            if line in (b"\r\n", b"\n", b""):
+                break
+            low = line.decode("utf-8", "replace").lower()
+            if low.startswith("authorization:"):
+                authorization = line.decode("utf-8", "replace").split(":", 1)[1].strip()
+            elif low.startswith("content-length:"):
+                try:
+                    content_length = int(low.split(":", 1)[1].strip())
+                except ValueError:
+                    content_length = 0
+        body = b""
+        if content_length > 0:
+            body = await asyncio.wait_for(reader.readexactly(content_length), timeout=HTTP_HEADER_READ_TIMEOUT)
+        return method, path, authorization, body
 
-        POST /probe, GET /status, POST /stop — JSON bodies. This is a minimal
-        bridge so external apps (e.g. gp-control-plane) don't need a socket
-        client; the probe core remains the Unix socket.
+    @staticmethod
+    def _parse_http_body(body: bytes) -> dict | None:
+        try:
+            parsed = json.loads(body.decode("utf-8")) if body else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    @staticmethod
+    def _busy_status_code(resp: dict) -> int:
+        return 423 if resp.get("status") == "busy" else 200
+
+    async def _route_http_request(
+        self,
+        method: str,
+        path: str,
+        body: bytes,
+    ) -> tuple[dict, int] | None:
+        """Route one authenticated HTTP request.
+
+        Returns ``(response, status_code)`` or ``None`` when the handler takes
+        over the connection (SSE stream).
         """
+        if path == "/api/events" and method in {"GET", "HEAD"}:
+            return None
+        if path == "/api/status" and method in {"GET", "HEAD"}:
+            resp = self._envelope(await self._handle_status())
+            return resp, self._busy_status_code(resp)
+        if path == "/api/telemetry" and method in {"GET", "HEAD"}:
+            return self._envelope(await self._handle_get_telemetry()), 200
+        if path == "/api/stop" and method == "POST":
+            self._stop.set()
+            return self._envelope({"status": "stopping"}), 200
+        action_paths = {
+            "/api/probe": "probe",
+            "/api/triage": "triage",
+            "/api/find-strategy": "find_strategy",
+            "/api/generate-config": "generate_config",
+            "/api/dbg-probe": "dbg_probe",
+        }
+        if path in action_paths and method == "POST":
+            req = self._parse_http_body(body)
+            if req is None:
+                return {"status": "error", "error": "bad json body"}, 400
+            req.setdefault("cmd", action_paths[path])
+            resp = await self.handle_request(req)
+            return resp, self._busy_status_code(resp)
+        # Legacy routes (still require token).
+        if method == "GET" and path.startswith("/status"):
+            resp = self._envelope(await self._handle_status())
+            return resp, self._busy_status_code(resp)
+        if method == "POST" and path.startswith("/stop"):
+            self._stop.set()
+            return self._envelope({"status": "stopping"}), 200
+        if method == "POST" and (path.startswith("/probe") or path == "/"):
+            req = self._parse_http_body(body)
+            if req is None:
+                return {"status": "error", "error": "bad json body"}, 400
+            req.setdefault("cmd", "probe")
+            resp = await self.handle_request(req)
+            return resp, self._busy_status_code(resp)
+        return {"status": "error", "error": "not found"}, 404
+
+    async def serve_http(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8089,
+        token: str | None = None,
+    ) -> None:
+        """Authenticated HTTP bridge over the same request handlers (stdlib only).
+
+        All routes require ``Authorization: Bearer <token>`` except ``/api/health``.
+        When *token* is empty/None the HTTP bridge is disabled (no listener).
+        Exposes the socket actions under ``/api/*`` plus an SSE stream at
+        ``/api/events`` for on-the-fly progress.
+        """
+        if not token:
+            print("  [serve] HTTP bridge disabled: no token provided")
+            return
+
+        async def _send_json(
+            writer: asyncio.StreamWriter,
+            resp: dict,
+            status_code: int,
+        ) -> None:
+            payload = json.dumps(resp).encode()
+            reason = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 423: "Locked"}.get(status_code, "OK")
+            writer.write(
+                (
+                    f"HTTP/1.1 {status_code} {reason}\r\n"
+                    "Content-Type: application/json\r\n"
+                    f"Content-Length: {len(payload)}\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode()
+            )
+            writer.write(payload)
+            await writer.drain()
 
         async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             try:
-                request_line = await asyncio.wait_for(reader.readline(), timeout=30)
-                if not request_line:
+                request = await self._read_http_request(reader)
+                if request is None:
                     return
-                method, path, _ = request_line.decode("utf-8", "replace").strip().split(" ", 2)
-                # read headers until blank line
-                content_length = 0
-                while True:
-                    line = await reader.readline()
-                    if line in (b"\r\n", b"\n", b""):
-                        break
-                    low = line.decode("utf-8", "replace").lower()
-                    if low.startswith("content-length:"):
-                        try:
-                            content_length = int(low.split(":", 1)[1].strip())
-                        except ValueError:
-                            content_length = 0
-                body = b""
-                if content_length > 0:
-                    body = await reader.readexactly(content_length)
+                method, path, authorization, body = request
 
-                if method == "GET" and path.startswith("/status"):
-                    resp = await self._handle_status()
-                elif method == "POST" and path.startswith("/stop"):
-                    self._stop.set()
-                    resp = {"status": "stopping"}
-                elif method == "POST" and (path.startswith("/probe") or path == "/"):
-                    try:
-                        req = json.loads(body.decode("utf-8")) if body else {}
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        resp = {"status": "error", "error": "bad json body"}
-                    else:
-                        if not isinstance(req, dict):
-                            resp = {"status": "error", "error": "body must be a JSON object"}
-                        else:
-                            req.setdefault("cmd", "probe")
-                            resp = await self.handle_request(req)
-                else:
-                    resp = {"status": "error", "error": "not found"}
-                payload = json.dumps(resp).encode("utf-8")
-                status_line = "423 Locked" if resp.get("status") == "busy" else "200 OK"
-                writer.write(
-                    (
-                        f"HTTP/1.1 {status_line}\r\n"
-                        "Content-Type: application/json\r\n"
-                        f"Content-Length: {len(payload)}\r\n"
-                        "Connection: close\r\n\r\n"
-                    ).encode()
-                )
-                writer.write(payload)
-                await writer.drain()
+                # Public liveness probe — no token required.
+                if method in {"GET", "HEAD"} and path == "/api/health":
+                    await _send_json(writer, {"status": "ok"}, 200)
+                    return
+
+                # Everything else requires a Bearer token.
+                if _authorization_token(authorization) != token:
+                    await _send_json(writer, {"status": "error", "error": "unauthorized"}, 401)
+                    return
+
+                routed = await self._route_http_request(method, path, body)
+                if routed is None:
+                    await self._stream_events(writer)
+                    return
+                resp, status_code = routed
+                await _send_json(writer, resp, status_code)
             except (asyncio.TimeoutError, ConnectionError, OSError, ValueError):
                 pass
             finally:
@@ -422,7 +603,7 @@ class ProbeServer:
                     pass
 
         self._http = await asyncio.start_server(_handle, host, port)
-        print(f"  [serve] HTTP bridge on http://{host}:{port}")
+        print(f"  [serve] authenticated HTTP bridge on http://{host}:{port}")
         async with self._http:
             await self._stop.wait()
 

@@ -379,7 +379,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--http-port",
         type=int,
         default=None,
-        help="Also expose a thin HTTP bridge on 127.0.0.1:PORT (optional)",
+        help="Also expose an authenticated HTTP bridge on 127.0.0.1:PORT (optional)",
+    )
+    serve.add_argument(
+        "--http-token",
+        type=str,
+        default=None,
+        help="Bearer token for the HTTP bridge (default: BLOCKCHECKS_HTTP_TOKEN env "
+        "or config.toml [http] token)",
     )
 
     tcp = sub.add_parser("tcp", help="Single TCP strategy test (sync)")
