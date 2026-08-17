@@ -1,6 +1,6 @@
 # Architecture — blockcheckS
 
-Canonical data-flow reference for the async scan path (1.3.1+).
+Canonical data-flow reference for the async scan path (1.3.4+).
 
 ## Main runtime flow (`bs scan` / `bs pair` / `bs full`)
 

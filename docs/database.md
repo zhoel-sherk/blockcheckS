@@ -114,7 +114,7 @@ erDiagram
 | `THROTTLED` | TCP throttled, UDP OK |
 | `FAIL` | both failed |
 
-## Batch flush (B8, 1.3.1)
+## Batch flush (B8, 1.3.4)
 
 `log_tcp`/`log_udp` buffer rows when `batch_size > 0` (default 500). `flush()`
 drains them atomically under `_flush_lock` before any await, so a concurrent

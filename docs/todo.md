@@ -93,9 +93,9 @@ _(none — E3 closed in Wave2)_
 
 **Статус:** ProbeBatchService готов (1.1.x); T-L1 короткие прогоны на LLC Fiord — в работе.
 
-**Поэтапный переход default → lua_bridge (1.3.1 — переключён):**
+**Поэтапный переход default → lua_bridge (1.3.4 — переключён):**
 
-С 1.3.1 **default = lua_bridge** (`DEFAULT_PROBE_BACKEND`); `--classic` /
+С 1.3.4 **default = lua_bridge** (`DEFAULT_PROBE_BACKEND`); `--classic` /
 `--probe-backend {classic,lua_bridge}` выбирают явно. Classic path сохранён
 (pair UDP bootstrap, fan-out, отладка).
 
@@ -107,10 +107,10 @@ _(none — E3 closed in Wave2)_
 | **T-L4** | после T-L3 | CLI `--classic` / `--probe-backend classic` — явный legacy; deprecate `--lua-bridge` (alias) |
 | **T-L5** | optional | env `BLOCKCHECKS_PROBE_BACKEND`; CI gate только `--lua-bridge-compare` на subset |
 
-- [x] **L-transition-1** (T-L1) LLC Fiord: `bs scan --lua-bridge --max 200` + `bs full --lua-bridge` subset, compare green — smoke 2026-08-05: scan/compare/full OK, 0 PASS на random custom (ожидаемо); drift 0 — DONE (1.3.1)
+- [x] **L-transition-1** (T-L1) LLC Fiord: `bs scan --lua-bridge --max 200` + `bs full --lua-bridge` subset, compare green — smoke 2026-08-05: scan/compare/full OK, 0 PASS на random custom (ожидаемо); drift 0 — DONE (1.3.4)
 - [ ] **L-transition-2** (T-L2) smart-fallback NDJSON poll → early curl abort в `ProbeBatchService`
-- [x] **L-transition-3** (T-L3) Flip default backend to `lua_bridge` — DONE (1.3.1, `config.DEFAULT_PROBE_BACKEND`)
-- [x] **L-transition-4** (T-L4) Добавить `--classic` и `--probe-backend {classic,lua_bridge}` — DONE (1.3.1, `add_backend_args`)
+- [x] **L-transition-3** (T-L3) Flip default backend to `lua_bridge` — DONE (1.3.4, `config.DEFAULT_PROBE_BACKEND`)
+- [x] **L-transition-4** (T-L4) Добавить `--classic` и `--probe-backend {classic,lua_bridge}` — DONE (1.3.4, `add_backend_args`)
 - [ ] **L-transition-5** (T-L5) Убрать `--lua-bridge-compare` из user path; оставить в `scripts/release_smoke.sh` / CI
 
 **Не смешивать с `--classic`:**
@@ -220,7 +220,7 @@ fanout = transfer, provider-preflight = cold-start prior). Цель старых
 - [x] **SVC-8** `POST /probe` → `[{domain, strategy_id, status, fail_phase, latency_ms, http_code, fingerprint_matched}]`
       — fail_phase классификатор (`classify_fail_phase`), E2E подтверждено. (2026-08-14)
 - [x] **SVC-9** `GET /status` → `{status, active_run, pool_size, started, uptime_s}`; `POST /stop`. (2026-08-14)
-- [x] **SVC-10** systemd unit `blockcheck-serve.service` + install/uninstall (по образцу series) — DONE (1.3.1, `systemd/blockcheck-serve.service`)
+- [x] **SVC-10** systemd unit `blockcheck-serve.service` + install/uninstall (по образцу series) — DONE (1.3.4, `systemd/blockcheck-serve.service`)
 
 ### Интеграция GP
 - [ ] **SVC-11** GP root-helper runner POST'ит на socket вместо exec `blockcheck2.sh`;
@@ -392,7 +392,7 @@ NFQWS2_SETTLE_MIN  = 0
 
 ### T1-4 — Probe timeout: CLI default 5.0 → 3.0
 **Файл:** `src/blockchecks/cli/parser.py` (все `--timeout default=3.0`)
-**Текущее:** `--timeout default=3.0` на всех командах — DONE (1.3.1)
+**Текущее:** `--timeout default=3.0` на всех командах — DONE (1.3.4)
 **Проблема:** DPI-блокировка детектируется за 2-3s (SYN+ClientHello либо проходит, либо silent-drop). 5s — запас, который умножается на количество FAIL-тестов.
 **Экономия:** 2s × 600 FAIL-проб = **~1200s** на full-скан.
 **Осталось:**
