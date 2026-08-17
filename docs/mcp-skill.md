@@ -17,6 +17,10 @@ which tool to use when.
 | `query_strategies(domain, status, limit)` | Top strategies for a domain from state.db (PASS/THROTTLED/FAIL) |
 | `get_presets(kind)` | List strategy/domain presets from presets/ |
 | `dbg_validate_strategy_syntax(strategy)` | Offline strategy validation (9+ rules) |
+| `get_nfqws2_status` | nfqws2 running? pids, binary, ELF arch vs host (read-only) |
+| `get_zapret2_config` | Active /opt/zapret2/config profiles (read-only) |
+| `list_zapret2_blobs` | Blobs under /opt/zapret2 + blockcheckS aliases |
+| `get_ipset_status` | ipset scripts + live kernel tables |
 
 ### Require the `bs serve` daemon (root, netns)
 | Tool | What it does |
@@ -29,6 +33,7 @@ which tool to use when.
 | `dbg_dump_pool_state` | netns pool, nfqws2 PIDs, stale run.lock |
 | `stop_campaign(wait)` | Graceful campaign stop via daemon |
 | `generate_router_config(target_os, domains)` | nfqws2 .conf for Keenetic/OpenWrt/Linux |
+| `probe_strategy(domain, strategy)` | Alias for `dbg_probe_raw` (dry_run_db=True) |
 
 ## 2. Fair-exclusion rule (IMPORTANT)
 

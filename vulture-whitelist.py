@@ -161,3 +161,8 @@ _._qnum  # unused attribute (src/blockchecks/service/nfqws2.py:204)
 make_service  # unused function (src/blockchecks/service/server.py:429)
 import_shortlist_async  # unused function (src/blockchecks/shortlist_import.py:138)
 validate_strategies  # public batch API (engine/static_validator), used by MCP/CLI consumers
+get_nfqws2_status  # MCP tool (LAYER C, registered via @mcp.tool)
+get_zapret2_config  # MCP tool (LAYER C)
+list_zapret2_blobs  # MCP tool (LAYER C)
+get_ipset_status  # MCP tool (LAYER C)
+probe_strategy  # MCP tool (LAYER C)

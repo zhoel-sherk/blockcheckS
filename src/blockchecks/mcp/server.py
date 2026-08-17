@@ -683,6 +683,156 @@ async def dbg_dump_pool_state() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# LAYER C: zapret2 Host Status (read-only, no daemon / no nfqws2 launch)
+# ---------------------------------------------------------------------------
+
+_ZAPRET2_DIR = Path("/opt/zapret2")
+
+
+def _zapret2_dir() -> Path | None:
+    """Resolve zapret2 root: env ZAPRET2_ROOT → /opt/zapret2 → None."""
+    env = os.getenv("ZAPRET2_ROOT", "").strip()
+    if env and os.path.isdir(env):
+        return Path(env)
+    return _ZAPRET2_DIR if _ZAPRET2_DIR.is_dir() else None
+
+
+@mcp.tool()
+async def get_nfqws2_status() -> dict[str, Any]:
+    """
+    Reports whether nfqws2 is running on the host, which binary is resolved
+    (env → which → /opt/zapret2 → vendor), and whether its ELF arch matches
+    the host. Read-only; never launches or stops nfqws2.
+    """
+    from blockchecks.engine.preflight import find_host_nfqws2_pids
+    from blockchecks.engine.system_deps import check_nfqws2_arch, resolve_nfqws2_bin
+
+    pids = find_host_nfqws2_pids()
+    binary = resolve_nfqws2_bin()
+    payload: dict[str, Any] = {
+        "running": bool(pids),
+        "pids": pids,
+        "binary": binary,
+        "binary_exists": bool(binary and os.path.isfile(binary)),
+    }
+    if binary and os.path.isfile(binary):
+        payload["arch_warning"] = check_nfqws2_arch(binary)
+    else:
+        payload["arch_warning"] = "nfqws2 binary not found (auto-fetch on first run)"
+    return payload
+
+
+@mcp.tool()
+async def get_zapret2_config(path: str | None = None) -> dict[str, Any]:
+    """
+    Returns the active zapret2 config (default /opt/zapret2/config, else
+    config.default) as lines + a lightweight profile breakdown. Read-only.
+    """
+    root = _zapret2_dir()
+    if root is None:
+        return {"error": "zapret2 dir not found (set ZAPRET2_ROOT or install /opt/zapret2)"}
+    cfg = Path(path) if path else root / "config"
+    if not cfg.is_file():
+        cfg = root / "config.default"
+    if not cfg.is_file():
+        return {"error": f"no config at {cfg} or {root/'config.default'}"}
+    try:
+        text = cfg.read_text(encoding="utf-8", errors="replace")
+    except OSError as err:
+        return {"error": f"cannot read {cfg}: {err}"}
+    lines = text.splitlines()
+    profiles: dict[str, list[str]] = {}
+    current = "default"
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("["):
+            current = stripped.strip("[]").strip()
+            profiles.setdefault(current, [])
+        else:
+            profiles.setdefault(current, []).append(stripped)
+    return {
+        "path": str(cfg),
+        "profile_count": len(profiles),
+        "profiles": profiles,
+        "raw_lines": lines,
+    }
+
+
+@mcp.tool()
+async def list_zapret2_blobs() -> list[dict[str, Any]]:
+    """
+    Lists blob payloads available under /opt/zapret2 (blobs/ + files/fake/)
+    and their resolvability through blockcheckS aliases. Read-only.
+    """
+    from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP
+
+    root = _zapret2_dir()
+    if root is None:
+        return [{"error": "zapret2 dir not found"}]
+    out: list[dict[str, Any]] = []
+    for sub in ("blobs", "files", "files/fake"):
+        d = root / sub
+        if not d.is_dir():
+            continue
+        for p in sorted(d.glob("*.bin")):
+            name = p.name
+            alias = next((a for a, fn in BLOB_ALIAS_MAP.items() if fn == name), None)
+            out.append(
+                {
+                    "path": str(p),
+                    "name": name,
+                    "size": p.stat().st_size if p.is_file() else 0,
+                    "alias": alias,
+                }
+            )
+    return out
+
+
+@mcp.tool()
+async def get_ipset_status() -> dict[str, Any]:
+    """
+    Reports zapret2 ipset tooling: script presence under /opt/zapret2/ipset and
+    live kernel ipset tables (via `ipset list -name` when available). Read-only.
+    """
+    root = _zapret2_dir()
+    scripts: list[str] = []
+    if root is not None:
+        ipset_dir = root / "ipset"
+        if ipset_dir.is_dir():
+            scripts = sorted(p.name for p in ipset_dir.glob("*.sh"))
+    tables: list[str] = []
+    import shutil
+
+    if shutil.which("ipset"):
+        try:
+            r = subprocess_run(["ipset", "list", "-name"], timeout=3)
+            if r.returncode == 0:
+                tables = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+        except Exception:
+            tables = []
+    return {"scripts": scripts, "kernel_tables": tables}
+
+
+def subprocess_run(args: list[str], timeout: float) -> object:
+    """subprocess.run helper (avoids importing subprocess at module top)."""
+    import subprocess
+
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+
+
+@mcp.tool()
+async def probe_strategy(domain: str, strategy: str, fake_blob: str | None = None) -> ProbeResult:
+    """
+    Convenience alias for dbg_probe_raw: single-shot isolated strategy probe
+    (dry_run_db=True default — never writes production state.db). Requires the
+    `bs serve` daemon (root, netns).
+    """
+    return await dbg_probe_raw(domain, strategy, fake_blob, dry_run_db=True)
+
+
+# ---------------------------------------------------------------------------
 # MCP Resources (Direct contextual data access for LLM)
 # ---------------------------------------------------------------------------
 

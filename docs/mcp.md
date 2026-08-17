@@ -75,11 +75,22 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 | B | `dbg_inspect_lua_ipc` | Трейс событий Lua bridge (APPLIED / rst_in / ttl) |
 | B | `dbg_validate_strategy_syntax` | Офлайн-валидация CLI-аргументов nfqws2 |
 | B | `dbg_dump_pool_state` | netns pool, PID nfqws2, stale run.lock |
+| C | `get_nfqws2_status` | Статус nfqws2 на хосте (pids, бинарник, ELF-арх vs host) — read-only, без демона |
+| C | `get_zapret2_config` | Активный `/opt/zapret2/config` (профили, строки) — read-only |
+| C | `list_zapret2_blobs` | Blobs в `/opt/zapret2` (blobs/ + files/fake/) + алиасы blockcheckS |
+| C | `get_ipset_status` | Скрипты `/opt/zapret2/ipset/` + живые kernel ipset-таблицы |
+| C | `probe_strategy` | Алиас `dbg_probe_raw` (dry_run_db=True) — требует `bs serve` |
 
 Ресурсы: `blockchecks://presets/manifest`, `blockchecks://telemetry/active_run`.
 
+> **zapret2 filesystem-MCP заменён**: раньше был отдельный `server-filesystem`
+> с доступом к `/opt/zapret2`. Теперь полезные zapret2-инструменты встроены
+> прямо в blockchecks (LAYER C) — один MCP на всё. Чтение файлов zapret2
+> остаётся доступным через обычные средства агента.
+
 > **Без демона работают**: `get_series_status`, `query_strategies`, `get_presets`,
-> `dbg_validate_strategy_syntax` + ресурс `presets/manifest`.
+> `dbg_validate_strategy_syntax`, `get_nfqws2_status`, `get_zapret2_config`,
+> `list_zapret2_blobs`, `get_ipset_status` + ресурс `presets/manifest`.
 > **Требуют `bs serve`**: `triage_domain`, `find_working_strategy`,
 > `generate_router_config`, `get_service_status`, `stop_campaign`, `dbg_probe_raw`,
 > `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`.

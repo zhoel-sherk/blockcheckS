@@ -455,3 +455,107 @@ async def test_stop_campaign_delegates_to_daemon(monkeypatch):
     monkeypatch.setattr(ms, "_send_daemon_request", fake_send)
     result = await ms.stop_campaign()
     assert result.get("status") == "stopping"
+
+
+# ── LAYER C: zapret2 host status (read-only) ──────────────────────────
+
+
+async def test_get_nfqws2_status_running(monkeypatch):
+    from blockchecks.engine import preflight, system_deps
+
+    monkeypatch.setattr(preflight, "find_host_nfqws2_pids", lambda: [111, 222])
+    monkeypatch.setattr(system_deps, "resolve_nfqws2_bin", lambda: "/tmp/nfqws2")
+    monkeypatch.setattr(system_deps.os.path, "isfile", lambda p: p == "/tmp/nfqws2")
+    monkeypatch.setattr(system_deps, "check_nfqws2_arch", lambda p: None)
+
+    from blockchecks.mcp.server import get_nfqws2_status
+
+    s = await get_nfqws2_status()
+    assert s["running"] is True
+    assert s["pids"] == [111, 222]
+    assert s["binary"] == "/tmp/nfqws2"
+    assert s["arch_warning"] is None
+
+
+async def test_get_nfqws2_status_not_running(monkeypatch):
+    from blockchecks.engine import preflight, system_deps
+
+    monkeypatch.setattr(preflight, "find_host_nfqws2_pids", lambda: [])
+    monkeypatch.setattr(system_deps, "resolve_nfqws2_bin", lambda: None)
+
+    from blockchecks.mcp.server import get_nfqws2_status
+
+    s = await get_nfqws2_status()
+    assert s["running"] is False
+    assert s["pids"] == []
+    assert s["binary"] is None
+
+
+async def test_get_zapret2_config_reads_config(tmp_path, monkeypatch):
+    import blockchecks.mcp.server as ms
+
+    zap = tmp_path / "zapret2"
+    zap.mkdir()
+    (zap / "config").write_text("# head\nNFQWS_BASE_ARGS=--filter-tcp=443\n", encoding="utf-8")
+    monkeypatch.setattr(ms, "_zapret2_dir", lambda: zap)
+
+    c = await ms.get_zapret2_config()
+    assert c["path"] == str(zap / "config")
+    assert c["profile_count"] == 1
+    assert "NFQWS_BASE_ARGS=--filter-tcp=443" in c["raw_lines"]
+
+
+async def test_get_zapret2_config_missing_dir():
+    import blockchecks.mcp.server as ms
+
+    result = await ms.get_zapret2_config()
+    # Without /opt/zapret2 on CI, must degrade gracefully.
+    assert "error" in result or "path" in result
+
+
+async def test_list_zapret2_blobs(tmp_path, monkeypatch):
+    import blockchecks.mcp.server as ms
+
+    zap = tmp_path / "zapret2"
+    (zap / "blobs").mkdir(parents=True)
+    (zap / "blobs" / "stun.bin").write_bytes(b"x")
+    (zap / "files" / "fake").mkdir(parents=True)
+    (zap / "files" / "fake" / "max_ru.bin").write_bytes(b"y")
+    monkeypatch.setattr(ms, "_zapret2_dir", lambda: zap)
+
+    blobs = await ms.list_zapret2_blobs()
+    names = {b["name"] for b in blobs}
+    assert "stun.bin" in names
+    assert "max_ru.bin" in names
+    stun = next(b for b in blobs if b["name"] == "stun.bin")
+    assert stun["alias"] == "stun"
+
+
+async def test_get_ipset_status_scripts(tmp_path, monkeypatch):
+    import blockchecks.mcp.server as ms
+
+    zap = tmp_path / "zapret2"
+    (zap / "ipset").mkdir(parents=True)
+    (zap / "ipset" / "create_ipset.sh").write_text("#!/bin/sh\n")
+    monkeypatch.setattr(ms, "_zapret2_dir", lambda: zap)
+    monkeypatch.setattr(ms, "subprocess_run", lambda *a, **k: None)
+
+    s = await ms.get_ipset_status()
+    assert "create_ipset.sh" in s["scripts"]
+    assert isinstance(s["kernel_tables"], list)
+
+
+async def test_probe_strategy_aliases_dbg_probe(monkeypatch):
+    import blockchecks.mcp.server as ms
+
+    captured = {}
+
+    async def fake_dbg(domain, strategy, fake_blob, dry_run_db):
+        captured.update(domain=domain, strategy=strategy, fake_blob=fake_blob, dry_run_db=dry_run_db)
+        return ms.ProbeResult(domain=domain, strategy=strategy, status="PASS")
+
+    monkeypatch.setattr(ms, "dbg_probe_raw", fake_dbg)
+    r = await ms.probe_strategy("a.com", "fake:blob=stun")
+    assert r.status == "PASS"
+    assert captured["domain"] == "a.com"
+    assert captured["dry_run_db"] is True
