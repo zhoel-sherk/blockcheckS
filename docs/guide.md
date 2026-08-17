@@ -43,7 +43,9 @@ Entry point: `bs` → `blockchecks.bs:main`.
 | `bs pair` | TCP×UDP matrix, resume, auto-discover |
 | `bs composite` | один composite .conf × список доменов |
 | `bs full` | mass strategy×coverage + voice/QUIC/pairs + conf export |
-| `bc-nfconf` | export keenetic+raw conf from existing `state.db` |
+| `bs serve` | резидентный probe server (Unix socket + HTTP) |
+| `bs mcp` | MCP-сервер (stdio) для LLM, требует extra `[mcp]` |
+| `bc-nfconf` | export keenetic+raw conf from existing `state.db` (с поддержкой `--ipset`) |
 
 Примеры:
 
@@ -116,6 +118,12 @@ host-shared designs, not a prerequisite for `parallel > 4` under netns.
 `bs full` writes `output/nfqws2_<ts>.conf` (keenetic), `nfqws2_raw_<ts>.conf`,
 and `user.list`. ETA printed as `N_strat × N_domains / parallel`. Resume skips
 `(strategy, domain)` already in DB. STUN discover concurrency is capped at 4.
+
+**Экспорт с фильтрацией по IP (`bc-nfconf --ipset`)**: если роутер не
+перехватывает DNS, можно добавить IP-фильтр из кэша. Флаг `--ipset` возьмёт IPs
+из `data_block` DNS-кэша. Малые наборы будут встроены как `--ipset-ip ip1,ip2`,
+большие выгружены в файл `user.ipset`. Если доступна утилита `ip2net`, адреса
+схлопнутся в CIDR.
 
 `--auto-discover N` — DNS bulk `finland{N}.discord.gg` (+ опционально gateway).
 Сейчас в matrix берётся **первый** найденный endpoint (multi-EP loop — в todo).

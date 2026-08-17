@@ -117,7 +117,7 @@ Re-exported from `blockchecks.engine` and `blockchecks.checkers` — see
 ## Repository Structure & Metrics
 
 Full tree with line counts (Python / shell / lua / md; binaries excluded).
-Unit suite: **1266 passed**, quality **122**, integration **22** (sudo E2E).
+Unit suite: **1270 passed**, quality **122**, integration **22** (sudo E2E).
 
 ```
 src/blockchecks/                      (≈25 700 строк, 108 py-файлов)
@@ -146,7 +146,7 @@ src/blockchecks/                      (≈25 700 строк, 108 py-файлов
 │   batch_service 385 | firewall 120 | lua_bridge_ipc 133 | lua_conf 112 |
 │   lua_netns 82 | lua_session 141 | metrics 216 | netns_pool 228 | nfqws2 316 |
 │   nfqws2_settle 71 | probe 107 | probe_service 219 | run_control 178 | server 181
-tests/unit/                        (≈18 600 строк, 112 файлов)  — 1266 passed
+tests/unit/                        (≈18 600 строк, 112 файлов)  — 1270 passed
 tests/integration/                 (≈670 строк, 6 файлов)       — 22 passed (sudo)
 lua/blockchecks/                   (≈200 строк): geneva 65 | scan_bridge 90 |
                                    write_ipc 44 | init 3
