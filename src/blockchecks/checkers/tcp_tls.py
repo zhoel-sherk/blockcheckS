@@ -27,12 +27,14 @@ MIN_BYTES_PER_SEC = 400.0
 # HTTP statuses that produce tiny bodies legitimately
 SMALL_BODY_STATUSES = frozenset({101, 204, 206, 301, 302, 303, 304, 307, 308})
 
-# Patterns that indicate DPI fake response
+# Patterns that indicate DPI fake response (TSPU stubs)
 DPI_FAKE_PATTERNS = [
     b"roskomnadzor",
     b"rkn.gov.ru",
     b"blockpage",
     b"utmblock",
+    b"eais",
+    b"warning.rt.ru",
 ]
 
 # blockcheck2 curl exit 254 — suspicious redirect / blockpage

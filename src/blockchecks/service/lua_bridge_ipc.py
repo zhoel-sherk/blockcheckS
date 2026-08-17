@@ -44,6 +44,16 @@ class BridgeEvent:
         """True if this event is a DPI-injected inbound RST (scan_bridge)."""
         return self.event == "STRATEGY_FAIL" and self.reason == "rst_in"
 
+    def to_dict(self) -> dict:
+        """Serializable dict for API/SSE consumers (mirrors vars())."""
+        return {
+            "event": self.event,
+            "gen": self.gen,
+            "id": self.id,
+            "reason": self.reason,
+            "ttl": self.ttl,
+        }
+
 
 @dataclass(frozen=True)
 class BridgePaths:

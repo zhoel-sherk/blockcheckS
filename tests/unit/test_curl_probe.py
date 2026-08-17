@@ -619,3 +619,14 @@ def test_plaintext_404_fails():
 def test_plaintext_200_passes():
     r = _run_plain_probe(200, b"x" * 400, protocol="http")
     assert r.success is True
+
+
+def test_tls_403_with_eais_stub_fails():
+    """403/404 carrying a TSPU-specific marker (eais) is a stub, not a bypass."""
+    r = _run_plain_probe(403, b"<html>eais blocked resource</html>" * 5)
+    assert r.success is False
+
+
+def test_tls_200_with_rtru_stub_fails():
+    r = _run_plain_probe(200, b"<html>warning.rt.ru blocked</html>" * 5)
+    assert r.success is False

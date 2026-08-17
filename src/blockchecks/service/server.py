@@ -606,6 +606,3 @@ class ProbeServer:
         print(f"  [serve] authenticated HTTP bridge on http://{host}:{port}")
         async with self._http:
             await self._stop.wait()
-
-    def make_service(**kwargs) -> ProbeService:
-        return ProbeService(**kwargs)
