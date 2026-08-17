@@ -1,5 +1,20 @@
 # blockcheckS Changelog
 
+## 1.3.5 — hotfix: mutmut double -m + family expander guard (2026-08-17)
+
+**Hotfix.**
+
+- `[tool.mutmut].pytest_add_cli_args_test_selection` no longer passes `-m`
+  (it collided with `[tool.pytest.ini_options].addopts`' `-m`, producing a
+  duplicate `-m` usage error → `BadTestExecutionCommandsException`). addopts
+  is auto-applied by pytest, so a bare `tests/unit` selection is enough.
+- `test_mutmut_no_survivors`: targeted error message when mutmut exits 4
+  (usage error) instead of a raw traceback.
+- `test_family_expanders_all_have_methods`: every `_FAMILY_EXPANDERS` entry
+  resolves to a real `_fam_*` method (Jules/vulture flag them as unused, but
+  they are called via `getattr` in `_expand_family` — all 31 verified).
+- Bump 1.3.5.
+
 ## 1.3.4 — hotfix: wheel presets on Debian/Ubuntu (2026-08-17)
 
 **Hotfix.** On Debian/Ubuntu system Python `sys.prefix` is `/usr` but distutils

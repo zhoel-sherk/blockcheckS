@@ -47,6 +47,19 @@ def test_mutmut_no_survivors() -> None:
     )
     out = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode != 0:
+        # mutmut exits 4 (usage error) when its internal pytest invocation
+        # breaks — typically a version incompatibility (mutmut 3.7 vs pytest 9)
+        # surfacing as BadTestExecutionCommandsException, or a stale
+        # pytest_add_cli_args_test_selection with a bare "-m" that collides
+        # with [tool.pytest.ini_options].addopts. Surface a targeted message.
+        if proc.returncode == 4 and "BadTestExecutionCommandsException" in out:
+            pytest.fail(
+                "mutmut run failed with exit 4 (pytest usage error):\n"
+                f"{out[-2000:]}\n\n"
+                "Likely mutmut 3.7 vs pytest 9 incompatibility, or a duplicate "
+                "'-m' in [tool.mutmut].pytest_add_cli_args_test_selection vs "
+                "[tool.pytest.ini_options].addopts. See changelog 1.3.5."
+            )
         pytest.fail(f"mutmut run failed ({proc.returncode}):\n{out}")
 
     stats_path = PROJECT_ROOT / "mutants" / "mutmut-cicd-stats.json"

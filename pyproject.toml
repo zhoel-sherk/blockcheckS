@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blockchecks"
-version = "1.3.4"
+version = "1.3.5"
 description = "Asynchronous DPI strategy testing framework for nfqws2/zapret2"
 readme = "README.pypi.md"
 license = "MIT"
@@ -190,12 +190,15 @@ source_paths = [
     "src/blockchecks/service/batch_bridge_probe.py",
 ]
 pytest_add_cli_args_test_selection = [
-    "-m", "unit and not quality and not mutation",
+    # NOTE: do NOT pass "-m" here — [tool.pytest.ini_options].addopts already
+    # sets `-m "not integration and not quality and not mutation"`, which
+    # pytest auto-applies to every pytest.main() (incl. mutmut's internal
+    # run). Passing a second "-m" yields a double -m usage error
+    # (BadTestExecutionCommandsException) in mutmut 3.7.
     "tests/unit",
 ]
 pytest_add_cli_args = ["-q"]
 do_not_mutate_patterns = ["logger\\.", "raise "]
-
 [tool.blockchecks.architecture]
 package = "blockchecks"
 

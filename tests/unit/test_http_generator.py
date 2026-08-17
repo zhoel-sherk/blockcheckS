@@ -60,3 +60,31 @@ def test_build_inline_escapes_lt():
     assert "--out-range=s1\\<d1" in text
     assert "--in-range=-s1" in text
     assert "s1<d1" not in text
+
+
+def test_family_expanders_all_have_methods():
+    """Every _FAMILY_EXPANDERS entry must resolve to a real _fam_* method.
+
+    Jules/vulture flag these as "unused" (getattr dispatcher), but they are
+    called dynamically in _expand_family. This guards against broken links.
+    """
+    import inspect
+    import re
+    from pathlib import Path
+
+    import blockchecks.engine.generators.standard as standard_mod
+
+    src = inspect.getsource(standard_mod)
+    m = re.search(r"_FAMILY_EXPANDERS = \{(.*?)\n    \}", src, re.S)
+    assert m, "could not find _FAMILY_EXPANDERS in standard.py"
+    mapped = set(re.findall(r': "(_fam_\w+)"', m.group(1)))
+    assert mapped, "no _fam_* entries in _FAMILY_EXPANDERS"
+
+    fam_dir = Path(standard_mod.__file__).parent / "families"
+    defined = set()
+    for f in fam_dir.glob("*.py"):
+        defined |= set(re.findall(r"def (_fam_\w+)\b", f.read_text(encoding="utf-8")))
+
+    assert mapped <= defined, (
+        f"_FAMILY_EXPANDERS references missing methods: {sorted(mapped - defined)}"
+    )
