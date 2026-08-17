@@ -466,7 +466,7 @@ def test_ytcdn_probe_bare_no_thumb_for_gvt1():
     assert not any("/dQw4w9WgXcQ" in v.curl_url for v in variants)
 
 
-def _run_plain_probe(status, body=b"", headers=None):
+def _run_plain_probe(status, body=b"", headers=None, protocol="tls12"):
     """Run run_curl_probe with a fake session returning the given response."""
     from unittest.mock import patch
 
@@ -497,7 +497,9 @@ def _run_plain_probe(status, body=b"", headers=None):
             return resp
 
     with patch("curl_cffi.Session", FakeSession):
-        return run_curl_probe(CurlProbeRequest(domain="example.com", timeout=5.0))
+        return run_curl_probe(
+            CurlProbeRequest(domain="example.com", timeout=5.0, protocol=protocol)
+        )
 
 
 def test_false_pass_blockpage_samehost_redirect():
@@ -560,3 +562,60 @@ def test_200_html_binary_api_fails():
         r = run_curl_probe(req)
     assert r.success is False
     assert "text/html" in (r.error or "")
+
+
+# ── TLS status classification (proving TSPU bypass) ──
+#
+# On Fryazino the block is a silent drop of the ClientHello → http_code=0
+# (timeout/RST). Any real HTTP answer means the TLS handshake succeeded and
+# DPI did NOT drop it → the bypass works. So for HTTPS probes, 401/403/404
+# (with a non-stub body) are PASS, while 400 (desync corrupted the payload)
+# stays FAIL.
+
+
+def test_tls_403_with_body_passes():
+    r = _run_plain_probe(403, b"x" * 400)
+    assert r.success is True
+    assert r.http_code == 403
+
+
+def test_tls_404_with_body_passes():
+    r = _run_plain_probe(404, b"x" * 400)
+    assert r.success is True
+    assert r.http_code == 404
+
+
+def test_tls_401_with_body_passes():
+    r = _run_plain_probe(401, b"x" * 400)
+    assert r.success is True
+    assert r.http_code == 401
+
+
+def test_tls_400_still_fails():
+    """400 = desync corrupted the payload (fake packets) → FAIL, not a bypass."""
+    r = _run_plain_probe(400, b"x" * 400)
+    assert r.success is False
+    assert "400" in (r.error or "")
+
+
+def test_tls_404_with_rkn_body_fails():
+    """Even a 404 must FAIL if the body carries a DPI/roskomnadzor stub."""
+    r = _run_plain_probe(404, b"<html>blocked by roskomnadzor</html>" * 5)
+    assert r.success is False
+
+
+def test_tls_redirect_to_block_path_fails():
+    r = _run_plain_probe(302, b"", {"Location": "https://example.com/forbidden"})
+    assert r.success is False
+
+
+def test_plaintext_404_fails():
+    """Plaintext HTTP stays conservative: any 4xx = FAIL."""
+    r = _run_plain_probe(404, b"x" * 400, protocol="http")
+    assert r.success is False
+    assert r.http_code == 404
+
+
+def test_plaintext_200_passes():
+    r = _run_plain_probe(200, b"x" * 400, protocol="http")
+    assert r.success is True

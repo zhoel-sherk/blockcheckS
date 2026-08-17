@@ -611,7 +611,21 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     # Tiny 206 is OK for ordinary sites; googlevideo Range must meet size budget
     small_206 = resp.status_code == 206 and clen < 300 and not req.googlevideo
     small_body_ok = (not dpi_fake) and (resp.status_code in _SMALL_BODY_STATUSES or small_206)
-    status_ok = 200 <= resp.status_code < 400
+
+    # PASS classification depends on the probe type (TLS vs plaintext HTTP):
+    #   - HTTPS/TLS: a real HTTP answer (200..399, 401, 403, 404) proves the TLS
+    #     handshake succeeded and DPI did NOT drop/replace it → bypass works.
+    #     400 is a sign the desync corrupted the payload (fake packets) → FAIL.
+    #   - Plaintext HTTP: conservative — only 200..399 with validated body.
+    # DPI stub patterns (rkn/roskomnadzor/blockpage) and block-redirects are
+    # always FAIL regardless of status code.
+    if is_http:
+        status_ok = 200 <= resp.status_code < 400
+    else:
+        status_ok = (
+            200 <= resp.status_code < 400
+            or resp.status_code in {401, 403, 404}
+        )
     throttled = False
     success = False
     if status_ok and (content_ok or small_body_ok) and not dpi_fake:

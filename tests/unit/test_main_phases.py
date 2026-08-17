@@ -819,3 +819,43 @@ def test_sequential_bridge_warns_when_isolation_off():
     warned = any("domain isolation is OFF" in str(a) for a, _ in mock_print.call_args_list)
     assert warned, "expected isolation warning"
     assert progress.done == 2
+
+
+def test_sequential_bridge_progress_updates_during_run():
+    """progress.done must reflect completed jobs DURING the phase (regression:
+    a frozen [0/N] previously persisted until after gather())."""
+    from blockchecks.main_phases import _run_tcp_sequential_bridge
+
+    ctx = _mk_ctx()
+    ctx.parallel = 1
+    ctx.args.resume = False
+    ctx.args.timeout = 1.0
+    ctx.runner.bridge_batch = 2
+
+    seen_done: list[int] = []
+
+    async def fake_probe(items, domain, timeout, backend, domains=None):
+        await asyncio.sleep(0.02)
+        return [SimpleNamespace(success=True) for _ in items]
+
+    ctx.runner._run_probe_batch = fake_probe
+
+    from blockchecks.engine.generators.base import StrategyItem
+
+    ctx.tcp_items = [StrategyItem(label=f"s{i}", strategy="fake:repeats=6") for i in range(4)]
+    ctx.domains = ["a.com"]
+
+    with patch("blockchecks.engine.config.AQ_DOMAIN_ISOLATE", False):
+        ctx.stop = asyncio.Event()
+        progress = SimpleNamespace(
+            done=0,
+            skipped=0,
+            passed=0,
+            report=lambda: seen_done.append(progress.done),
+        )
+        asyncio.run(_run_tcp_sequential_bridge(ctx, progress))
+
+    # report() is called on each flush; with 1 worker + bridge_batch=2 there are
+    # at least 2 flushes (2 jobs each), so progress.done must grow past 0 mid-run.
+    assert progress.done == 4, progress.done
+    assert any(d > 0 for d in seen_done), f"progress never advanced mid-run: {seen_done}"

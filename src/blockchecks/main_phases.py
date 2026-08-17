@@ -757,6 +757,12 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
                     stats["done"] += 1
                     if r.success:
                         stats["passed"] += 1
+                # Mirror the worker-local counters onto the shared TcpProgress so
+                # report() prints live progress instead of a frozen [0/N] for the
+                # whole phase (the previous code only synced after gather()).
+                progress.done = stats["done"]
+                progress.passed = stats["passed"]
+                progress.skipped = stats["skipped"]
             progress.report()
             acc = []
 
