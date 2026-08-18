@@ -44,7 +44,7 @@ class CustomListGenerator(StrategyGenerator):
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                label = line[:60].replace(" ", "_").replace(":", "_")
+                label = line.replace(" ", "_").replace(":", "_")
                 proto = {
                     "http": "http",
                     "quic": "quic",
@@ -148,7 +148,7 @@ class UserMatrixGenerator(StrategyGenerator):
                 and "udp" not in strategy.lower()
             ):
                 continue
-            label = strategy.split("\n", 1)[0][:50].replace(" ", "_").replace(":", "_")
+            label = strategy.split("\n", 1)[0].replace(" ", "_").replace(":", "_")
             items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
             if scan_level == "single" and items:
                 break

@@ -44,6 +44,7 @@ sudo -E .venv/bin/bs serve --pool 4 --http-port 8089 --http-token "$BLOCKCHECKS_
 | GET | `/api/health` | liveness (без токена) | `{"status":"ok"}` |
 | GET | `/api/status` | статус демона (пул, busy, uptime) | busy → 423 |
 | GET | `/api/telemetry` | телеметрия (+run.lock) | — |
+| GET | `/api/results` | best PASS-стратегии из run-БД (TCP/UDP/QUIC) | `?db=&limit=&domains=` |
 | POST | `/api/stop` | graceful stop демона | — |
 | POST | `/api/probe` | on-the-fly проба стратегий | JSON body |
 | POST | `/api/triage` | preflight-triage домена | JSON body |
@@ -84,6 +85,11 @@ curl -s -X POST -H "$AUTH" -H "Content-Type: application/json" \
 curl -s -X POST -H "$AUTH" -H "Content-Type: application/json" \
   -d '{"target_os":"linux","domains":["youtube.com","discord.com"]}' \
   $BASE/api/generate-config | python3 -m json.tool
+
+# Results: best PASS-стратегии (DB авто-резолвится из run.lock или DEFAULT)
+curl -s -H "$AUTH" "$BASE/api/results?limit=10" | python3 -m json.tool
+# с явным путём к run-БД
+curl -s -H "$AUTH" "$BASE/api/results?db=/path/to/run.db&limit=5" | python3 -m json.tool
 
 # SSE-поток событий (live)
 curl -sN -H "$AUTH" $BASE/api/events

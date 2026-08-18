@@ -272,6 +272,28 @@ class TestGgcProbe:
         assert r.success is True
         assert r.http_code == 403
 
+    def test_ggc_bandaid_server_header_passes(self):
+        """'Bandaid Misdirected Traffic Server' is a genuine Google frontend
+        on some googlevideo/static endpoints — must not be a false FAIL."""
+        from blockchecks.checkers.curl_probe import run_curl_probe
+        from blockchecks.engine.config import GGC_HOST
+
+        req = CurlProbeRequest(
+            domain="googlevideo.com",
+            curl_url=f"https://{GGC_HOST}/videoplayback",
+            resolve_name=GGC_HOST,
+            resolved_ip="74.125.108.234",
+            googlevideo=True,
+            ggc=True,
+            disable_ech=True,
+            timeout=5.0,
+        )
+        sess, _, _ = self._mk_session(404, {"Server": "Bandaid Misdirected Traffic Server"})
+        with patch("curl_cffi.Session", sess):
+            r = run_curl_probe(req)
+        assert r.success is True
+        assert r.http_code == 404
+
     def test_ggc_nginx_server_header_fails(self):
         from blockchecks.checkers.curl_probe import run_curl_probe
         from blockchecks.engine.config import GGC_HOST

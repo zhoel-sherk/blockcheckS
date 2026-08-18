@@ -298,3 +298,38 @@ def test_authorization_token_parser():
     assert _authorization_token("Basic abc") is None
     assert _authorization_token("Bearer ") is None
     assert _authorization_token(None) is None
+
+
+@pytest.mark.unit
+def test_http_results_endpoint_reads_run_db(temp_db):
+    """GET /api/results returns PASS strategies from a run DB (on-demand)."""
+    import asyncio
+
+    from blockchecks.service.probe_service import ProbeService
+    from blockchecks.service.server import ProbeServer
+
+    async def seed():
+        await temp_db.log_tcp(
+            "fake:blob=stun:repeats=6", "discord.com", "PASS", 100.0, proto="tcp"
+        )
+        await temp_db.log_tcp(
+            "fake:blob=max_ru:repeats=6", "discord.com", "PASS", 120.0, proto="tcp"
+        )
+        await temp_db.flush()
+
+    asyncio.run(seed())
+
+    svc = ProbeService(pool_size=2)
+    server = ProbeServer(svc, socket_path="/tmp/bs_results.sock")
+
+    async def run():
+        resp = await server._handle_results(
+            {"db": str(temp_db.path), "limit": 10}
+        )
+        assert resp["status"] == "ok"
+        assert resp["db"] == str(temp_db.path)
+        names = [s["strategy"] for s in resp["tcp"]]
+        assert "fake:blob=stun:repeats=6" in names
+        assert "fake:blob=max_ru:repeats=6" in names
+
+    asyncio.run(run())

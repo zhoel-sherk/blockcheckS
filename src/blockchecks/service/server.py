@@ -86,6 +86,8 @@ class ProbeServer:
             return await self._handle_dbg_dump_pool()
         if cmd == "get_telemetry":
             return self._envelope(await self._handle_get_telemetry())
+        if cmd == "results":
+            return self._envelope(await self._handle_results(req))
         if cmd == "stop":
             self._stop.set()
             return self._envelope({"status": "stopping"})
@@ -344,6 +346,53 @@ class ProbeServer:
         except Exception as err:
             return self._envelope({"status": "error", "error": f"get_telemetry failed: {err}"})
 
+    async def _handle_results(self, req: dict) -> dict:
+        """Return best PASS strategies from a run database (on-the-fly).
+
+        Resolves the DB path automatically: explicit ``?db=`` param > the
+        active run.lock's db_path > the default state.db. Reads are read-only
+        and never write to the campaign DB.
+        """
+        try:
+            from blockchecks.engine.paths import DEFAULT_DB_PATH
+            from blockchecks.engine.store import open_run_store
+            from blockchecks.service.run_control import read_active_run
+
+            db_path = str(req.get("db") or "").strip()
+            if not db_path:
+                active = read_active_run()
+                if active is not None and active.db_path:
+                    db_path = str(active.db_path)
+            if not db_path:
+                db_path = str(DEFAULT_DB_PATH)
+
+            limit = int(req.get("limit") or 5)
+            limit = max(1, min(limit, 50))
+            domains = [d for d in (req.get("domains") or []) if isinstance(d, str)]
+
+            store = open_run_store(db_path)
+            try:
+                if domains:
+                    tcp = await store.get_common_tcp(domains, limit=limit)
+                else:
+                    tcp = await store.get_best_by_coverage(limit=limit)
+                udp = await store.get_best_udp(limit=limit)
+                quic = await store.get_best_quic("", limit=limit)
+            finally:
+                await store.close()
+
+            data = {
+                "status": "ok",
+                "db": db_path,
+                "limit": limit,
+                "tcp": tcp,
+                "udp": udp,
+                "quic": quic,
+            }
+            return self._envelope({"status": "ok", "results": data, **data})
+        except Exception as err:
+            return self._envelope({"status": "error", "error": f"results failed: {err}"})
+
     # ── event bus (SSE) ──
 
     def publish_event(self, event: dict[str, Any]) -> None:
@@ -481,6 +530,14 @@ class ProbeServer:
         return parsed if isinstance(parsed, dict) else None
 
     @staticmethod
+    def _parse_query_params(path: str) -> dict[str, Any]:
+        """Parse ``?a=1&b=2`` from a request path into a dict."""
+        from urllib.parse import parse_qs, urlparse
+
+        query = parse_qs(urlparse(path).query)
+        return {k: v[0] for k, v in query.items()}
+
+    @staticmethod
     def _busy_status_code(resp: dict) -> int:
         return 423 if resp.get("status") == "busy" else 200
 
@@ -502,6 +559,9 @@ class ProbeServer:
             return resp, self._busy_status_code(resp)
         if path == "/api/telemetry" and method in {"GET", "HEAD"}:
             return self._envelope(await self._handle_get_telemetry()), 200
+        if path == "/api/results" or path.startswith("/api/results?"):
+            req = self._parse_query_params(path)
+            return self._envelope(await self._handle_results(req)), 200
         if path == "/api/stop" and method == "POST":
             self._stop.set()
             return self._envelope({"status": "stopping"}), 200

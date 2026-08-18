@@ -110,8 +110,9 @@ def is_ytcdn_domain(domain: str) -> bool:
 
 #: Server-header fragments identifying a genuine Google frontend. The TSPU
 #: stub replies with ``nginx/nts`` (or none); Google uses gws (web), scone/gvs
-#: (googlevideo cache), sffe (static content / ytimg), etc.
-_GOOGLE_SERVER_HINTS = ("gws", "scone", "gvs", "sffe", "fife")
+#: (googlevideo cache), sffe (static content / ytimg), bandaid (misdirected
+#: traffic server on some googlevideo/static endpoints), etc.
+_GOOGLE_SERVER_HINTS = ("gws", "scone", "gvs", "sffe", "fife", "bandaid")
 
 
 def googlevideo_range_header() -> str:

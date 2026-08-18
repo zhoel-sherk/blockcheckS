@@ -87,3 +87,26 @@ async def test_generate_tcp_from_sources():
     assert len(items) > 0
     assert all("fake:" in i.strategy for i in items)
     assert len({i.label for i in items}) == len(items)
+
+
+@pytest.mark.asyncio
+async def test_custom_list_generator_labels_unique_for_long_strategies():
+    """Long custom strategies (common prefix >60 chars) must NOT collide —
+    the previous [:60] truncation produced identical labels and broke resume."""
+    from blockchecks.engine.generators.custom import CustomListGenerator
+
+    with tempfile.TemporaryDirectory() as d:
+        # Two strategies sharing a >60-char prefix but differing in the tail.
+        common = "fake:blob=stun:repeats=6:tcp_ts=-1000:ip_ttl="
+        p = os.path.join(d, "list_https_tls12.txt")
+        with open(p, "w") as f:
+            f.write(common + "64\n")
+            f.write(common + "128\n")
+
+        gen = CustomListGenerator(base_dir=d)
+        items = await gen.generate("tls12", scan_level="full", max_count=10)
+
+    assert len(items) == 2
+    assert len({i.label for i in items}) == 2, f"labels collided: {[i.label for i in items]}"
+    # labels must encode the differing tail, not truncate to the common prefix
+    assert items[0].label != items[1].label
