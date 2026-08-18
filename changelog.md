@@ -1,3 +1,7 @@
+## 1.3.6 — Release alpha branch (2026-08-18)
+
+- Bump 1.3.6.
+
 # blockcheckS Changelog
 
 ## 1.3.5 — hotfix: mutmut double -m + family expander guard (2026-08-17)

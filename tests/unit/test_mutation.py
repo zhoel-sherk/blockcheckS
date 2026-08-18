@@ -58,7 +58,7 @@ def test_mutmut_no_survivors() -> None:
                 f"{out[-2000:]}\n\n"
                 "Likely mutmut 3.7 vs pytest 9 incompatibility, or a duplicate "
                 "'-m' in [tool.mutmut].pytest_add_cli_args_test_selection vs "
-                "[tool.pytest.ini_options].addopts. See changelog 1.3.5."
+                "[tool.pytest.ini_options].addopts. See changelog 1.3.6."
             )
         pytest.fail(f"mutmut run failed ({proc.returncode}):\n{out}")
 

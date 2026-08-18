@@ -3,7 +3,7 @@
 > **Версия плана:** 2.0 (пересмотр 2026-08-11, по итогам глубокого изучения upstream)
 > **Бинарник:** `ciadpi` (byedpi) — upstream [hufrea/byedpi](https://github.com/hufrea/byedpi) (MIT)
 > **Код изучен:** `/tmp/opencode/byedpi_src` (main.c, proxy.c, params.h, README) + ByeByeDPI каталог
-> **Статус:** Phase 1–1b реализованы (translator + matrix generator); Phases 2–6 — план
+> **Статус:** Phase 1–1b реализованы (translator + matrix generator); Phases 2–8 отложены до следующих мажорных релизов
 
 ---
 
