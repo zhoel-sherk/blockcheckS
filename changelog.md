@@ -1,5 +1,15 @@
-## 1.3.6 — Release alpha branch (2026-08-18)
+## 1.3.6 — GP integration, probe fixes, smoke (2026-08-18)
 
+- `bs serve --http-port`: authenticated HTTP bridge (Bearer token; `--http-token`
+  / `BLOCKCHECKS_HTTP_TOKEN` / `config.toml [http]`) + routes `/api/status`,
+  `/api/telemetry`, `/api/results`, `/api/probe`, `/api/triage`,
+  `/api/find-strategy`, `/api/generate-config`, `/api/stop`, `/api/events` (SSE).
+- `GET /api/results`: best PASS strategies from a run DB (TCP/UDP/QUIC).
+- Fix: TLS 401/403/404 now classify as PASS (TSPU bypass proven by real server
+  answer); live bridge progress (no frozen `[0/N]`); TSPU stub markers `eais`,
+  `warning.rt.ru`; GGC `Server: Bandaid`; custom label collision.
+- MCP LAYER C: zapret2 host status tools.
+- `scripts/smoke_20min.sh`: 20-min functional test (~90% run paths).
 - Bump 1.3.6.
 
 # blockcheckS Changelog
