@@ -14,6 +14,7 @@ from blockchecks.engine.conf_builder import (
     DEFAULT_KEENETIC_PREFIX,
     build_keenetic_conf,
     build_raw_conf,
+    write_export_bundle,
     write_user_list,
 )
 from blockchecks.engine.config import BLOB_DIR
@@ -260,23 +261,35 @@ async def export_configs(
         tcp_strategies=tcp_s,
         udp_strategies=udp_s,
         quic_strategies=quic_s,
-        blobs_dir=BLOB_DIR
-        if not os.path.isdir(os.path.join(prefix, "blobs"))
-        else os.path.join(prefix, "blobs"),
+        blobs_dir=BLOB_DIR,
         domains=domains,
         comment=comment,
         ipset_ips=ipset_ips,
         ipset_file=ipset_file,
     )
-    with open(keenetic_path, "w", encoding="utf-8") as f:
-        f.write(keenetic)
+    write_export_bundle(
+        keenetic,
+        out_dir,
+        tcp_strats=tcp_s,
+        udp_strats=udp_s,
+        quic_strats=quic_s,
+        ipset_file=ipset_file,
+        conf_name=f"nfqws2_{ts}.conf",
+    )
     with open(raw_path, "w", encoding="utf-8") as f:
         f.write(raw)
     write_user_list(user_list, domains)
 
     from blockchecks.engine.paths import reclaim_sudo_ownership
 
-    artifacts = [keenetic_path, raw_path, user_list]
+    artifacts = [
+        keenetic_path,
+        raw_path,
+        user_list,
+        Path(out_dir) / "blobs",
+        Path(out_dir) / "lua",
+        Path(out_dir) / "lists",
+    ]
     if ipset_file:
         artifacts.append(ipset_file)
     for artifact in artifacts:

@@ -167,3 +167,22 @@ def blob_cli_lines(names: Iterable[str], blobs_dir: str | None = None) -> list[s
     out: list[str] = []
     append_blob_cli_lines(out, names, blobs_dir)
     return out
+
+
+# Shipped by nfqws2-keenetic under /opt/etc/nfqws2/blobs/ — no COPY comment.
+STOCK_KEENETIC_BLOB_FILES = frozenset({"tls_clienthello.bin", "quic_initial.bin"})
+
+
+def blob_export_filename(name: str) -> str | None:
+    """Filename under prefix/blobs for *name*, or None if built-in / hex."""
+    if name in _BUILTIN_BLOBS or name == "0x00000000":
+        return None
+    return BLOB_ALIAS_MAP.get(name) or f"{name}.bin"
+
+
+def blob_export_cli_line(name: str, prefix: str) -> str | None:
+    """``--blob=NAME:@{prefix}/blobs/file.bin`` without host-path resolution."""
+    fname = blob_export_filename(name)
+    if not fname:
+        return None
+    return f"--blob={name}:@{prefix}/blobs/{fname}"

@@ -8,22 +8,32 @@ escape — that asymmetry is fixed here.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+import shutil
 import time
+from pathlib import Path
 from typing import Any
 
 from blockchecks.engine.blob_aliases import (
+    STOCK_KEENETIC_BLOB_FILES,
     append_blob_cli_lines,
     blob_cli_lines,
+    blob_export_cli_line,
+    blob_export_filename,
     extract_blob_names,
+    resolve_blob_path,
 )
 from blockchecks.engine.config import (
     BLOB_DIR,
+    LUA_CUSTOM_DIR,
     NFQUEUE_TCP,
     NFQUEUE_UDP,
     get_lua_init_scripts,
 )
+
+log = logging.getLogger(__name__)
 
 # Keenetic Entware layout (override via prefix=)
 DEFAULT_KEENETIC_PREFIX = "/opt/etc/nfqws2"
@@ -31,8 +41,11 @@ DEFAULT_KEENETIC_PREFIX = "/opt/etc/nfqws2"
 CIRCULAR_TCP = "circular:fails=2:time=300:retrans=3:nld=2"
 CIRCULAR_UDP = "circular:fails=2:time=300:retrans=3:nld=2"
 
-DEFAULT_UDP_FILTER = "590-600,1400,3478-3481,5349,19294-19344,50000-65535"
-DEFAULT_UDP_PORTS = "443,590:600,1400,3478:3481,5349,19294:19344,50000:65535"
+DEFAULT_UDP_FILTER = "590-600,1400,3478-3481,5349,19294-19344,49152-65535"
+DEFAULT_UDP_PORTS = "443,590:600,1400,3478:3481,5349,19294:19344,49152:65535"
+STOCK_LUA_NAMES = ("zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua")
+_STRATEGY_N_RE = re.compile(r":strategy=\d+\s*$")
+_LUA_FN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DEFAULT_UDP_L7 = "wireguard,stun,discord,mtproto,unknown"
 DEFAULT_UDP_PAYLOAD = (
     "wireguard_initiation,wireguard_response,wireguard_cookie,"
@@ -80,19 +93,184 @@ def load_custom_lua_manifest() -> dict[str, dict[str, Any]]:
     return registry
 
 
-def custom_lua_comment(strategy: str) -> str | None:
-    """Return a deploy comment if *strategy* needs a custom Lua function.
+def custom_lua_comment(strategy: str, prefix: str = DEFAULT_KEENETIC_PREFIX) -> str | None:
+    """COPY comment for a custom Lua function, or None.
 
-    Looks for desync cores in the strategy string that are registered in
-    ``lua/custom/manifest.toml`` (e.g. ``dupfake:blob=…``). Returns e.g.
-    ``# --lua-custom1 " #Лежит в blockcheckS/lua/custom/dupfake.lua``
-    or ``None`` when no custom function is used. Never raises.
+    ``# COPY lua: <abs source> -> {prefix}/lua/<file>``
     """
+    comments = custom_lua_copy_comments(strategy, prefix)
+    return comments[0] if comments else None
+
+
+def _abs_or_str(p: Path) -> str:
+    try:
+        return str(p.resolve())
+    except OSError:
+        return str(p)
+
+
+def custom_lua_copy_comments(strategy: str, prefix: str = DEFAULT_KEENETIC_PREFIX) -> list[str]:
+    """COPY comments for every custom Lua function used in *strategy*."""
     low = strategy.lower()
-    for fn, meta in load_custom_lua_manifest().items():
-        if re.search(rf"(?:^|:|=){re.escape(fn)}:", low):
-            return f'# --lua-custom1 " #Лежит в blockcheckS/lua/custom/{meta["file"]}'
-    return None
+    return [
+        f"# COPY lua: {_abs_or_str(Path(LUA_CUSTOM_DIR) / str(meta['file']))}"
+        f" -> {prefix}/lua/{meta['file']}"
+        for fn, meta in load_custom_lua_manifest().items()
+        if re.search(rf"(?:^|:|=){re.escape(fn)}:", low)
+    ]
+
+
+def custom_lua_files_for(*strategies: str) -> list[str]:
+    """Unique custom lua filenames referenced by *strategies* (manifest order)."""
+    blob = "\n".join(strategies).lower()
+    return list(
+        dict.fromkeys(
+            str(meta["file"])
+            for fn, meta in load_custom_lua_manifest().items()
+            if re.search(rf"(?:^|:|=){re.escape(fn)}:", blob)
+        )
+    )
+
+
+def looks_like_conf_path(text: str) -> bool:
+    """True when *text* is a filesystem .conf path (optional :strategy=N suffix)."""
+    head = _STRATEGY_N_RE.sub("", text.strip())
+    return head.endswith(".conf") and ("/" in head or os.path.sep in head)
+
+
+def is_lua_function_core(text: str) -> bool:
+    """True when *text* is a lua-desync core (function name, not a path)."""
+    if not text or text.startswith(("/", "--")):
+        return False
+    first = text.split(":", 1)[0].strip()
+    return bool(_LUA_FN_RE.match(first))
+
+
+def lua_desync_cores_from_conf(path: str) -> list[str]:
+    """Extract ``--lua-desync=`` cores from a .conf file; skip path-like values."""
+    conf = Path(_STRATEGY_N_RE.sub("", path.strip()))
+    try:
+        lines = conf.read_text(encoding="utf-8").splitlines()
+    except OSError as e:
+        log.warning("export: cannot read strategy conf %s: %s", conf, e)
+        return []
+    cores = [
+        raw[len("--lua-desync=") :].strip()
+        for raw in (ln.strip() for ln in lines)
+        if raw.startswith("--lua-desync=")
+    ]
+    return [c for c in cores if is_lua_function_core(c)]
+
+
+def _export_part(part: str) -> list[str]:
+    if looks_like_conf_path(part):
+        return lua_desync_cores_from_conf(part)
+    if part.startswith("--lua-desync="):
+        core = part[len("--lua-desync=") :].strip()
+        return [core] if is_lua_function_core(core) else []
+    if part.startswith("--"):
+        cores = [
+            tok[len("--lua-desync=") :]
+            for tok in split_cli_args(part)
+            if tok.startswith("--lua-desync=")
+            and is_lua_function_core(tok[len("--lua-desync=") :])
+        ]
+        if cores:
+            return cores
+        if "/" in part:
+            log.warning("export: skip path-bearing CLI fragment %r", part[:80])
+            return []
+        return [part]
+    if is_lua_function_core(part):
+        return [part]
+    log.warning("export: skip non-function strategy %r", part[:80])
+    return []
+
+
+def strategy_parts_for_export(strat: str) -> list[str]:
+    """Cores / CLI fragments for export; never returns a .conf filesystem path."""
+    text = strat.strip()
+    if not text:
+        return []
+    if looks_like_conf_path(text):
+        return lua_desync_cores_from_conf(text)
+    return [
+        p
+        for raw in text.split("\n")
+        if (part := raw.strip())
+        for p in _export_part(part)
+    ]
+
+
+def flatten_export_strategies(strategies: list[str]) -> list[str]:
+    """Function cores only (no ``--`` CLI fragments)."""
+    return [
+        p
+        for s in strategies
+        for p in strategy_parts_for_export(s)
+        if not p.startswith("--")
+    ]
+
+
+_TTL_PARAM_RE = re.compile(r"(?:^|:)(?:ip_ttl|ip6_ttl)=(-?\d+)(?:(?::)|$)")
+
+
+def core_ttl_ok(core: str) -> bool:
+    """False when any ``ip_ttl`` / ``ip6_ttl`` is outside 0–255."""
+    return all(0 <= int(m.group(1)) <= 255 for m in _TTL_PARAM_RE.finditer(core))
+
+
+def filter_export_strategies(strategies: list[str]) -> list[str]:
+    """Drop unreadable / path-only rows and cores with TTL outside 0–255."""
+    return [s for s in strategies if _keep_export_strategy(s)]
+
+
+def _keep_export_strategy(strat: str) -> bool:
+    parts = strategy_parts_for_export(strat)
+    if not parts:
+        return False
+    cores = [p for p in parts if not p.startswith("--")]
+    if any(not core_ttl_ok(c) for c in cores):
+        log.warning("export: skip strategy with ip_ttl/ip6_ttl outside 0-255: %r", strat[:80])
+        return False
+    blobs = extract_blob_names(*cores)
+    bad = [n for n in blobs if not _LUA_FN_RE.match(n)]
+    if bad:
+        log.warning("export: skip strategy with non-lua blob name %s: %r", bad, strat[:80])
+        return False
+    return True
+
+
+def desync_cli_lines(strategies: list[str]) -> list[str]:
+    """``--lua-desync=fn:…`` or pass-through ``--`` fragments; never a .conf path."""
+    return [
+        part if part.startswith("--") else f"--lua-desync={_ensure_strategy_n(part, i)}"
+        for i, strat in enumerate(strategies, start=1)
+        for part in strategy_parts_for_export(strat)
+    ]
+
+
+def blob_copy_comment(name: str, prefix: str) -> str | None:
+    """COPY comment for a non-stock blob, or None."""
+    fname = blob_export_filename(name)
+    if not fname or fname in STOCK_KEENETIC_BLOB_FILES:
+        return None
+    src = resolve_blob_path(name)
+    dest = f"{prefix}/blobs/{fname}"
+    return f"# COPY blob: {src} -> {dest}" if src else f"# COPY blob: <missing {name}> -> {dest}"
+
+
+def ipset_export_path(prefix: str) -> str:
+    return f"{prefix}/lists/user.ipset"
+
+
+def blob_copy_comments(names: list[str], prefix: str) -> list[str]:
+    return list(dict.fromkeys(c for n in names if (c := blob_copy_comment(n, prefix))))
+
+
+def _export_blob_names(*groups: list[str]) -> list[str]:
+    cores = flatten_export_strategies([s for g in groups for s in g])
+    return extract_blob_names(*cores)
 
 
 def _strategy_params(strategy: str) -> dict[str, str]:
@@ -215,27 +393,45 @@ def _ensure_strategy_n(strategy: str, n: int) -> str:
     return f"{s}:strategy={n}"
 
 
+def _hash_comment(text: str) -> str:
+    """``#`` line safe for nfqws2 @file (parentheses break its option splitter)."""
+    body = text.lstrip("# ").replace("(", "[").replace(")", "]")
+    return f"# {body}"
+
+
 def _quote_multiline(value: str) -> str:
     """Shell double-quoted value; keep newlines with leading space (keenetic style)."""
-    # Escape backslash and double-quote for shell
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
 
-def _lua_init_lines(prefix: str) -> list[str]:
-    lua_dir = os.path.join(prefix, "lua")
-    names = ("zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua")
-    lines = []
-    for name in names:
-        path = os.path.join(lua_dir, name)
-        # Fall back to zapret2 paths if keenetic tree missing
-        if not os.path.exists(path):
-            for alt in get_lua_init_scripts():
-                if alt.endswith(name) and os.path.exists(alt):
-                    path = alt
-                    break
-        lines.append(f"--lua-init=@{path}")
-    return lines
+def _lua_init_lines(prefix: str, extra: list[str] | None = None) -> list[str]:
+    """Always ``{prefix}/lua/…`` — never host-exists fallback to /opt/zapret2."""
+    names = (*STOCK_LUA_NAMES, *(extra or []))
+    return [f"--lua-init=@{prefix}/lua/{name}" for name in names]
+
+
+def _keenetic_copy_header(
+    tcp: list[str],
+    udp: list[str],
+    quic: list[str],
+    prefix: str,
+    ipset_file: str | None,
+) -> list[str]:
+    cores = flatten_export_strategies(tcp + udp + quic)
+    names = _export_blob_names(tcp, udp, quic)
+    return [
+        f"# Uncommented paths: {prefix}/{{blobs,lua,lists}} only.",
+        "# --filter-l7 is the flow protocol; --payload is packet type "
+        "(sticky until the next --payload=).",
+        *custom_lua_copy_comments("\n".join(cores), prefix),
+        *blob_copy_comments(names, prefix),
+        *(
+            [f"# COPY ipset: {ipset_file} -> {ipset_export_path(prefix)}"]
+            if ipset_file
+            else []
+        ),
+    ]
 
 
 def build_keenetic_conf(
@@ -254,114 +450,95 @@ def build_keenetic_conf(
     """Keenetic / Entware nfqws2.conf (shell env variables).
 
     ``ipset_ips`` → emit ``--ipset-ip=<comma list>``; ``ipset_file`` → emit
-    ``--ipset=@<path>``. Both are optional and never both set (file wins if
-    both given). Uses nfqws2-native ipset filtering (no zapret2 ipset scripts).
+    ``--ipset=@{prefix}/lists/user.ipset`` plus a ``# COPY ipset:`` comment
+    (the host path is never a working argument).
     """
-    quic_strategies = quic_strategies or [
-        "fake:blob=quic_initial:repeats=11",
-    ]
-    blobs_dir = os.path.join(prefix, "blobs")
-    if not os.path.isdir(blobs_dir):
-        blobs_dir = BLOB_DIR
+    quic_strategies = filter_export_strategies(
+        quic_strategies or ["fake:blob=quic_initial:repeats=11"]
+    )
+    tcp_strategies = filter_export_strategies(tcp_strategies)
+    udp_strategies = filter_export_strategies(udp_strategies)
+    extra_lua = custom_lua_files_for(
+        *flatten_export_strategies(tcp_strategies + udp_strategies + quic_strategies)
+    )
+    blob_names = _export_blob_names(tcp_strategies, udp_strategies, quic_strategies)
+    blob_parts = [ln for n in blob_names if (ln := blob_export_cli_line(n, prefix))]
+    ipset_part = (
+        [f"--ipset=@{ipset_export_path(prefix)}"]
+        if ipset_file
+        else (["--ipset-ip=" + ",".join(ipset_ips)] if ipset_ips else [])
+    )
+    base_args = "\n ".join(_lua_init_lines(prefix, extra_lua) + blob_parts + ipset_part)
 
-    all_strats = list(tcp_strategies) + list(udp_strategies) + list(quic_strategies)
-    blob_names = extract_blob_names(*all_strats)
-    for base in ("tls_clienthello", "quic_initial", "discord_udp", "stun"):
-        if base not in blob_names:
-            blob_names.append(base)
-
-    base_parts = _lua_init_lines(prefix) + blob_cli_lines(blob_names, blobs_dir)
-    if ipset_file:
-        base_parts.append(f"--ipset=@{ipset_file}")
-    elif ipset_ips:
-        base_parts.append("--ipset-ip=" + ",".join(ipset_ips))
-    base_args = "\n ".join(base_parts)
-
-    # circular needs inbound until s5556 + outbound until s34228 (manual.md)
-    tcp_lines = [
-        "--filter-tcp=443,80,1984,5222",
-        "--filter-l7=http,tls,mtproto",
-        "--payload=tls_client_hello,mtproto_initial",
-        "--out-range=-s34228",
-        f"--in-range=-s5556 --lua-desync={CIRCULAR_TCP}",
-        "--in-range=x",
-    ]
-    for i, strat in enumerate(tcp_strategies, start=1):
-        # Multi-line strategy (fake\\nmultisplit) → one --lua-desync per line
-        for part in strat.split("\n"):
-            part = part.strip()
-            if not part:
-                continue
-            tcp_lines.append(f"--lua-desync={_ensure_strategy_n(part, i)}")
-    tcp_lines.extend(
+    tcp_desync = desync_cli_lines(tcp_strategies)
+    tcp_circular = (
         [
+            "--out-range=-s34228",
+            f"--in-range=-s5556 --lua-desync={CIRCULAR_TCP}",
+            "--in-range=x",
+        ]
+        if flatten_export_strategies(tcp_strategies)
+        else []
+    )
+    tcp_args = "\n ".join(
+        [
+            "--filter-tcp=443,80,1984,5222",
+            "--filter-l7=http,tls,mtproto",
+            "--payload=tls_client_hello,mtproto_initial",
+            *tcp_circular,
+            *tcp_desync,
             "--payload=http_req",
             "--lua-desync=http_methodeol:badsum",
         ]
     )
-    tcp_args = "\n ".join(tcp_lines)
+    quic_args = "\n ".join(
+        [
+            "--filter-udp=443",
+            "--filter-l7=quic",
+            "--payload=quic_initial",
+            *desync_cli_lines(quic_strategies),
+        ]
+    )
+    udp_desync = desync_cli_lines(udp_strategies)
+    udp_circular = (
+        [f"--lua-desync={CIRCULAR_UDP}"]
+        if flatten_export_strategies(udp_strategies)
+        else []
+    )
+    udp_args = "\n ".join(
+        [
+            f"--filter-udp={DEFAULT_UDP_FILTER}",
+            f"--filter-l7={DEFAULT_UDP_L7}",
+            "--out-range=<n2",
+            f"--payload={DEFAULT_UDP_PAYLOAD}",
+            *udp_circular,
+            *udp_desync,
+        ]
+    )
 
-    quic_lines = [
-        "--filter-udp=443",
-        "--filter-l7=quic",
-        "--payload=quic_initial",
-    ]
-    for i, strat in enumerate(quic_strategies, start=1):
-        for part in strat.split("\n"):
-            part = part.strip()
-            if not part:
-                continue
-            if part.startswith("--"):
-                # full CLI fragment from generator
-                quic_lines.append(part)
-            else:
-                quic_lines.append(f"--lua-desync={_ensure_strategy_n(part, i)}")
-    quic_args = "\n ".join(quic_lines)
-
-    udp_lines = [
-        f"--filter-udp={DEFAULT_UDP_FILTER}",
-        f"--filter-l7={DEFAULT_UDP_L7}",
-        "--out-range=<n2",
-        f"--payload={DEFAULT_UDP_PAYLOAD}",
-        f"--lua-desync={CIRCULAR_UDP}",
-    ]
-    for i, strat in enumerate(udp_strategies, start=1):
-        for part in strat.split("\n"):
-            part = part.strip()
-            if not part:
-                continue
-            if part.startswith("--"):
-                udp_lines.append(part)
-            else:
-                udp_lines.append(f"--lua-desync={_ensure_strategy_n(part, i)}")
-    udp_args = "\n ".join(udp_lines)
-
-    mode_map = {
-        "auto": "$MODE_AUTO",
-        "list": "$MODE_LIST",
-        "all": "$MODE_ALL",
-    }
-    extra = mode_map.get(mode.lower(), "$MODE_AUTO")
+    extra = {"auto": "$MODE_AUTO", "list": "$MODE_LIST", "all": "$MODE_ALL"}.get(
+        mode.lower(), "$MODE_AUTO"
+    )
 
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
     hdr = [
         f"# Generated by blockcheckS nfconf at {ts}",
+        *([f"# {comment}"] if comment else []),
+        *_keenetic_copy_header(
+            tcp_strategies, udp_strategies, quic_strategies, prefix, ipset_file
+        ),
+        *(
+            [
+                f"# domains ({len(domains)}): "
+                + ",".join(domains[:8])
+                + ("..." if len(domains) > 8 else "")
+            ]
+            if domains
+            else []
+        ),
+        "# Format: nfqws2-keenetic etc/nfqws2/nfqws2.conf",
+        "",
     ]
-    if comment:
-        hdr.append(f"# {comment}")
-    # Deploy hint when a strategy needs a custom Lua file from lua/custom/.
-    for strat in list(tcp_strategies) + list(udp_strategies) + list(quic_strategies):
-        hint = custom_lua_comment(strat)
-        if hint and hint not in hdr:
-            hdr.append(hint)
-    if domains:
-        hdr.append(
-            f"# domains ({len(domains)}): "
-            + ",".join(domains[:8])
-            + ("..." if len(domains) > 8 else "")
-        )
-    hdr.append("# Format: nfqws2-keenetic etc/nfqws2/nfqws2.conf")
-    hdr.append("")
 
     body = f"""# Provider network interface
 ISP_INTERFACE={_quote_multiline(isp_interface)}
@@ -399,86 +576,64 @@ def build_raw_conf(
     ipset_ips: list[str] | None = None,
     ipset_file: str | None = None,
 ) -> str:
-    """Flat nfqws2 @file conf without keenetic ISP/MODE wrappers.
+    """Flat nfqws2 @file conf for the **scan host** (abs lua/blob paths).
 
-    ``ipset_ips`` → emit ``--ipset-ip=<comma list>``; ``ipset_file`` → emit
-    ``--ipset=@<path>``. Both optional, never both set (file wins).
+    Keenetic/router export uses ``build_keenetic_conf`` (prefix-only paths).
+    dpi-tester consumes this raw ``@file`` (absolute ``/opt/zapret2`` lua and host blobs).
+    ``ipset_ips`` → ``--ipset-ip=``; ``ipset_file`` → ``--ipset=@<host path>``.
     """
-    quic_strategies = quic_strategies or []
-    lines: list[str] = []
+    tcp_strategies = filter_export_strategies(tcp_strategies)
+    udp_strategies = filter_export_strategies(udp_strategies)
+    quic_strategies = filter_export_strategies(quic_strategies or [])
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-    lines.append(f"# blockcheckS raw nfqws2 conf — {ts}")
-    if comment:
-        lines.append(f"# {comment}")
-    # Deploy hint when a strategy needs a custom Lua file from lua/custom/.
-    for strat in list(tcp_strategies) + list(udp_strategies) + list(quic_strategies):
-        hint = custom_lua_comment(strat)
-        if hint and hint not in lines:
-            lines.append(hint)
-    lines.append(f"--qnum={qnum_tcp}")
-    lines.append("--ipcache-lifetime=0")
-    lines.append("--bind-fix4")
-
-    for lua in get_lua_init_scripts():
-        if os.path.exists(lua):
-            lines.append(f"--lua-init=@{lua}")
-
-    all_strats = list(tcp_strategies) + list(udp_strategies) + list(quic_strategies)
-    blob_names = extract_blob_names(*all_strats)
-    for base in ("stun", "discord_udp", "quic_initial", "tls_clienthello", "max_ru"):
-        if base not in blob_names:
-            blob_names.append(base)
-    lines.extend(blob_cli_lines(blob_names, blobs_dir))
-
-    if ipset_file:
-        lines.append(f"--ipset=@{ipset_file}")
-    elif ipset_ips:
-        lines.append("--ipset-ip=" + ",".join(ipset_ips))
-
-    if domains:
-        lines.append("--hostlist-domains=" + ",".join(domains))
-
-    lines.append("--filter-tcp=443")
-    lines.append("--filter-l3=ipv4")
-    lines.append("--filter-l7=tls")
-    lines.append("--payload=tls_client_hello")
-    for i, strat in enumerate(tcp_strategies, start=1):
-        for part in strat.split("\n"):
-            part = part.strip()
-            if part:
-                lines.append(f"--lua-desync={_ensure_strategy_n(part, i)}")
-
+    cores = flatten_export_strategies(tcp_strategies + udp_strategies + quic_strategies)
+    extra_lua = custom_lua_files_for(*cores)
+    lua_inits = [f"--lua-init=@{p}" for p in get_lua_init_scripts() if os.path.exists(p)]
+    lua_inits += [
+        f"--lua-init=@{Path(LUA_CUSTOM_DIR) / fname}"
+        for fname in extra_lua
+        if (Path(LUA_CUSTOM_DIR) / fname).is_file()
+    ]
+    blob_names = extract_blob_names(*cores)
+    ipset_lines = (
+        [f"--ipset=@{ipset_file}"]
+        if ipset_file
+        else (["--ipset-ip=" + ",".join(ipset_ips)] if ipset_ips else [])
+    )
+    lines = [
+        _hash_comment(f"blockcheckS raw nfqws2 conf host-oriented {ts}"),
+        *([_hash_comment(comment)] if comment else []),
+        *custom_lua_copy_comments("\n".join(cores)),
+        f"--qnum={qnum_tcp}",
+        "--ipcache-lifetime=0",
+        "--bind-fix4",
+        *lua_inits,
+        *blob_cli_lines(blob_names, blobs_dir),
+        *ipset_lines,
+        *(["--hostlist-domains=" + ",".join(domains)] if domains else []),
+        "--filter-tcp=443",
+        "--filter-l3=ipv4",
+        "--filter-l7=tls",
+        "--payload=tls_client_hello",
+        *desync_cli_lines(tcp_strategies),
+    ]
     if quic_strategies:
-        lines.append("--new=quic")
-        lines.append("--filter-udp=443")
-        lines.append("--filter-l7=quic")
-        lines.append("--payload=quic_initial")
-        for i, strat in enumerate(quic_strategies, start=1):
-            for part in strat.split("\n"):
-                part = part.strip()
-                if not part:
-                    continue
-                if part.startswith("--"):
-                    lines.append(part)
-                else:
-                    lines.append(f"--lua-desync={_ensure_strategy_n(part, i)}")
-
+        lines += [
+            "--new=quic",
+            "--filter-udp=443",
+            "--filter-l7=quic",
+            "--payload=quic_initial",
+            *desync_cli_lines(quic_strategies),
+        ]
     if udp_strategies:
-        lines.append("--new=voice")
-        lines.append("--filter-udp=50000-50100")
-        lines.append("--filter-l3=ipv4")
-        lines.append("--filter-l7=discord,stun")
-        lines.append("--payload=discord_ip_discovery,stun,unknown")
-        for i, strat in enumerate(udp_strategies, start=1):
-            for part in strat.split("\n"):
-                part = part.strip()
-                if not part:
-                    continue
-                if part.startswith("--"):
-                    lines.append(part)
-                else:
-                    lines.append(f"--lua-desync={_ensure_strategy_n(part, i)}")
-
+        lines += [
+            "--new=voice",
+            "--filter-udp=50000-50100",
+            "--filter-l3=ipv4",
+            "--filter-l7=discord,stun",
+            "--payload=discord_ip_discovery,stun,unknown",
+            *desync_cli_lines(udp_strategies),
+        ]
     return "\n".join(lines) + "\n"
 
 
@@ -489,3 +644,43 @@ def write_user_list(path: str, domains: list[str]) -> None:
             d = d.strip()
             if d and not d.startswith("#"):
                 f.write(d + "\n")
+
+
+def write_export_bundle(
+    conf_text: str,
+    out_dir: str | Path,
+    *,
+    tcp_strats: list[str] | None = None,
+    udp_strats: list[str] | None = None,
+    quic_strats: list[str] | None = None,
+    ipset_file: str | None = None,
+    conf_name: str = "nfqws2.conf",
+) -> Path:
+    """Write *conf_text* plus custom blobs/lua (and optional ipset) under *out_dir*."""
+    dest = Path(out_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    conf_path = dest / conf_name
+    conf_path.write_text(conf_text, encoding="utf-8")
+    cores = flatten_export_strategies(
+        (tcp_strats or []) + (udp_strats or []) + (quic_strats or [])
+    )
+    blob_dir = dest / "blobs"
+    for name in extract_blob_names(*cores):
+        fname = blob_export_filename(name)
+        if not fname or fname in STOCK_KEENETIC_BLOB_FILES:
+            continue
+        src = resolve_blob_path(name)
+        if src and Path(src).is_file():
+            blob_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, blob_dir / fname)
+    lua_dir = dest / "lua"
+    for fname in custom_lua_files_for(*cores):
+        src = Path(LUA_CUSTOM_DIR) / fname
+        if src.is_file():
+            lua_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, lua_dir / fname)
+    if ipset_file and Path(ipset_file).is_file():
+        lists = dest / "lists"
+        lists.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ipset_file, lists / "user.ipset")
+    return conf_path
