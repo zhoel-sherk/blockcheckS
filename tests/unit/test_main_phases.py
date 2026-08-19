@@ -748,7 +748,7 @@ def test_sequential_bridge_isolates_domains():
     probe_log: list[tuple[int, int, list[str]]] = []
     order = {"next": 0}
 
-    async def fake_probe(items, domain, timeout, backend, domains=None):
+    async def fake_probe(items, domain, timeout, backend, domains=None, stop_event=None):
         doms = list(domains or [domain] * len(items))
         start = order["next"]
         order["next"] += 1
@@ -796,7 +796,7 @@ def test_sequential_bridge_warns_when_isolation_off():
     ctx.args.timeout = 1.0
     ctx.runner.bridge_batch = 10
 
-    async def fake_probe(items, domain, timeout, backend, domains=None):
+    async def fake_probe(items, domain, timeout, backend, domains=None, stop_event=None):
         return [SimpleNamespace(success=True) for _ in items]
 
     ctx.runner._run_probe_batch = fake_probe
@@ -834,7 +834,7 @@ def test_sequential_bridge_progress_updates_during_run():
 
     seen_done: list[int] = []
 
-    async def fake_probe(items, domain, timeout, backend, domains=None):
+    async def fake_probe(items, domain, timeout, backend, domains=None, stop_event=None):
         await asyncio.sleep(0.02)
         return [SimpleNamespace(success=True) for _ in items]
 

@@ -746,7 +746,8 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
             doms = [j[1] for j in acc]
             try:
                 results = await ctx.runner._run_probe_batch(
-                    items, doms[0], args.timeout, "lua_bridge", domains=doms
+                    items, doms[0], args.timeout, "lua_bridge", domains=doms,
+                    stop_event=ctx.stop,
                 )
             finally:
                 if isolate:
@@ -888,6 +889,7 @@ async def discover_voice_endpoint(ctx: FullRunContext) -> tuple[str, int]:
             eps = await discover_dns_alive(
                 args.discover_dns,
                 use_bootstrap=not args.discover_dns_no_bootstrap,
+                stop_event=ctx.stop,
             )
             if eps:
                 ctx.voice_eps = eps
@@ -939,7 +941,7 @@ async def run_quic_phase(ctx: FullRunContext) -> None:
             if use_bridge:
                 batch = [item]
                 results = await ctx.runner._run_probe_batch(
-                    batch, domain, quic_timeout, "lua_bridge"
+                    batch, domain, quic_timeout, "lua_bridge", stop_event=ctx.stop
                 )
                 r = results[0] if results else None
                 quic_done += 1

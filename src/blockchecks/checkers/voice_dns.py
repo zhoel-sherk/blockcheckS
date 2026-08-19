@@ -447,6 +447,7 @@ async def discover_dns_alive(
     region: str = "finland",
     use_bootstrap: bool = True,
     try_burst: bool = False,
+    stop_event: asyncio.Event | None = None,
 ) -> list[dict]:
     """Discover voice endpoints via DNS + Maks seed, filtered by dual UDP probe.
 
@@ -535,9 +536,19 @@ async def discover_dns_alive(
 
         async def _probe(ep: dict) -> dict | None:
             async with sem:
-                ok, ms, _detail, method = await asyncio.to_thread(
-                    voice_udp_probe, ep["ip"], ep["port"], stun_timeout, try_burst=try_burst
-                )
+                try:
+                    ok, ms, _detail, method = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            voice_udp_probe,
+                            ep["ip"],
+                            ep["port"],
+                            stun_timeout,
+                            try_burst=try_burst,
+                        ),
+                        timeout=stun_timeout * 2 + 1.0,
+                    )
+                except asyncio.TimeoutError:
+                    return None
                 if not ok:
                     return None
                 out = dict(ep)
@@ -546,7 +557,25 @@ async def discover_dns_alive(
                 out["bootstrap"] = boot_on
                 return out
 
-        results = await asyncio.gather(*[_probe(ep) for ep in ordered])
+        results: list[dict | None] = []
+        tasks = [asyncio.ensure_future(_probe(ep)) for ep in ordered]
+        try:
+            while tasks:
+                if stop_event is not None and stop_event.is_set():
+                    for t in tasks:
+                        t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    break
+                done, pending = await asyncio.wait(
+                    tasks, return_when=asyncio.FIRST_COMPLETED
+                )
+                results.extend(t.result() for t in done)
+                tasks = list(pending)
+        except asyncio.CancelledError:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
     alive = [r for r in results if r is not None][:count]
 

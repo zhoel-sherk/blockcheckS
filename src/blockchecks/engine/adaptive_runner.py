@@ -198,7 +198,7 @@ async def _bridge_worker(
         items = [j.item for j in jobs]
         domains = [j.domain for j in jobs]
         results = await runner._run_probe_batch(
-            items, domains[0], timeout, "lua_bridge", domains=domains
+            items, domains[0], timeout, "lua_bridge", domains=domains, stop_event=stop_event
         )
         for job, result in zip(jobs, results, strict=False):
             ok = bool(result.success)

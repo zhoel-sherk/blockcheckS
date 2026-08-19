@@ -36,10 +36,24 @@ class NetNsPool:
         return self._queue
 
     def _run(self, *args, check: bool = True) -> subprocess.CompletedProcess:
-        """Run a command with sudo, optionally checking for errors."""
-        r = subprocess.run(["sudo"] + list(args), capture_output=True, text=True, timeout=15)
+        """Run a command with sudo, optionally checking for errors.
+
+        A hung netns (uninterruptible D-state) makes ``ip netns exec/delete``
+        block forever in the kernel. The 15s wall timeout bounds every command;
+        on timeout we return a synthetic failure instead of raising, so cleanup
+        never deadlocks the event loop / worker thread.
+        """
+        try:
+            r = subprocess.run(["sudo"] + list(args), capture_output=True, text=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            r = subprocess.CompletedProcess(
+                args=list(args),
+                returncode=-1,
+                stdout="",
+                stderr=f"timeout after 15s: {' '.join(args)}",
+            )
         if check and r.returncode != 0:
-            raise RuntimeError(f"cmd failed: {' '.join(args)} → {r.stderr[:200]}")
+            raise RuntimeError(f"cmd failed: {' '.join(args)} → {(r.stderr or '')[:200]!r}")
         return r
 
     def _get_iface(self) -> str:

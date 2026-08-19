@@ -24,6 +24,11 @@ from blockchecks.service.lua_bridge_ipc import LuaBridge
 from blockchecks.service.lua_netns import _netns_tcp_probe_cleanup
 from blockchecks.service.lua_session import BridgeSession, strategy_text_from_item
 
+#: Max seconds to wait for a free netns before bailing out of a batch. Prevents
+#: a graceful stop (or a hung batch holding the whole pool) from deadlocking
+#: the adaptive/bridge workers on an empty pool queue.
+ACQUIRE_NS_TIMEOUT = 30.0
+
 CYAN = Fore.CYAN + Style.BRIGHT
 RESET = Style.RESET_ALL
 
@@ -47,8 +52,22 @@ class ProbeBatchService:
         self.scheduler = BatchScheduler(config.batch_size)
         self.memory_monitor = memory_monitor
 
-    async def run_batch(self, ctx: BatchContext, timeout: float) -> BatchProbeResult:
-        ns = await self.deps.acquire_ns()
+    async def run_batch(
+        self,
+        ctx: BatchContext,
+        timeout: float,
+        stop_event: asyncio.Event | None = None,
+    ) -> BatchProbeResult:
+        # Do not acquire a namespace when a graceful stop is already requested —
+        # otherwise a stopped run hangs waiting for a busy pool.
+        if stop_event is not None and stop_event.is_set():
+            return self._empty_stopped_result(ctx)
+        # Bound the acquisition: if every netns is busy (e.g. a hung batch holds
+        # the pool), wait_for lets us bail out instead of deadlocking the stop.
+        try:
+            ns = await asyncio.wait_for(self.deps.acquire_ns(), timeout=ACQUIRE_NS_TIMEOUT)
+        except asyncio.TimeoutError:
+            return self._empty_stopped_result(ctx)
         try:
             domains = ctx.item_domains()
             resolved_by_domain: dict[str, tuple[str | None, str, str]] = {}
@@ -56,6 +75,8 @@ class ProbeBatchService:
             for d in dict.fromkeys(domains):
                 resolved_by_domain[d] = await self.deps.resolve_domain_dns(d)
                 ip_lists_by_domain[d] = self.deps.resolve_domain_ips(d)
+            if stop_event is not None and stop_event.is_set():
+                return self._empty_stopped_result(ctx)
             wall_start = time.monotonic()
             try:
                 result = await asyncio.to_thread(
@@ -65,6 +86,7 @@ class ProbeBatchService:
                     ns,
                     resolved_by_domain,
                     ip_lists_by_domain,
+                    stop_event,
                 )
             except Exception as e:
                 # Never lose the batch: any error in the sync probe loop must
@@ -94,6 +116,28 @@ class ProbeBatchService:
         finally:
             await self.deps.release_ns(ns)
 
+    @staticmethod
+    def _empty_stopped_result(ctx: BatchContext) -> BatchProbeResult:
+        """Empty result when a stop was requested before the batch started."""
+        from blockchecks.engine.results import TcpTestResult
+
+        results = [
+            TcpTestResult(
+                item=item,
+                domain=dom,
+                success=False,
+                error="stopped before probe",
+            )
+            for item, dom in zip(ctx.items, ctx.item_domains(), strict=False)
+        ]
+        return BatchProbeResult(
+            results=results,
+            settle_ms=0,
+            backend="",
+            batch_wall_ms=0,
+            batch_fill_ratio=0,
+        )
+
     def _run_batch_sync(
         self,
         ctx: BatchContext,
@@ -101,12 +145,15 @@ class ProbeBatchService:
         ns_name: str,
         resolved_by_domain: dict[str, tuple[str | None, str, str]],
         ip_lists_by_domain: dict[str, list[str]] | None = None,
+        stop_event: asyncio.Event | None = None,
     ) -> BatchProbeResult:
         if self.config.backend == "lua_bridge":
             return self._run_lua_bridge_batch(
-                ctx, timeout, ns_name, resolved_by_domain, ip_lists_by_domain
+                ctx, timeout, ns_name, resolved_by_domain, ip_lists_by_domain, stop_event
             )
-        return self._run_classic_batch(ctx, timeout, ns_name, resolved_by_domain, ip_lists_by_domain)
+        return self._run_classic_batch(
+            ctx, timeout, ns_name, resolved_by_domain, ip_lists_by_domain, stop_event
+        )
 
     def _run_classic_batch(
         self,
@@ -115,9 +162,12 @@ class ProbeBatchService:
         ns_name: str,
         resolved_by_domain: dict[str, tuple[str | None, str, str]],
         ip_lists_by_domain: dict[str, list[str]] | None = None,
+        stop_event: asyncio.Event | None = None,
     ) -> BatchProbeResult:
         results: list = []
         for item, dom in zip(ctx.items, ctx.item_domains(), strict=False):
+            if stop_event is not None and stop_event.is_set():
+                break
             timeout_i, settle_max = self.deps.timing_for(item, timeout)
             protocol = getattr(item, "protocol", ctx.protocol) or ctx.protocol
             resolved_ip, _, _ = resolved_by_domain[dom]
@@ -169,6 +219,7 @@ class ProbeBatchService:
         ns_name: str,
         resolved_by_domain: dict[str, tuple[str | None, str, str]],
         ip_lists_by_domain: dict[str, list[str]] | None = None,
+        stop_event: asyncio.Event | None = None,
     ) -> BatchProbeResult:
         protocol = ctx.protocol
         if ctx.items:
@@ -191,6 +242,8 @@ class ProbeBatchService:
             for idx, (item, dom) in enumerate(
                 zip(ctx.items, ctx.item_domains(), strict=False), start=1
             ):
+                if stop_event is not None and stop_event.is_set():
+                    break
                 if self._maybe_recycle(ns_name, session):
                     recycled += 1
                     boot_debug = _debug_env()

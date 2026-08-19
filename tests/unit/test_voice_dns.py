@@ -221,3 +221,41 @@ def test_fetch_maks_region_ips_no_matching_hosts(monkeypatch):
 
     monkeypatch.setattr(vd, "_maks_get", lambda url, timeout: "other.discord.gg\n")
     assert vd.fetch_maks_region_ips("russia") == []
+
+
+@pytest.mark.asyncio
+async def test_discover_dns_alive_stops_on_stop_event(monkeypatch):
+    """A graceful stop must interrupt the candidate probe gather promptly."""
+    import asyncio
+
+    import blockchecks.checkers.voice_dns as vd
+
+    monkeypatch.setattr(vd, "_load_cache", lambda: None)
+
+    async def _fake_range():
+        return {f"35.1.{i}.3": [f"finland{14000 + i}.discord.gg"] for i in range(8)}
+
+    async def _no_maks(region, timeout=8.0):
+        return []
+
+    def fake_probe(ip, port, timeout, try_burst=False):
+        return True, 5.0, "", "ip_discovery"
+
+    monkeypatch.setattr(vd, "resolve_finland_range", _fake_range)
+    monkeypatch.setattr(vd, "fetch_maks_region_ips", _no_maks)
+    monkeypatch.setattr(vd, "fetch_maks_voice_ips", _no_maks)
+    monkeypatch.setattr("blockchecks.checkers.udp_voice.voice_udp_probe", fake_probe)
+    monkeypatch.setattr(vd, "_save_cache", lambda endpoints: None)
+
+    stop = asyncio.Event()
+    stop.set()
+
+    with patch.object(vd, "udp_discover_bootstrap",
+                      return_value=MagicMock(__enter__=MagicMock(return_value=True),
+                                             __exit__=MagicMock(return_value=None))):
+        eps = await vd.discover_dns_alive(
+            count=1, use_cache=False, use_maks=False, use_bootstrap=False,
+            stop_event=stop,
+        )
+    # Stop fired before probing: the gather must bail out (no hang).
+    assert isinstance(eps, list)

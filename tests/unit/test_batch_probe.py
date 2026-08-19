@@ -597,3 +597,79 @@ async def test_debug_env_toggle_restarts_lua_daemon() -> None:
         bp._debug_env = orig_debug_env
         bp.BridgeSession = original
         os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+
+
+def _minimal_deps(**overrides):
+    deps = RunnerProbeDeps(
+        python="python3",
+        disable_ech=False,
+        repeats=1,
+        parallel_repeats=False,
+        repeats_mode="fast",
+        quick_break=False,
+        try_wssize=False,
+        lua_extra=[],
+        timing_for=lambda item, t: (t, None),
+        resolve_domain_ips=lambda domain: [],
+        resolve_domain_dns=AsyncMock(return_value=("1.2.3.4", "ok", "doh")),
+        tcp_result_from_data=lambda item, domain, data: MagicMock(success=data.get("success")),
+        log_tcp_result=AsyncMock(),
+        next_probe_gen=lambda: 1,
+        run_tcp_check=lambda *a, **k: {"success": True, "http_code": 200},
+        acquire_ns=AsyncMock(return_value="bs-p-0"),
+        release_ns=AsyncMock(),
+    )
+    for k, v in overrides.items():
+        setattr(deps, k, v)
+    return deps
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio(loop_scope="package")
+async def test_run_batch_stop_event_skips_acquire() -> None:
+    """A graceful stop must not acquire a netns or run any probe."""
+    import asyncio
+
+    acquired = []
+    deps = _minimal_deps(
+        acquire_ns=AsyncMock(side_effect=lambda: acquired.append(1) or "bs-p-0"),
+        release_ns=AsyncMock(),
+    )
+    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
+    ctx = BatchContext(
+        ns_name="",
+        items=[_item("a"), _item("b")],
+        domain="discord.com",
+        batch_id=1,
+    )
+    stop = asyncio.Event()
+    stop.set()
+    result = await svc.run_batch(ctx, timeout=5.0, stop_event=stop)
+    assert not acquired, "acquire_ns must not be called when stopped"
+    assert len(result.results) == 2
+    assert all(not r.success for r in result.results)
+    assert all(getattr(r, "error", "") == "stopped before probe" for r in result.results)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio(loop_scope="package")
+async def test_run_batch_acquire_timeout_returns_empty() -> None:
+    """A busy pool (acquire never resolves) must not deadlock the stop."""
+    import asyncio
+
+    async def never_acquire():
+        await asyncio.sleep(3600)
+        return "bs-p-0"
+
+    deps = _minimal_deps(acquire_ns=never_acquire, release_ns=AsyncMock())
+    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
+    ctx = BatchContext(
+        ns_name="",
+        items=[_item("a")],
+        domain="discord.com",
+        batch_id=1,
+    )
+    with patch("blockchecks.service.batch_service.ACQUIRE_NS_TIMEOUT", 0.05):
+        result = await svc.run_batch(ctx, timeout=5.0)
+    assert len(result.results) == 1
+    assert not result.results[0].success
