@@ -117,6 +117,60 @@ _(none — E3 closed in Wave2)_
 - `classic_persistent` (daemon без shm) — отдельный backend, низкий ROI; не alias для `--classic`
 - UDP voice q201, T3-4 unix socket — отдельные треки ([custom_lua.md](custom_lua.md), T3-4)
 
+#### Host-mode backend + Lua hot-swap Mode A (без netns)
+
+**Статус:** дизайн-фаза. Mode B (scan_pick по id из prebaked conf) — DONE
+(1.3.1, дефолт `lua_bridge`). В бэклоге: Mode A (произвольная строка
+`strategy.cmd` на лету, без пересоздания nfqws2) + **host-mode** (глобальный
+backend probe без netns — технология из `blockcheck2.sh` / `blockcheckw`
+https://github.com/rcd27/blockcheckw).
+
+**Цель:**
+- Mode A: nfqws2 живёт один раз на воркер, стратегия меняется на лету
+  (lua-parser `strategy.cmd` → `_G.bs_strategy_table`); нет пересоздания
+  daemon + конфига на каждый батч.
+- Host-mode: глобальный `--probe-backend host` для `bs scan/full/serve`
+  (не только serve). Убрать оверхед netns/veth, использовать fwmark-схему
+  blockcheck2.sh или vmap-схему blockcheckw для изоляции тестируемого
+  трафика на хосте.
+
+**Референсы (исследовано):**
+- `blockcheck2.sh`: host-mode, `--fwmark=0x10000000`, mangle-цепи,
+  NFQUEUE только на `-d $ip` + `--dport`, RETURN-loop-protection по mark,
+  `CT --notrack` для помеченных, INPUT drop ICMP time-exceeded
+  (строки 740–830). Минус: пересоздание правил на каждую стратегию.
+- `blockcheckw` (Rust, нет netns): **SO_MARK per worker** до `connect()`,
+  nftables **vmap** (mark→chain O(1)), per-worker nfqws2 qnum=200+N,
+  DESYNC_MARK notrack + prenat ICMP drop, HTTP in-process (hyper, без curl —
+  НО rustls ClientHello отличается от curl, фингерпринт слабее).
+  Плюс: правил на стратегию не меняются (правила только на старте пула).
+
+**Шаги:**
+
+- [ ] **HS-A1** Lua-parser для `strategy.cmd` (режим A): безопасный разбор
+      lua-desync-строки (whitelist-параметры, без eval) →
+      `_G.bs_strategy_table` → `plan_instance_execute`. См.
+      custom_lua.md §7.5. Python уже пишет `strategy.cmd` при
+      `extra_lua_desync` (`lua_bridge_ipc.py:121`) — нужен gen-fence.
+- [ ] **HS-A2** Продлить жизнь nfqws2-даемона на весь прогон (не батч):
+      iptables/NFT-правила ставятся 1× на netns; замерить рост
+      NFQUEUE/очередей при сотнях стратегий на одном daemon —
+      переполнения быть не должно (правило одно, `--queue-bypass`).
+- [ ] **HS-A3** Lua GC: контроль план-инстансов (нет утечки памяти nfqws2
+      за N тысяч стратегий на одном daemon).
+- [ ] **HS-A4** Host-mode backend `--probe-backend host` (глобальный):
+      вариант A — схема blockcheck2.sh (iptables mangle по dst IP +
+      fwmark loop-protection + notrack); вариант B — схема blockcheckw
+      (SO_MARK per worker + nftables vmap). Выбрать по бенчмарку.
+- [ ] **HS-A5** Fair-use guard host-mode: предупреждение/блок, если
+      тестируемый домен/IP активно используется системой; cleanup только
+      точный `-D`/`nft delete` (никакого `-F OUTPUT` на хосте).
+- [ ] **HS-A6** Верификация: drift host vs netns (аналог
+      `--lua-bridge-compare`), smoke youtube/discord, unit-тесты обоих
+      режимов, perf-замер (netns-оверхед vs host).
+- [ ] **HS-A7** Документация: custom_lua.md (Mode A), guide.md (host-mode
+      ограничения/риски), changelog.
+
 ### YouTube / External
 
 _(see Deferred)_
