@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess as sp
 import sys
+import tempfile
+from pathlib import Path
 
 from blockchecks.checkers.curl_probe import (
     CurlProbeRequest,
@@ -27,6 +30,7 @@ from blockchecks.engine.config import (
     NFQUEUE_UDP,
     PYTHON_BIN,
     RETRY_IP_TIMEOUT,
+    VOICE_UDP_FILTER,
     get_lua_init_scripts,
 )
 from blockchecks.engine.nfqws_config import (
@@ -39,6 +43,120 @@ from blockchecks.service.probe import (
     invoke_curl_probe_worker as _invoke_curl_probe_worker,
 )
 from blockchecks.service.probe import probe_request_dict as _probe_request_dict
+
+
+def udp_filter_covers_port(spec: str, port: int) -> bool:
+    """True if a nfqws2 --filter-udp value includes ``port``."""
+    parts = [p.strip() for p in spec.split(",") if p.strip()]
+    bounds = [(p.partition("-")[0], p.partition("-")[2] or p) if "-" in p else (p, p) for p in parts]
+    return any(a.isdigit() and b.isdigit() and int(a) <= port <= int(b) for a, b in bounds)
+
+
+def voice_udp_filter_for_port(port: int) -> str:
+    """VOICE_UDP_FILTER, plus the probe port if it lies outside that range."""
+    base = VOICE_UDP_FILTER
+    return base if udp_filter_covers_port(base, port) else f"{base},{port}"
+
+
+def ensure_udp_filter_lines(lines: list[str], port: int) -> list[str]:
+    """Guarantee a --filter-udp that covers the probe port."""
+    specs = [ln.split("=", 1)[1] for ln in lines if ln.startswith("--filter-udp=") and "=" in ln]
+    if any(udp_filter_covers_port(s, port) for s in specs):
+        return lines
+    insert_at = next((i + 1 for i, ln in enumerate(lines) if ln.startswith("--qnum=")), 1)
+    insert_at = min(insert_at, len(lines))
+    return [
+        *lines[:insert_at],
+        f"--filter-udp={voice_udp_filter_for_port(port)}",
+        *lines[insert_at:],
+    ]
+
+
+def _udp_base_lines() -> list[str]:
+    return [
+        f"--qnum={NFQUEUE_UDP}",
+        "--filter-l3=ipv4",
+        "--ipcache-lifetime=0",
+        "--bind-fix4",
+        *(f"--lua-init=@{lua}" for lua in get_lua_init_scripts() if os.path.exists(lua)),
+    ]
+
+
+def _strategy_cli_tokens(strategy: str) -> list[str]:
+    stripped = [raw.strip() for raw in strategy.split("\n") if raw.strip()]
+    return [
+        tok
+        for line in stripped
+        for tok in (split_cli_args(line) if line.startswith("--") else [f"--lua-desync={line}"])
+    ]
+
+
+def _write_udp_conf(lines: list[str]) -> str:
+    fd, path = tempfile.mkstemp(prefix="bs_async_udp_", suffix=".conf")
+    os.close(fd)
+    Path(path).write_text("\n".join(lines) + "\n")
+    return path
+
+
+def _load_conf_lines(path: str) -> list[str]:
+    return [ln.strip() for ln in Path(path).read_text().splitlines() if ln.strip()]
+
+
+def _attach_udp_queue(ns_name: str, port: int, *, coexist: bool) -> None:
+    """NFQUEUE UDP to q201 after nfqws2 is up. No --queue-bypass (would skip desync)."""
+    if not coexist:
+        _sudo("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT")
+    _sudo(
+        "ip",
+        "netns",
+        "exec",
+        ns_name,
+        "iptables",
+        "-A",
+        "OUTPUT",
+        "-p",
+        "udp",
+        "--dport",
+        str(port),
+        "-j",
+        "NFQUEUE",
+        "--queue-num",
+        str(NFQUEUE_UDP),
+    )
+
+
+def _conf_from_file(strategy: str, port: int) -> str:
+    src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
+    fd, tmp_conf = tempfile.mkstemp(prefix="bs_async_udp_", suffix=".conf")
+    os.close(fd)
+    shutil.copy2(src, tmp_conf)
+    Path(tmp_conf).write_text(
+        "\n".join(ensure_udp_filter_lines(_load_conf_lines(tmp_conf), port)) + "\n"
+    )
+    return tmp_conf
+
+
+def _inline_udp_lines(strategy: str, port: int) -> list[str]:
+    base = _udp_base_lines()
+    lines = [base[0], f"--filter-udp={voice_udp_filter_for_port(port)}", *base[1:]]
+    add_blobs_from_strategy(lines, strategy)
+    if not any(ln.startswith("--blob=") for ln in lines):
+        blob = os.path.join(BLOB_DIR, "discord_udp.bin")
+        if os.path.exists(blob):
+            lines.append(f"--blob=discord_udp:@{blob}")
+    return ensure_udp_filter_lines([*lines, *_strategy_cli_tokens(strategy)], port)
+
+
+def _materialize_udp_conf(strategy: str, port: int, *, is_config: bool) -> str:
+    kind = "config" if is_config else ("cli" if strategy.strip().startswith("--") else "inline")
+    builders = {
+        "config": lambda: _conf_from_file(strategy, port),
+        "cli": lambda: _write_udp_conf(
+            ensure_udp_filter_lines([*_udp_base_lines(), *_strategy_cli_tokens(strategy)], port)
+        ),
+        "inline": lambda: _write_udp_conf(_inline_udp_lines(strategy, port)),
+    }
+    return builders[kind]()
 
 
 def _run_quic_check(
@@ -525,98 +643,23 @@ def _run_udp_check(
 ) -> dict:
     """Start nfqws2 UDP in ns, run STUN probe, return result.
 
-    coexist=True: do not pkill existing nfqws2 (keep TCP desync for pairs).
+    coexist=True: do not pkill existing nfqws2 (keep TCP desync for pairs);
+    wait until two nfqws2 processes are visible (q200+q201) before probing.
+    iptables is attached after settle, without --queue-bypass.
     """
 
     py = python_bin or PYTHON_BIN
-    kill_existing = not coexist
-    tmp_conf = None
+    tmp_conf = _materialize_udp_conf(strategy, port, is_config=is_config)
+    try:
+        _nfqws2_daemon(
+            ns_name,
+            tmp_conf,
+            kill_existing=not coexist,
+            min_procs=2 if coexist else 1,
+        )
+        _attach_udp_queue(ns_name, port, coexist=coexist)
 
-    if is_config:
-        src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
-        import shutil
-        import tempfile as _tf2
-
-        _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf")
-        os.close(_tf2_fd)
-        shutil.copy2(src, tmp_conf)
-        _nfqws2_daemon(ns_name, tmp_conf, kill_existing=kill_existing)
-    elif strategy.strip().startswith("--"):
-        # Full CLI config (standard_udp dual-blob etc.)
-        config_lines = [
-            f"--qnum={NFQUEUE_UDP}",
-            "--filter-l3=ipv4",
-            "--ipcache-lifetime=0",
-            "--bind-fix4",
-        ]
-        for lua in get_lua_init_scripts():
-            if os.path.exists(lua):
-                config_lines.append(f"--lua-init=@{lua}")
-        for raw_line in strategy.split("\n"):
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            config_lines.extend(split_cli_args(raw_line))
-        import tempfile as _tf2
-
-        _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf")
-        os.close(_tf2_fd)
-        with open(tmp_conf, "w") as f:
-            f.write("\n".join(config_lines))
-        _nfqws2_daemon(ns_name, tmp_conf, kill_existing=kill_existing)
-    else:
-        # Inline lua-desync core (e.g. fake:blob=discord_udp:repeats=6)
-        config_lines = [
-            f"--qnum={NFQUEUE_UDP}",
-            "--filter-udp=50000-50100",
-            "--filter-l3=ipv4",
-            "--ipcache-lifetime=0",
-            "--bind-fix4",
-        ]
-        for lua in get_lua_init_scripts():
-            if os.path.exists(lua):
-                config_lines.append(f"--lua-init=@{lua}")
-        add_blobs_from_strategy(config_lines, strategy)
-        if not any(line.startswith("--blob=") for line in config_lines):
-            blob = os.path.join(BLOB_DIR, "discord_udp.bin")
-            if os.path.exists(blob):
-                config_lines.append(f"--blob=discord_udp:@{blob}")
-        for raw_line in strategy.split("\n"):
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            if raw_line.startswith("--"):
-                config_lines.extend(split_cli_args(raw_line))
-            else:
-                config_lines.append(f"--lua-desync={raw_line}")
-        import tempfile as _tf2
-
-        _tf2_fd, tmp_conf = _tf2.mkstemp(prefix="bs_async_udp_", suffix=".conf")
-        os.close(_tf2_fd)
-        with open(tmp_conf, "w") as f:
-            f.write("\n".join(config_lines))
-        _nfqws2_daemon(ns_name, tmp_conf, kill_existing=kill_existing)
-
-    _sudo(
-        "ip",
-        "netns",
-        "exec",
-        ns_name,
-        "iptables",
-        "-A",
-        "OUTPUT",
-        "-p",
-        "udp",
-        "--dport",
-        str(port),
-        "-j",
-        "NFQUEUE",
-        "--queue-num",
-        str(NFQUEUE_UDP),
-        "--queue-bypass",
-    )
-
-    probe_code = f"""
+        probe_code = f"""
 import json, os
 from blockchecks.checkers.udp_voice import voice_udp_probe
 _burst = os.environ.get("BLOCKCHECKS_VOICE_BURST", "").strip().lower() in ("1","true","on","yes")
@@ -624,23 +667,34 @@ ok, lat, detail, method = voice_udp_probe({ip!r}, {port}, {timeout}, try_burst=_
 print(json.dumps({{"success": ok, "latency_ms": lat,
     "detail": detail, "method": method}}))
 """
-    try:
-        r = sp.run(
-            ["sudo", "ip", "netns", "exec", ns_name, py, "-c", probe_code],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 3,
+        burst = os.environ.get("BLOCKCHECKS_VOICE_BURST", "").strip().lower() in (
+            "1",
+            "true",
+            "on",
+            "yes",
         )
         try:
-            return json.loads(r.stdout)
-        except json.JSONDecodeError:
-            return {"success": False, "latency_ms": 0, "detail": "parse error"}
-    finally:
-        if tmp_conf:
+            r = sp.run(
+                ["sudo", "ip", "netns", "exec", ns_name, py, "-c", probe_code],
+                capture_output=True,
+                text=True,
+                timeout=timeout * (3 if burst else 2) + 3,
+            )
             try:
-                os.unlink(tmp_conf)
-            except OSError:
-                pass
+                return json.loads(r.stdout)
+            except json.JSONDecodeError:
+                return {"success": False, "latency_ms": 0, "detail": "parse error"}
+        except sp.TimeoutExpired:
+            return {
+                "success": False,
+                "latency_ms": 0,
+                "detail": "TimeoutExpired: probe subprocess timeout",
+            }
+    finally:
+        try:
+            os.unlink(tmp_conf)
+        except OSError:
+            pass
 
 
 # ── AsyncTestRunner ─────────────────────────────────

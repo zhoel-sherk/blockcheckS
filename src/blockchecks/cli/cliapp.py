@@ -328,7 +328,7 @@ def _run_pair(model: BaseModel) -> int:
     else:
         ns.generate = bool(gen) or bool(
             getattr(ns, "tcp_sources", "") != _GENERATE_DEFAULT
-            or getattr(ns, "udp_sources", "") != "custom"
+            or getattr(ns, "udp_sources", "") != "custom,standard_udp"
         )
     code = ensure_system_deps_or_exit(ns)
     return code or asyncio.run(cmd_pair(ns))

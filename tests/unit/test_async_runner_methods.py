@@ -60,8 +60,17 @@ async def test_runner_test_udp(mock_runner, monkeypatch):
         "blockchecks.engine.async_runner._run_udp_check",
         lambda *a, **k: {"success": True, "latency_ms": 8.0},
     )
+    saved: list[tuple] = []
+
+    async def _save(strategy, domain, *, protocol, latency_ms, http_code):
+        saved.append((strategy, domain, protocol, latency_ms))
+
+    monkeypatch.setattr(
+        "blockchecks.engine.async_runner._save_pass_strategy_data_block", _save
+    )
     r = await mock_runner.test_udp(_item(), "35.217.5.42", 50006, timeout=3.0)
     assert r.success is True
+    assert saved == [(_item().strategy, "35.217.5.42:50006", "udp", 8.0)]
 
 
 async def test_runner_test_udp_fail(mock_runner, monkeypatch):

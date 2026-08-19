@@ -8,7 +8,7 @@
 #   4. full + export               (nfqws2_*.conf, user.list, run_summary)
 #   5. resume                      (skip already-tested (strategy,domain))
 #   6. googlevideo GV1             (GGC/ytcdn binary probe)
-#   7. voice UDP                   (discord_udp discovery + probe)
+#   7. voice UDP                   (host pinned EP PASS + netns pair udp_results)
 #   8. HTTP plaintext              (conservative 200..399 only)
 #   9. HTTP service layer (bs serve) — auth, /api/* routes, SSE (http bridge / API layer)
 #
@@ -91,8 +91,8 @@ sudo -n "$BS" full --domains-file presets/domains/benchmark.txt --scan-level fas
   --tcp-only --no-http --no-quic --no-voice --allow-dns-hijack \
   --max-timem 3 --timeout 4 --skip-deps-check --skip-baseline --skip-port-block --skip-prolog --skip-ip-block \
   --db "$DIR/step4.db" --out-dir "$DIR/step4_export" 2>&1 | tee "$LOG4" >/dev/null || true
-HAS_CONF=$(ls "$DIR/step4_export"/nfqws2_*.conf 2>/dev/null | head -1)
-HAS_SUM=$(ls "$DIR/step4_export"/run_summary_*.json 2>/dev/null | head -1)
+HAS_CONF=$(ls "$DIR/step4_export"/nfqws2_*.conf 2>/dev/null | head -1 || true)
+HAS_SUM=$(ls "$DIR/step4_export"/run_summary_*.json 2>/dev/null | head -1 || true)
 if [[ -n "$HAS_CONF" && -n "$HAS_SUM" ]]; then ok "export artifacts present (nfqws2 conf + run_summary)"
 else bad "missing export artifacts (conf='$HAS_CONF' sum='$HAS_SUM')"; fi
 
@@ -125,14 +125,28 @@ if grep -qE "TCP done|TCP × coverage|GGC|googlevideo|Server: gws|scone" "$LOG6"
 else bad "googlevideo GV1 probe missing"; tail -5 "$LOG6"; fi
 
 # ────────────────────────────────────────────────────────────────
-log 7 "voice UDP (discord_udp discovery + probe)"
+log 7 "voice UDP (host pinned EP + netns pair)"
 # ────────────────────────────────────────────────────────────────
 LOG7="$DIR/step7_voice.log"
 UDP_CONF="${UDP_CONF:-configs/udp_voice__fake_r6.conf}"
-sudo env PYTHONPATH="${PWD}/src" "$PY" -m blockchecks.bs udp -c "$UDP_CONF" --discover-dns 2 \
-  --timeout 5 --skip-deps-check 2>&1 | tee "$LOG7" >/dev/null || true
-if grep -qE "OK|PASS|voice|discovery" "$LOG7"; then ok "voice UDP probe ran"
-else bad "voice UDP probe failed"; tail -5 "$LOG7"; fi
+VOICE_IP="${VOICE_IP:-35.217.48.152}"
+VOICE_PORT="${VOICE_PORT:-50004}"
+sudo -n env PYTHONPATH="${PWD}/src" "$PY" -m blockchecks.bs udp -c "$UDP_CONF" \
+  --ip "$VOICE_IP" --port "$VOICE_PORT" --timeout 5 --skip-deps-check \
+  2>&1 | tee "$LOG7" >/dev/null || true
+if grep -qE "\[OK\]" "$LOG7"; then ok "host UDP $VOICE_IP:$VOICE_PORT PASS"
+else bad "host UDP $VOICE_IP:$VOICE_PORT not PASS"; tail -8 "$LOG7"; fi
+
+LOG7B="$DIR/step7_pair.log"
+PAIR_DB="$DIR/step7_pair.db"
+sudo -n "$BS" pair -d discord.com --generate --tcp-sources fake --udp-sources custom,standard_udp,configs \
+  --max 1 --udp-bypass --ip "$VOICE_IP" --port "$VOICE_PORT" --parallel 2 --udp-timeout 3 \
+  --scan-level fast --skip-deps-check --skip-dns-audit --skip-prolog --skip-ip-block --skip-port-block \
+  --skip-baseline --allow-dns-hijack --db "$PAIR_DB" \
+  2>&1 | tee "$LOG7B" >/dev/null || true
+UDP_PASS=$("$PY" -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute(\"select count(*) from udp_results where status='PASS'\").fetchone()[0])" "$PAIR_DB" 2>/dev/null || echo 0)
+if [[ "$UDP_PASS" -ge 1 ]]; then ok "netns pair udp_results PASS count=$UDP_PASS"
+else bad "netns pair no udp_results PASS"; tail -12 "$LOG7B"; fi
 
 # ────────────────────────────────────────────────────────────────
 log 8 "HTTP plaintext (conservative 200..399)"

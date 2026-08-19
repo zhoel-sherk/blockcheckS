@@ -44,6 +44,13 @@ def _pair_args(**over):
     return SimpleNamespace(**base)
 
 
+def test_pair_cli_udp_sources_default():
+    from blockchecks.cli.parser import build_parser
+
+    ns = build_parser().parse_args(["pair", "-d", "discord.com"])
+    assert ns.udp_sources == "custom,standard_udp"
+
+
 def _run(coro):
     return asyncio.run(coro)
 

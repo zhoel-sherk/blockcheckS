@@ -11,7 +11,15 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
-async def test_pair_parallel(mock_runner):
+async def test_pair_parallel(mock_runner, monkeypatch):
+    saved: list[tuple] = []
+
+    async def _save(strategy, domain, *, protocol, latency_ms, http_code):
+        saved.append((strategy, domain, protocol))
+
+    monkeypatch.setattr(
+        "blockchecks.engine.async_runner._save_pass_strategy_data_block", _save
+    )
     tcp_res = TcpTestResult(
         item=StrategyItem(label="tcp_ok", strategy="fake:repeats=1"),
         domain="discord.com",
@@ -33,6 +41,8 @@ async def test_pair_parallel(mock_runner):
     assert all(p.overall == "PASS" for p in pairs)
     assert all(p.tcp_ok and p.udp_ok for p in pairs)
     assert {p.udp_item.label for p in pairs} == {"u1", "u2"}
+    assert {s[0] for s in saved} == {"fake:repeats=6", "fake:repeats=12"}
+    assert all(s[1] == "1.2.3.4:5" and s[2] == "udp" for s in saved)
 
 
 @pytest.mark.asyncio
@@ -203,3 +213,31 @@ async def test_pair_throttled_overall(mock_runner):
     )
     assert len(pairs) == 1
     assert pairs[0].overall == "THROTTLED"
+
+
+@pytest.mark.asyncio
+async def test_pair_logs_udp_on_success(mock_runner):
+    logged = []
+    orig = mock_runner.db.log_udp
+
+    async def wrap(*a, **k):
+        logged.append((a, k))
+        return await orig(*a, **k)
+
+    mock_runner.db.log_udp = wrap
+    tcp_res = TcpTestResult(
+        item=StrategyItem(label="tcp_ok", strategy="fake:repeats=1"),
+        domain="d",
+        success=True,
+        latency_ms=40,
+    )
+    pairs = await mock_runner.test_pair_matrix(
+        [tcp_res],
+        [StrategyItem(label="u1", strategy="fake:blob=discord_udp:repeats=6")],
+        "d",
+        voice_ip="35.217.48.152",
+        voice_port=50004,
+    )
+    assert pairs[0].udp_ok is True
+    assert logged
+    assert logged[0][0][2] == "PASS"

@@ -372,6 +372,12 @@ UDP_VOICE_FAMILIES = ["udp_discord"]
 QUIC_HTTP3_FAMILIES = ["quic_fake", "quic_gv", "quic_ipfrag", "udp_quic", "udp_multiblob"]
 UDP_QUIC_FAMILIES = ["udp_quic", "udp_game", "udp_multiblob"]
 FAMILY_ALIASES = {"ipfrag_tcp": "tcp_ipfrag", "ipfrag_udp": "quic_ipfrag"}
+_FAMILIES_BY_PROTOCOL = {
+    "udp_voice": UDP_VOICE_FAMILIES,
+    "udp_game": ["udp_game"],
+    "http": HTTP_FAMILIES,
+    "quic": QUIC_HTTP3_FAMILIES,
+}
 
 
 def _resolve_family_name(name: str) -> str:
@@ -723,15 +729,8 @@ class StandardGenerator(
             types = list(self.STRATEGY_FAMILIES.keys())
 
         # Protocol gate — empty intersection means nothing for this protocol
-        if protocol == "udp_voice":
-            types = [t for t in types if _resolve_family_name(t) in UDP_VOICE_FAMILIES]
-        elif protocol == "http":
-            types = [t for t in types if _resolve_family_name(t) in HTTP_FAMILIES]
-        elif protocol == "quic":
-            types = [t for t in types if _resolve_family_name(t) in QUIC_HTTP3_FAMILIES]
-        else:
-            # tls12/tls13 — TCP TLS only
-            types = [t for t in types if _resolve_family_name(t) in TCP_FAMILIES]
+        allowed = _FAMILIES_BY_PROTOCOL.get(protocol, TCP_FAMILIES)
+        types = [t for t in types if _resolve_family_name(t) in allowed]
 
         # Expand axes for full scan
         full = scan_level == "full"
@@ -763,6 +762,10 @@ class StandardGenerator(
                     dict.fromkeys(list(fam.get("foolings", [""])) + ALL_FOOLINGS_UDP)
                 )
                 fam["ip6_fools"] = ALL_FOOLINGS_IPV6
+            elif full and resolved == "udp_discord":
+                fam["repeats"] = [2, 3, 4, 6, 8, 10, 12, 14]
+                fam["ttl_static"] = [5, 8]
+                fam["ttl_auto"] = ["-2,3-20", "-1,2-10"]
             elif scan_level == "fast" and resolved == "fake":
                 # Limited IPv6 fooling axis on fast
                 fam["ipv6_extra"] = FAST_FOOLINGS_IPV6

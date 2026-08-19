@@ -110,3 +110,28 @@ async def test_custom_list_generator_labels_unique_for_long_strategies():
     assert len({i.label for i in items}) == 2, f"labels collided: {[i.label for i in items]}"
     # labels must encode the differing tail, not truncate to the common prefix
     assert items[0].label != items[1].label
+
+
+@pytest.mark.asyncio
+async def test_generate_udp_voice_protocol_and_filter():
+    gen = MatrixGenerator()
+    fast = await gen.generate_udp(sources=["standard_udp"], scan_level="fast", max_count=400)
+    full = await MatrixGenerator().generate_udp(
+        sources=["standard_udp"], scan_level="full", max_count=400
+    )
+    assert fast and full
+    assert all(i.protocol == "udp_voice" for i in fast + full)
+    assert all("50000-50100" in i.strategy for i in fast)
+    assert len(full) > len(fast)
+
+
+@pytest.mark.asyncio
+async def test_generate_udp_game_not_in_default():
+    default = await MatrixGenerator().generate_udp(
+        sources=["custom", "standard_udp"], scan_level="single", max_count=80
+    )
+    assert not any("std_udp_game" in i.label for i in default)
+    game = await MatrixGenerator().generate_udp(sources=["game"], scan_level="single", max_count=20)
+    assert game
+    assert all(i.protocol == "udp_voice" for i in game)
+    assert any("std_udp_game" in i.label or "filter-udp=" in i.strategy for i in game)

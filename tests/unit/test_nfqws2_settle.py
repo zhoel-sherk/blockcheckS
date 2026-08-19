@@ -93,6 +93,18 @@ def test_wait_min_wait_floor():
     assert elapsed >= 0.5
 
 
+def test_wait_nfqws2_ready_min_procs_two():
+    counts = MagicMock(side_effect=[1, 2])
+    sleep = MagicMock()
+    with patch("blockchecks.service.nfqws2_settle.nfqws2_count_in_ns", counts):
+        with patch("blockchecks.service.nfqws2_settle.time.sleep", sleep):
+            elapsed = wait_nfqws2_ready(
+                "bs-p0", max_wait=1.0, poll_interval=0.1, min_wait=0, min_procs=2
+            )
+    assert counts.call_count == 2
+    assert 0 <= elapsed < 1.0
+
+
 def test_wait_nfqws2_gone_returns_true_when_never_there():
     """_wait_nfqws2_gone: nfqws2 absent → returns True immediately."""
     from blockchecks.service.nfqws2_settle import _wait_nfqws2_gone

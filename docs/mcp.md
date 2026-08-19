@@ -129,7 +129,7 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 }
 ```
 
-### Cursor (`~/.cursor/mcp.json`)
+### Cursor (`~/.cursor/mcp.json` or project `.cursor/mcp.json`)
 ```json
 {
   "mcpServers": {

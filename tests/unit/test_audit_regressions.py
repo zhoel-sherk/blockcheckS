@@ -184,7 +184,7 @@ def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
 
     written = {}
 
-    def fake_daemon(ns_name, config_path, kill_existing=True):
+    def fake_daemon(ns_name, config_path, kill_existing=True, **_kw):
         written["text"] = Path(config_path).read_text(encoding="utf-8")
         written["kill"] = kill_existing
 
@@ -214,7 +214,7 @@ def test_udp_coexist_skips_pkill(monkeypatch):
 
     calls = []
 
-    def fake_daemon(ns_name, config_path, kill_existing=True):
+    def fake_daemon(ns_name, config_path, kill_existing=True, **_kw):
         calls.append(kill_existing)
         Path(config_path).write_text("--qnum=201\n", encoding="utf-8")
 
@@ -247,6 +247,7 @@ def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
     src = Path(nfq.__file__).read_text(encoding="utf-8")
     assert "stderr=subprocess.DEVNULL" in src
     assert "kill_existing" in inspect.signature(nfq.start_daemon).parameters
+    assert "min_procs" in inspect.signature(nfq.start_daemon).parameters
     assert "kill_existing" in inspect.signature(ar._nfqws2_daemon).parameters
     worker_src = Path(insw.__file__).read_text(encoding="utf-8")
     assert "--queue-bypass" in worker_src

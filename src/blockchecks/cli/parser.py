@@ -559,7 +559,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="custom,configs",
         help="TCP sources: custom,configs,fake,faked (fakedsplit),hostfake,fake_multi,fake_faked (fake+fakedsplit)",
     )
-    pair.add_argument("--udp-sources", default="custom", help="UDP sources: custom,configs")
+    pair.add_argument(
+        "--udp-sources",
+        default="custom,standard_udp",
+        help="UDP sources: custom,standard_udp,configs,flowseal,game",
+    )
     pair.add_argument(
         "--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)"
     )
@@ -757,7 +761,7 @@ def dispatch(args: argparse.Namespace) -> int:
         else:
             a.generate = bool(a.generate) or bool(
                 getattr(a, "tcp_sources", "") != "custom,configs"
-                or getattr(a, "udp_sources", "") != "custom"
+                or getattr(a, "udp_sources", "") != "custom,standard_udp"
             )
         return asyncio.run(cmd_pair(a))
 

@@ -78,6 +78,7 @@ def start_daemon(
     *,
     settle_max: float | None = None,
     settle_poll: float | None = None,
+    min_procs: int = 1,
 ) -> float:
     """Launch nfqws2 in daemon mode inside ns. Non-blocking.
 
@@ -117,7 +118,9 @@ def start_daemon(
             f"@{tmp_conf}",
         ]
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        settle = wait_nfqws2_ready(ns_name, max_wait=settle_max, poll_interval=settle_poll)
+        settle = wait_nfqws2_ready(
+            ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
+        )
         _reclaim_debug_log(dbg_path)
         return settle
     finally:

@@ -1,3 +1,16 @@
+## 1.3.7 — Discord-UDP coverage, Cursor MCP, variant G (2026-08-19)
+
+- Discord-voice UDP vs QUIC/game: `generate_udp` retags `udp_voice`; pair
+  defaults `--udp-sources custom,standard_udp`; `--udp-sources game` is explicit.
+- Netns UDP probe: filter covers probe port, iptables `--dport` matches, no early
+  `--queue-bypass`, coexist waits for two nfqws2 (q200+q201), pair writes `log_udp`.
+- `udp_discord` full scan expands repeats/TTL; cores include `--filter-udp=50000-50100`.
+- Cursor MCP: `~/.cursor/mcp.json` / `.cursor/mcp.json` → `.venv/bin/bs-mcp`.
+- `scripts/smoke_20min.sh` step 7: host pinned EP PASS + netns `udp_results` PASS.
+- Variant G: `scripts/run_variant.sh G 20` (`bs pair` Discord-UDP loop, 20h);
+  not part of sequential A→F.
+- Bump 1.3.7.
+
 ## 1.3.6 — GP integration, probe fixes, smoke (2026-08-18)
 
 - `bs serve --http-port`: authenticated HTTP bridge (Bearer token; `--http-token`

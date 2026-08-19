@@ -6,6 +6,7 @@ contract and delegate dedup/append to ``self._add``.
 
 from __future__ import annotations
 
+from blockchecks.engine.config import VOICE_UDP_FILTER
 from blockchecks.engine.generators.families._helpers import (
     _blob_abs,
     _with_ip6_send_drop,
@@ -162,12 +163,15 @@ class TamperFamiliesMixin:
         return items
 
     def _fam_udp_discord(self, items, seen, family, scan_level, _known_working):
-        """Expand udp_discord family."""
+        """Expand udp_discord family (voice UDP 50000-50100)."""
         blobs = family.get("blobs", ["discord_udp"])
         for blob_name in blobs:
             for r in family["repeats"]:
-                strat = f"fake:blob={blob_name}:repeats={r}"
-                self._add(items, seen, f"std_udp_{blob_name}_r{r}", strat)
+                core = f"fake:blob={blob_name}:repeats={r}"
+                strat = f"--filter-udp={VOICE_UDP_FILTER}\n{core}"
+                self._add(
+                    items, seen, f"std_udp_{blob_name}_r{r}", strat, protocol="udp_voice"
+                )
                 if scan_level == "single":
                     return items
                 for ttl in family.get("ttl_static", []):
@@ -175,14 +179,16 @@ class TamperFamiliesMixin:
                         items,
                         seen,
                         f"std_udp_{blob_name}_r{r}_ttl{ttl}",
-                        f"{strat}:ip_ttl={ttl}",
+                        f"--filter-udp={VOICE_UDP_FILTER}\n{core}:ip_ttl={ttl}",
+                        protocol="udp_voice",
                     )
                 for ttl in family.get("ttl_auto", []):
                     self._add(
                         items,
                         seen,
                         f"std_udp_{blob_name}_r{r}_autottl",
-                        f"{strat}:ip_autottl={ttl}",
+                        f"--filter-udp={VOICE_UDP_FILTER}\n{core}:ip_autottl={ttl}",
+                        protocol="udp_voice",
                     )
 
         return items
@@ -217,7 +223,13 @@ class TamperFamiliesMixin:
                             f"--lua-desync=fake:blob=GAME:repeats={r}"
                             + (f" --out-range={orng}" if orng else "")
                         )
-                        self._add(items, seen, f"std_udp_game_r{r}_{orng or 'no'}", s)
+                        self._add(
+                            items,
+                            seen,
+                            f"std_udp_game_r{r}_{orng or 'no'}",
+                            s,
+                            protocol="udp_game",
+                        )
                         if scan_level == "single":
                             return items
 

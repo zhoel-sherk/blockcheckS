@@ -304,7 +304,7 @@ class TestRunner:
         if self.ns_name:
             cmd = ["sudo", "ip", "netns", "exec", self.ns_name, *cmd]
 
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 3)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout * 2 + 3)
         try:
             return json.loads(r.stdout)
         except json.JSONDecodeError:
@@ -336,6 +336,23 @@ class TestRunner:
             fw.cleanup()
 
         result.time_total_ms = (time.perf_counter() - t0) * 1000
+        if result.success:
+            import asyncio
+
+            from blockchecks.engine.in_ns_workers import _save_pass_strategy_data_block
+
+            try:
+                asyncio.run(
+                    _save_pass_strategy_data_block(
+                        config_path,
+                        f"{ip}:{port}",
+                        protocol="udp",
+                        latency_ms=result.latency_ms,
+                        http_code=0,
+                    )
+                )
+            except Exception:
+                pass
         return result
 
     def test_sequential_udp(

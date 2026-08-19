@@ -185,6 +185,7 @@ def apply_tool_paths(
 # Network isolation
 NFQUEUE_TCP = int(_env_or("BLOCKCHECKS_QNUM_TCP", "200"))
 NFQUEUE_UDP = int(_env_or("BLOCKCHECKS_QNUM_UDP", "201"))
+VOICE_UDP_FILTER = "50000-50100"
 NETNS_BASE = _env_or("BLOCKCHECKS_NETNS_BASE", "bs-p")
 DEFAULT_POOL_SIZE = int(_env_or("BLOCKCHECKS_POOL", "4"))
 

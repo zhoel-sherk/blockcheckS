@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "blockchecks": {
+      "command": "/home/zhoel/workspace/blockcheckS/.venv/bin/bs-mcp",
+      "args": []
+    }
+  }
+}

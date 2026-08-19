@@ -736,6 +736,14 @@ class AsyncTestRunner:
                         result.error,
                         config_path=item.strategy,
                     )
+                if result.success:
+                    await _save_pass_strategy_data_block(
+                        item.strategy,
+                        target,
+                        protocol="udp",
+                        latency_ms=result.latency_ms,
+                        http_code=0,
+                    )
             except Exception as e:
                 result.error = str(e)[:200]
             finally:
@@ -943,8 +951,24 @@ class AsyncTestRunner:
                         f"+ {udp_s.label[:22]:22s}  udp={udp_tag}{voice_tag}"
                     )
 
+                    if udp_ok:
+                        await _save_pass_strategy_data_block(
+                            udp_s.strategy,
+                            f"{voice_ip}:{voice_port}",
+                            protocol="udp",
+                            latency_ms=udp_ms,
+                            http_code=0,
+                        )
                     if self.db:
                         async with db_lock:
+                            await self.db.log_udp(
+                                udp_s.label,
+                                f"{voice_ip}:{voice_port}",
+                                "PASS" if udp_ok else "FAIL",
+                                udp_ms,
+                                data.get("detail", "") or "",
+                                config_path=udp_s.strategy,
+                            )
                             await self.db.log_pair(
                                 tcp_r.item.label,
                                 udp_s.label,
@@ -973,7 +997,9 @@ class AsyncTestRunner:
             for udp_ord, udp_s in enumerate(udp_strategies):
                 tasks.append(asyncio.create_task(run_pair(tcp_i, tcp_r, udp_s, udp_ord)))
 
-        await asyncio.gather(*tasks, return_exceptions=True)
+        for res in await asyncio.gather(*tasks, return_exceptions=True):
+            if isinstance(res, BaseException):
+                print(f"  {RED}pair task error: {type(res).__name__}: {res}{RESET}")
         return pairs
 
     # ── Matrix display ──

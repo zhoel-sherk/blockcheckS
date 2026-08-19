@@ -15,6 +15,7 @@ from blockchecks.engine.run_finalize import (
     maybe_export_configs,
     maybe_sync_data_block,
     maybe_write_best_config_data_block,
+    rank_pass_strategies_for_export,
     run_exit_code,
     should_export,
     write_run_summary,
@@ -192,12 +193,31 @@ def test_maybe_write_best_config_data_block_writes(tmp_path):
         store.strategies_db = MagicMock()
         store.strategies_db.is_file.return_value = True
         store.pass_strategies = AsyncMock(return_value=[
-            {"strategy": "fake:a", "protocol": "tcp"},
-            {"strategy": "fake:b", "protocol": "udp"},
+            {"strategy": "slow_tcp", "protocol": "tcp", "latency_ms": 200},
+            {"strategy": "fast_tcp", "protocol": "tcp", "latency_ms": 50},
+            {"strategy": "fake:blob=stun:repeats=6", "protocol": "udp", "latency_ms": 10},
+            {"strategy": "fake:blob=discord_udp:repeats=6", "protocol": "udp", "latency_ms": 40},
         ])
         asyncio.run(maybe_write_best_config_data_block())
         build.assert_called_once()
+        kwargs = build.call_args.kwargs
+        assert kwargs["tcp_strategies"][0] == "fast_tcp"
+        assert kwargs["udp_strategies"][0] == "fake:blob=discord_udp:repeats=6"
         store.write_best_config.assert_called_once_with("[ipset]\n")
+
+
+def test_rank_pass_strategies_for_export_latency_and_discord_udp():
+    rows = [
+        {"strategy": "tcp_b", "protocol": "tcp", "latency_ms": 90},
+        {"strategy": "tcp_a", "protocol": "tcp", "latency_ms": 20},
+        {"strategy": "fake:blob=stun:repeats=6", "protocol": "udp", "latency_ms": 5},
+        {"strategy": "fake:blob=discord_udp:repeats=6", "protocol": "udp", "latency_ms": 80},
+        {"strategy": "tcp_a", "protocol": "tcp", "latency_ms": 15},
+    ]
+    tcp, udp = rank_pass_strategies_for_export(rows, tcp_n=5, udp_n=5)
+    assert tcp[0] == "tcp_a"
+    assert udp[0] == "fake:blob=discord_udp:repeats=6"
+    assert "fake:blob=stun:repeats=6" in udp
 
 
 def test_maybe_sync_data_block_disabled():

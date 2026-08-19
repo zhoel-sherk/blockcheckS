@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -149,7 +149,10 @@ def test_test_udp_config():
         "blockchecks.engine.test_runner.Nfqws2Manager", return_value=nfq
     ), patch.object(runner, "_run_stun_check", return_value={
         "success": True, "latency_ms": 5, "detail": ""
-    }):
+    }), patch(
+        "blockchecks.engine.in_ns_workers._save_pass_strategy_data_block",
+        new=AsyncMock(),
+    ):
         result = runner.test_udp_config("/tmp/u.conf", "1.2.3.4", port=50004, timeout=3.0)
     assert result.success is True
     fw.prepare_udp.assert_called_once()

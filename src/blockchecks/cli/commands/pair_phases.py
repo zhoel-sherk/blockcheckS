@@ -442,7 +442,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
     if do_generate or user_matrix:
         scanner = MatrixGenerator()
         tcp_src = getattr(args, "tcp_sources", "") or "custom,configs"
-        udp_src = getattr(args, "udp_sources", "") or "custom"
+        udp_src = getattr(args, "udp_sources", "") or "custom,standard_udp"
         if getattr(args, "tcp_only", False):
             udp_src = ""
         tcp_sources = [s for s in tcp_src.split(",") if s]

@@ -15,6 +15,31 @@ from blockchecks.engine.store import RunStateStore
 from blockchecks.nfconf import export_configs
 
 
+def rank_pass_strategies_for_export(
+    rows: list[dict[str, Any]], *, tcp_n: int = 5, udp_n: int = 5
+) -> tuple[list[str], list[str]]:
+    """Pick TCP/UDP cores for best_config: lowest latency, UDP prefers discord_udp."""
+
+    def _latency(row: dict[str, Any]) -> float:
+        try:
+            return float(row.get("latency_ms") or 1e9)
+        except (TypeError, ValueError):
+            return 1e9
+
+    def _unique(ordered: list[dict[str, Any]]) -> list[str]:
+        return list(dict.fromkeys(r["strategy"] for r in ordered if r.get("strategy")))
+
+    tcp_rows = sorted(
+        (r for r in rows if r.get("protocol") == "tcp"),
+        key=_latency,
+    )
+    udp_rows = sorted(
+        (r for r in rows if r.get("protocol") == "udp"),
+        key=lambda r: (0 if "discord_udp" in str(r.get("strategy") or "") else 1, _latency(r)),
+    )
+    return _unique(tcp_rows)[:tcp_n], _unique(udp_rows)[:udp_n]
+
+
 async def maybe_write_best_config_data_block() -> None:
     """Write the best nfqws2 config to data_block/providers/<p>/best_config.conf.
 
@@ -35,14 +60,13 @@ async def maybe_write_best_config_data_block() -> None:
             rows = await store.pass_strategies()
         if not rows:
             return
-        tcp = [r["strategy"] for r in rows if r.get("protocol") == "tcp"]
-        udp = [r["strategy"] for r in rows if r.get("protocol") == "udp"]
+        tcp, udp = rank_pass_strategies_for_export(rows)
         if not tcp and not udp:
             return
         comment = f"blockcheckS best_config ({_now()}) domains={len(rows)}"
         content = build_keenetic_conf(
-            tcp_strategies=tcp[:5],
-            udp_strategies=udp[:5],
+            tcp_strategies=tcp,
+            udp_strategies=udp,
             comment=comment,
         )
         store.write_best_config(content)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +14,8 @@ from blockchecks.engine.in_ns_workers import (
     _run_quic_check,
     _run_tcp_check_multi,
     _run_udp_check,
+    ensure_udp_filter_lines,
+    udp_filter_covers_port,
 )
 
 
@@ -113,3 +116,78 @@ def test_run_udp_check_coexist():
         )
     assert data["success"] is True
     assert daemon.call_args.kwargs.get("kill_existing") is False
+    assert daemon.call_args.kwargs.get("min_procs") == 2
+
+
+@pytest.mark.unit
+def test_udp_filter_covers_voice_ports():
+    assert udp_filter_covers_port("50000-50100", 50004) is True
+    assert udp_filter_covers_port("50000-50100", 443) is False
+    assert udp_filter_covers_port("50000-50100,3478", 3478) is True
+    spec = next(
+        ln.split("=", 1)[1]
+        for ln in ensure_udp_filter_lines(["--qnum=201"], 50004)
+        if ln.startswith("--filter-udp=")
+    )
+    assert udp_filter_covers_port(spec, 50004)
+
+
+@pytest.mark.unit
+def test_run_udp_check_dport_and_no_bypass():
+    """iptables --dport is the probe port; no --queue-bypass before/after settle."""
+    sudo_calls: list[tuple] = []
+
+    def fake_sudo(*a, **k):
+        sudo_calls.append(a)
+
+    written = {}
+
+    def fake_daemon(ns_name, config_path, kill_existing=True, **kw):
+        written["text"] = Path(config_path).read_text(encoding="utf-8")
+        written["min_procs"] = kw.get("min_procs")
+
+    with (
+        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", side_effect=fake_daemon),
+        patch("blockchecks.engine.in_ns_workers._sudo", side_effect=fake_sudo),
+        patch(
+            "blockchecks.engine.in_ns_workers.sp.run",
+            return_value=MagicMock(stdout='{"success": true, "latency_ms": 12}'),
+        ),
+    ):
+        _run_udp_check(
+            "bs-p0",
+            "fake:blob=discord_udp:repeats=6",
+            "35.217.48.152",
+            50004,
+            3.0,
+            coexist=True,
+        )
+    ipt = [c for c in sudo_calls if "iptables" in c]
+    assert ipt
+    dport_idx = ipt[-1].index("--dport")
+    assert ipt[-1][dport_idx + 1] == "50004"
+    assert "--queue-bypass" not in ipt[-1]
+    assert not any("-F" in c for c in sudo_calls)
+    assert written["min_procs"] == 2
+    assert any(
+        udp_filter_covers_port(ln.split("=", 1)[1], 50004)
+        for ln in written["text"].splitlines()
+        if ln.startswith("--filter-udp=")
+    )
+
+
+@pytest.mark.unit
+def test_run_udp_check_timeout_expired():
+    import subprocess as sp
+
+    with (
+        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
+        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch(
+            "blockchecks.engine.in_ns_workers.sp.run",
+            side_effect=sp.TimeoutExpired(cmd="probe", timeout=1),
+        ),
+    ):
+        data = _run_udp_check("bs-p0", "fake:blob=discord_udp:repeats=6", "1.2.3.4", 50006, 1.0)
+    assert data["success"] is False
+    assert "TimeoutExpired" in data["detail"]

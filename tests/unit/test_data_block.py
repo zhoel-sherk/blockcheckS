@@ -144,6 +144,28 @@ async def test_pass_strategies_upsert_updates(store: ProviderStore):
     assert rows[0]["latency_ms"] == 100
 
 
+@pytest.mark.asyncio
+async def test_pass_strategies_udp_does_not_clobber_tcp(store: ProviderStore):
+    await store.upsert_pass_strategy(
+        "fake:blob=stun:repeats=6",
+        "discord.com",
+        protocol="tcp",
+        latency_ms=70,
+        http_code=200,
+    )
+    await store.upsert_pass_strategy(
+        "fake:blob=discord_udp:repeats=6",
+        "35.217.5.42:50004",
+        protocol="udp",
+        latency_ms=12,
+    )
+    rows = await store.pass_strategies()
+    by_proto = {r["protocol"]: r for r in rows}
+    assert by_proto["tcp"]["domain"] == "discord.com"
+    assert by_proto["udp"]["domain"] == "35.217.5.42:50004"
+    assert by_proto["tcp"]["http_code"] == 200
+
+
 @pytest.mark.unit
 def test_best_config_write(store: ProviderStore):
     content = "# best config\n--lua-desync=fake\n"

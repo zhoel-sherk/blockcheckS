@@ -78,6 +78,30 @@ bc-nfconf --db state.db --limit 3 --out-dir output
 ./scripts/voice_smoke.sh
 ```
 
+## UDP vs Discord-UDP
+
+Три разных контура — не смешивать с HTTPS `curl` на `discord.com`:
+
+| Команда | Что тестирует |
+|---|---|
+| `bs udp -c configs/udp_voice__*.conf` | Только voice UDP (хост, без netns). STUN + IP Discovery. |
+| `bs pair --generate` | TCP curl × UDP voice. Дефолт `--udp-sources custom,standard_udp`. |
+| `bs full` | То же UDP-пул в конце прогона (`custom,standard_udp`). |
+
+Цель Discord-voice: `finland*.discord.gg` → GCP `35.217.*` UDP `50000–50100` (листы Maks-gaming). Проба — RFC5389 STUN, затем Discord IP Discovery 74B. `finland*.discord.media` — это TLS voice WS (Cloudflare), не этот пул.
+
+`udp_quic` / `udp_multiblob` живут в фазе HTTP/3 (`standard_quic`). Игровой UDP: `--udp-sources game` (`standard_udp_game`), не в Discord-дефолте.
+
+`bs udp` на хосте и `bs pair` в netns — разные стеки (один nfqws2 vs TCP q200 + UDP q201 coexist). PASS на хосте не гарантирует PASS в паре.
+
+```bash
+sudo bs udp -c configs/udp_voice__fake_r6.conf --discover-dns 2
+sudo bs pair -d discord.com --generate --udp-sources custom,standard_udp \
+  --ip 35.217.48.152 --port 50004 --udp-bypass --max 1
+```
+
+## Память / мониторинг
+
 Default `--parallel` comes from `BLOCKCHECKS_POOL` / `DEFAULT_POOL_SIZE` (usually 4).
 On hosts with `MemAvailable < ~1.5 GiB` the CLI default is soft-capped to **1**
 (override with an explicit `--parallel`).

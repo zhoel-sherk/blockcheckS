@@ -35,6 +35,7 @@ class MatrixGenerator:
         "byedpi": ByedpiMatrixGenerator,
         "standard": lambda: StandardGenerator(strategy_types=list(TCP_FAMILIES)),
         "standard_udp": lambda: StandardGenerator(strategy_types=list(UDP_VOICE_FAMILIES)),
+        "standard_udp_game": lambda: StandardGenerator(strategy_types=["udp_game"]),
         "standard_quic": lambda: StandardGenerator(strategy_types=list(QUIC_HTTP3_FAMILIES)),
         "standard_http": lambda: StandardGenerator(strategy_types=list(HTTP_FAMILIES)),
         "configs": ConfigFileGenerator,
@@ -147,8 +148,11 @@ class MatrixGenerator:
             self.register("user", UserMatrixGenerator(user_matrix))
             sources = ["user"]
 
-        # Map legacy "standard" on UDP path to voice-only source
-        sources = ["standard_udp" if s == "standard" else s for s in sources]
+        # Map legacy "standard" on UDP path to voice-only source;
+        # "game" is the explicit non-Discord UDP pool (not in defaults).
+        remap = {"standard": "standard_udp", "game": "standard_udp_game"}
+        sources = [remap.get(s, s) for s in sources]
+        proto_by_src = {"standard_udp_game": "udp_game"}
 
         all_items = []
         for src_name in sources:
@@ -156,7 +160,7 @@ class MatrixGenerator:
             gen = self._generators.get(src_name)
             if not gen:
                 continue
-            proto = "udp_voice"
+            proto = proto_by_src.get(src_name, "udp_voice")
             t1 = _time.perf_counter()
             items = await gen.generate(
                 protocol=proto,
@@ -176,6 +180,8 @@ class MatrixGenerator:
             if item.strategy in seen:
                 continue
             seen.add(item.strategy)
+            if item.protocol != "udp_voice":
+                item.protocol = "udp_voice"
             deduped.append(item)
         return deduped[:max_count]
 
