@@ -11,7 +11,7 @@ lua/
 ├── blockchecks/         # bridge-цепочка прогона (scan_bridge, write_ipc, init, geneva)
 └── custom/              # кастомные скрипты для экспорта на Keenetic/внешний хост
     ├── dupfake.lua      # dupfake: atomic multi-blob (winws fake+repeats аналог)
-    └── README.md        # как подключать, маппинг, export-комментарий --lua-custom1
+    └── README.md        # как подключать, маппинг, COPY + --lua-init
 ```
 
 `lua/blockchecks/`:
@@ -30,9 +30,9 @@ lua/
 
 `lua/custom/` — кастомные nfqws2 Lua-скрипты, которые выносите на
 роутер/внешний хост (например `dupfake.lua`). Экспорт конфигов
-(`bc-nfconf`, MCP `generate_router_config`) добавляет комментарий-ссылку
-`# --lua-custom1 " #Лежит в blockcheckS/lua/custom/<file>.lua`, если стратегия
-использует такую функцию. См. `lua/custom/README.md`.
+(`bc-nfconf`, MCP `generate_router_config`) добавляет `# COPY lua: <abs> ->
+/opt/etc/nfqws2/lua/<file>` и рабочий `--lua-init=@/opt/etc/nfqws2/lua/<file>`,
+если стратегия использует такую функцию. См. `lua/custom/README.md`.
 
 ## Backend map: что через Lua bridge, что через classic
 

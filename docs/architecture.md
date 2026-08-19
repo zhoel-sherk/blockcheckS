@@ -216,8 +216,13 @@ lookups. `--no-secure-dns` skips DoH.
 - `blockchecks.service.probe.invoke_curl_probe_worker`, `probe_request_dict`
 - `blockchecks.service.nfqws2.start_daemon`, `Nfqws2Manager`
 - `blockchecks.checkers.TlsResult`, `check_tls`
-- `conf_builder.build_keenetic_conf`, `build_raw_conf`
+- `conf_builder.build_keenetic_conf` (router), `build_raw_conf` (dpi-tester `@file`)
 - `engine.preset_paths.resolve_domain_preset`, `resolve_strategy_preset` (CLI re-exports)
+
+Keenetic export: `--filter-l7` is the flow protocol; `--payload` is the packet
+type and is sticky until the next `--payload=`. Circular uses inbound
+`--in-range=-s5556` (zapret2 manual / GP `keenetic_https.conf`). Raw conf is
+host-oriented (`BLOB_DIR`, `/opt/zapret2/lua`); do not copy it to the router.
 
 **Internal (do not import from outside):**
 

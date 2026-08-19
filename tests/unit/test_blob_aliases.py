@@ -26,6 +26,16 @@ def test_resolve_builtin_returns_none():
     assert resolve_blob_path("fake_default_tls", "/nonexistent") is None
 
 
+def test_blob_export_cli_line_uses_prefix_not_host():
+    from blockchecks.engine.blob_aliases import blob_export_cli_line
+
+    assert (
+        blob_export_cli_line("stun", "/opt/etc/nfqws2")
+        == "--blob=stun:@/opt/etc/nfqws2/blobs/stun.bin"
+    )
+    assert blob_export_cli_line("fake_default_tls", "/opt/etc/nfqws2") is None
+
+
 def test_resolve_quic_gv_from_fake_files(tmp_path):
     fake = tmp_path / "fake"
     fake.mkdir()

@@ -1,7 +1,7 @@
 # M4 / GP Keenetic dupfake strategies — requires lua/custom/dupfake.lua on host
 # (загрузка: BLOCKCHECKS_LUA_EXTRA=$PWD/lua/custom/dupfake.lua или
 #  --lua-init=@.../dupfake.lua после zapret-auto.lua на Keenetic).
-# Экспорт конфигов добавляет комментарий-ссылку # --lua-custom1 "...".
+# Экспорт: # COPY lua: …/dupfake.lua -> /opt/etc/nfqws2/lua/dupfake.lua
 #
 # Keenetic production (dupfake core, atomic multi-blob):
 dupfake:blob=stun+max_ru:repeats=6:tcp_ts=-1000

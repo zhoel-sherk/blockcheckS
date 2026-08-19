@@ -214,6 +214,12 @@ async def test_export_configs_writes_files(tmp_path):
     assert "ISP_INTERFACE" not in raw
     assert "stun" in keen
     assert "discord_udp" in keen
+    working = "\n".join(
+        ln for ln in keen.splitlines() if ln.strip() and not ln.lstrip().startswith("#")
+    )
+    assert "/home/" not in working
+    assert "--blob=stun:@/opt/etc/nfqws2/blobs/stun.bin" in working
+    assert (out / "blobs" / "stun.bin").is_file()
 
 
 @pytest.mark.asyncio

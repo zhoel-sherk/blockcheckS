@@ -115,14 +115,25 @@ Scale note: more workers = more netns×nfqws2 (already isolated). Raising
 `--parallel` on a Xeon is the first throughput lever; nftables vmap (B7) is for
 host-shared designs, not a prerequisite for `parallel > 4` under netns.
 
-`bs full` writes `output/nfqws2_<ts>.conf` (keenetic), `nfqws2_raw_<ts>.conf`,
-and `user.list`. ETA printed as `N_strat × N_domains / parallel`. Resume skips
+`bs full` / `bc-nfconf` write two confs plus a bundle (`user.list`, custom `blobs/` / `lua/`):
+
+- **keenetic** (`nfqws2_<ts>.conf`) — for the router. Working paths only
+  `/opt/etc/nfqws2/{blobs,lua,lists}`; host abs paths only in `# COPY …`.
+- **raw** (`nfqws2_raw_<ts>.conf`) — for **dpi-tester** (`--config`): flat
+  `nfqws2 @file` with `--lua-init=@/opt/zapret2/lua/…` and host blob paths.
+  Do not feed the keenetic/shell file to dpi-tester.
+
+`--filter-l7` selects the **flow** protocol (`tls`/`http`/`quic`); `--payload`
+selects the **packet** type and stays in effect until the next `--payload=`.
+
+ETA printed as `N_strat × N_domains / parallel`. Resume skips
 `(strategy, domain)` already in DB. STUN discover concurrency is capped at 4.
 
 **Экспорт с фильтрацией по IP (`bc-nfconf --ipset`)**: если роутер не
 перехватывает DNS, можно добавить IP-фильтр из кэша. Флаг `--ipset` возьмёт IPs
 из `data_block` DNS-кэша. Малые наборы будут встроены как `--ipset-ip ip1,ip2`,
-большие выгружены в файл `user.ipset`. Если доступна утилита `ip2net`, адреса
+большие — `# COPY ipset:` + `--ipset=@/opt/etc/nfqws2/lists/user.ipset` (файл
+кладётся в бандл `lists/user.ipset`). Если доступна утилита `ip2net`, адреса
 схлопнутся в CIDR.
 
 `--auto-discover N` — DNS bulk `finland{N}.discord.gg` (+ опционально gateway).

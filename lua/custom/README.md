@@ -32,23 +32,24 @@ bridge-цепочке прогона).
 # прогон с кастомным lua:
 BLOCKCHECKS_LUA_EXTRA=$PWD/lua/custom/dupfake.lua sudo -E bs scan -d youtube.com -M gp-custom-dupfake
 
-# экспорт: bc-nfconf добавит комментарий-ссылку в .conf:
-#   # --lua-custom1 " #Лежит в blockcheckS/lua/custom/dupfake.lua
+# экспорт: bc-nfconf пишет COPY-комментарий + рабочий --lua-init:
+#   # COPY lua: …/lua/custom/dupfake.lua -> /opt/etc/nfqws2/lua/dupfake.lua
+#   --lua-init=@/opt/etc/nfqws2/lua/dupfake.lua
 ```
 
-## Экспорт-комментарий `--lua-custom1`
+## Экспорт: COPY + `--lua-init`
 
 При экспорте конфигов (`bc-nfconf`, `bs full`, MCP `generate_router_config`)
-стратегия, использующая кастомную lua-функцию, получает комментарий-ссылку:
+стратегия с кастомной lua получает:
 
 ```conf
-# --lua-custom1 " #Лежит в blockcheckS/lua/custom/lua-custom1.lua
+# COPY lua: /home/…/blockcheckS/lua/custom/dupfake.lua -> /opt/etc/nfqws2/lua/dupfake.lua
+--lua-init=@/opt/etc/nfqws2/lua/dupfake.lua
 --lua-desync=dupfake:blob=tls_clienthello:repeats=6:tcp_ts=-1000
 ```
 
-Это **не флаг nfqws2** (он игнорирует `#`-строки), а подсказка для деплоя:
-где лежит нужный lua-скрипт. Маппинг функция → файл задаётся в
-`lua/custom/manifest.toml`.
+`# COPY` — откуда взять файл на скан-хосте. Рабочая строка — путь на роутере.
+Маппинг функция → файл задаётся в `lua/custom/manifest.toml`.
 
 ## Реестр кастомных lua (`manifest.toml`)
 

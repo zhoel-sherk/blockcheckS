@@ -767,10 +767,11 @@ end
 Подключение: `--lua-init=@.../dupfake.lua` после `zapret-auto.lua` (или
 `BLOCKCHECKS_LUA_EXTRA=$PWD/lua/custom/dupfake.lua`).
 
-Экспорт конфигов (`bc-nfconf`, MCP `generate_router_config`) добавляет
-комментарий-ссылку при стратегии с `dupfake:`:
+Экспорт конфигов (`bc-nfconf`, MCP `generate_router_config`) при стратегии с
+`dupfake:` пишет COPY-комментарий и рабочий `--lua-init`:
 ```conf
-# --lua-custom1 " #Лежит в blockcheckS/lua/custom/dupfake.lua
+# COPY lua: …/lua/custom/dupfake.lua -> /opt/etc/nfqws2/lua/dupfake.lua
+--lua-init=@/opt/etc/nfqws2/lua/dupfake.lua
 --lua-desync=dupfake:blob=tls_clienthello:repeats=6:tcp_ts=-1000
 ```
 
