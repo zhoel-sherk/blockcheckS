@@ -17,9 +17,7 @@ async def test_pair_parallel(mock_runner, monkeypatch):
     async def _save(strategy, domain, *, protocol, latency_ms, http_code):
         saved.append((strategy, domain, protocol))
 
-    monkeypatch.setattr(
-        "blockchecks.engine.async_runner._save_pass_strategy_data_block", _save
-    )
+    monkeypatch.setattr("blockchecks.engine.async_runner._save_pass_strategy_data_block", _save)
     tcp_res = TcpTestResult(
         item=StrategyItem(label="tcp_ok", strategy="fake:repeats=1"),
         domain="discord.com",

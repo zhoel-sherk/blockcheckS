@@ -15,6 +15,7 @@ def _get_rules() -> list[dict]:
     assert rules, "pyproject [tool.blockchecks.architecture.rules] is empty"
     return rules
 
+
 def _get_package() -> str:
     cfg = tool_section("tool", "blockchecks", "architecture")
     return cfg.get("package") or "blockchecks"

@@ -32,7 +32,9 @@ COMMON_SKIPS = [
 ]
 
 
-def _run(cmd: list[str], *, timeout: float = 120.0, input: str | None = None) -> subprocess.CompletedProcess:
+def _run(
+    cmd: list[str], *, timeout: float = 120.0, input: str | None = None
+) -> subprocess.CompletedProcess:
     """Run sudo bs ... in its own process group; kill tree on timeout."""
     proc = subprocess.Popen(
         ["sudo", "-n", *cmd],
@@ -63,53 +65,87 @@ def _clean_each(nfqws2_available):
 
 
 def test_e2e_tcp():
-    r = _run([
-        BS, "tcp",
-        "--domain", DOMAIN,
-        "--strategy", STRATEGY,
-        "--timeout", "8",
-        "--skip-deps-check",
-    ])
+    r = _run(
+        [
+            BS,
+            "tcp",
+            "--domain",
+            DOMAIN,
+            "--strategy",
+            STRATEGY,
+            "--timeout",
+            "8",
+            "--skip-deps-check",
+        ]
+    )
     # exit 0 when pass, 1 when no pass; both prove the pipeline ran
     assert r.returncode in (0, 1), r.stdout[-1000:]
 
 
 def test_e2e_scan_smoke():
-    matrix = "\n".join([
-        STRATEGY,
-        "fake:blob=max_ru:repeats=6:tcp_ts=-1000",
-        "hostfakesplit:nofake2:tcp_ts=-1000",
-    ])
-    r = _run([
-        BS, "scan",
-        "--db", "/tmp/e2e_scan.db",
-        "--domain", DOMAIN,
-        "--user-matrix", "-",
-        "--max", "3",
-        "--parallel", "2",
-        "--timeout", "8",
-        "--scan-level", "fast",
-        *COMMON_SKIPS,
-    ], timeout=180, input=matrix)
+    matrix = "\n".join(
+        [
+            STRATEGY,
+            "fake:blob=max_ru:repeats=6:tcp_ts=-1000",
+            "hostfakesplit:nofake2:tcp_ts=-1000",
+        ]
+    )
+    r = _run(
+        [
+            BS,
+            "scan",
+            "--db",
+            "/tmp/e2e_scan.db",
+            "--domain",
+            DOMAIN,
+            "--user-matrix",
+            "-",
+            "--max",
+            "3",
+            "--parallel",
+            "2",
+            "--timeout",
+            "8",
+            "--scan-level",
+            "fast",
+            *COMMON_SKIPS,
+        ],
+        timeout=180,
+        input=matrix,
+    )
     assert r.returncode in (0, 1), r.stdout[-1000:]
 
 
 def test_e2e_pair_smoke():
-    matrix = "\n".join([
-        STRATEGY,
-        "fake:blob=max_ru:repeats=6:tcp_ts=-1000",
-    ])
-    r = _run([
-        BS, "pair",
-        "--db", "/tmp/e2e_pair.db",
-        "--domain", DOMAIN,
-        "--user-matrix", "-",
-        "--max", "2",
-        "--parallel", "1",
-        "--timeout", "8",
-        "--scan-level", "fast",
-        *COMMON_SKIPS,
-    ], timeout=180, input=matrix)
+    matrix = "\n".join(
+        [
+            STRATEGY,
+            "fake:blob=max_ru:repeats=6:tcp_ts=-1000",
+        ]
+    )
+    r = _run(
+        [
+            BS,
+            "pair",
+            "--db",
+            "/tmp/e2e_pair.db",
+            "--domain",
+            DOMAIN,
+            "--user-matrix",
+            "-",
+            "--max",
+            "2",
+            "--parallel",
+            "1",
+            "--timeout",
+            "8",
+            "--scan-level",
+            "fast",
+            *COMMON_SKIPS,
+        ],
+        timeout=180,
+        input=matrix,
+    )
     assert r.returncode in (0, 1), r.stdout[-1000:]
 
 
@@ -118,12 +154,18 @@ def test_e2e_udp_config_skip(tmp_path):
     # gracefully (exit 0/1) rather than crashing.
     conf = tmp_path / "udp.conf"
     conf.write_text("--qnum=201\n--filter-udp=50000-50100\n--filter-l7=discord\n")
-    r = _run([
-        BS, "udp",
-        "--config", str(conf),
-        "--timeout", "5",
-        "--skip-deps-check",
-    ], timeout=120)
+    r = _run(
+        [
+            BS,
+            "udp",
+            "--config",
+            str(conf),
+            "--timeout",
+            "5",
+            "--skip-deps-check",
+        ],
+        timeout=120,
+    )
     assert r.returncode in (0, 1), r.stdout[-800:]
 
 
@@ -134,25 +176,40 @@ def test_e2e_composite(tmp_path):
         "--ipcache-lifetime=0\n--bind-fix4\n"
         f"--lua-desync={STRATEGY}\n"
     )
-    r = _run([
-        BS, "composite",
-        "--config", str(conf),
-        "--timeout", "8",
-        "--skip-deps-check",
-    ], timeout=180)
+    r = _run(
+        [
+            BS,
+            "composite",
+            "--config",
+            str(conf),
+            "--timeout",
+            "8",
+            "--skip-deps-check",
+        ],
+        timeout=180,
+    )
     assert r.returncode in (0, 1), r.stdout[-800:]
 
 
 def test_e2e_bench_settle():
-    r = _run([
-        BS, "bench-settle",
-        "--domain", DOMAIN,
-        "--strategy", STRATEGY,
-        "--settle-times", "0.5,1.0",
-        "--curl-timeouts", "1.0,2.0",
-        "--max-strategies", "1",
-        "--skip-deps-check",
-    ], timeout=180)
+    r = _run(
+        [
+            BS,
+            "bench-settle",
+            "--domain",
+            DOMAIN,
+            "--strategy",
+            STRATEGY,
+            "--settle-times",
+            "0.5,1.0",
+            "--curl-timeouts",
+            "1.0,2.0",
+            "--max-strategies",
+            "1",
+            "--skip-deps-check",
+        ],
+        timeout=180,
+    )
     assert r.returncode in (0, 1), r.stdout[-800:]
 
 
@@ -165,23 +222,37 @@ def test_e2e_full_smoke(tmp_path):
     dom_file = tmp_path / "domains.txt"
     dom_file.write_text(f"{DOMAIN}\n")
     db_file = tmp_path / "full.db"
-    r = _run([
-        BS, "full",
-        "--db", str(db_file),
-        "--domain", DOMAIN,
-        "--domains-file", str(dom_file),
-        "--tcp-sources", "standard",
-        "--max", "2",
-        "--parallel", "1",
-        "--timeout", "8",
-        "--scan-level", "fast",
-        "--no-http", "--no-quic", "--no-voice",
-        "--skip-deps-check",
-        "--skip-dns-audit",
-        "--skip-prolog",
-        "--skip-ip-block",
-        "--skip-port-block",
-        "--skip-baseline",
-        "--no-wssize",
-    ], timeout=180)
+    r = _run(
+        [
+            BS,
+            "full",
+            "--db",
+            str(db_file),
+            "--domain",
+            DOMAIN,
+            "--domains-file",
+            str(dom_file),
+            "--tcp-sources",
+            "standard",
+            "--max",
+            "2",
+            "--parallel",
+            "1",
+            "--timeout",
+            "8",
+            "--scan-level",
+            "fast",
+            "--no-http",
+            "--no-quic",
+            "--no-voice",
+            "--skip-deps-check",
+            "--skip-dns-audit",
+            "--skip-prolog",
+            "--skip-ip-block",
+            "--skip-port-block",
+            "--skip-baseline",
+            "--no-wssize",
+        ],
+        timeout=180,
+    )
     assert r.returncode in (0, 1), r.stdout[-1000:]

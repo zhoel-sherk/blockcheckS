@@ -711,10 +711,7 @@ class StandardGenerator(
             # Post-quantum ClientHello (2 TCP segments) → static numeric splits
             # land mid-record; keep only contextual markers (sni/sniext).
             if triage.prefer_contextual_split and triage.requires_postquantum_awareness:
-                return [
-                    it for it in items_in
-                    if not _static_numeric_split(it.strategy)
-                ]
+                return [it for it in items_in if not _static_numeric_split(it.strategy)]
             return items_in
 
         # (build happens below; both return paths apply _prune)
@@ -819,7 +816,6 @@ class StandardGenerator(
             return _prune(out[:max_count])
 
         return _prune(items[:max_count])
-
 
     # Aliases for todo / CLI naming (ipfrag_tcp / ipfrag_udp)
     _FAMILY_EXPANDERS = {

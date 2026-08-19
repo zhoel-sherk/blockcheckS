@@ -9,8 +9,6 @@ import signal
 from dataclasses import dataclass, field
 from typing import Any
 
-from colorama import Fore, Style
-
 from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.checkers.voice_dns import pair_log_domain, resolve_voice_targets
@@ -46,12 +44,7 @@ from blockchecks.engine.run_finalize import (
 )
 from blockchecks.engine.store import fingerprint_mismatch
 from blockchecks.engine.strategy_loader import StrategyLoader
-
-CYAN = Fore.CYAN
-GREEN = Fore.GREEN + Style.BRIGHT
-RED = Fore.RED + Style.BRIGHT
-YELLOW = Fore.YELLOW
-RESET = Style.RESET_ALL
+from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
 
 STANDARD_TCP_SOURCES = ("standard", "fake", "hostfake", "faked", "fake_multi", "fake_faked")
 
@@ -97,10 +90,10 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
             allow_unsafe=getattr(args, "allow_unsafe_domains", False),
         )
     except PresetPathError as e:
-        print(f"  {Fore.RED}ERROR: {e}{RESET}")
+        print(f"  {RED}ERROR: {e}{RESET}")
         return preset_domains, 1
     except FileNotFoundError:
-        print(f"  {Fore.YELLOW}Preset '{preset_name}' not found. Available:{RESET}")
+        print(f"  {YELLOW}Preset '{preset_name}' not found. Available:{RESET}")
         for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/domains", "*.txt"))):
             if os.path.basename(f) in RESERVED_DOMAIN_FILES:
                 continue
@@ -108,11 +101,11 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
         return preset_domains, 1
 
     preset_domains = loaded.domains
-    print(f"  {Fore.CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}")
+    print(f"  {CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}")
     if loaded.skipped:
         print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
     if not preset_domains:
-        print(f"  {Fore.RED}ERROR: preset empty after denylist (use --allow-unsafe-domains){RESET}")
+        print(f"  {RED}ERROR: preset empty after denylist (use --allow-unsafe-domains){RESET}")
         return preset_domains, 1
     auto_enable_gv_ggc(preset_domains)
     return preset_domains, None
@@ -121,7 +114,7 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
 def validate_pair_domain(args, preset_domains: list[str]) -> int | None:
     """Ensure a test domain is available; return exit code on error."""
     if not args.domain and not preset_domains:
-        print(f"{Fore.RED}ERROR: --domain or --preset required{RESET}")
+        print(f"{RED}ERROR: --domain or --preset required{RESET}")
         return 1
     if not args.domain and preset_domains:
         args.domain = preset_domains[0]
@@ -190,7 +183,7 @@ async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPrefl
         pins = load_pins(pin_path)
         if pins:
             print(
-                f"  {Fore.CYAN}[dns] pinned IPs from {pin_path}: "
+                f"  {CYAN}[dns] pinned IPs from {pin_path}: "
                 f"{', '.join(f'{d}={ip}' for d, ip in pins.items())}{RESET}"
             )
         if dns_cache is not None:
@@ -206,7 +199,7 @@ async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPrefl
         PreflightOptions.from_args(args, dns_cache=dns_cache, store=None),
     )
     if preflight.exit_code:
-        print(f"{Fore.RED}ERROR: preflight failed: {preflight.error}{RESET}")
+        print(f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")
         return DnsPreflightResult(dns_cache, dns_audits, exit_code=preflight.exit_code)
     if args.domain and args.domain in preflight.skip_domains and not getattr(args, "force", False):
         print(f"{YELLOW}Prolog: {args.domain} works without bypass — nothing to test{RESET}")
@@ -303,7 +296,7 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
         getattr(args, "auto_discover", None),
     )
     if mutex_err:
-        print(f"{Fore.RED}{mutex_err}{RESET}")
+        print(f"{RED}{mutex_err}{RESET}")
         return None, 1
 
     token = load_token()
@@ -405,10 +398,10 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
         try:
             sp_path = resolve_strategy_preset(strategy_preset)
         except PresetPathError as e:
-            print(f"  {Fore.RED}ERROR: {e}{RESET}")
+            print(f"  {RED}ERROR: {e}{RESET}")
             return StrategyLoadResult([], [], [], set(), error_code=1)
         except FileNotFoundError:
-            print(f"  {Fore.RED}ERROR: strategy preset '{strategy_preset}' not found{RESET}")
+            print(f"  {RED}ERROR: strategy preset '{strategy_preset}' not found{RESET}")
             return StrategyLoadResult([], [], [], set(), error_code=1)
         args.user_matrix = str(sp_path)
 
@@ -615,7 +608,9 @@ async def run_adaptive_pair_phase(
     )
 
     async def _resume_job(job):
-        return bool(args.resume and await db.has_tcp_result(job.item.label, job.domain))
+        return bool(
+            getattr(args, "resume", False) and await db.has_tcp_result(job.item.label, job.domain)
+        )
 
     queue, skipped = await build_adaptive_queue(
         tcp_items,
@@ -623,7 +618,7 @@ async def run_adaptive_pair_phase(
         db,
         epsilon=getattr(args, "adaptive_epsilon", 0.1),
         load_weights=not getattr(args, "no_adaptive_weights", False),
-        resume_check=_resume_job if args.resume else None,
+        resume_check=_resume_job if getattr(args, "resume", False) else None,
     )
     print(f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
     aq_result = await run_adaptive_tcp(

@@ -8,9 +8,9 @@ the full pool (incl. the new Geneva/Flowseal audit families).
 
 | Var | DB | Method | Key params |
 |---|---|---|---|
-| A | `logs/run_A_base.db` | Adaptive baseline | coverage.txt, bridge-batch 10, timeout 2, lua-bridge, `--adaptive --adaptive-epsilon 0.1` |
+| A | `logs/run_A_base.db` | Adaptive baseline | coverage.txt, bridge-batch 10, timeout 2, lua-bridge (AQ default ON since 1.3.1; scripts pass `--adaptive-epsilon 0.1` explicitly) |
 | B | `logs/run_B_new.db` | Full new pool | coverage.txt, `--max 30000`, timeout 2, `--scan-level full`, `geneva.lua` |
-| C | `logs/run_C_adaptive.db` | Adaptive + fan-out | `--fan-out --adaptive --adaptive-epsilon 0.1` |
+| C | `logs/run_C_adaptive.db` | Adaptive + fan-out | `--fan-out --adaptive-epsilon 0.1` (AQ + fan-out; `--adaptive` redundant — default ON) |
 | D | `logs/run_D_classic.db` | Classic backend | `--classic` (no lua-bridge) |
 | E | `logs/run_E_flowseal.db` | Flowseal-only | `--tcp-sources flowseal` |
 | F | `logs/run_F_stable.db` | Stable repeats | `--repeats 3 --repeats-mode stable` |
@@ -18,9 +18,14 @@ the full pool (incl. the new Geneva/Flowseal audit families).
 
 All runs:
 - domains: `presets/domains/coverage.txt` (~40)
+- **Profile shortcut (1.3.7):** `--profile 20h` bundles
+  `--scan-level full --resume --no-preflight --no-wssize --timeout 2.0
+  `--allow-dns-hijack --fan-out` (see [guide.md](guide.md#run-profiles-profile))
 - `--max-timeh 20 --resume --data-block-sync --parallel 4 --bridge-batch 10`
-- `--allow-dns-hijack --skip-prolog/ip-block/port-block --isp-interface eth3`
+- `--allow-dns-hijack --no-preflight --isp-interface eth3`
 - `--no-wssize --no-settle-profile --timeout 2` (все варианты)
+- Adaptive queue ON by default (`--no-adaptive` to disable); legacy `--adaptive`
+  flag kept as inverse alias only
 - PASS exported to `data_block/providers/<provider>/strategies.db` (`pass_strategies`)
 
 ## Launch

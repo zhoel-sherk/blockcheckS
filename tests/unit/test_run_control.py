@@ -113,10 +113,8 @@ def test_is_pid_alive_current():
 def test_read_active_run_stale_clears(run_lock_file, monkeypatch):
     import json
 
-
     run_lock_file.write_text(json.dumps({"pid": 99999999, "command": "scan"}))
-    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive",
-                        lambda pid: False)
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive", lambda pid: False)
     assert read_active_run() is None
     assert not run_lock_file.exists()
 
@@ -125,8 +123,7 @@ def test_request_stop_permission_denied(run_lock_file, monkeypatch):
     import json
 
     run_lock_file.write_text(json.dumps({"pid": 12345, "command": "scan"}))
-    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive",
-                        lambda pid: True)
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive", lambda pid: True)
 
     def _kill(pid, sig):
         raise PermissionError("denied")
@@ -141,8 +138,7 @@ def test_request_stop_stale_process(run_lock_file, monkeypatch):
     import json
 
     run_lock_file.write_text(json.dumps({"pid": 12345, "command": "scan"}))
-    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive",
-                        lambda pid: True)
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive", lambda pid: True)
 
     def _kill(pid, sig):
         raise ProcessLookupError
@@ -168,8 +164,7 @@ def test_request_stop_force_immediate_exit(run_lock_file, monkeypatch):
     import json
 
     run_lock_file.write_text(json.dumps({"pid": 12345, "command": "scan"}))
-    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive",
-                        lambda pid: True)
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive", lambda pid: True)
 
     def _kill(pid, sig):
         if sig == signal.SIGTERM:
@@ -177,8 +172,7 @@ def test_request_stop_force_immediate_exit(run_lock_file, monkeypatch):
         return None
 
     monkeypatch.setattr("blockchecks.service.run_control.os.kill", _kill)
-    monkeypatch.setattr("blockchecks.service.run_control.time.sleep",
-                        lambda s: None)
+    monkeypatch.setattr("blockchecks.service.run_control.time.sleep", lambda s: None)
     code, msg = request_graceful_stop(force=True, wait_sec=1.0)
     assert code == 2
     assert "Stale run lock" in msg

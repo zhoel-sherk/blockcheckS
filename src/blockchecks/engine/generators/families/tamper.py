@@ -169,9 +169,7 @@ class TamperFamiliesMixin:
             for r in family["repeats"]:
                 core = f"fake:blob={blob_name}:repeats={r}"
                 strat = f"--filter-udp={VOICE_UDP_FILTER}\n{core}"
-                self._add(
-                    items, seen, f"std_udp_{blob_name}_r{r}", strat, protocol="udp_voice"
-                )
+                self._add(items, seen, f"std_udp_{blob_name}_r{r}", strat, protocol="udp_voice")
                 if scan_level == "single":
                     return items
                 for ttl in family.get("ttl_static", []):

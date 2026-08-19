@@ -98,9 +98,7 @@ def test_result_errors_property() -> None:
 
 
 def test_validate_strategies_batch() -> None:
-    results = validate_strategies(
-        ["fake:blob=stun:repeats=6", "fake:repeats=6", ""]
-    )
+    results = validate_strategies(["fake:blob=stun:repeats=6", "fake:repeats=6", ""])
     assert len(results) == 3
     assert results[0].is_valid
     assert not results[1].is_valid

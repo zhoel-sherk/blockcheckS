@@ -20,7 +20,7 @@
 - 🏊 **Netns pool** — пресозданные изолированные namespace'ы
 - 🔬 **Preflight Triage** — детерминированный профиль DPI до скана (DNS/L3/SNI/
   stream-stall/QoS/QUIC/TLS-fingerprint) → отсечение бесполезных веток генераторов
-- 🧬 **Adaptive queue** — генетический буст PASS-стратегий по family/blob/traits
+- 🧬 **Adaptive queue** — ON по умолчанию; генетический буст PASS-стратегий по family/blob/traits
 - 🛰️ **`bs serve`** — резидентный on-the-fly probe server (Unix socket + HTTP)
 - 🧩 **`bs mcp`** — MCP-мост (FastMCP, stdio) для LLM-клиентов (Claude/Cursor/opencode)
 - 🧪 **Статический валидатор** — офлайн-проверка стратегий до netns (9+ правил,
@@ -87,10 +87,13 @@ sudo bs scan -d discord.com --generate --parallel 4
 # 1. Установка (editable, см. ниже почему)
 pip install -e ".[dev,discovery]"
 
-# 2. Первый скан — 29 стратегий на discord.com
+# 2. Быстрый smoke — 20 стратегий, AQ + preflight по умолчанию
+sudo bs scan -d discord.com --profile smoke --generate
+
+# 3. Полный скан — 29 стратегий на discord.com
 sudo bs scan -d discord.com --generate --parallel 4
 
-# 3. Продолжить после обрыва (checkpoint/resume)
+# 4. Продолжить после обрыва (checkpoint/resume)
 sudo bs scan -d discord.com --generate --resume
 ```
 
@@ -144,7 +147,7 @@ pytest -m "not integration"
 |---|---|---|
 | `bs scan` | Асинхронный TCP-батч | `sudo bs scan -d discord.com --generate --parallel 4` |
 | `bs pair` | TCP×UDP pair matrix | `sudo bs pair -d discord.com --generate --auto-discover 5` |
-| `bs full` | Масс-скан + экспорт (долгий) | `sudo bs full --parallel 4 --max-timeh 2` |
+| `bs full` | Масс-скан + экспорт (долгий) | `sudo bs full --profile 20h` |
 | `bs tcp` | Одна TCP-стратегия (sync) | `sudo bs tcp -d discord.com -c configs/simple_fake__fake_ts.conf` |
 | `bs udp` | Один UDP-конфиг (sync) | `sudo bs udp -c configs/udp_voice__fake_r6.conf` |
 | `bs composite` | Композитный TCP+UDP конфиг | `sudo bs composite -c configs/composite_discord.conf` |
@@ -153,10 +156,18 @@ pytest -m "not integration"
 | `bs mcp` | MCP-сервер (stdio) для LLM-клиентов | `bs-mcp` (см. [docs/mcp.md](docs/mcp.md)) |
 | `bc-nfconf` | Экспорт nfqws2-конфигов из БД (+`--ipset`) | `bc-nfconf --db state.db --out-dir output --ipset` |
 
-Флаги, которые стоит знать: `--resume`, `--preset`, `-M`, `--generate`,
-`--tcp-sources`, `--parallel`, `--max`, `--scan-level`, `--repeats`,
-`--disable-ech`, `--max-timeh`. Bare `--generate` (без значения) =
-`custom,configs`; явно: `--generate fake,configs`.
+**Профили прогона** (`--profile`): `smoke` (20 стратегий, quick preflight),
+`fast` (100, scan-level fast), `20h` (long-term серия: full + resume +
+fan-out). Работают в `scan`, `pair`, `full`.
+
+**Защитные фичи ON по умолчанию** (strict inversion — отключать явно):
+`--no-adaptive`, `--no-preflight` / `--quick`, `--no-ech`, `--no-wssize`,
+`--no-secure-dns`.
+
+Прочие флаги: `--resume`, `--preset`, `-M`, `--generate`, `--tcp-sources`,
+`--parallel`, `--max`, `--scan-level`, `--repeats`, `--max-timeh`.
+Bare `--generate` (без значения) = `custom,configs`; явно:
+`--generate fake,configs`.
 
 Подробный CLI reference: [docs/guide.md](docs/guide.md).
 

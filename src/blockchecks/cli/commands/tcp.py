@@ -2,24 +2,20 @@
 
 import asyncio
 
-from colorama import Fore, Style
-
 from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.engine.config import CONFIGS_DIR, SECURE_DNS_DEFAULT
 from blockchecks.engine.run_deadline import RunDeadline, parse_time_limit_seconds
 from blockchecks.engine.strategy_loader import StrategyLoader
 from blockchecks.engine.test_runner import TestRunner
-
-GREEN = Fore.GREEN + Style.BRIGHT
-RESET = Style.RESET_ALL
+from blockchecks.terminal import error
 
 
 def cmd_tcp(args):
     try:
         budget_sec = parse_time_limit_seconds(args)
     except ValueError as e:
-        print(f"ERROR: {e}")
+        error(str(e))
         return 1
 
     loader = StrategyLoader()
@@ -53,11 +49,11 @@ def cmd_tcp(args):
         if loaded is not None:
             break
     if loaded is None:
-        print("ERROR: specify --strategy, --config, --configs-dir, --file, or --test")
+        error("specify --strategy, --config, --configs-dir, --file, or --test")
         return 1
     strategies, mode = loaded
     if not strategies:
-        print("ERROR: no strategies loaded")
+        error("no strategies loaded")
         return 1
     print("\n  blockcheckS — TCP TLS test")
     print(f"  Domain: {args.domain}  Items: {len(strategies)}  Timeout: {args.timeout}s\n")

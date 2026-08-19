@@ -55,11 +55,15 @@ def get_manifest_path() -> Path:
 class TriageResult(BaseModel):
     domain: str
     l3_status: str = Field(description="L3 reachable, syn_ack, or icmp blocked")
-    fail_phase: str = Field(description="Primary failure phase (e.g. TLS_RST_AT_SNI, DATA_STALL_16K, PASS)")
+    fail_phase: str = Field(
+        description="Primary failure phase (e.g. TLS_RST_AT_SNI, DATA_STALL_16K, PASS)"
+    )
     client_hello_len: int = Field(description="Calculated ClientHello size in bytes")
     quic_blocked: bool = Field(description="True if QUIC Initial is dropped or rejected")
     dns_tampered: bool = Field(description="True if ISP tampered with DNS responses")
-    recommended_generators: list[str] = Field(description="Strategy families recommended for this target")
+    recommended_generators: list[str] = Field(
+        description="Strategy families recommended for this target"
+    )
 
 
 class ProbeResult(BaseModel):
@@ -77,7 +81,9 @@ class ProbeResult(BaseModel):
 class LuaIpcTrace(BaseModel):
     domain: str
     strategy: str
-    events: list[dict[str, Any]] = Field(description="Raw events drained from scan_bridge.lua IPC stream")
+    events: list[dict[str, Any]] = Field(
+        description="Raw events drained from scan_bridge.lua IPC stream"
+    )
     desync_applied: bool = False
     rst_in_detected: bool = False
     rst_in_ttl: int = 0
@@ -424,7 +430,9 @@ async def query_strategies(
     if status_key not in allowed:
         raise ValueError(f"Invalid status '{status}'. Allowed: {', '.join(sorted(allowed))}")
 
-    statuses = ("PASS", "THROTTLED") if status_key in ("PASS", "THROTTLED", "ALL") else (status_key,)
+    statuses = (
+        ("PASS", "THROTTLED") if status_key in ("PASS", "THROTTLED", "ALL") else (status_key,)
+    )
     limit = max(1, min(int(limit), 100))
 
     def _query() -> list[dict[str, Any]]:
@@ -497,7 +505,8 @@ async def get_presets(kind: str = "strategies") -> list[dict[str, Any]]:
             seen.add(name)
             try:
                 count = sum(
-                    1 for line in Path(f).read_text(encoding="utf-8", errors="replace").splitlines()
+                    1
+                    for line in Path(f).read_text(encoding="utf-8", errors="replace").splitlines()
                     if line.strip() and not line.strip().startswith("#")
                 )
             except OSError:
@@ -575,8 +584,10 @@ async def dbg_probe_raw(
     res = response.get("data", {})
     results = res.get("results") or []
     r = results[0] if results else res
-    status = "PASS" if (r.get("status") == "PASS" or r.get("success")) else (
-        "TIMEOUT" if r.get("fail_phase") == "connect_timeout" else "FAIL"
+    status = (
+        "PASS"
+        if (r.get("status") == "PASS" or r.get("success"))
+        else ("TIMEOUT" if r.get("fail_phase") == "connect_timeout" else "FAIL")
     )
     return ProbeResult(
         domain=domain,
@@ -613,7 +624,9 @@ async def dbg_inspect_lua_ipc(
     data = response.get("data", {})
     events = data.get("events", [])
     desync_applied = any(e.get("event") == "APPLIED" for e in events)
-    rst_in_events = [e for e in events if e.get("event") == "STRATEGY_FAIL" and e.get("reason") == "rst_in"]
+    rst_in_events = [
+        e for e in events if e.get("event") == "STRATEGY_FAIL" and e.get("reason") == "rst_in"
+    ]
 
     return LuaIpcTrace(
         domain=domain,
@@ -650,11 +663,7 @@ async def dbg_validate_strategy_syntax(
 
     # Unified semantics from engine.static_validator (single source of truth).
     result = validate_strategy(strategy_cli)
-    conflicts = [
-        i.message
-        for i in result.issues
-        if i.severity == "error"
-    ]
+    conflicts = [i.message for i in result.issues if i.severity == "error"]
     if not conflicts:
         conflicts = [i.message for i in result.issues if i.severity == "warning"]
 
@@ -735,7 +744,7 @@ async def get_zapret2_config(path: str | None = None) -> dict[str, Any]:
     if not cfg.is_file():
         cfg = root / "config.default"
     if not cfg.is_file():
-        return {"error": f"no config at {cfg} or {root/'config.default'}"}
+        return {"error": f"no config at {cfg} or {root / 'config.default'}"}
     try:
         text = cfg.read_text(encoding="utf-8", errors="replace")
     except OSError as err:
@@ -860,6 +869,7 @@ async def get_active_run_telemetry() -> str:
 # Server Entrypoint
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     """Runs the FastMCP server over standard I/O (STDIN/STDOUT)."""
     try:
@@ -868,8 +878,7 @@ def main() -> None:
         import sys
 
         print(
-            "Ошибка: зависимость 'mcp' не найдена.\n"
-            "Установите: pip install 'blockchecks[mcp]'",
+            "Ошибка: зависимость 'mcp' не найдена.\nУстановите: pip install 'blockchecks[mcp]'",
             file=sys.stderr,
         )
         sys.exit(1)

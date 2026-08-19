@@ -80,8 +80,10 @@ def test_probe_quic_pass(monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr("blockchecks.checkers.quic_raw.socket.socket",
-                        lambda *a, **k: FakeUdp() if a and a[1] == socket.SOCK_DGRAM else FakeIcmp())
+    monkeypatch.setattr(
+        "blockchecks.checkers.quic_raw.socket.socket",
+        lambda *a, **k: FakeUdp() if a and a[1] == socket.SOCK_DGRAM else FakeIcmp(),
+    )
     r = probe_quic_initial("1.2.3.4", 443, timeout=2, blob=b"x" * 1200, blob_name="test")
     assert r.phase == FailPhase.PASS
     assert r.response_received is True
@@ -112,8 +114,10 @@ def test_probe_quic_drop(monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr("blockchecks.checkers.quic_raw.socket.socket",
-                        lambda *a, **k: FakeUdp() if a and a[1] == socket.SOCK_DGRAM else FakeIcmp())
+    monkeypatch.setattr(
+        "blockchecks.checkers.quic_raw.socket.socket",
+        lambda *a, **k: FakeUdp() if a and a[1] == socket.SOCK_DGRAM else FakeIcmp(),
+    )
     r = probe_quic_initial("1.2.3.4", 443, timeout=1, blob=b"x" * 1200, blob_name="test")
     assert r.phase == FailPhase.QUIC_DROP
 
@@ -144,8 +148,10 @@ def test_probe_quic_icmp_port_unreachable(monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr("blockchecks.checkers.quic_raw.socket.socket",
-                        lambda *a, **k: FakeUdp() if a and a[1] == socket.SOCK_DGRAM else FakeIcmp())
+    monkeypatch.setattr(
+        "blockchecks.checkers.quic_raw.socket.socket",
+        lambda *a, **k: FakeUdp() if a and a[1] == socket.SOCK_DGRAM else FakeIcmp(),
+    )
     r = probe_quic_initial("1.2.3.4", 443, timeout=2, blob=b"x" * 1200, blob_name="test")
     assert r.phase == FailPhase.UDP_BLOCKED
     assert r.icmp_port_unreachable is True

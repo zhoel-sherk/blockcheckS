@@ -84,11 +84,10 @@ def test_tcp_no_source_returns_error():
 
 def test_tcp_no_strategies_loaded():
     args = _tcp_args()
-    with patch(
-        "blockchecks.cli.commands.tcp.StrategyLoader"
-    ) as LoaderCls, patch(
-        "blockchecks.cli.commands.tcp.prepare_dns_for_run"
-    ) as dns:
+    with (
+        patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
+    ):
         LoaderCls.return_value.from_string.return_value = []
         dns.return_value = (None, None, 0)
         rc = cmd_tcp(args)
@@ -97,11 +96,13 @@ def test_tcp_no_strategies_loaded():
 
 def test_tcp_strategy_source_runs_sequential():
     args = _tcp_args(strategy="fake:blob=stun:repeats=6:tcp_ts=-1000")
-    with patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls, patch(
-        "blockchecks.cli.commands.tcp.prepare_dns_for_run"
-    ) as dns, patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls, patch(
-        "blockchecks.data_block.provider.provider_name"
-    ), patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats:
+    with (
+        patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
+        patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
+        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats,
+    ):
         LoaderCls.return_value.from_string.return_value = ["fake:strategy"]
         dns.return_value = (MagicMock(), None, 0)
         repeats.return_value = (1, False, "fast", False)
@@ -114,11 +115,13 @@ def test_tcp_strategy_source_runs_sequential():
 
 def test_tcp_config_source_uses_configs_path():
     args = _tcp_args(config="/tmp/x.conf", strategy="")
-    with patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls, patch(
-        "blockchecks.cli.commands.tcp.prepare_dns_for_run"
-    ) as dns, patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls, patch(
-        "blockchecks.data_block.provider.provider_name"
-    ), patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats:
+    with (
+        patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
+        patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
+        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats,
+    ):
         LoaderCls.return_value.from_config.return_value = ["/tmp/x.conf"]
         dns.return_value = (MagicMock(), None, 0)
         repeats.return_value = (1, False, "fast", False)
@@ -130,11 +133,13 @@ def test_tcp_config_source_uses_configs_path():
 
 def test_tcp_fail_returns_1():
     args = _tcp_args()
-    with patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls, patch(
-        "blockchecks.cli.commands.tcp.prepare_dns_for_run"
-    ) as dns, patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls, patch(
-        "blockchecks.data_block.provider.provider_name"
-    ), patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats:
+    with (
+        patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
+        patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
+        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats,
+    ):
         LoaderCls.return_value.from_string.return_value = ["fake:strategy"]
         dns.return_value = (MagicMock(), None, 0)
         repeats.return_value = (1, False, "fast", False)
@@ -145,9 +150,11 @@ def test_tcp_fail_returns_1():
 
 def test_tcp_dns_error_short_circuits():
     args = _tcp_args()
-    with patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls, patch(
-        "blockchecks.cli.commands.tcp.prepare_dns_for_run"
-    ) as dns, patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls:
+    with (
+        patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
+        patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
+    ):
         LoaderCls.return_value.from_string.return_value = ["fake:strategy"]
         dns.return_value = (None, None, 3)
         rc = cmd_tcp(args)
@@ -159,11 +166,13 @@ def test_tcp_time_limit_prints_stopped():
     args = _tcp_args(max_timem=60)
     rep = _report(passed=1, n=3)
     rep.stopped_reason = "time_limit"
-    with patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls, patch(
-        "blockchecks.cli.commands.tcp.prepare_dns_for_run"
-    ) as dns, patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls, patch(
-        "blockchecks.data_block.provider.provider_name"
-    ), patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats:
+    with (
+        patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
+        patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
+        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats,
+    ):
         LoaderCls.return_value.from_string.return_value = ["fake:a", "fake:b", "fake:c"]
         dns.return_value = (MagicMock(), None, 0)
         repeats.return_value = (1, False, "fast", False)
@@ -201,9 +210,10 @@ def test_udp_no_source_returns_1():
 
 def test_udp_empty_configs_returns_1():
     args = _udp_args(configs_dir="/tmp/cfg")
-    with patch("blockchecks.cli.commands.udp.check_discover_mutex") as mutex, patch(
-        "blockchecks.cli.commands.udp.StrategyLoader"
-    ) as LoaderCls:
+    with (
+        patch("blockchecks.cli.commands.udp.check_discover_mutex") as mutex,
+        patch("blockchecks.cli.commands.udp.StrategyLoader") as LoaderCls,
+    ):
         mutex.return_value = None
         LoaderCls.return_value.from_config_dir.return_value = []
         rc = cmd_udp(args)
@@ -212,11 +222,12 @@ def test_udp_empty_configs_returns_1():
 
 def test_udp_static_ip_runs_udp_probe():
     args = _udp_args(configs_dir="/tmp/cfg")
-    with patch("blockchecks.cli.commands.udp.check_discover_mutex") as mutex, patch(
-        "blockchecks.cli.commands.udp.StrategyLoader"
-    ) as LoaderCls, patch("blockchecks.cli.commands.udp.TestRunner") as RunnerCls, patch(
-        "blockchecks.cli.commands.udp.resolve_voice_targets"
-    ) as resolve:
+    with (
+        patch("blockchecks.cli.commands.udp.check_discover_mutex") as mutex,
+        patch("blockchecks.cli.commands.udp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.udp.TestRunner") as RunnerCls,
+        patch("blockchecks.cli.commands.udp.resolve_voice_targets") as resolve,
+    ):
         mutex.return_value = None
         LoaderCls.return_value.from_config_dir.return_value = ["/tmp/cfg/udp_a.conf"]
         resolve.return_value = [("162.159.137.1", 50004)]
@@ -228,13 +239,13 @@ def test_udp_static_ip_runs_udp_probe():
 
 def test_udp_discover_dns_fallback_on_error():
     args = _udp_args(configs_dir="/tmp/cfg", ip="162.159.137.1", discover_dns=2)
-    with patch("blockchecks.cli.commands.udp.check_discover_mutex") as mutex, patch(
-        "blockchecks.cli.commands.udp.StrategyLoader"
-    ) as LoaderCls, patch("blockchecks.cli.commands.udp.TestRunner") as RunnerCls, patch(
-        "blockchecks.cli.commands.udp.resolve_voice_targets"
-    ) as resolve, patch(
-        "blockchecks.cli.commands.udp.discover_dns_alive"
-    ) as discover:
+    with (
+        patch("blockchecks.cli.commands.udp.check_discover_mutex") as mutex,
+        patch("blockchecks.cli.commands.udp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.udp.TestRunner") as RunnerCls,
+        patch("blockchecks.cli.commands.udp.resolve_voice_targets") as resolve,
+        patch("blockchecks.cli.commands.udp.discover_dns_alive") as discover,
+    ):
         mutex.return_value = None
         LoaderCls.return_value.from_config_dir.return_value = ["/tmp/cfg/udp_a.conf"]
         discover.side_effect = RuntimeError("no network")
@@ -250,13 +261,13 @@ def test_udp_discover_dns_fallback_on_error():
 
 def test_udp_auto_discover_uses_discover_multiple():
     args = _udp_args(configs_dir="/tmp/cfg", ip="35.217.5.42", auto_discover=3)
-    with patch("blockchecks.cli.commands.udp.check_discover_mutex") as mutex, patch(
-        "blockchecks.cli.commands.udp.StrategyLoader"
-    ) as LoaderCls, patch("blockchecks.cli.commands.udp.TestRunner") as RunnerCls, patch(
-        "blockchecks.cli.commands.udp.resolve_voice_targets"
-    ) as resolve, patch(
-        "blockchecks.checkers.voice_discovery.discover_multiple"
-    ) as discover_multiple:
+    with (
+        patch("blockchecks.cli.commands.udp.check_discover_mutex") as mutex,
+        patch("blockchecks.cli.commands.udp.StrategyLoader") as LoaderCls,
+        patch("blockchecks.cli.commands.udp.TestRunner") as RunnerCls,
+        patch("blockchecks.cli.commands.udp.resolve_voice_targets") as resolve,
+        patch("blockchecks.checkers.voice_discovery.discover_multiple") as discover_multiple,
+    ):
         mutex.return_value = None
         LoaderCls.return_value.from_config_dir.return_value = ["/tmp/cfg/udp_a.conf"]
         discover_multiple.return_value = [{"ip": "1.2.3.4", "port": 50001, "method": "x"}]

@@ -2,8 +2,6 @@
 
 import asyncio
 
-from colorama import Fore, Style
-
 from blockchecks.checkers.voice_dns import (
     check_discover_mutex,
     discover_dns_alive,
@@ -13,11 +11,7 @@ from blockchecks.checkers.voice_dns import (
 from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
 from blockchecks.engine.strategy_loader import StrategyLoader
 from blockchecks.engine.test_runner import TestRunner
-
-CYAN = Fore.CYAN
-GREEN = Fore.GREEN + Style.BRIGHT
-YELLOW = Fore.YELLOW
-RESET = Style.RESET_ALL
+from blockchecks.terminal import CYAN, GREEN, RESET, YELLOW, error
 
 
 def cmd_udp(args):
@@ -35,10 +29,10 @@ def cmd_udp(args):
     elif args.configs_dir:
         configs = loader.from_config_dir(args.configs_dir)
     else:
-        print("ERROR: specify --config or --configs-dir")
+        error("specify --config or --configs-dir")
         return 1
     if not configs:
-        print("ERROR: no configs loaded")
+        error("no configs loaded")
         return 1
 
     voice_ip = args.ip

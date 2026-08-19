@@ -74,8 +74,9 @@ def strategy_traits(strategy: str) -> tuple[str, ...]:
 
     for m in re.finditer(r"repeats=(\d+)", strategy):
         add(f"r{m.group(1)}")
-    for m in re.finditer(r"(tcp_ts|tcp_md5|badsid|badseq|badsum|seqovl|ip_ttl|tcp_seq|tcp_ack)",
-                         strategy):
+    for m in re.finditer(
+        r"(tcp_ts|tcp_md5|badsid|badseq|badsum|seqovl|ip_ttl|tcp_seq|tcp_ack)", strategy
+    ):
         add(f"fool:{m.group(1)}")
     for m in re.finditer(r"ttl=(\d+)", strategy):
         t = int(m.group(1))
@@ -86,8 +87,11 @@ def strategy_traits(strategy: str) -> tuple[str, ...]:
     for m in re.finditer(r"ip_ttl=(\d+)", strategy):
         add(f"ipttl{m.group(1)}")
     # desync technique family names embedded in the strategy string
-    for m in re.finditer(r"(hostfakesplit|fakedsplit|fakeddisorder|multisplit|multidisorder|"
-                         r"tlsrec|oob|syndata|pktmod|send|dupfake)", strategy):
+    for m in re.finditer(
+        r"(hostfakesplit|fakedsplit|fakeddisorder|multisplit|multidisorder|"
+        r"tlsrec|oob|syndata|pktmod|send|dupfake)",
+        strategy,
+    ):
         add(f"tec:{m.group(1)}")
     return tuple(traits)
 
@@ -307,11 +311,7 @@ class AdaptiveJobQueue:
             return None
         exclude = exclude_domains or set()
 
-        if (
-            self.epsilon > 0
-            and self._rng.random() < self.epsilon
-            and len(self._pending) > 1
-        ):
+        if self.epsilon > 0 and self._rng.random() < self.epsilon and len(self._pending) > 1:
             keys = list(self._pending.keys())
             for key in keys:
                 if self._pending[key].domain not in exclude:

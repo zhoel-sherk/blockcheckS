@@ -101,10 +101,16 @@ _PHASE_PATTERNS: tuple[tuple[FailPhase, re.Pattern], ...] = (
     (FailPhase.DELAYED_FIN, re.compile(r"fin after|fin_ack|fake fin", re.I)),
     (FailPhase.DNS_RESOLVE, re.compile(r"Could not resolve|Failed to resolve|getaddrinfo", re.I)),
     (FailPhase.DNS_TAMPERED, re.compile(r"TAMPERED|dns.*mismatch", re.I)),
-    (FailPhase.DNS_SINKHOLE, re.compile(r"sinkhole|bogon|reserved ip|198\.18\.|127\.0\.0\.1", re.I)),
+    (
+        FailPhase.DNS_SINKHOLE,
+        re.compile(r"sinkhole|bogon|reserved ip|198\.18\.|127\.0\.0\.1", re.I),
+    ),
     (FailPhase.CONNECT_TIMEOUT, re.compile(r"timed? ?out|timeout after|Operation timed out", re.I)),
     (FailPhase.CONNECT_REFUSED, re.compile(r"Connection refused|ECONNREFUSED", re.I)),
-    (FailPhase.TLS_RST_AT_SNI, re.compile(r"Recv failure|Connection reset|RST|WRONG_VERSION", re.I)),
+    (
+        FailPhase.TLS_RST_AT_SNI,
+        re.compile(r"Recv failure|Connection reset|RST|WRONG_VERSION", re.I),
+    ),
     (FailPhase.TLS_SILENT_DROP_AFTER_SNI, re.compile(r"no data|silent|frozen|stalled", re.I)),
     (FailPhase.TLS_HANDSHAKE_ERROR, re.compile(r"SSL routines|TLS|handshake", re.I)),
     (FailPhase.HTTP_REDIRECT, re.compile(r"suspicious redirect", re.I)),

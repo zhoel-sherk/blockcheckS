@@ -380,7 +380,8 @@ def _googlevideo_follow_request(req: CurlProbeRequest, location: str) -> CurlPro
     host = (urlparse(target).hostname or "").lower()
     if "googlevideo" not in host:
         return None
-    return CurlProbeRequest(        domain=req.domain,
+    return CurlProbeRequest(
+        domain=req.domain,
         timeout=req.timeout,
         resolved_ip=None,
         resolve_name=host,
@@ -623,10 +624,7 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     if is_http:
         status_ok = 200 <= resp.status_code < 400
     else:
-        status_ok = (
-            200 <= resp.status_code < 400
-            or resp.status_code in {401, 403, 404}
-        )
+        status_ok = 200 <= resp.status_code < 400 or resp.status_code in {401, 403, 404}
     throttled = False
     success = False
     if status_ok and (content_ok or small_body_ok) and not dpi_fake:
@@ -980,9 +978,7 @@ def run_tls_profile_probe(
         res.client_hello_len = TLS_PROFILE_CH_LEN.get("chrome124", 0)
     # Fingerprint-blocked: chrome fails but a lighter browser passes.
     chrome_ok = res.profile_pass.get("chrome124", False)
-    others_ok = any(
-        res.profile_pass.get(p, False) for p in ("firefox_120", "safari_17")
-    )
+    others_ok = any(res.profile_pass.get(p, False) for p in ("firefox_120", "safari_17"))
     bare_ok = res.profile_pass.get("bare_curl", False)
     if not chrome_ok and (others_ok or bare_ok):
         res.is_fingerprint_blocked = True

@@ -24,9 +24,11 @@ async def test_runner_test_tcp_wssize_retry(mock_runner, monkeypatch):
     mock_runner.try_wssize = True
     monkeypatch.setattr(
         "blockchecks.engine.async_runner._run_tcp_check",
-        lambda *a, **k: {"success": False, "http_code": 0}
-        if not any("wssize" in str(x) for x in a)
-        else {"success": True, "http_code": 200},
+        lambda *a, **k: (
+            {"success": False, "http_code": 0}
+            if not any("wssize" in str(x) for x in a)
+            else {"success": True, "http_code": 200}
+        ),
     )
     r = await mock_runner.test_tcp(_item(), "discord.com", timeout=5.0)
     assert r.success is True
@@ -36,9 +38,7 @@ async def test_runner_test_tcp_domains(mock_runner, monkeypatch):
     def fake_multi(ns, strategy, domains, timeout, **kw):
         return {d: {"success": True, "http_code": 200, "latency_ms": 5.0} for d in domains}
 
-    monkeypatch.setattr(
-        "blockchecks.engine.async_runner._run_tcp_check_multi", fake_multi
-    )
+    monkeypatch.setattr("blockchecks.engine.async_runner._run_tcp_check_multi", fake_multi)
     results = await mock_runner.test_tcp_domains(
         _item(), ["discord.com", "discord.gg"], timeout=5.0
     )
@@ -65,9 +65,7 @@ async def test_runner_test_udp(mock_runner, monkeypatch):
     async def _save(strategy, domain, *, protocol, latency_ms, http_code):
         saved.append((strategy, domain, protocol, latency_ms))
 
-    monkeypatch.setattr(
-        "blockchecks.engine.async_runner._save_pass_strategy_data_block", _save
-    )
+    monkeypatch.setattr("blockchecks.engine.async_runner._save_pass_strategy_data_block", _save)
     r = await mock_runner.test_udp(_item(), "35.217.5.42", 50006, timeout=3.0)
     assert r.success is True
     assert saved == [(_item().strategy, "35.217.5.42:50006", "udp", 8.0)]

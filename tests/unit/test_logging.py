@@ -99,7 +99,9 @@ def test_write_run_summary_reclaims_file(tmp_path, monkeypatch):
 
     out = write_run_summary(str(tmp_path), {"a": 1, "command": "full"})
     assert Path(out).is_file()
-    assert (Path(out).resolve(), 1000, 1000) in [ (str_path, u, g) for str_path, u, g in called ] or True
+    assert (Path(out).resolve(), 1000, 1000) in [
+        (str_path, u, g) for str_path, u, g in called
+    ] or True
     # at minimum the file was written and no exception raised
     payload = json.loads(Path(out).read_text(encoding="utf-8"))
     assert payload["command"] == "full"

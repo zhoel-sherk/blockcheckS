@@ -27,7 +27,17 @@ HOSTS = ["www.google.com", "ya.ru", "ozon.ru"]
 SNI_LIST = ["www.google.com", "fonts.google.com", "ya.ru"]
 TLS_MOD_NONE = "tls_mod=none"
 
-_TCP_PREFERRED = ("stun", "stun2", "max_ru", "google", "4pda", "tls_vk", "tls_5ka", "tls_funpay", "tls_rzd")
+_TCP_PREFERRED = (
+    "stun",
+    "stun2",
+    "max_ru",
+    "google",
+    "4pda",
+    "tls_vk",
+    "tls_5ka",
+    "tls_funpay",
+    "tls_rzd",
+)
 _QUIC_PREFERRED = (
     "quic_google",
     "quic_dbank",

@@ -28,9 +28,7 @@ def _netns_list() -> list[str]:
 
 
 def _nfqws2_pids() -> list[int]:
-    r = subprocess.run(
-        ["pgrep", "-x", "nfqws2"], capture_output=True, text=True, timeout=10
-    )
+    r = subprocess.run(["pgrep", "-x", "nfqws2"], capture_output=True, text=True, timeout=10)
     if r.returncode != 0:
         return []
     return [int(x) for x in r.stdout.split()]
@@ -45,9 +43,7 @@ def _veth_of(ns_name: str) -> list[str]:
     )
     if r.returncode != 0:
         return []
-    return [
-        ln.split()[1].rstrip(":") for ln in r.stdout.splitlines() if ns_name in ln
-    ]
+    return [ln.split()[1].rstrip(":") for ln in r.stdout.splitlines() if ns_name in ln]
 
 
 def test_netns_pool_no_leak_on_abort(nfqws2_available):
@@ -77,14 +73,29 @@ def test_netns_pool_no_leak_on_abort(nfqws2_available):
     nfqws2_ran = False
     try:
         _sudo(
-            "ip", "netns", "exec", name, "iptables",
-            "-A", "OUTPUT", "-p", "tcp", "--dport", "443",
-            "-j", "NFQUEUE", "--queue-num", str(NFQUEUE_TCP), "--queue-bypass",
+            "ip",
+            "netns",
+            "exec",
+            name,
+            "iptables",
+            "-A",
+            "OUTPUT",
+            "-p",
+            "tcp",
+            "--dport",
+            "443",
+            "-j",
+            "NFQUEUE",
+            "--queue-num",
+            str(NFQUEUE_TCP),
+            "--queue-bypass",
         )
         start_daemon(name, str(cfg), settle_max=2.0, settle_poll=0.2)
         r = subprocess.run(
             ["sudo", "-n", "ip", "netns", "exec", name, "pgrep", "-x", "nfqws2"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         nfqws2_ran = r.returncode == 0 and r.stdout.strip()
     except Exception:

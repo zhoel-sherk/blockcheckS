@@ -68,12 +68,15 @@ def test_sni_block_detected_when_blocked_sni_on_clean_ip():
     cache.primary_ip.return_value = "1.2.3.4"
     cache.resolve.return_value = ["5.6.7.8", "9.9.9.9"]
 
-    with patch("blockchecks.checkers.ip_block.check_tls", side_effect=[
-        clean,  # baseline
-        blocked_sni_ok,  # blocked SNI @ clean IP
-        unblocked_sni_fail,  # unblocked SNI @ blocked IP
-        unblocked_sni_fail,
-    ]):
+    with patch(
+        "blockchecks.checkers.ip_block.check_tls",
+        side_effect=[
+            clean,  # baseline
+            blocked_sni_ok,  # blocked SNI @ clean IP
+            unblocked_sni_fail,  # unblocked SNI @ blocked IP
+            unblocked_sni_fail,
+        ],
+    ):
         report = run_ip_block_cross_test("blocked.com", "ref.com", dns_cache=cache)
     assert report.sni_block_likely
     assert report.ip_block_on == ["5.6.7.8", "9.9.9.9"]

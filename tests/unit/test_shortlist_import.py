@@ -26,16 +26,10 @@ def _shortlist(**over):
         "source_db": "test.db",
         "generated_at": "2026-01-01",
         "domains": ["discord.com"],
-        "tcp": [
-            {"label": "s1", "strategy": "fake:blob=stun:repeats=6", "latency_ms": 42.0}
-        ],
-        "udp": [
-            {"label": "u1", "strategy": "fake:blob=discord_udp:repeats=6", "latency_ms": 10.0}
-        ],
+        "tcp": [{"label": "s1", "strategy": "fake:blob=stun:repeats=6", "latency_ms": 42.0}],
+        "udp": [{"label": "u1", "strategy": "fake:blob=discord_udp:repeats=6", "latency_ms": 10.0}],
         "quic": [],
-        "common_tcp": [
-            {"strategy": "hostfakesplit:nofake2", "domains_pass": ["a.com"]}
-        ],
+        "common_tcp": [{"strategy": "hostfakesplit:nofake2", "domains_pass": ["a.com"]}],
     }
     data.update(over)
     return data
@@ -110,8 +104,9 @@ def test_import_shortlist_sync(tmp_path):
     p = tmp_path / "s.json"
     p.write_text(json.dumps(_shortlist()))
     out = tmp_path / "out"
-    with patch("blockchecks.shortlist_import.write_shortlist_presets",
-               return_value={"tls12": "x.txt"}):
+    with patch(
+        "blockchecks.shortlist_import.write_shortlist_presets", return_value={"tls12": "x.txt"}
+    ):
         result = import_shortlist(p, out_dir=str(out))
     assert result["presets"] == {"tls12": "x.txt"}
 
@@ -123,9 +118,9 @@ def test_import_shortlist_seeds_db(tmp_path):
     db.log_tcp = AsyncMock()
     db.log_udp = AsyncMock()
     db.init = AsyncMock()
-    with patch("blockchecks.shortlist_import.write_shortlist_presets",
-               return_value={}), patch(
-        "blockchecks.shortlist_import.open_run_store", return_value=db
+    with (
+        patch("blockchecks.shortlist_import.write_shortlist_presets", return_value={}),
+        patch("blockchecks.shortlist_import.open_run_store", return_value=db),
     ):
         result = import_shortlist(p, db_path="x.db", seed_db=True)
     assert result["seeded_rows"] == 2
@@ -137,8 +132,7 @@ def test_import_shortlist_seeds_db(tmp_path):
 def test_import_shortlist_async(tmp_path):
     p = tmp_path / "s.json"
     p.write_text(json.dumps(_shortlist()))
-    with patch("blockchecks.shortlist_import.write_shortlist_presets",
-               return_value={}):
+    with patch("blockchecks.shortlist_import.write_shortlist_presets", return_value={}):
         result = _run(import_shortlist_async(p))
     assert result["schema"] == SCHEMA
 
@@ -149,8 +143,7 @@ def test_import_shortlist_async(tmp_path):
 def test_main_ok(tmp_path):
     p = tmp_path / "s.json"
     p.write_text(json.dumps(_shortlist()))
-    with patch("blockchecks.shortlist_import.write_shortlist_presets",
-               return_value={"tls12": "x"}):
+    with patch("blockchecks.shortlist_import.write_shortlist_presets", return_value={"tls12": "x"}):
         rc = main(["-i", str(p)])
     assert rc == 0
 

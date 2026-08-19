@@ -150,8 +150,11 @@ def test_run_tcp_check_all_ips_fail():
         patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
     ):
         data = _run_tcp_check(
-            "bs-p0", "fake:blob=stun:repeats=6:tcp_ts=-1000", "discord.com",
-            timeout=5.0, resolved_ips=["1.1.1.1", "2.2.2.2"],
+            "bs-p0",
+            "fake:blob=stun:repeats=6:tcp_ts=-1000",
+            "discord.com",
+            timeout=5.0,
+            resolved_ips=["1.1.1.1", "2.2.2.2"],
         )
     assert data["success"] is False
     assert data["used_ip"] == "2.2.2.2"  # last attempted
@@ -178,7 +181,11 @@ def test_run_tcp_check_config_path():
             patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
         ):
             data = _run_tcp_check(
-                "bs-p0", conf, "discord.com", timeout=5.0, is_config=True,
+                "bs-p0",
+                conf,
+                "discord.com",
+                timeout=5.0,
+                is_config=True,
                 extra_lua_desync="hostfakesplit:nofake2:repeats=1",
             )
         assert data["success"] is True
@@ -196,7 +203,9 @@ def test_run_quic_check_success():
         patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
-            return_value=MagicMock(stdout='{"success": true, "http_code": 0, "http_version": "HTTP/3"}'),
+            return_value=MagicMock(
+                stdout='{"success": true, "http_code": 0, "http_version": "HTTP/3"}'
+            ),
         ),
     ):
         data = _run_quic_check("bs-p0", "fake:blob=quic_initial:repeats=11", "discord.com", 5.0)
@@ -242,7 +251,9 @@ def test_run_udp_check_success():
         patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
-            return_value=MagicMock(stdout='{"success": true, "latency_ms": 30, "detail": "ok", "method": "rfc5389"}'),
+            return_value=MagicMock(
+                stdout='{"success": true, "latency_ms": 30, "detail": "ok", "method": "rfc5389"}'
+            ),
         ),
     ):
         data = _run_udp_check("bs-p0", "fake:blob=discord_udp:repeats=6", "35.217.5.42", 50006, 3.0)

@@ -4,6 +4,16 @@
 
 Приоритеты: **P1** = matrix/speed/protocol gaps; **P2** = voice/GP integration; **P3** = learned bandit + service layer.
 
+### Closed in 1.3.7
+
+- [x] CLI modernization: protective features ON by default (AQ, preflight, ECH, wssize, secure DNS)
+- [x] Inverse flags: `--no-adaptive`, `--no-preflight`, `--quick`, `--no-ech` (`--disable-ech` alias), `--no-wssize`
+- [x] Unified `add_campaign_args()` synchronized across `scan`, `pair`, `full`
+- [x] Run profiles: `--profile smoke|fast|20h` (`cli/profiles.py`)
+- [x] Typed execution: `RunSpec` + `CampaignContext` (`engine/run_spec.py`)
+- [x] Centralized terminal formatting (`terminal.py`: `supports_color`, `C`, semantic helpers)
+- [x] Variant G (Discord-voice UDP long-term run); docs + `run_variant.sh G`
+
 ### Closed in 1.0.2
 
 - [x] XDG audit: paths priority docs, out_dir finalize, DATA_DIR export/shortlists, subprocess_env
@@ -327,15 +337,14 @@ fanout = transfer, provider-preflight = cold-start prior). Цель старых
 
 ### Fixes (priority order)
 
-#### P0-1 — Disable wssize retry by default for full scans
-**Файл:** `src/blockchecks/engine/async_runner.py:821-845`  
-**Влияние:** **1.7–2.0×** (каждый FAIL-тест идёт один раз, а не два)  
-**План:**
-- [x] Добавить `--no-wssize` / `--wssize` флаг в CLI parser (оба `pair` и `full`)
-- [x] В `async_runner.py` guard: `if try_wssize and not args.no_wssize: ...`
-- [x] В `main_phases.py:413` и `pair_phases.py:186`: `try_wssize = not getattr(args, "no_wssize", False) and protocol == "tls12"`
-- [x] Дефолт для `bs full`: `--no-wssize` (без retry — full-скану важна скорость, wssize можно протестировать отдельным скан-левелом)
-- [x] Дефолт для `bs pair` / `bs scan`: `--wssize` оставить (короткие сканы, качество важнее скорости)
+#### P0-1 — Wssize fallback default (standardized 1.3.7)
+**Файл:** `src/blockchecks/engine/async_runner.py`, `add_campaign_args()`  
+**Влияние:** **1.7–2.0×** on FAIL-heavy full scans when wssize retry is active  
+**Статус (1.3.7):**
+- [x] `--no-wssize` / wssize ON by default on `scan`, `pair`, and `full` (unified via `add_campaign_args`)
+- [x] `try_wssize = not args.no_wssize` in `RunSpec.from_args` / async_runner
+- [x] Long-term series and `--profile 20h` pass `--no-wssize` for speed
+- [x] Short scans: wssize ON by default; disable with `--no-wssize` when speed matters
 
 #### P0-2 — Inline curl probe вместо subprocess
 **Файлы:** `src/blockchecks/engine/probe.py:29-62`, `async_runner.py:444,576`  
@@ -363,20 +372,19 @@ fanout = transfer, provider-preflight = cold-start prior). Цель старых
 - [x] `BLOCKCHECKS_NFQWS2_SETTLE_POLL=0.05` (вместо 0.1)
 - [x] `wait_nfqws2_ready` при min_wait=0 корректно ждёт если nfqws2 ещё не запущен
 
-#### P0-5 — Preflight skip флаги для повторных full-сканов
-**Файл:** `src/blockchecks/engine/preflight.py:118-189`, `main_phases.py:182-204`  
+#### P0-5 — Preflight skip flags for повторных full-сканов
+**Файл:** `src/blockchecks/engine/preflight.py`, `add_campaign_args()`  
 **Влияние:** стартовое время (10-20 минут на 100+ доменах)  
-**План:**
-- [x] `--skip-prolog` уже есть ✅
-- [x] `--skip-port-block` уже есть ✅
-- [x] `--skip-ip-block` уже есть ✅
-- [x] `--skip-dns-audit` уже есть ✅
-- [x] `--skip-baseline` уже есть ✅
-- [x] `scripts/run_full_20h.sh`: `--skip-prolog --skip-ip-block --skip-port-block`
+**Статус (1.3.7):**
+- [x] `--no-preflight` — skip all preflight (prolog, baseline, IP-block, port-block, DNS audit)
+- [x] `--quick` — prolog only; skip deep baseline/IP-block/port-block
+- [x] Granular `--skip-*` flags retained for partial control
+- [x] `--profile 20h` sets `no_preflight=True`
+- [x] Long-term scripts: `--no-preflight` (replaces ad-hoc `--skip-prolog --skip-ip-block --skip-port-block` bundles)
 
 #### P0-6 — Быстрый прогон после всех фиксов
 **План:**
-- [ ] `sudo bs full --max-timeh 8 --parallel 4 --fan-out --resume --skip-prolog --skip-ip-block --no-wssize --db-batch 500`
+- [ ] `sudo bs full --profile 20h --max-timeh 8 --parallel 4 --db-batch 500`
 - [ ] Ожидаемая скорость: **0.6–1.0 тест/сек** (3-5× быстрее текущего)
 - [ ] ETA для 379K тестов при 8ч лимите: ~72K тестов пройдено (19% coverage) — приемлемо для 8ч прогона
 
@@ -466,7 +474,7 @@ NFQWS2_SETTLE_MIN  = 0
 - [x] `worker_wall_timeout` default settle_slack=3.0 перекрывает зазор
 
 ### T1-6 — Верификационный прогон после T1
-- [ ] `sudo bs full --max-timeh 4 --parallel 4 --fan-out --resume --skip-prolog --skip-ip-block --no-wssize --db-batch 500`
+- [ ] `sudo bs full --profile 20h --max-timeh 4 --parallel 4 --db-batch 500`
 - [ ] Замерить тест/сек (цель: 0.6-1.0 тест/сек — 3-5× быстрее текущих 0.20)
 - [ ] Проверить что нет false-timeout на медленных стратегиях
 - [ ] Записать результаты в `docs/todo.md` (строка с датой и скоростью)
@@ -754,7 +762,7 @@ blockcheckS → для каждой стратегии:
 - [x] Скрипты: `scripts/run_variant.sh`, `run_long_term_series.sh`, `run_coverage_new.sh`, `monitor_series.sh`, docs `long_term_runs.md`.
 - [x] **Фикс доменной изоляции** (`_run_tcp_sequential_bridge` — false-positive all-youtube; параллельные worker'ы + active_domains, `[run] domain_isolate`). E2E: 6 доменов равномерно. Commit `ffb41e4`.
 - [x] Очищены 911 ложных PASS из data_block (commit `a31fa0a`).
-- [x] Вариант A → `--adaptive`.
+- [x] Вариант A → AQ default ON (explicit `--adaptive` in scripts is redundant inverse alias).
 - [ ] Прогон A (adaptive) в процессе: 12 доменов изолированы, ~1.9/s, 0 PASS при timeout 1s (LLC Fiord медленный — B с timeout 2 должен дать PASS).
 - [ ] Автозапуск B→F оркестратором (`bs-series`).
 - [ ] **--resume** протестировать (мягкая остановка + перезапуск, проверить skip-счётчик).

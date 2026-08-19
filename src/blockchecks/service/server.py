@@ -60,7 +60,11 @@ class ProbeServer:
         test_probe_service, HTTP bridge, gp-control-plane) and add ``ok``/``data``/``error``."""
         status = resp.get("status")
         ok = status == "ok"
-        error = None if ok else resp.get("error") or (None if status == "busy" else f"cmd failed: {status}")
+        error = (
+            None
+            if ok
+            else resp.get("error") or (None if status == "busy" else f"cmd failed: {status}")
+        )
         data = {k: v for k, v in resp.items() if k not in ("status", "error", "ok", "data")}
         return {"ok": ok, "data": data, "error": error, **resp}
 
@@ -108,9 +112,7 @@ class ProbeServer:
             timeout=float(req.get("timeout") or self.service.default_timeout),
             repeats=int(req.get("repeats") or 1),
         )
-        self.publish_event(
-            {"type": "probe_start", "domains": domains, "strategies": strategies}
-        )
+        self.publish_event({"type": "probe_start", "domains": domains, "strategies": strategies})
         resp = await self.service.probe(r)
         for result in resp.get("results") or []:
             if isinstance(result, dict):
@@ -144,7 +146,11 @@ class ProbeServer:
             data = {
                 "domain": domain,
                 "l3_status": (t.l3_phase.value if t and t.l3_phase else "unknown"),
-                "fail_phase": (t.handshake_phase.value if t and t.handshake_phase and t.handshake_phase != FailPhase.PASS else "pass"),
+                "fail_phase": (
+                    t.handshake_phase.value
+                    if t and t.handshake_phase and t.handshake_phase != FailPhase.PASS
+                    else "pass"
+                ),
                 "client_hello_len": t.client_hello_len if t else 0,
                 "quic_blocked": bool(t and t.quic_drop),
                 "dns_tampered": bool(t and (t.dns_hijacked or t.dns_sinkhole)),
@@ -183,10 +189,15 @@ class ProbeServer:
                 for line in path.read_text().splitlines()
                 if line.strip() and not line.startswith("#")
             ]
-            items = [StrategyItem(label=f"{domain}|{s}"[:60], strategy=s, protocol="tls12") for s in strategies[:120]]
+            items = [
+                StrategyItem(label=f"{domain}|{s}"[:60], strategy=s, protocol="tls12")
+                for s in strategies[:120]
+            ]
             if not self.service.started:
                 await self.service.start()
-            queue, _ = await build_adaptive_queue(items, [domain], db=None, epsilon=0.1, load_weights=False)
+            queue, _ = await build_adaptive_queue(
+                items, [domain], db=None, epsilon=0.1, load_weights=False
+            )
             stop = asyncio.Event()
 
             async def _tick():
@@ -269,8 +280,7 @@ class ProbeServer:
         blob = str(req.get("fake_blob") or "").strip()
         if blob:
             req["strategies"] = [
-                s if "blob=" in s else f"fake:blob={blob}"
-                for s in (req.get("strategies") or [])
+                s if "blob=" in s else f"fake:blob={blob}" for s in (req.get("strategies") or [])
             ]
         dry = bool(req.get("dry_run_db", True))
         if not dry:
@@ -301,7 +311,8 @@ class ProbeServer:
                 "events": [e.to_dict() if hasattr(e, "to_dict") else vars(e) for e in events],
                 "desync_applied": any(getattr(e, "event", "") == "APPLIED" for e in events),
                 "rst_in_detected": any(
-                    getattr(e, "event", "") == "STRATEGY_FAIL" and getattr(e, "reason", "") == "rst_in"
+                    getattr(e, "event", "") == "STRATEGY_FAIL"
+                    and getattr(e, "reason", "") == "rst_in"
                     for e in events
                 ),
             }
@@ -491,9 +502,10 @@ class ProbeServer:
             except (ConnectionError, OSError):
                 pass
 
-
     @staticmethod
-    async def _read_http_request(reader: asyncio.StreamReader) -> tuple[str, str, str | None, bytes] | None:
+    async def _read_http_request(
+        reader: asyncio.StreamReader,
+    ) -> tuple[str, str, str | None, bytes] | None:
         """Read one HTTP request -> (method, path, authorization, body) or None."""
         request_line = await asyncio.wait_for(reader.readline(), timeout=HTTP_HEADER_READ_TIMEOUT)
         if not request_line:
@@ -518,7 +530,9 @@ class ProbeServer:
                     content_length = 0
         body = b""
         if content_length > 0:
-            body = await asyncio.wait_for(reader.readexactly(content_length), timeout=HTTP_HEADER_READ_TIMEOUT)
+            body = await asyncio.wait_for(
+                reader.readexactly(content_length), timeout=HTTP_HEADER_READ_TIMEOUT
+            )
         return method, path, authorization, body
 
     @staticmethod
@@ -618,7 +632,13 @@ class ProbeServer:
             status_code: int,
         ) -> None:
             payload = json.dumps(resp).encode()
-            reason = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 423: "Locked"}.get(status_code, "OK")
+            reason = {
+                200: "OK",
+                400: "Bad Request",
+                401: "Unauthorized",
+                404: "Not Found",
+                423: "Locked",
+            }.get(status_code, "OK")
             writer.write(
                 (
                     f"HTTP/1.1 {status_code} {reason}\r\n"

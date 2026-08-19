@@ -141,8 +141,9 @@ def test_maybe_export_configs_skipped_when_no_passes():
     store.count_tcp_passes = AsyncMock(return_value=0)
     with patch("blockchecks.engine.run_finalize.export_configs", new=AsyncMock()) as exp:
         res = asyncio.run(
-            maybe_export_configs(store, _args(), primary="x.com", domains_file=None,
-                                 stop_set=True, deadline=None)
+            maybe_export_configs(
+                store, _args(), primary="x.com", domains_file=None, stop_set=True, deadline=None
+            )
         )
     assert res is None
     exp.assert_not_called()
@@ -152,12 +153,14 @@ def test_maybe_export_configs_calls_export():
     store = MagicMock()
     store.flush = AsyncMock()
     store.count_tcp_passes = AsyncMock(return_value=5)
-    with patch("blockchecks.engine.run_finalize.export_configs", new=AsyncMock(
-        return_value={"keenetic": "cfg", "raw": "r", "user_list": "u"}
-    )) as exp:
+    with patch(
+        "blockchecks.engine.run_finalize.export_configs",
+        new=AsyncMock(return_value={"keenetic": "cfg", "raw": "r", "user_list": "u"}),
+    ) as exp:
         res = asyncio.run(
-            maybe_export_configs(store, _args(), primary="x.com", domains_file=None,
-                                 stop_set=False, deadline=None)
+            maybe_export_configs(
+                store, _args(), primary="x.com", domains_file=None, stop_set=False, deadline=None
+            )
         )
     assert res == {"keenetic": "cfg", "raw": "r", "user_list": "u"}
     exp.assert_awaited_once()
@@ -167,12 +170,13 @@ def test_maybe_export_configs_calls_export():
 
 
 def test_maybe_write_best_config_data_block_no_db(tmp_path):
-    with patch(
-        "blockchecks.data_block.provider.get_provider_dir",
-        return_value=tmp_path,
-    ), patch(
-        "blockchecks.data_block.store.ProviderStore"
-    ) as StoreCls:
+    with (
+        patch(
+            "blockchecks.data_block.provider.get_provider_dir",
+            return_value=tmp_path,
+        ),
+        patch("blockchecks.data_block.store.ProviderStore") as StoreCls,
+    ):
         store = StoreCls.return_value
         store.strategies_db = MagicMock()
         store.strategies_db.is_file.return_value = False
@@ -181,23 +185,31 @@ def test_maybe_write_best_config_data_block_no_db(tmp_path):
 
 
 def test_maybe_write_best_config_data_block_writes(tmp_path):
-    with patch(
-        "blockchecks.data_block.provider.get_provider_dir",
-        return_value=tmp_path,
-    ), patch(
-        "blockchecks.data_block.store.ProviderStore"
-    ) as StoreCls, patch(
-        "blockchecks.engine.conf_builder.build_keenetic_conf", return_value="[ipset]\n"
-    ) as build:
+    with (
+        patch(
+            "blockchecks.data_block.provider.get_provider_dir",
+            return_value=tmp_path,
+        ),
+        patch("blockchecks.data_block.store.ProviderStore") as StoreCls,
+        patch(
+            "blockchecks.engine.conf_builder.build_keenetic_conf", return_value="[ipset]\n"
+        ) as build,
+    ):
         store = StoreCls.return_value
         store.strategies_db = MagicMock()
         store.strategies_db.is_file.return_value = True
-        store.pass_strategies = AsyncMock(return_value=[
-            {"strategy": "slow_tcp", "protocol": "tcp", "latency_ms": 200},
-            {"strategy": "fast_tcp", "protocol": "tcp", "latency_ms": 50},
-            {"strategy": "fake:blob=stun:repeats=6", "protocol": "udp", "latency_ms": 10},
-            {"strategy": "fake:blob=discord_udp:repeats=6", "protocol": "udp", "latency_ms": 40},
-        ])
+        store.pass_strategies = AsyncMock(
+            return_value=[
+                {"strategy": "slow_tcp", "protocol": "tcp", "latency_ms": 200},
+                {"strategy": "fast_tcp", "protocol": "tcp", "latency_ms": 50},
+                {"strategy": "fake:blob=stun:repeats=6", "protocol": "udp", "latency_ms": 10},
+                {
+                    "strategy": "fake:blob=discord_udp:repeats=6",
+                    "protocol": "udp",
+                    "latency_ms": 40,
+                },
+            ]
+        )
         asyncio.run(maybe_write_best_config_data_block())
         build.assert_called_once()
         kwargs = build.call_args.kwargs
@@ -227,9 +239,10 @@ def test_maybe_sync_data_block_disabled():
 
 
 def test_maybe_sync_data_block_enabled():
-    with patch(
-        "blockchecks.data_block.provider.get_provider_dir", return_value=MagicMock()
-    ), patch("blockchecks.data_block.store.ProviderStore") as StoreCls:
+    with (
+        patch("blockchecks.data_block.provider.get_provider_dir", return_value=MagicMock()),
+        patch("blockchecks.data_block.store.ProviderStore") as StoreCls,
+    ):
         store = StoreCls.return_value
         store.sync_commit = MagicMock()
         asyncio.run(maybe_sync_data_block(_args(data_block_sync=True)))

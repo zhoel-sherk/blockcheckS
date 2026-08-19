@@ -275,14 +275,10 @@ def test_maybe_sync_data_block_pushes(monkeypatch):
     from blockchecks.engine import run_finalize
 
     calls: list[dict] = []
-    store = type("FakeStore", (), {"sync_commit": lambda self, push=False: calls.append({"push": push})})()
-    monkeypatch.setattr(
-        "blockchecks.data_block.provider.get_provider_dir", lambda: "."
-    )
-    monkeypatch.setattr(
-        "blockchecks.data_block.store.ProviderStore", lambda *a, **k: store
-    )
-    asyncio.run(
-        run_finalize.maybe_sync_data_block(args=type("A", (), {"data_block_sync": True})())
-    )
+    store = type(
+        "FakeStore", (), {"sync_commit": lambda self, push=False: calls.append({"push": push})}
+    )()
+    monkeypatch.setattr("blockchecks.data_block.provider.get_provider_dir", lambda: ".")
+    monkeypatch.setattr("blockchecks.data_block.store.ProviderStore", lambda *a, **k: store)
+    asyncio.run(run_finalize.maybe_sync_data_block(args=type("A", (), {"data_block_sync": True})()))
     assert calls == [{"push": True}]

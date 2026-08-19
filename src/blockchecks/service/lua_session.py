@@ -90,7 +90,7 @@ def strategy_text_from_item(item: StrategyItem) -> str:
     for raw in Path(item.strategy).read_text(encoding="utf-8").splitlines():
         raw = raw.strip()
         if raw.startswith("--lua-desync="):
-            lines.append(raw[len("--lua-desync="):])
+            lines.append(raw[len("--lua-desync=") :])
     return "\n".join(lines)
 
 

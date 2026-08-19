@@ -12,9 +12,6 @@ import re
 import subprocess as sp
 import time
 
-from colorama import Fore, Style
-from colorama import init as colorama_init
-
 from blockchecks.checkers.curl_probe import CurlProbeRequest, worker_wall_timeout
 from blockchecks.engine.async_runner import (
     AsyncTestRunner,
@@ -25,13 +22,7 @@ from blockchecks.engine.config import NFQUEUE_TCP, NFQUEUE_UDP
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
 from blockchecks.service.nfqws2 import start_daemon
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
-
-colorama_init(autoreset=True)
-
-GREEN = Fore.GREEN + Style.BRIGHT
-RED = Fore.RED + Style.BRIGHT
-CYAN = Fore.CYAN
-RESET = Style.RESET_ALL
+from blockchecks.terminal import CYAN, GREEN, RED, RESET
 
 DOMAINS = [
     "discord.com",

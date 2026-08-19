@@ -239,10 +239,8 @@ def test_ensure_zapret2_vendor_offline():
 def test_ensure_zapret2_vendor_bad_arch(monkeypatch):
     from blockchecks.engine.system_deps import ensure_zapret2_vendor
 
-    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch",
-                        lambda: None)
-    monkeypatch.setattr("blockchecks.engine.system_deps.platform.machine",
-                        lambda: "weird-arch")
+    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch", lambda: None)
+    monkeypatch.setattr("blockchecks.engine.system_deps.platform.machine", lambda: "weird-arch")
     with pytest.raises(RuntimeError, match="unsupported CPU arch"):
         ensure_zapret2_vendor(offline=False)
 
@@ -261,8 +259,9 @@ def test_http_get_writes_file(tmp_path, monkeypatch):
         def read(self):
             return b"data"
 
-    monkeypatch.setattr("blockchecks.engine.system_deps.urllib.request.urlopen",
-                        lambda *a, **k: FakeResp())
+    monkeypatch.setattr(
+        "blockchecks.engine.system_deps.urllib.request.urlopen", lambda *a, **k: FakeResp()
+    )
     dest = tmp_path / "x.bin"
     data = sd._http_get("https://x", dest=dest)
     assert data == b"data"
@@ -279,8 +278,7 @@ def test_verify_arch_mismatch(monkeypatch, tmp_path):
     bin.write_text("x")
     bin.chmod(0o755)
     monkeypatch.setattr(sd, "resolve_nfqws2_bin", lambda: str(bin))
-    monkeypatch.setattr(sd, "check_nfqws2_arch",
-                        lambda p: "Exec format error (x86_64 vs aarch64)")
+    monkeypatch.setattr(sd, "check_nfqws2_arch", lambda p: "Exec format error (x86_64 vs aarch64)")
     monkeypatch.setattr(sd, "_path_ok", lambda p: True)
     monkeypatch.setattr(sd.os, "environ", {})
     report = sd.verify_system_dependencies(fetch=False)
@@ -290,7 +288,6 @@ def test_verify_arch_mismatch(monkeypatch, tmp_path):
 
 def test_verify_blobs_missing_warns(monkeypatch, tmp_path):
     import sys
-
 
     monkeypatch.setattr(sd, "sys", sys)
     monkeypatch.setattr(sd.sys, "platform", "linux")
@@ -333,8 +330,10 @@ def test_ensure_zapret2_vendor_success(tmp_path, monkeypatch):
     meta = {
         "tag_name": "v0.9.0",
         "assets": [
-            {"name": "zapret2-v0.9.0.tar.gz",
-             "browser_download_url": "https://x/zapret2-v0.9.0.tar.gz"},
+            {
+                "name": "zapret2-v0.9.0.tar.gz",
+                "browser_download_url": "https://x/zapret2-v0.9.0.tar.gz",
+            },
         ],
     }
     sha_text = "aa" * 32 + "  zapret2-v0.9.0.tar.gz\n"
@@ -349,20 +348,19 @@ def test_ensure_zapret2_vendor_success(tmp_path, monkeypatch):
             return dest.read_bytes()
         return tar_path.read_bytes()
 
-    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch",
-                        lambda: "linux-x86_64")
+    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch", lambda: "linux-x86_64")
     monkeypatch.setattr("blockchecks.engine.system_deps._http_get", fake_http_get)
-    monkeypatch.setattr("blockchecks.engine.system_deps.ensure_dirs",
-                        lambda: None)
-    monkeypatch.setattr("blockchecks.engine.system_deps.DL_CACHE",
-                        tmp_path / "dl")
+    monkeypatch.setattr("blockchecks.engine.system_deps.ensure_dirs", lambda: None)
+    monkeypatch.setattr("blockchecks.engine.system_deps.DL_CACHE", tmp_path / "dl")
     monkeypatch.setattr("blockchecks.engine.system_deps.DATA_DIR", tmp_path)
-    monkeypatch.setattr("blockchecks.engine.system_deps.VENDOR_ROOT",
-                        tmp_path / "zapret2")
-    monkeypatch.setattr("blockchecks.engine.system_deps.VENDOR_BIN_LINK",
-                        tmp_path / "bin" / "nfqws2")
-    monkeypatch.setattr("blockchecks.engine.system_deps.cfg",
-                        __import__("blockchecks.engine.config", fromlist=["x"]))
+    monkeypatch.setattr("blockchecks.engine.system_deps.VENDOR_ROOT", tmp_path / "zapret2")
+    monkeypatch.setattr(
+        "blockchecks.engine.system_deps.VENDOR_BIN_LINK", tmp_path / "bin" / "nfqws2"
+    )
+    monkeypatch.setattr(
+        "blockchecks.engine.system_deps.cfg",
+        __import__("blockchecks.engine.config", fromlist=["x"]),
+    )
     with patch("blockchecks.engine.system_deps.cfg.apply_tool_paths"):
         nfq, blobs, lua = sd.ensure_zapret2_vendor(offline=False)
     assert "nfqws2" in nfq
@@ -372,12 +370,12 @@ def test_ensure_zapret2_vendor_success(tmp_path, monkeypatch):
 
 def test_ensure_zapret2_vendor_no_asset(tmp_path, monkeypatch):
     meta = {"tag_name": "v1", "assets": []}
-    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch",
-                        lambda: "linux-x86_64")
-    monkeypatch.setattr("blockchecks.engine.system_deps._http_get",
-                        lambda *a, **k: __import__("json").dumps(meta).encode())
-    monkeypatch.setattr("blockchecks.engine.system_deps.ensure_dirs",
-                        lambda: None)
+    monkeypatch.setattr("blockchecks.engine.system_deps.zapret2_arch", lambda: "linux-x86_64")
+    monkeypatch.setattr(
+        "blockchecks.engine.system_deps._http_get",
+        lambda *a, **k: __import__("json").dumps(meta).encode(),
+    )
+    monkeypatch.setattr("blockchecks.engine.system_deps.ensure_dirs", lambda: None)
     monkeypatch.setattr("blockchecks.engine.system_deps.DL_CACHE", tmp_path)
     monkeypatch.setattr("blockchecks.engine.system_deps.DATA_DIR", tmp_path)
     with pytest.raises(RuntimeError, match="no asset"):

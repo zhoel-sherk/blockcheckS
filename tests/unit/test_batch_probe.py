@@ -158,7 +158,7 @@ async def test_probe_batch_service_lua_bridge_mock() -> None:
             quick_break=False,
             try_wssize=False,
             lua_extra=[],
-        resolve_domain_ips=lambda domain: [],
+            resolve_domain_ips=lambda domain: [],
             timing_for=lambda item, t: (t, None),
             resolve_domain_dns=AsyncMock(return_value=(None, "", "")),
             tcp_result_from_data=lambda item, domain, data: MagicMock(success=True),
@@ -234,7 +234,7 @@ async def test_probe_batch_service_recycles_on_memory_flag() -> None:
             repeats_mode="fast",
             quick_break=False,
             try_wssize=False,
-        resolve_domain_ips=lambda domain: [],
+            resolve_domain_ips=lambda domain: [],
             lua_extra=[],
             timing_for=lambda item, t: (t, None),
             resolve_domain_dns=AsyncMock(return_value=(None, "", "")),
@@ -324,9 +324,7 @@ async def test_wssize_retry_skips_config_items() -> None:
         classic_calls.append((args, kwargs))
         return {"success": False}
 
-    config_item = StrategyItem(
-        label="cfg", strategy="/tmp/some_config.conf", is_config=True
-    )
+    config_item = StrategyItem(label="cfg", strategy="/tmp/some_config.conf", is_config=True)
     inline_item = StrategyItem(label="inline", strategy="fake:blob=stun:repeats=6")
 
     deps = RunnerProbeDeps(
@@ -439,7 +437,9 @@ async def test_recycle_preserves_strategy_idx_and_events() -> None:
         def __init__(self, **_k) -> None:
             self.bridge = MagicMock()
             self.bridge.truncate_events = MagicMock()
-            self.bridge.publish = MagicMock(side_effect=lambda sid, gen, cmd=None: published.append((sid, gen)))
+            self.bridge.publish = MagicMock(
+                side_effect=lambda sid, gen, cmd=None: published.append((sid, gen))
+            )
             self.bridge.drain_events = MagicMock(return_value=[MagicMock(event="APPLIED", gen=1)])
 
         def boot(self) -> float:
@@ -481,7 +481,7 @@ async def test_recycle_preserves_strategy_idx_and_events() -> None:
             disable_ech=False,
             repeats=1,
             parallel_repeats=False,
-        resolve_domain_ips=lambda domain: [],
+            resolve_domain_ips=lambda domain: [],
             repeats_mode="fast",
             quick_break=False,
             try_wssize=False,
@@ -547,7 +547,7 @@ async def test_debug_env_toggle_restarts_lua_daemon() -> None:
             python="python3",
             disable_ech=False,
             repeats=1,
-        resolve_domain_ips=lambda domain: [],
+            resolve_domain_ips=lambda domain: [],
             parallel_repeats=False,
             repeats_mode="fast",
             quick_break=False,
@@ -565,7 +565,7 @@ async def test_debug_env_toggle_restarts_lua_daemon() -> None:
         svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), deps)
 
         # SIGUSR1 arrives mid-batch: _debug_env() flips between boots → restart.
-        seq = iter(["" , "1", "1"])
+        seq = iter(["", "1", "1"])
         calls = {"boots": 0, "env_calls": 0}
 
         def fake_debug_env():

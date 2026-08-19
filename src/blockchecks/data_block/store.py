@@ -117,9 +117,7 @@ class ProviderStore:
         await db.commit()
         return db
 
-    async def save_dns_records(
-        self, records: dict[str, list[str]], *, source: str = "doh"
-    ) -> None:
+    async def save_dns_records(self, records: dict[str, list[str]], *, source: str = "doh") -> None:
         """Upsert verified DoH IPs into dns_records."""
         if not records:
             return
@@ -171,9 +169,7 @@ class ProviderStore:
             return {}
         db = await aiosqlite.connect(self.dns_db)
         try:
-            cur = await db.execute(
-                "SELECT domain, ips, checked_at FROM dns_records"
-            )
+            cur = await db.execute("SELECT domain, ips, checked_at FROM dns_records")
             rows = await cur.fetchall()
         finally:
             await db.close()
@@ -264,7 +260,15 @@ class ProviderStore:
             rows = await cur.fetchall()
         finally:
             await db.close()
-        keys = ("strategy", "domain", "protocol", "latency_ms", "http_code", "approved", "checked_at")
+        keys = (
+            "strategy",
+            "domain",
+            "protocol",
+            "latency_ms",
+            "http_code",
+            "approved",
+            "checked_at",
+        )
         return [dict(zip(keys, row, strict=False)) for row in rows]
 
     # ── hosts file (Windows anti-hijack) ──────────────────
@@ -334,9 +338,7 @@ class ProviderStore:
             ["git", "add", "-A"],
             ["git", "commit", "-m", f"sync: update provider data ({_now()})"],
         ):
-            r = subprocess.run(
-                prefix + cmd, cwd=repo, capture_output=True, text=True, timeout=30
-            )
+            r = subprocess.run(prefix + cmd, cwd=repo, capture_output=True, text=True, timeout=30)
             if r.returncode != 0 and "nothing to commit" not in r.stdout + r.stderr:
                 print(f"  [data_block] git {cmd[1]} failed: {r.stderr[:200]}")
                 return False
@@ -345,9 +347,7 @@ class ProviderStore:
                 prefix + ["git", "push"], cwd=repo, capture_output=True, text=True, timeout=60
             )
             if r.returncode != 0:
-                print(
-                    f"  WARNING: data_block push failed (creds?): {r.stderr[:200]}"
-                )
+                print(f"  WARNING: data_block push failed (creds?): {r.stderr[:200]}")
                 return False
         return True
 

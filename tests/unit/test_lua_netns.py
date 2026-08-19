@@ -45,9 +45,7 @@ def test_netns_tcp_probe_cleanup():
 
 
 def test_bridge_iptables_add_tcp():
-    with patch("subprocess.run") as run, patch(
-        "blockchecks.service.lua_netns._check_netns_exists"
-    ):
+    with patch("subprocess.run") as run, patch("blockchecks.service.lua_netns._check_netns_exists"):
         _bridge_iptables_add("bs-p-0", "443", "tls12")
     # flush + add = 2 calls
     assert run.call_count == 2
@@ -56,9 +54,7 @@ def test_bridge_iptables_add_tcp():
 
 
 def test_bridge_iptables_add_quic():
-    with patch("subprocess.run") as run, patch(
-        "blockchecks.service.lua_netns._check_netns_exists"
-    ):
+    with patch("subprocess.run") as run, patch("blockchecks.service.lua_netns._check_netns_exists"):
         _bridge_iptables_add("bs-p-0", "443", "quic")
     args = run.call_args_list[1].args[0]
     assert "udp" in args

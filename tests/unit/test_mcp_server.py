@@ -26,9 +26,7 @@ def _ok(data: dict) -> bytes:
 
 
 def _err(msg: str) -> bytes:
-    return (
-        json.dumps({"status": "error", "ok": False, "data": {}, "error": msg}) + "\n"
-    ).encode()
+    return (json.dumps({"status": "error", "ok": False, "data": {}, "error": msg}) + "\n").encode()
 
 
 @pytest.fixture
@@ -237,8 +235,6 @@ def test_get_manifest_path_resolves_dev_tree():
     assert path.name == "manifest.toml"
 
 
-
-
 # ── get_series_status (local, no daemon) ──────────────────────────────
 
 
@@ -292,7 +288,9 @@ async def test_get_series_status_active(tmp_path, monkeypatch):
     _make_state_db(db)
     from blockchecks.mcp.server import get_series_status
 
-    info = _make_active_info(db, cwd=str(tmp_path), argv=["full", "--db", str(db), "--parallel", "4"])
+    info = _make_active_info(
+        db, cwd=str(tmp_path), argv=["full", "--db", str(db), "--parallel", "4"]
+    )
     _patch_run_control(monkeypatch, info)
 
     result = await get_series_status()
@@ -378,7 +376,15 @@ def _make_full_db(path):
             (1, "a.com", "PASS", 200, 80.0, "2026-08-16T10:00:00", ""),
             (2, "a.com", "PASS", 200, 120.0, "2026-08-16T10:00:01", ""),
             (3, "a.com", "FAIL", 0, 0.0, "2026-08-16T10:00:02", "connect_timeout"),
-            (1, "a.com", "FAIL", 0, 0.0, "2026-08-16T10:00:03", "connect_timeout"),  # later, replaces pass
+            (
+                1,
+                "a.com",
+                "FAIL",
+                0,
+                0.0,
+                "2026-08-16T10:00:03",
+                "connect_timeout",
+            ),  # later, replaces pass
         ],
     )
     con.commit()
@@ -551,7 +557,9 @@ async def test_probe_strategy_aliases_dbg_probe(monkeypatch):
     captured = {}
 
     async def fake_dbg(domain, strategy, fake_blob, dry_run_db):
-        captured.update(domain=domain, strategy=strategy, fake_blob=fake_blob, dry_run_db=dry_run_db)
+        captured.update(
+            domain=domain, strategy=strategy, fake_blob=fake_blob, dry_run_db=dry_run_db
+        )
         return ms.ProbeResult(domain=domain, strategy=strategy, status="PASS")
 
     monkeypatch.setattr(ms, "dbg_probe_raw", fake_dbg)

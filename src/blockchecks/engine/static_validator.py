@@ -118,9 +118,7 @@ def validate_strategy(
     raw = strategy or ""
 
     if not raw.strip():
-        result.issues.append(
-            ValidationIssue("empty_strategy", "Strategy string is empty", "error")
-        )
+        result.issues.append(ValidationIssue("empty_strategy", "Strategy string is empty", "error"))
         return result
 
     if not _is_well_formed(raw):

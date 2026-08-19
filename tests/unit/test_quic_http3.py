@@ -180,15 +180,21 @@ async def test_quic_fallback_uses_short_timeout_for_fallback_variants():
 
     def fake_run_quic(ns, strategy, domain, timeout, *a, **k):
         calls.append((strategy, timeout))
-        return {"success": False, "http_code": 0, "latency_ms": 0,
-                "content_len": 0, "error": "Connection timed out"}
+        return {
+            "success": False,
+            "http_code": 0,
+            "latency_ms": 0,
+            "content_len": 0,
+            "error": "Connection timed out",
+        }
 
     runner = AsyncTestRunner(pool_size=1)
     runner.secure_dns = False
     runner.dns_cache = None
     runner.dns_audit = {}
-    item = StrategyItem(label="quic_fake", strategy="fake:blob=quic_google:repeats=6",
-                        protocol="quic")
+    item = StrategyItem(
+        label="quic_fake", strategy="fake:blob=quic_google:repeats=6", protocol="quic"
+    )
 
     # AsyncTestRunner.test_quic uses self.pool.acquire + asyncio.to_thread.
     # Patch acquire to return a ns and _run_quic_check to capture timeouts.

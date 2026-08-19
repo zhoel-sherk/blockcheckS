@@ -168,7 +168,11 @@ def voice_burst_probe(
         # Receive loop — wait for any reply while the burst settles.
         data, addr = sock.recvfrom(512)
         elapsed = (time.perf_counter() - start) * 1000
-        return True, elapsed, f"{len(data)}B UDP reply to {burst_bytes}B burst from {addr[0]}:{addr[1]}"
+        return (
+            True,
+            elapsed,
+            f"{len(data)}B UDP reply to {burst_bytes}B burst from {addr[0]}:{addr[1]}",
+        )
     except TimeoutError:
         elapsed = (time.perf_counter() - start) * 1000
         return False, elapsed, f"timeout after {burst_bytes}B burst"

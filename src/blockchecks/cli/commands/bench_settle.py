@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import time
 
-from colorama import Fore, Style
-
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.engine.async_runner import AsyncTestRunner, _run_tcp_check
 from blockchecks.engine.config import SECURE_DNS_DEFAULT
@@ -17,12 +15,7 @@ from blockchecks.engine.settle_profile import (
     save_profile,
 )
 from blockchecks.engine.strategy_loader import StrategyLoader
-
-CYAN = Fore.CYAN
-GREEN = Fore.GREEN + Style.BRIGHT
-RED = Fore.RED + Style.BRIGHT
-YELLOW = Fore.YELLOW
-RESET = Style.RESET_ALL
+from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
 
 DEFAULT_SETTLE = (0.1, 0.2, 0.5, 1.0, 2.0)
 DEFAULT_CURL = (0.5, 1.0, 1.5, 2.0)

@@ -9,8 +9,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from colorama import Fore, Style
-
 from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.checkers.http3 import supports_http3
@@ -44,6 +42,7 @@ from blockchecks.engine.run_finalize import (
     maybe_export_configs,
     write_run_summary,
 )
+from blockchecks.engine.run_spec import RunSpec
 from blockchecks.engine.settle_profile import auto_load_profile, load_profile
 from blockchecks.engine.store import (
     DEFAULT_DB_BATCH,
@@ -52,12 +51,7 @@ from blockchecks.engine.store import (
     open_run_store,
 )
 from blockchecks.engine.tcp_fanout import fanout_allowed, fanout_batches
-
-CYAN = Fore.CYAN
-GREEN = Fore.GREEN + Style.BRIGHT
-YELLOW = Fore.YELLOW
-RED = Fore.RED + Style.BRIGHT
-RESET = Style.RESET_ALL
+from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
 
 
 def cap_strategy_count(n: int) -> int:
@@ -102,6 +96,7 @@ class FullRunContext:
     scan_level: str
     parallel: int
     steps: int
+    spec: RunSpec = field(default_factory=RunSpec)
     tcp_items: list[StrategyItem] = field(default_factory=list)
     udp_items: list[StrategyItem] = field(default_factory=list)
     quic_items: list[StrategyItem] = field(default_factory=list)
@@ -246,8 +241,10 @@ def build_full_run_context(
     primary = args.domain or domains[0]
     steps = 7 if not getattr(args, "no_http", False) else 6
     repeats, parallel_repeats, repeats_mode, quick_break = repeats_from_args(args)
+    spec = getattr(args, "_run_spec", None) or RunSpec.from_args(args, command="full")
     return FullRunContext(
         args=args,
+        spec=spec,
         db=db,
         domains_file=domains_file,
         domains=domains,
@@ -348,11 +345,11 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
 
 def configure_tcp_execution(ctx: FullRunContext) -> None:
     args = ctx.args
-    use_adaptive = bool(getattr(args, "adaptive", False) or getattr(args, "fan_out", False))
+    use_adaptive = not bool(getattr(args, "no_adaptive", False))
     curl_parallel = max(
         1, min(getattr(args, "curl_parallel", DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
     )
-    if getattr(args, "fan_out", False) and curl_parallel <= 1:
+    if (getattr(args, "fan_out", False) or use_adaptive) and curl_parallel <= 1:
         curl_parallel = min(max(4, DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
     use_family_gates = (
         ctx.scan_level != "full"
@@ -704,9 +701,9 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
     isolate = bool(AQ_DOMAIN_ISOLATE)
     if not isolate:
         print(
-            f"  {Fore.YELLOW}WARNING: domain isolation is OFF (set [run] domain_isolate"
+            f"  {YELLOW}WARNING: domain isolation is OFF (set [run] domain_isolate"
             f"=true or BLOCKCHECKS_AQ_DOMAIN_ISOLATE=1 in settings.ini). Parallel"
-            f"netns may probe the same domain → false-positive results.{Style.RESET_ALL}"
+            f"netns may probe the same domain → false-positive results.{RESET}"
         )
 
     jobs: list[tuple[StrategyItem, str]] = []
@@ -746,7 +743,11 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
             doms = [j[1] for j in acc]
             try:
                 results = await ctx.runner._run_probe_batch(
-                    items, doms[0], args.timeout, "lua_bridge", domains=doms,
+                    items,
+                    doms[0],
+                    args.timeout,
+                    "lua_bridge",
+                    domains=doms,
                     stop_event=ctx.stop,
                 )
             finally:

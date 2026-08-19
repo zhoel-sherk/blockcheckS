@@ -50,10 +50,7 @@ async def test_concurrent_flush_no_row_loss(tmp_path):
             await store.flush()
             await asyncio.sleep(0.001)
 
-    tasks = [
-        asyncio.create_task(_writer(store, w, ROWS_PER_WORKER))
-        for w in range(N_WORKERS)
-    ]
+    tasks = [asyncio.create_task(_writer(store, w, ROWS_PER_WORKER)) for w in range(N_WORKERS)]
     tasks.append(asyncio.create_task(flusher()))
     await asyncio.gather(*tasks)
     await store.flush()
@@ -86,10 +83,7 @@ async def test_concurrent_flush_resume_consistency(tmp_path):
             await store.flush()
             await asyncio.sleep(0.001)
 
-    tasks = [
-        asyncio.create_task(_writer(store, w, ROWS_PER_WORKER))
-        for w in range(N_WORKERS)
-    ]
+    tasks = [asyncio.create_task(_writer(store, w, ROWS_PER_WORKER)) for w in range(N_WORKERS)]
     tasks.append(asyncio.create_task(flusher()))
     await asyncio.gather(*tasks)
     await store.flush()

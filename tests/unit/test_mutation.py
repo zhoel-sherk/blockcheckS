@@ -65,8 +65,7 @@ def test_mutmut_no_survivors() -> None:
     stats_path = PROJECT_ROOT / "mutants" / "mutmut-cicd-stats.json"
     if not stats_path.is_file():
         pytest.fail(
-            f"mutmut did not write {stats_path} (run aborted early?). "
-            f"stdout tail:\n{out[-2000:]}"
+            f"mutmut did not write {stats_path} (run aborted early?). stdout tail:\n{out[-2000:]}"
         )
     stats = json.loads(stats_path.read_text(encoding="utf-8"))
     survived = int(stats.get("survived") or 0)

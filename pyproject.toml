@@ -265,10 +265,12 @@ parity_dests = [
 # command → source files that must mention each dest (plus shared_readers)
 shared_readers = [
     "src/blockchecks/cli/parser.py",
+    "src/blockchecks/cli/profiles.py",
     "src/blockchecks/cli/user_config.py",
     "src/blockchecks/engine/preflight.py",
     "src/blockchecks/engine/run_finalize.py",
     "src/blockchecks/engine/run_deadline.py",
+    "src/blockchecks/engine/run_spec.py",
     "src/blockchecks/engine/system_deps.py",
     "src/blockchecks/engine/config.py",
     "src/blockchecks/checkers/curl_probe.py",

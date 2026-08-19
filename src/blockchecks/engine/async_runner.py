@@ -7,11 +7,6 @@ curl_cffi is called via asyncio.to_thread() (libcurl is C, not async).
 import asyncio
 import os
 
-from colorama import Fore, Style
-from colorama import init as colorama_init
-
-colorama_init(autoreset=True)
-
 from blockchecks.checkers.dns_secure import DnsRunCache
 from blockchecks.engine.config import (
     BLOB_DIR,
@@ -27,13 +22,7 @@ from blockchecks.service.batch_scheduler import BatchScheduler
 from blockchecks.service.batch_service import ProbeBatchService
 from blockchecks.service.netns_pool import NetNsPool
 from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon
-
-GREEN = Fore.GREEN + Style.BRIGHT
-RED = Fore.RED + Style.BRIGHT
-YELLOW = Fore.YELLOW
-CYAN = Fore.CYAN
-GREY = Fore.LIGHTBLACK_EX
-RESET = Style.RESET_ALL
+from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW, status_tag
 
 # Auto-pin (IP-PIN): known-good strategy + short budget for probing candidate
 # IPs at startup. Pinned IPs override DoH order against per-IP throttling.
@@ -93,6 +82,7 @@ __all__ = [
 # Legacy re-exports (module-private names kept for test/back-compat).
 _add_blobs_from_strategy = add_blobs_from_strategy
 _split_cli_args = split_cli_args
+
 
 class AsyncTestRunner:
     """Parallel strategy tester using NetNsPool + asyncio.Semaphore."""
@@ -285,16 +275,14 @@ class AsyncTestRunner:
                 if self.dns_cache.pinned_ip(domain) != picked:
                     self.dns_cache.add_pin(domain, picked)
                 tag = "file" if existing == picked else "auto"
-                print(
-                    f"  {Fore.CYAN}[dns] pinned {domain} -> {picked} ({tag}){RESET}"
-                )
+                print(f"  {CYAN}[dns] pinned {domain} -> {picked} ({tag}){RESET}")
             elif existing:
                 # No candidate passed — keep the old pin as a best-effort target
                 # rather than dropping it (a stale pin still beats a DoH rotate
                 # onto a throttled IP).
                 self.dns_cache.add_pin(domain, existing)
                 print(
-                    f"  {Fore.YELLOW}[dns] pin kept for {domain} -> {existing} "
+                    f"  {YELLOW}[dns] pin kept for {domain} -> {existing} "
                     f"(no working fallback){RESET}"
                 )
 
@@ -303,11 +291,11 @@ class AsyncTestRunner:
             if merged != file_pins:
                 try:
                     save_pins(self.pinned_path, merged)
-                    print(f"  {Fore.CYAN}[dns] saved pinned IPs -> {self.pinned_path}{RESET}")
+                    print(f"  {CYAN}[dns] saved pinned IPs -> {self.pinned_path}{RESET}")
                 except OSError as e:
-                    print(f"  {Fore.YELLOW}[dns] cannot save pins {self.pinned_path}: {e}{RESET}")
+                    print(f"  {YELLOW}[dns] cannot save pins {self.pinned_path}: {e}{RESET}")
             else:
-                print(f"  {Fore.CYAN}[dns] pins unchanged -> {self.pinned_path}{RESET}")
+                print(f"  {CYAN}[dns] pins unchanged -> {self.pinned_path}{RESET}")
 
     async def _probe_pin_ip(self, domain: str, ip: str) -> bool:
         """Return True when ``fake:blob=stun`` passes to *domain* via *ip*."""
@@ -804,12 +792,7 @@ class AsyncTestRunner:
 
     def _print_tcp_batch_results(self, results: list[TcpTestResult]) -> None:
         for r in results:
-            if r.throttled:
-                tag = f"{YELLOW}THROTTLED{RESET}"
-            elif r.success:
-                tag = f"{GREEN}OK{RESET}"
-            else:
-                tag = f"{RED}FAIL{RESET}"
+            tag = status_tag(r.success, throttled=r.throttled)
             lat = f"{r.latency_ms:.0f}ms" if r.latency_ms else ""
             status = f"HTTP {r.http_code}" if r.http_code else ""
             err = f" — {r.error[:40]}" if r.error else ""

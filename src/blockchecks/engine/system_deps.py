@@ -109,9 +109,9 @@ class DepsReport:
 
     def print_report(self) -> None:
         try:
-            from colorama import Fore, Style
+            from blockchecks.terminal import GREEN, RED, RESET, YELLOW
 
-            y, r, g, reset = Fore.YELLOW, Fore.RED, Fore.GREEN, Style.RESET_ALL
+            y, r, g, reset = YELLOW, RED, GREEN, RESET
         except Exception:
             y = r = g = reset = ""
         for w in self.warnings:

@@ -22,6 +22,7 @@ def auto_enable_gv_ggc(domains: list[str]) -> None:
         return
     os.environ.setdefault("BLOCKCHECKS_GV_GGC", "1")
 
+
 DOMAINS_PRESET_DIR = os.path.join(PROJECT_DIR, "presets", "domains")
 DEFAULT_DOMAINS_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage-tcp.txt")
 FULL_COVERAGE_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage.txt")

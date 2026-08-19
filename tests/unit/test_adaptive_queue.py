@@ -102,7 +102,9 @@ def test_pop_exclude_domains_isolates():
     domains = ["youtube.com", "discord.com", "aws.com"]
     q = AdaptiveJobQueue.build(
         [StrategyItem("s1", "fake:blob=stun:repeats=6")],
-        domains, epsilon=0.0, seed=1,
+        domains,
+        epsilon=0.0,
+        seed=1,
     )
     # первый pop — youtube
     first = q.pop()

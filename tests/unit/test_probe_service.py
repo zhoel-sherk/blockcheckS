@@ -67,9 +67,7 @@ def test_probe_service_rejects_when_campaign_active(monkeypatch):
     # busy() reflects the campaign
     assert svc.busy() == "full"
     # probe() short-circuits to busy envelope without starting pool
-    resp = asyncio.run(
-        svc.probe(ProbeRequest(domains=["a.com"], strategies=["fake:repeats=6"]))
-    )
+    resp = asyncio.run(svc.probe(ProbeRequest(domains=["a.com"], strategies=["fake:repeats=6"])))
     assert resp["status"] == "busy"
     assert resp["reason"] == "campaign_active"
     assert svc.started is False

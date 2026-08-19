@@ -64,7 +64,9 @@ def test_static_numeric_split_heuristic():
 async def test_generator_prunes_l3_block():
     g = StandardGenerator(strategy_types=["multisplit"])
     items = await g.generate(
-        protocol="tls12", scan_level="full", max_count=100,
+        protocol="tls12",
+        scan_level="full",
+        max_count=100,
         triage=TriageProfile(unbypassable_l3=True),
     )
     assert items == []
@@ -76,7 +78,10 @@ async def test_generator_prunes_static_splits_on_pq():
     g = StandardGenerator(strategy_types=["multisplit"])
     triage = TriageProfile(client_hello_len=1740, requires_postquantum_awareness=True)
     items = await g.generate(
-        protocol="tls12", scan_level="full", max_count=2000, triage=triage,
+        protocol="tls12",
+        scan_level="full",
+        max_count=2000,
+        triage=triage,
     )
     assert items
     # no purely-numeric split survives post-quantum pruning

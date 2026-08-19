@@ -120,8 +120,7 @@ def test_discover_voice_endpoint_gateway_exception(monkeypatch):
             return None
 
     monkeypatch.setattr(vd, "_singbox_session", lambda: _CM())
-    monkeypatch.setattr(vd, "_discover_via_gateway",
-                        AsyncMock(side_effect=RuntimeError("boom")))
+    monkeypatch.setattr(vd, "_discover_via_gateway", AsyncMock(side_effect=RuntimeError("boom")))
     assert asyncio.run(discover_voice_endpoint()) is None
 
 
@@ -131,9 +130,11 @@ def test_discover_voice_endpoint_gateway_exception(monkeypatch):
 def test_discover_multiple_dns_only(monkeypatch):
     from blockchecks.checkers import voice_discovery as vd
 
-    monkeypatch.setattr(vd, "dns_discover",
-                        AsyncMock(return_value=[{"ip": "35.1.2.3", "port": 50004,
-                                                  "hostname": "h"}]))
+    monkeypatch.setattr(
+        vd,
+        "dns_discover",
+        AsyncMock(return_value=[{"ip": "35.1.2.3", "port": 50004, "hostname": "h"}]),
+    )
     monkeypatch.setattr(vd, "load_token", lambda: None)
     eps = asyncio.run(discover_multiple(count=2, use_dns=True))
     assert len(eps) == 1
@@ -143,12 +144,13 @@ def test_discover_multiple_dns_only(monkeypatch):
 def test_discover_multiple_dns_fail_then_gateway(monkeypatch):
     from blockchecks.checkers import voice_discovery as vd
 
-    monkeypatch.setattr(vd, "dns_discover",
-                        AsyncMock(side_effect=RuntimeError("dns down")))
+    monkeypatch.setattr(vd, "dns_discover", AsyncMock(side_effect=RuntimeError("dns down")))
     monkeypatch.setattr(vd, "load_token", lambda: "tok")
-    monkeypatch.setattr(vd, "discover_voice_endpoint",
-                        AsyncMock(return_value={"ip": "9.9.9.9", "port": 50001,
-                                                "voice_ws_endpoint": "ep"}))
+    monkeypatch.setattr(
+        vd,
+        "discover_voice_endpoint",
+        AsyncMock(return_value={"ip": "9.9.9.9", "port": 50001, "voice_ws_endpoint": "ep"}),
+    )
     eps = asyncio.run(discover_multiple(count=1, use_dns=True))
     assert len(eps) == 1
     assert eps[0]["ip"] == "9.9.9.9"
@@ -295,13 +297,12 @@ def test_discover_via_gateway_no_server_update():
 
             return _inner()
 
-    with patch("aiohttp_socks.ProxyConnector"), patch(
-        "aiohttp.ClientSession",
-        return_value=FakeSession()), patch(
-        "blockchecks.engine.config.SOCKS5_PROXY",
-        "socks5://127.0.0.1:1080"), patch(
-        "blockchecks.checkers.voice_discovery._load_guild_channel",
-        return_value=("", "")):
+    with (
+        patch("aiohttp_socks.ProxyConnector"),
+        patch("aiohttp.ClientSession", return_value=FakeSession()),
+        patch("blockchecks.engine.config.SOCKS5_PROXY", "socks5://127.0.0.1:1080"),
+        patch("blockchecks.checkers.voice_discovery._load_guild_channel", return_value=("", "")),
+    ):
         result = asyncio.run(_discover_via_gateway("token"))
     assert result is None
 
@@ -311,9 +312,11 @@ def test_discover_multiple_gateway_layer(monkeypatch):
 
     monkeypatch.setattr(vd, "dns_discover", AsyncMock(return_value=[]))
     monkeypatch.setattr(vd, "load_token", lambda: "tok")
-    monkeypatch.setattr(vd, "discover_voice_endpoint",
-                        AsyncMock(return_value={"ip": "9.9.9.9", "port": 50001,
-                                                "voice_ws_endpoint": "ep"}))
+    monkeypatch.setattr(
+        vd,
+        "discover_voice_endpoint",
+        AsyncMock(return_value={"ip": "9.9.9.9", "port": 50001, "voice_ws_endpoint": "ep"}),
+    )
     eps = asyncio.run(discover_multiple(count=1, use_dns=True))
     assert eps and eps[0]["ip"] == "9.9.9.9"
 
@@ -323,7 +326,6 @@ def test_discover_multiple_gateway_exception(monkeypatch):
 
     monkeypatch.setattr(vd, "dns_discover", AsyncMock(return_value=[]))
     monkeypatch.setattr(vd, "load_token", lambda: "tok")
-    monkeypatch.setattr(vd, "discover_voice_endpoint",
-                        AsyncMock(side_effect=RuntimeError("down")))
+    monkeypatch.setattr(vd, "discover_voice_endpoint", AsyncMock(side_effect=RuntimeError("down")))
     eps = asyncio.run(discover_multiple(count=1, use_dns=True))
     assert eps == []

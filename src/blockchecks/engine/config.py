@@ -198,7 +198,10 @@ DEFAULT_BRIDGE_BATCH_MAX = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH_MAX", "2000"))
 # distinct domains (no all-youtube false positives). Disable with
 # BLOCKCHECKS_AQ_DOMAIN_ISOLATE=0 / [run] domain_isolate = false.
 AQ_DOMAIN_ISOLATE = _env_or("BLOCKCHECKS_AQ_DOMAIN_ISOLATE", "1").lower() not in (
-    "0", "false", "off", "no",
+    "0",
+    "false",
+    "off",
+    "no",
 )
 
 DEFAULT_PROBE_BACKEND = "lua_bridge"  # T-L3: lua_bridge is the standard backend
@@ -380,6 +383,7 @@ def ggc_enabled(domain: str | None = None) -> bool:
     if domain:
         return "googlevideo" in domain.lower()
     return False
+
 
 # ── ECH (Encrypted Client Hello) ──────────────────
 # Disable ECH via curl_cffi.CurlOpt.ECH = 10325

@@ -7,8 +7,6 @@ import os
 import time
 from typing import TYPE_CHECKING
 
-from colorama import Fore, Style
-
 if TYPE_CHECKING:
     pass
 
@@ -23,14 +21,12 @@ from blockchecks.service.batch_scheduler import BatchScheduler
 from blockchecks.service.lua_bridge_ipc import LuaBridge
 from blockchecks.service.lua_netns import _netns_tcp_probe_cleanup
 from blockchecks.service.lua_session import BridgeSession, strategy_text_from_item
+from blockchecks.terminal import CYAN, RESET, YELLOW
 
 #: Max seconds to wait for a free netns before bailing out of a batch. Prevents
 #: a graceful stop (or a hung batch holding the whole pool) from deadlocking
 #: the adaptive/bridge workers on an empty pool queue.
 ACQUIRE_NS_TIMEOUT = 30.0
-
-CYAN = Fore.CYAN + Style.BRIGHT
-RESET = Style.RESET_ALL
 
 
 def _debug_env() -> str:
@@ -191,7 +187,14 @@ class ProbeBatchService:
                 resolved_ips=(ip_lists_by_domain or {}).get(dom),
             )
             data = self._maybe_wssize_retry(
-                item, ctx, timeout_i, ns_name, resolved_ip, protocol, settle_max, data,
+                item,
+                ctx,
+                timeout_i,
+                ns_name,
+                resolved_ip,
+                protocol,
+                settle_max,
+                data,
                 ip_lists=(ip_lists_by_domain or {}).get(dom),
             )
             data["batch_id"] = ctx.batch_id
@@ -251,8 +254,8 @@ class ProbeBatchService:
                     # SIGUSR1 toggled nfqws2 --debug while this batch was running:
                     # restart the daemon so the next probe picks it up.
                     print(
-                        f"  {Fore.YELLOW}[debug] restarting nfqws2 in {ns_name} "
-                        f"(debug={'1' if _debug_env() else '0'}){Style.RESET_ALL}"
+                        f"  {YELLOW}[debug] restarting nfqws2 in {ns_name} "
+                        f"(debug={'1' if _debug_env() else '0'}){RESET}"
                     )
                     session.boot()
                     boot_debug = _debug_env()
@@ -280,8 +283,16 @@ class ProbeBatchService:
                     resolved_ips=(ip_lists_by_domain or {}).get(dom),
                 )
                 data = self._maybe_wssize_bridge_retry(
-                    session, idx, item, ctx, timeout_i, resolved_ip, item_proto, data,
-                    domain=dom, ip_lists=(ip_lists_by_domain or {}).get(dom),
+                    session,
+                    idx,
+                    item,
+                    ctx,
+                    timeout_i,
+                    resolved_ip,
+                    item_proto,
+                    data,
+                    domain=dom,
+                    ip_lists=(ip_lists_by_domain or {}).get(dom),
                 )
                 data["batch_id"] = ctx.batch_id
                 result = self.deps.tcp_result_from_data(item, dom, data)
@@ -302,8 +313,8 @@ class ProbeBatchService:
         self.memory_monitor.record_ns(ns_name)
         if self.memory_monitor.worker_over_limit():
             print(
-                f"  {Fore.YELLOW}[mem] python worker RSS over threshold "
-                f"(see BLOCKCHECKS_MEM_PY_MAX_MIB){Style.RESET_ALL}"
+                f"  {YELLOW}[mem] python worker RSS over threshold "
+                f"(see BLOCKCHECKS_MEM_PY_MAX_MIB){RESET}"
             )
 
     def _maybe_recycle(self, ns_name: str, session: BridgeSession) -> bool:
@@ -316,10 +327,7 @@ class ProbeBatchService:
             return False
         for pid, reason in candidates:
             self.memory_monitor.clear(pid)
-            print(
-                f"  {Fore.YELLOW}[mem] recycle nfqws2 pid={pid} ({reason}) "
-                f"in {ns_name}{Style.RESET_ALL}"
-            )
+            print(f"  {YELLOW}[mem] recycle nfqws2 pid={pid} ({reason}) in {ns_name}{RESET}")
         session.boot()
         self._record_daemon_mem(ns_name)
         return True
@@ -425,9 +433,8 @@ def warn_fanout_bridge_once() -> None:
     if _FANOUT_BRIDGE_WARNED:
         return
     _FANOUT_BRIDGE_WARNED = True
-    yellow = Fore.YELLOW
     print(
-        f"  {yellow}WARN: --lua-bridge ignored for fan-out waves "
+        f"  {YELLOW}WARN: --lua-bridge ignored for fan-out waves "
         f"(classic per-strategy nfqws2){RESET}"
     )
 

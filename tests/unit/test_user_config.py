@@ -67,8 +67,11 @@ def test_apply_parser_defaults_run_env(monkeypatch):
 
     from blockchecks.cli import user_config
 
-    for k in ("BLOCKCHECKS_RETRY_IP_TIMEOUT", "BLOCKCHECKS_AQ_DOMAIN_ISOLATE",
-              "BLOCKCHECKS_BRIDGE_BATCH"):
+    for k in (
+        "BLOCKCHECKS_RETRY_IP_TIMEOUT",
+        "BLOCKCHECKS_AQ_DOMAIN_ISOLATE",
+        "BLOCKCHECKS_BRIDGE_BATCH",
+    ):
         monkeypatch.delenv(k, raising=False)
 
     p = argparse.ArgumentParser()

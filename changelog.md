@@ -1,4 +1,27 @@
-## 1.3.7 — Discord-UDP coverage, Cursor MCP, variant G (2026-08-19)
+## 1.3.7 — CLI modernization, Discord-UDP, Cursor MCP (2026-08-19)
+
+### CLI Modernization & Simplification
+
+- **Strict inversion convention**: protective features are ON by default; disable
+  explicitly with `--no-adaptive`, `--no-preflight`, `--no-ech`, `--no-wssize`.
+  `--quick` keeps prolog-only preflight (skips deep baseline/IP-block/port-block).
+- **Adaptive queue (AQ)**: default ON for `scan` / `pair` / `full`; sequential
+  matrix only with `--no-adaptive`. `--adaptive` kept as alias (no-op when default).
+- **ECH**: `--no-ech` replaces `--disable-ech` (alias retained); ECH ON by default.
+- **Wssize fallback**: ON by default; `--no-wssize` skips TLS 1.2 wssize retry.
+- **Run profiles** (`--profile smoke|fast|20h`) in `scan`, `pair`, `full`:
+  `smoke` = max 20 + fast + quick preflight; `fast` = max 100 + fast;
+  `20h` = full scan-level + resume + no-preflight + no-wssize + fan-out
+  (long-term series A→F bundle).
+- **Centralized terminal output** (`blockchecks.terminal`): `NO_COLOR`,
+  `FORCE_COLOR`, `CLICOLOR_FORCE`, `TERM=dumb`; colorama init at CLI boundary;
+  `error()` / `warn()` on stderr.
+- **Typed execution spec** (`engine/run_spec.py`): `RunSpec` + `CampaignContext`
+  replace untyped `argparse.Namespace` propagation across campaign phases.
+- **Unified campaign parser** (`add_campaign_args()`): single flag builder for
+  `scan` / `pair` / `full` — removes duplicate definitions and syncs defaults.
+
+### Discord-UDP coverage, MCP, variant G
 
 - Discord-voice UDP vs QUIC/game: `generate_udp` retags `udp_voice`; pair
   defaults `--udp-sources custom,standard_udp`; `--udp-sources game` is explicit.

@@ -7,8 +7,6 @@ import logging
 import os
 from pathlib import Path
 
-from colorama import Fore, Style
-
 from blockchecks.engine.config import PROJECT_DIR
 from blockchecks.engine.paths import USER_PRESETS_DIR
 from blockchecks.engine.preset_paths import (
@@ -18,8 +16,8 @@ from blockchecks.engine.preset_paths import (
     resolve_domain_preset,
     resolve_strategy_preset,
 )
+from blockchecks.terminal import CYAN, RESET
 
-RESET = Style.RESET_ALL
 log = logging.getLogger(__name__)
 
 __all__ = [
@@ -33,7 +31,7 @@ __all__ = [
 
 def list_presets() -> None:
     """Print available domain and strategy presets."""
-    print(f"{Fore.CYAN}Domain presets (presets/domains/):{RESET}")
+    print(f"{CYAN}Domain presets (presets/domains/):{RESET}")
     for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/domains", "*.txt"))):
         if os.path.basename(f) in RESERVED_DOMAIN_FILES:
             continue
@@ -43,14 +41,14 @@ def list_presets() -> None:
         print(f"  {name:25s} {count} domains")
     user_dom = Path(USER_PRESETS_DIR) / "domains"
     if user_dom.is_dir():
-        print(f"{Fore.CYAN}User domain presets ({user_dom}):{RESET}")
+        print(f"{CYAN}User domain presets ({user_dom}):{RESET}")
         for f in sorted(user_dom.glob("*.txt")):
             if f.name in RESERVED_DOMAIN_FILES:
                 continue
             with open(f) as pf:
                 count = sum(1 for line in pf if line.strip() and not line.startswith("#"))
             print(f"  {f.stem:25s} {count} domains")
-    print(f"{Fore.CYAN}Strategy presets (presets/strategies/):{RESET}")
+    print(f"{CYAN}Strategy presets (presets/strategies/):{RESET}")
     strategy_exts = (".tls", ".txt", ".http", ".quic", ".udp")
     for f in sorted(
         path

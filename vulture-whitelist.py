@@ -166,3 +166,9 @@ get_zapret2_config  # MCP tool (LAYER C)
 list_zapret2_blobs  # MCP tool (LAYER C)
 get_ipset_status  # MCP tool (LAYER C)
 probe_strategy  # MCP tool (LAYER C)
+C  # terminal color namespace
+heading  # terminal helper
+time_limit_h  # RunSpec dataclass field
+time_limit_m  # RunSpec dataclass field
+raw_args  # RunSpec dataclass field
+CampaignContext  # execution context dataclass

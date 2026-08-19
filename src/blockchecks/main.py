@@ -6,25 +6,11 @@ import argparse
 import asyncio
 import sys
 
-from colorama import init as colorama_init
-
 from blockchecks.cli.parser import (
-    add_adaptive_args,
-    add_curl_fanout_args,
-    add_curl_repeats_args,
-    add_domain_filter_args,
-    add_family_gate_args,
-    add_lua_bridge_args,
-    add_protocol_phase_args,
-    add_secure_dns_args,
-    add_store_args,
-    add_system_deps_args,
-    add_time_limit_args,
+    add_campaign_args,
     ensure_system_deps_or_exit,
 )
-from blockchecks.engine.config import (
-    effective_default_pool_size,
-)
+from blockchecks.cli.profiles import apply_profile
 from blockchecks.engine.matrix_generator import MatrixGenerator
 from blockchecks.engine.run_deadline import validate_time_limit_args
 from blockchecks.main_phases import (
@@ -51,8 +37,9 @@ from blockchecks.main_phases import (
     run_quic_phase,
     run_tcp_coverage_phase,
 )
+from blockchecks.terminal import init_terminal
 
-colorama_init(autoreset=True)
+init_terminal()
 
 
 async def run_full(args) -> int:
@@ -63,6 +50,7 @@ async def run_full(args) -> int:
 
 
 async def _run_full_campaign(args) -> int:
+    apply_profile(args)
     db = await open_full_run_db(args)
 
     domains, domains_file, domains_rc = load_run_domains(args)
@@ -124,87 +112,9 @@ def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser
         prog="bs full",
         description="Mass strategy x coverage test + nfqws2 conf export",
     )
-    add_store_args(p)
+    add_campaign_args(p, mode="full")
     if user_config:
         apply_parser_defaults(p, user_config)
-    p.add_argument(
-        "--db-batch",
-        type=int,
-        default=500,
-        metavar="N",
-        help="Buffer N DB writes before flush (0=immediate, default)",
-    )
-    p.add_argument(
-        "-d", "--domain", default=None, help="Primary domain (default: first in domains file)"
-    )
-    p.add_argument(
-        "--domains-file",
-        default=None,
-        help="Default: presets/domains/coverage-tcp.txt (lean)",
-    )
-    g = p.add_argument_group("domain filter")
-    g.add_argument(
-        "--zero-pass-warn",
-        type=int,
-        default=10,
-        metavar="N",
-        help="Warn if domain has 0%% PASS after N DB results (0=off, default 10)",
-    )
-    add_domain_filter_args(p)
-    p.add_argument("--tcp-sources", default="standard,custom,configs,flowseal")
-    p.add_argument("--udp-sources", default="custom,standard_udp")
-    p.add_argument("--quic-sources", default="standard_quic")
-    p.add_argument("--http-sources", default="custom,standard_http")
-    p.add_argument("--no-http", action="store_true", help="Skip HTTP :80 strategy phase")
-    p.add_argument("--scan-level", default="full", choices=["single", "fast", "full"])
-    p.add_argument("--max", type=int, default=0, help="Cap strategies (0=uncapped)")
-    p.add_argument("--parallel", type=int, default=effective_default_pool_size())
-    p.add_argument("--timeout", type=float, default=5.0)
-    p.add_argument("--udp-timeout", type=float, default=3.0)
-    p.add_argument("--protocol", default="tls12", choices=["tls12", "tls13"])
-    p.add_argument(
-        "--no-wssize",
-        action="store_true",
-        default=True,
-        help="Skip wssize fallback on TLS 1.2 FAIL. Default ON for bs full (speed).",
-    )
-    p.add_argument("--resume", action="store_true", help="Skip strategy x domain already in DB")
-    p.add_argument("--tcp-only", action="store_true")
-    p.add_argument("--no-quic", action="store_true")
-    p.add_argument("--no-voice", action="store_true")
-    p.add_argument("--discover-dns", type=int, default=5)
-    p.add_argument("--discover-dns-no-bootstrap", action="store_true")
-    p.add_argument("--pair-max", type=int, default=200)
-    p.add_argument("--export-limit", type=int, default=3)
-    p.add_argument(
-        "--no-common-only",
-        action="store_true",
-        help="Export best per-domain strategies instead of COMMON intersection",
-    )
-    p.add_argument("--isp-interface", default="eth3")
-    p.add_argument("--prefix", default="/opt/etc/nfqws2")
-    p.add_argument("--mode", default="auto", choices=["auto", "list", "all"])
-    add_secure_dns_args(p, include_preflight=True)
-    add_system_deps_args(p)
-    add_curl_repeats_args(p, include_quic_timeout=True)
-    add_family_gate_args(p)
-    add_protocol_phase_args(p)
-    add_curl_fanout_args(p)
-    g = p.add_argument_group("settle profile (B11)")
-    g.add_argument(
-        "--settle-profile",
-        default=None,
-        metavar="PATH",
-        help="Load settle/curl timings from bench-settle JSON (default: logs/settle_profile.json)",
-    )
-    g.add_argument(
-        "--no-settle-profile",
-        action="store_true",
-        help="Ignore settle profile even if logs/settle_profile.json exists",
-    )
-    add_adaptive_args(p)
-    add_lua_bridge_args(p)
-    add_time_limit_args(p, include_export=True)
     return p
 
 

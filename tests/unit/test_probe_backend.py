@@ -67,7 +67,9 @@ def test_cliapp_parses_classic_and_probe_backend():
     from blockchecks.cli.cliapp import build_cli_root
 
     Root = build_cli_root()
-    sub = get_subcommand(Root(_cli_parse_args=["scan", "--classic", "--max", "1"]), is_required=True)
+    sub = get_subcommand(
+        Root(_cli_parse_args=["scan", "--classic", "--max", "1"]), is_required=True
+    )
     assert sub.classic is True
     sub2 = get_subcommand(
         Root(_cli_parse_args=["scan", "--probe-backend", "classic", "--max", "1"]),

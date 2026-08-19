@@ -146,10 +146,13 @@ def test_validate_pair_domain_ok():
 
 def test_prepare_dns_rc_short_circuits():
     args = _args()
-    with patch(
-        "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
-        return_value=(None, [], 7),
-    ), patch("blockchecks.data_block.provider.provider_name"):
+    with (
+        patch(
+            "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
+            return_value=(None, [], 7),
+        ),
+        patch("blockchecks.data_block.provider.provider_name"),
+    ):
         res = asyncio.run(prepare_dns_and_preflight(args, []))
     assert res.exit_code == 7
 
@@ -159,14 +162,17 @@ def test_prepare_dns_preflight_exit_code():
     preflight = MagicMock()
     preflight.exit_code = 3
     preflight.error = "boom"
-    with patch(
-        "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
-        return_value=(MagicMock(), [], None),
-    ), patch(
-        "blockchecks.engine.preflight.run_preflight_async",
-        new=AsyncMock(return_value=preflight),
-    ), patch("blockchecks.data_block.provider.provider_name"), patch(
-        "blockchecks.checkers.ip_pin.load_pins", return_value={}
+    with (
+        patch(
+            "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
+            return_value=(MagicMock(), [], None),
+        ),
+        patch(
+            "blockchecks.engine.preflight.run_preflight_async",
+            new=AsyncMock(return_value=preflight),
+        ),
+        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.checkers.ip_pin.load_pins", return_value={}),
     ):
         res = asyncio.run(prepare_dns_and_preflight(args, []))
     assert res.exit_code == 3
@@ -177,14 +183,17 @@ def test_prepare_dns_prolog_skip_domain():
     preflight = MagicMock()
     preflight.exit_code = None
     preflight.skip_domains = ["youtube.com"]
-    with patch(
-        "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
-        return_value=(MagicMock(), [], None),
-    ), patch(
-        "blockchecks.engine.preflight.run_preflight_async",
-        new=AsyncMock(return_value=preflight),
-    ), patch("blockchecks.data_block.provider.provider_name"), patch(
-        "blockchecks.checkers.ip_pin.load_pins", return_value={}
+    with (
+        patch(
+            "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
+            return_value=(MagicMock(), [], None),
+        ),
+        patch(
+            "blockchecks.engine.preflight.run_preflight_async",
+            new=AsyncMock(return_value=preflight),
+        ),
+        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.checkers.ip_pin.load_pins", return_value={}),
     ):
         res = asyncio.run(prepare_dns_and_preflight(args, []))
     assert res.exit_code == 0
@@ -195,14 +204,17 @@ def test_prepare_dns_ok_returns_no_exit():
     preflight = MagicMock()
     preflight.exit_code = None
     preflight.skip_domains = []
-    with patch(
-        "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
-        return_value=(MagicMock(), [], None),
-    ), patch(
-        "blockchecks.engine.preflight.run_preflight_async",
-        new=AsyncMock(return_value=preflight),
-    ), patch("blockchecks.data_block.provider.provider_name"), patch(
-        "blockchecks.checkers.ip_pin.load_pins", return_value={}
+    with (
+        patch(
+            "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
+            return_value=(MagicMock(), [], None),
+        ),
+        patch(
+            "blockchecks.engine.preflight.run_preflight_async",
+            new=AsyncMock(return_value=preflight),
+        ),
+        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.checkers.ip_pin.load_pins", return_value={}),
     ):
         res = asyncio.run(prepare_dns_and_preflight(args, []))
     assert res.exit_code is None
@@ -213,11 +225,17 @@ def test_prepare_dns_ok_returns_no_exit():
 
 def test_build_pair_runner_passes_settings():
     args = _args()
-    with patch("blockchecks.cli.commands.pair_phases.repeats_from_args",
-               return_value=(1, False, "fast", False)), patch(
-        "blockchecks.cli.commands.pair_phases.resolve_probe_backend",
-        return_value="classic",
-    ), patch("blockchecks.cli.commands.pair_phases.AsyncTestRunner") as RunnerCls:
+    with (
+        patch(
+            "blockchecks.cli.commands.pair_phases.repeats_from_args",
+            return_value=(1, False, "fast", False),
+        ),
+        patch(
+            "blockchecks.cli.commands.pair_phases.resolve_probe_backend",
+            return_value="classic",
+        ),
+        patch("blockchecks.cli.commands.pair_phases.AsyncTestRunner") as RunnerCls,
+    ):
         build_pair_runner(args, MagicMock(), MagicMock(), [], 2)
     kwargs = RunnerCls.call_args.kwargs
     assert kwargs["pool_size"] == 2
@@ -280,8 +298,7 @@ def test_resume_fingerprint_mismatch():
     cp = MagicMock()
     cp.fingerprint = "old"
     db.latest_checkpoint = AsyncMock(return_value=cp)
-    with patch("blockchecks.cli.commands.pair_phases.fingerprint_mismatch",
-               return_value=True):
+    with patch("blockchecks.cli.commands.pair_phases.fingerprint_mismatch", return_value=True):
         _, rc = asyncio.run(resolve_resume_checkpoint(args, db, "new"))
     assert rc == 1
 
@@ -292,8 +309,7 @@ def test_resume_match():
     cp = MagicMock()
     cp.fingerprint = "fp"
     db.latest_checkpoint = AsyncMock(return_value=cp)
-    with patch("blockchecks.cli.commands.pair_phases.fingerprint_mismatch",
-               return_value=False):
+    with patch("blockchecks.cli.commands.pair_phases.fingerprint_mismatch", return_value=False):
         resume_from, rc = asyncio.run(resolve_resume_checkpoint(args, db, "fp"))
     assert rc is None and resume_from is cp
 
@@ -314,8 +330,7 @@ def test_load_strategy_items_generated():
     gen = MagicMock()
     gen.generate_tcp = AsyncMock(return_value=[MagicMock()])
     gen.generate_udp = AsyncMock(return_value=[MagicMock()])
-    with patch("blockchecks.cli.commands.pair_phases.MatrixGenerator",
-               return_value=gen):
+    with patch("blockchecks.cli.commands.pair_phases.MatrixGenerator", return_value=gen):
         res = asyncio.run(load_strategy_items(args, MagicMock()))
     assert res.error_code is None
     assert len(res.tcp_items) == 1
@@ -327,8 +342,7 @@ def test_load_strategy_items_tcp_only_skips_udp():
     gen = MagicMock()
     gen.generate_tcp = AsyncMock(return_value=[MagicMock()])
     gen.generate_udp = AsyncMock(return_value=[])
-    with patch("blockchecks.cli.commands.pair_phases.MatrixGenerator",
-               return_value=gen):
+    with patch("blockchecks.cli.commands.pair_phases.MatrixGenerator", return_value=gen):
         res = asyncio.run(load_strategy_items(args, MagicMock()))
     assert len(res.udp_items) == 0
 
@@ -349,16 +363,16 @@ def test_load_strategy_items_strategy_preset_not_found():
 def test_finalize_no_tcp_passed_returns_1():
     args = _args(tcp_only=True)
     db = MagicMock()
-    with patch("blockchecks.engine.run_finalize.maybe_write_best_config_data_block",
-               new=AsyncMock()), patch(
-        "blockchecks.engine.run_finalize.maybe_sync_data_block",
-        new=AsyncMock()), patch(
-        "blockchecks.cli.commands.pair_phases.write_run_summary",
-        return_value=None), patch(
-        "blockchecks.cli.commands.pair_phases.run_exit_code", return_value=0):
+    with (
+        patch(
+            "blockchecks.engine.run_finalize.maybe_write_best_config_data_block", new=AsyncMock()
+        ),
+        patch("blockchecks.engine.run_finalize.maybe_sync_data_block", new=AsyncMock()),
+        patch("blockchecks.cli.commands.pair_phases.write_run_summary", return_value=None),
+        patch("blockchecks.cli.commands.pair_phases.run_exit_code", return_value=0),
+    ):
         rc = asyncio.run(
-            finalize_pair_run(args, db, None, asyncio.Event(), StopHandlerState(),
-                              0, [], None)
+            finalize_pair_run(args, db, None, asyncio.Event(), StopHandlerState(), 0, [], None)
         )
     assert rc == 1
 
@@ -366,16 +380,16 @@ def test_finalize_no_tcp_passed_returns_1():
 def test_finalize_tcp_passed_returns_exit_code():
     args = _args(tcp_only=True)
     db = MagicMock()
-    with patch("blockchecks.engine.run_finalize.maybe_write_best_config_data_block",
-               new=AsyncMock()), patch(
-        "blockchecks.engine.run_finalize.maybe_sync_data_block",
-        new=AsyncMock()), patch(
-        "blockchecks.cli.commands.pair_phases.write_run_summary",
-        return_value=None), patch(
-        "blockchecks.cli.commands.pair_phases.run_exit_code", return_value=0):
+    with (
+        patch(
+            "blockchecks.engine.run_finalize.maybe_write_best_config_data_block", new=AsyncMock()
+        ),
+        patch("blockchecks.engine.run_finalize.maybe_sync_data_block", new=AsyncMock()),
+        patch("blockchecks.cli.commands.pair_phases.write_run_summary", return_value=None),
+        patch("blockchecks.cli.commands.pair_phases.run_exit_code", return_value=0),
+    ):
         rc = asyncio.run(
-            finalize_pair_run(args, db, None, asyncio.Event(), StopHandlerState(),
-                              2, [], None)
+            finalize_pair_run(args, db, None, asyncio.Event(), StopHandlerState(), 2, [], None)
         )
     assert rc == 0
 
@@ -385,16 +399,18 @@ def test_finalize_pairs_fail_returns_1():
     db = MagicMock()
     bad_pair = MagicMock()
     bad_pair.overall = "FAIL"
-    with patch("blockchecks.engine.run_finalize.maybe_write_best_config_data_block",
-               new=AsyncMock()), patch(
-        "blockchecks.engine.run_finalize.maybe_sync_data_block",
-        new=AsyncMock()), patch(
-        "blockchecks.cli.commands.pair_phases.write_run_summary",
-        return_value=None), patch(
-        "blockchecks.cli.commands.pair_phases.run_exit_code", return_value=0):
+    with (
+        patch(
+            "blockchecks.engine.run_finalize.maybe_write_best_config_data_block", new=AsyncMock()
+        ),
+        patch("blockchecks.engine.run_finalize.maybe_sync_data_block", new=AsyncMock()),
+        patch("blockchecks.cli.commands.pair_phases.write_run_summary", return_value=None),
+        patch("blockchecks.cli.commands.pair_phases.run_exit_code", return_value=0),
+    ):
         rc = asyncio.run(
-            finalize_pair_run(args, db, None, asyncio.Event(), StopHandlerState(),
-                              2, [bad_pair], None)
+            finalize_pair_run(
+                args, db, None, asyncio.Event(), StopHandlerState(), 2, [bad_pair], None
+            )
         )
     assert rc == 1
 
@@ -424,9 +440,20 @@ def test_run_standard_pair_phase_tcp_only():
     runner.test_batch_tcp = AsyncMock(return_value=[_result("s1"), _result("s2", False)])
     phase = asyncio.run(
         run_standard_pair_phase(
-            args, runner, [_item("s1"), _item("s2")], [], ["youtube.com"],
-            "1.2.3.4", 50004, False, None, "fp", asyncio.Event(),
-            "fast", False, set(),
+            args,
+            runner,
+            [_item("s1"), _item("s2")],
+            [],
+            ["youtube.com"],
+            "1.2.3.4",
+            50004,
+            False,
+            None,
+            "fp",
+            asyncio.Event(),
+            "fast",
+            False,
+            set(),
         )
     )
     assert phase.tcp_passed == 1
@@ -442,9 +469,20 @@ def test_run_standard_pair_phase_family_gates():
     ):
         phase = asyncio.run(
             run_standard_pair_phase(
-                args, runner, [_item("s1"), _item("s2")], [], ["youtube.com"],
-                "1.2.3.4", 50004, False, None, "fp", asyncio.Event(),
-                "fast", True, set(),
+                args,
+                runner,
+                [_item("s1"), _item("s2")],
+                [],
+                ["youtube.com"],
+                "1.2.3.4",
+                50004,
+                False,
+                None,
+                "fp",
+                asyncio.Event(),
+                "fast",
+                True,
+                set(),
             )
         )
     assert phase.tcp_passed == 2
@@ -457,8 +495,20 @@ def test_run_standard_pair_phase_stop_event_breaks():
     ev.set()
     phase = asyncio.run(
         run_standard_pair_phase(
-            args, runner, [_item("s1")], [], ["youtube.com"],
-            "1.2.3.4", 50004, False, None, "fp", ev, "fast", False, set(),
+            args,
+            runner,
+            [_item("s1")],
+            [],
+            ["youtube.com"],
+            "1.2.3.4",
+            50004,
+            False,
+            None,
+            "fp",
+            ev,
+            "fast",
+            False,
+            set(),
         )
     )
     assert phase.tcp_passed == 0
@@ -476,24 +526,41 @@ def test_run_adaptive_pair_phase():
     m.time_to_first_pass = 1.0
     m.fanout_enqueued = 2
     aq_result.metrics = m
-    with patch(
-        "blockchecks.cli.commands.pair_phases.build_adaptive_queue",
-        new=AsyncMock(return_value=([MagicMock()], 0)),
-    ), patch(
-        "blockchecks.cli.commands.pair_phases.run_adaptive_tcp",
-        new=AsyncMock(return_value=aq_result),
-    ), patch(
-        "blockchecks.cli.commands.pair_phases.resolve_probe_backend",
-        return_value="classic",
-    ), patch(
-        "blockchecks.cli.commands.pair_phases.persist_adaptive_weights",
-        new=AsyncMock(),
+    with (
+        patch(
+            "blockchecks.cli.commands.pair_phases.build_adaptive_queue",
+            new=AsyncMock(return_value=([MagicMock()], 0)),
+        ),
+        patch(
+            "blockchecks.cli.commands.pair_phases.run_adaptive_tcp",
+            new=AsyncMock(return_value=aq_result),
+        ),
+        patch(
+            "blockchecks.cli.commands.pair_phases.resolve_probe_backend",
+            return_value="classic",
+        ),
+        patch(
+            "blockchecks.cli.commands.pair_phases.persist_adaptive_weights",
+            new=AsyncMock(),
+        ),
     ):
         phase = asyncio.run(
             run_adaptive_pair_phase(
-                args, runner, MagicMock(), [_item("s1")], [], ["youtube.com"],
-                "1.2.3.4", 50004, False, None, "fp", asyncio.Event(),
-                2, "tls12", [],
+                args,
+                runner,
+                MagicMock(),
+                [_item("s1")],
+                [],
+                ["youtube.com"],
+                "1.2.3.4",
+                50004,
+                False,
+                None,
+                "fp",
+                asyncio.Event(),
+                2,
+                "tls12",
+                [],
             )
         )
     assert phase.tcp_passed == 3
@@ -514,15 +581,26 @@ def test_discover_voice_endpoints_dns_alive():
     from blockchecks.cli.commands.pair_phases import discover_voice_endpoints
 
     args = _args(discover_dns=3)
-    with patch("blockchecks.checkers.voice_dns.discover_dns_alive",
-               new=AsyncMock(return_value=[{"ip": "1.2.3.4", "port": 50004,
-                                            "hostname": "h", "source": "dns",
-                                            "stun_ms": 5, "method": "x",
-                                            "bootstrap": True}])), patch(
-        "blockchecks.checkers.voice_dns.check_discover_mutex",
-        return_value=None), patch(
-        "blockchecks.checkers.voice_discovery.load_token",
-        return_value=None):
+    with (
+        patch(
+            "blockchecks.checkers.voice_dns.discover_dns_alive",
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "ip": "1.2.3.4",
+                        "port": 50004,
+                        "hostname": "h",
+                        "source": "dns",
+                        "stun_ms": 5,
+                        "method": "x",
+                        "bootstrap": True,
+                    }
+                ]
+            ),
+        ),
+        patch("blockchecks.checkers.voice_dns.check_discover_mutex", return_value=None),
+        patch("blockchecks.checkers.voice_discovery.load_token", return_value=None),
+    ):
         ctx, rc = asyncio.run(discover_voice_endpoints(args))
     assert rc is None
     assert ctx.voice_ip == "1.2.3.4"
@@ -532,13 +610,14 @@ def test_discover_voice_endpoints_auto_discover():
     from blockchecks.cli.commands.pair_phases import discover_voice_endpoints
 
     args = _args(auto_discover=3)
-    with patch("blockchecks.checkers.voice_discovery.discover_multiple",
-               new=AsyncMock(return_value=[{"ip": "9.9.9.9", "port": 50001,
-                                            "hostname": "h"}])), patch(
-        "blockchecks.checkers.voice_dns.check_discover_mutex",
-        return_value=None), patch(
-        "blockchecks.checkers.voice_discovery.load_token",
-        return_value=None):
+    with (
+        patch(
+            "blockchecks.checkers.voice_discovery.discover_multiple",
+            new=AsyncMock(return_value=[{"ip": "9.9.9.9", "port": 50001, "hostname": "h"}]),
+        ),
+        patch("blockchecks.checkers.voice_dns.check_discover_mutex", return_value=None),
+        patch("blockchecks.checkers.voice_discovery.load_token", return_value=None),
+    ):
         ctx, rc = asyncio.run(discover_voice_endpoints(args))
     assert rc is None
     assert ctx.voice_ip == "9.9.9.9"
@@ -548,10 +627,10 @@ def test_discover_voice_endpoints_full_voice_no_token():
     from blockchecks.cli.commands.pair_phases import discover_voice_endpoints
 
     args = _args(full_voice=True)
-    with patch("blockchecks.checkers.voice_dns.check_discover_mutex",
-               return_value=None), patch(
-        "blockchecks.checkers.voice_discovery.load_token",
-        return_value=None):
+    with (
+        patch("blockchecks.checkers.voice_dns.check_discover_mutex", return_value=None),
+        patch("blockchecks.checkers.voice_discovery.load_token", return_value=None),
+    ):
         ctx, rc = asyncio.run(discover_voice_endpoints(args))
     assert rc is None
     assert ctx.full_voice is False
@@ -567,8 +646,7 @@ def test_register_stop_handlers(monkeypatch):
     ev = asyncio.Event()
     loop = MagicMock()
     state = StopHandlerState()
-    with patch("blockchecks.cli.commands.pair_phases.asyncio.get_running_loop",
-               return_value=loop):
+    with patch("blockchecks.cli.commands.pair_phases.asyncio.get_running_loop", return_value=loop):
         register_stop_handlers(loop, state, None, ev)
     assert loop.add_signal_handler.call_count == 3
 
@@ -578,11 +656,11 @@ def test_load_strategy_items_configs_dir(tmp_path):
     conf_dir.mkdir()
     (conf_dir / "tcp_a.conf").write_text("--qnum=200\n")
     (conf_dir / "udp_voice_b.conf").write_text("--qnum=201\n")
-    args = _args(generate=False, config=None, configs_dir=str(conf_dir),
-                 user_matrix="")
+    args = _args(generate=False, config=None, configs_dir=str(conf_dir), user_matrix="")
     with patch("blockchecks.cli.commands.pair_phases.StrategyLoader") as LoaderCls:
         LoaderCls.return_value.from_config_dir.return_value = [
-            str(conf_dir / "tcp_a.conf"), str(conf_dir / "udp_voice_b.conf")
+            str(conf_dir / "tcp_a.conf"),
+            str(conf_dir / "udp_voice_b.conf"),
         ]
         res = asyncio.run(load_strategy_items(args, MagicMock()))
     assert len(res.tcp_items) == 1

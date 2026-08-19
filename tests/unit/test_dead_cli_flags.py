@@ -139,8 +139,11 @@ def test_parity_dests_full_vs_pair() -> None:
     import inspect
 
     from blockchecks import main as main_mod
+    from blockchecks.cli import parser as parser_mod
 
-    src = inspect.getsource(main_mod.build_arg_parser)
+    src = inspect.getsource(main_mod.build_arg_parser) + inspect.getsource(
+        parser_mod.add_campaign_args
+    )
     assert "add_secure_dns_args" in src
     assert "add_curl_repeats_args" in src
     assert "add_domain_filter_args" in src

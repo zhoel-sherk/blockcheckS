@@ -80,9 +80,11 @@ def test_get_fresh_url_fetches(tmp_path, monkeypatch):
 
     cache = tmp_path / "gv.json"
     monkeypatch.setattr(yu, "GV_URL_CACHE_FILE", cache)
-    monkeypatch.setattr(yu, "_fetch_ytdlp_url", lambda *a, **k: (
-        "https://a.googlevideo.com/videoplayback?ip=46.44.0.118"
-    ))
+    monkeypatch.setattr(
+        yu,
+        "_fetch_ytdlp_url",
+        lambda *a, **k: "https://a.googlevideo.com/videoplayback?ip=46.44.0.118",
+    )
     # CI has no yt-dlp in PATH/venv (it lives in the optional `youtube` extra).
     # Mock the binary lookup so get_fresh_url reaches the fetch branch.
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/yt-dlp")
@@ -99,7 +101,7 @@ def test_get_fresh_url_uses_cooldown(tmp_path, monkeypatch):
     monkeypatch.setattr(yu, "GV_URL_CACHE_FILE", cache)
     monkeypatch.setattr(yu, "_fetch_ytdlp_url", lambda *a, **k: None)
     monkeypatch.setattr(yu, "_expired_cache_url", lambda: "expired-url")
-    yu._fetch_fail_until = 10 ** 12  # in future → cooldown
+    yu._fetch_fail_until = 10**12  # in future → cooldown
     assert yu.get_fresh_url() == "expired-url"
 
 

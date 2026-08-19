@@ -47,7 +47,9 @@ class _HttpProbe:
             writer.write(payload)
         await writer.drain()
 
-        status_line = (await asyncio.wait_for(reader.readline(), timeout=5)).decode("utf-8", "replace")
+        status_line = (await asyncio.wait_for(reader.readline(), timeout=5)).decode(
+            "utf-8", "replace"
+        )
         status_code = int(status_line.split(" ", 2)[1])
         body_bytes = b""
         while True:
@@ -309,9 +311,7 @@ def test_http_results_endpoint_reads_run_db(temp_db):
     from blockchecks.service.server import ProbeServer
 
     async def seed():
-        await temp_db.log_tcp(
-            "fake:blob=stun:repeats=6", "discord.com", "PASS", 100.0, proto="tcp"
-        )
+        await temp_db.log_tcp("fake:blob=stun:repeats=6", "discord.com", "PASS", 100.0, proto="tcp")
         await temp_db.log_tcp(
             "fake:blob=max_ru:repeats=6", "discord.com", "PASS", 120.0, proto="tcp"
         )
@@ -323,9 +323,7 @@ def test_http_results_endpoint_reads_run_db(temp_db):
     server = ProbeServer(svc, socket_path="/tmp/bs_results.sock")
 
     async def run():
-        resp = await server._handle_results(
-            {"db": str(temp_db.path), "limit": 10}
-        )
+        resp = await server._handle_results({"db": str(temp_db.path), "limit": 10})
         assert resp["status"] == "ok"
         assert resp["db"] == str(temp_db.path)
         names = [s["strategy"] for s in resp["tcp"]]

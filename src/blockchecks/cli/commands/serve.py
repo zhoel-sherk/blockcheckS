@@ -70,8 +70,10 @@ def cmd_serve(args) -> int:
                 if http_port:
                     http_token = _resolve_http_token(args)
                     if not http_token:
-                        print("  [serve] WARNING: --http-port set but no token (--http-token / env "
-                              "BLOCKCHECKS_HTTP_TOKEN / config.toml [http] token). HTTP bridge disabled.")
+                        print(
+                            "  [serve] WARNING: --http-port set but no token (--http-token / env "
+                            "BLOCKCHECKS_HTTP_TOKEN / config.toml [http] token). HTTP bridge disabled."
+                        )
                     await asyncio.gather(
                         server.serve(),
                         server.serve_http(port=int(http_port), token=http_token),

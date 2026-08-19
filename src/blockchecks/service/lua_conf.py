@@ -103,9 +103,7 @@ def write_bridge_conf(
     tag: str = "bridge",
 ) -> str:
     """Write bridge conf to a temp file; return path."""
-    text = build_bridge_conf(
-        strategies, ipc_dir, protocol=protocol, extra_lua_init=extra_lua_init
-    )
+    text = build_bridge_conf(strategies, ipc_dir, protocol=protocol, extra_lua_init=extra_lua_init)
     fd, path = tempfile.mkstemp(prefix=f"bs_{tag}_", suffix=".conf")
     os.close(fd)
     Path(path).write_text(text, encoding="utf-8")

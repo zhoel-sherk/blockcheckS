@@ -1,6 +1,6 @@
 # Package structure — blockcheckS
 
-Аудит layout после packaging + onboarding split (2026-08).
+Аудит layout после packaging + CLI modernization (2026-08, 1.3.7).
 
 ## Канон
 
@@ -9,13 +9,16 @@ blockcheckS/
 ├── src/blockchecks/
 │   ├── __init__.py
 │   ├── bs.py                  # thin CLI entry → cli.parser.main
+│   ├── terminal.py            # color output (supports_color, C, error/warn/heading)
 │   ├── cli/
-│   │   ├── parser.py          # argparse + dispatch
+│   │   ├── parser.py          # argparse + add_campaign_args (scan/pair/full)
+│   │   ├── profiles.py        # --profile smoke|fast|20h bundles
 │   │   ├── presets.py
-│   │   └── commands/          # tcp, udp, pair
+│   │   └── commands/          # tcp, udp, pair, ...
 │   ├── main.py                # bs full orchestrator
 │   ├── nfconf.py
 │   ├── engine/
+│   │   ├── run_spec.py        # RunSpec + CampaignContext (typed CLI config)
 │   │   ├── paths.py           # XDG dirs (config/data/cache)
 │   │   ├── store/             # RunStateStore DAO (sqlite)
 │   │   ├── config.py
@@ -100,7 +103,8 @@ Flags: `--no-fetch-deps`, `--offline`, `--skip-deps-check`.
 
 ```
 bs ──► cli.parser (pydantic CliApp) ──► commands + async_runner / test_runner
-main ──► async_runner + nfconf
+     └── add_campaign_args (scan/pair/full) + profiles.apply_profile
+main ──► RunSpec.from_args ──► CampaignContext ──► async_runner + nfconf
 async_runner ──► service.probe.invoke_curl_probe_worker ──► in_ns_workers --mode curl|udp
 in_ns_workers ──► checkers + service.netns_pool + service.nfqws2 (+ base_worker)
 matrix_generator ──► generators/* (standard facade → families/)
@@ -120,10 +124,10 @@ Full tree with line counts (Python / shell / lua / md; binaries excluded).
 Unit suite: **1270 passed**, quality **122**, integration **22** (sudo E2E).
 
 ```
-src/blockchecks/                      (≈25 700 строк, 108 py-файлов)
-├── bs.py 17 | main.py 234 | main_phases.py 1102 | nfconf.py 229
+src/blockchecks/                      (≈25 700 строк, 108+ py-файлов)
+├── bs.py 17 | terminal.py 97 | main.py 234 | main_phases.py 1102 | nfconf.py 229
 ├── provider_import.py 230 | shortlist_export.py 188 | shortlist_import.py 206
-├── cli/  cliapp.py 602 | parser.py 835 | presets.py 65 | user_config.py 104
+├── cli/  cliapp.py 602 | parser.py 916 | profiles.py 46 | presets.py 65 | user_config.py 104
 │   └── commands/  bench_settle 161 | pair 208 | pair_phases 802 | serve 62 |
 │                  stop 14 | tcp 117 | udp 123
 ├── checkers/  composite_runner 189 | curl_probe 941 | dns_secure 497 |
@@ -137,7 +141,7 @@ src/blockchecks/                      (≈25 700 строк, 108 py-файлов
 │   domain_loader 175 | fail_phase 128 | family_needs 192 | in_ns_workers 784 |
 │   matrix_generator 287 | nfqws_config 94 | paths 322 | preflight 487 |
 │   preset_paths 101 | results 82 | run_deadline 144 | run_finalize 154 |
-│   secure_io 24 | settings 107 | settle_profile 178 | strategy_loader 64 |
+│   run_spec 185 | secure_io 24 | settings 107 | settle_profile 178 | strategy_loader 64 |
 │   system_deps 489 | tcp_fanout 100 | test_runner 353 | triage 130
 │   ├── generators/  base 41 | custom 155 | flowseal 335 | standard 882 (facade)
 │   │   └── families/  fake 213 | split 253 | tamper 244 | _helpers 112

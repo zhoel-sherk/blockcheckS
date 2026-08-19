@@ -62,7 +62,9 @@ def test_stall_at_16k(monkeypatch):
         time.sleep(cp.STALL_IDLE_SEC + 0.5)
 
     resp = _ChunkResp(gen())
-    monkeypatch.setattr(cp, "curl_cffi", type("_M", (), {"Session": lambda *a, **kw: _FakeSession(resp)})())
+    monkeypatch.setattr(
+        cp, "curl_cffi", type("_M", (), {"Session": lambda *a, **kw: _FakeSession(resp)})()
+    )
     res = run_stream_triage_probe("https://x.test", timeout=8)
     assert res.phase == "data_stall_16k"
     assert res.total_bytes == 16 * 1024
@@ -74,7 +76,9 @@ def test_full_stream_pass(monkeypatch):
 
     chunks = [b"x" * 4096] * 16  # 64KB
     resp = _ChunkResp(chunks)
-    monkeypatch.setattr(cp, "curl_cffi", type("_M", (), {"Session": lambda *a, **kw: _FakeSession(resp)})())
+    monkeypatch.setattr(
+        cp, "curl_cffi", type("_M", (), {"Session": lambda *a, **kw: _FakeSession(resp)})()
+    )
     res = run_stream_triage_probe("https://x.test", timeout=5)
     assert res.total_bytes == 64 * 1024
     assert res.http_code == 200

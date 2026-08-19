@@ -59,9 +59,7 @@ def test_run_tcp_check_multi_gv_fail():
         ),
         patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=True),
     ):
-        out = _run_tcp_check_multi(
-            "bs-p0", "fake:x", ["googlevideo.com"], 5.0
-        )
+        out = _run_tcp_check_multi("bs-p0", "fake:x", ["googlevideo.com"], 5.0)
     assert out["googlevideo.com"]["success"] is False
 
 

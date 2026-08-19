@@ -98,9 +98,7 @@ def test_l3_probe_silent_drop_doc_ip(monkeypatch):
     def _timeout(*a, **k):
         raise TimeoutError("connect timed out")
 
-    monkeypatch.setattr(
-        "blockchecks.checkers.l3_probe.socket.create_connection", _timeout
-    )
+    monkeypatch.setattr("blockchecks.checkers.l3_probe.socket.create_connection", _timeout)
     r = probe_l3("192.0.2.1", 443, timeout=1.5, use_raw=False)
     assert r.phase == FailPhase.L4_SYN_DROP
 

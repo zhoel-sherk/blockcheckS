@@ -130,7 +130,9 @@ def test_shortlist_export_main(tmp_path):
 
     from blockchecks.shortlist_export import main
 
-    with patch("blockchecks.shortlist_export.export_shortlist_json",
-               new=AsyncMock(return_value={"schema": "blockchecks.shortlist/v1", "tcp": []})):
+    with patch(
+        "blockchecks.shortlist_export.export_shortlist_json",
+        new=AsyncMock(return_value={"schema": "blockchecks.shortlist/v1", "tcp": []}),
+    ):
         rc = main(["--db", str(tmp_path / "x.db"), "--output", str(tmp_path / "o.json")])
     assert rc == 0

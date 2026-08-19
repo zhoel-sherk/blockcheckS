@@ -55,9 +55,7 @@ def test_collect_coverage_fallback():
 def test_collect_working_fallback():
     db = _store()
     db.get_working_tcp = AsyncMock(return_value=["fake:c"])
-    tcp, _, _ = asyncio.run(
-        collect_export_strategies(db, domain="d.com", limit=3, domains=None)
-    )
+    tcp, _, _ = asyncio.run(collect_export_strategies(db, domain="d.com", limit=3, domains=None))
     assert tcp == ["fake:c"]
 
 
@@ -137,7 +135,10 @@ def test_export_configs_uses_domain_file_domains(tmp_path):
         raw.return_value = "raw"
         asyncio.run(
             export_configs(
-                store=store, domain="d.com", limit=1, out_dir=str(out),
+                store=store,
+                domain="d.com",
+                limit=1,
+                out_dir=str(out),
                 domains_file=str(doms),
             )
         )
@@ -147,12 +148,19 @@ def test_export_configs_uses_domain_file_domains(tmp_path):
 
 def test_main_returns_zero(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", ["nfconf", "--limit", "1"])
-    with patch("blockchecks.nfconf.export_configs", new=AsyncMock(
-        return_value={
-            "keenetic": "k", "raw": "r", "user_list": "u",
-            "tcp": ["a"], "udp": ["b"], "quic": ["c"],
-        }
-    )):
+    with patch(
+        "blockchecks.nfconf.export_configs",
+        new=AsyncMock(
+            return_value={
+                "keenetic": "k",
+                "raw": "r",
+                "user_list": "u",
+                "tcp": ["a"],
+                "udp": ["b"],
+                "quic": ["c"],
+            }
+        ),
+    ):
         rc = main(["--limit", "1"])
     assert rc == 0
 
@@ -167,9 +175,7 @@ def _fake_provider_dir(tmp_path, provider, records):
     prov = tmp_path / "providers" / provider
     prov.mkdir(parents=True)
     con = sqlite3.connect(str(prov / "dns.db"))
-    con.execute(
-        "CREATE TABLE dns_records (domain TEXT PRIMARY KEY, ips TEXT, checked_at TEXT)"
-    )
+    con.execute("CREATE TABLE dns_records (domain TEXT PRIMARY KEY, ips TEXT, checked_at TEXT)")
     for dom, ips in records.items():
         con.execute(
             "INSERT INTO dns_records (domain, ips, checked_at) VALUES (?,?,?)",
@@ -209,7 +215,8 @@ def test_collect_domain_ips_missing_db_returns_empty(tmp_path, monkeypatch):
 def test_resolve_ipset_for_export_inline(tmp_path, monkeypatch):
     monkeypatch.setattr("blockchecks.nfconf._find_ip2net", lambda: None)
     monkeypatch.setattr(
-        "blockchecks.nfconf.collect_domain_ips", lambda domains, use_all_providers=True: ["1.1.1.1", "2.2.2.2"]
+        "blockchecks.nfconf.collect_domain_ips",
+        lambda domains, use_all_providers=True: ["1.1.1.1", "2.2.2.2"],
     )
     from blockchecks.nfconf import resolve_ipset_for_export
 
@@ -249,14 +256,14 @@ def test_export_configs_passes_ipset_to_builders(tmp_path, monkeypatch):
         "blockchecks.nfconf.resolve_ipset_for_export",
         lambda domains, out_dir, use_all_providers=True: (["1.2.3.4"], None),
     )
-    with patch("blockchecks.nfconf.build_keenetic_conf") as kc, \
-         patch("blockchecks.nfconf.build_raw_conf") as raw:
+    with (
+        patch("blockchecks.nfconf.build_keenetic_conf") as kc,
+        patch("blockchecks.nfconf.build_raw_conf") as raw,
+    ):
         kc.return_value = "k"
         raw.return_value = "r"
         asyncio.run(
-            export_configs(
-                store=store, domain="d.com", limit=1, out_dir=str(out), use_ipset=True
-            )
+            export_configs(store=store, domain="d.com", limit=1, out_dir=str(out), use_ipset=True)
         )
     assert kc.call_args.kwargs["ipset_ips"] == ["1.2.3.4"]
     assert raw.call_args.kwargs["ipset_ips"] == ["1.2.3.4"]

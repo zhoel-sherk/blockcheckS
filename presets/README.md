@@ -76,11 +76,18 @@ bs pair -d discord.com --generate --auto-discover 5
 
 ## Smoke presets (Phase 11 A8)
 
-Quick validation without full `coverage.txt` stress:
+Quick validation without full `coverage.txt` stress. Since 1.3.7, `--profile`
+bundles common flag sets (AQ + preflight ON by default):
 
 ```bash
+# Run profile smoke — 20 strategies, quick preflight (replaces manual --max 20)
+sudo bs scan -d discord.com --profile smoke --generate
+
+# Run profile fast — 100 strategies, scan-level fast
+sudo bs scan -d discord.com --profile fast --generate
+
 # 6 domains — benchmark preset
-bs scan --preset benchmark -M gp-verified --scan-level fast --max 20
+bs scan --preset benchmark -M gp-verified --profile smoke
 
 # 4 critical services
 bs scan --preset critical -M gp-verified --scan-level single
@@ -88,8 +95,8 @@ bs scan --preset critical -M gp-verified --scan-level single
 # Settle × curl timeout grid (needs sudo + nfqws2)
 sudo bs bench-settle -d discord.com -M timeout-benchmark
 
-# Lean mass run default (14 domains, coverage-tcp)
-sudo bs full --scan-level fast --max 100 --preset benchmark
+# Lean mass run (14 domains, coverage-tcp)
+sudo bs full --profile fast --preset benchmark
 # or explicit:
 sudo bs full --domains-file presets/domains/coverage-tcp.txt --max 100
 ```
@@ -104,6 +111,7 @@ then voice discover, optional QUIC/pairs, and exports configs:
 
 ```bash
 sudo bs full                    # uncapped matrix × coverage + export
+sudo bs full --profile 20h      # long-term series bundle (fan-out + resume + …)
 sudo bs full --parallel 4 --curl-parallel 4 --scan-level fast --max 500
 # curl-parallel=1 (default) — one domain per nfqws2 restart (safest)
 sudo bs full --max 500          # shrink matrix
@@ -115,14 +123,14 @@ bc-nfconf --db state.db --limit 3 --out-dir output
 Graceful shutdown: flush DB, export conf (unless `--no-export-on-stop`), write `run_summary_*.json`.
 
 ```bash
-# ~2h budget, adaptive + B2, benchmark domains
+# ~2h budget, AQ ON by default + B2 fan-out, benchmark domains
 sudo bs full --fan-out --allow-dns-hijack \
   --domains-file presets/domains/benchmark.txt \
   --max-timeh 2 --db logs/my_run.db --out-dir logs/my_export
 
-# 90 min scan with AQ
+# 90 min scan (adaptive queue default ON; disable: --no-adaptive)
 sudo bs scan -d discord.com --generate fake,multi_fake \
-  --adaptive --max-timem 90 --db state.db --out-dir logs/scan_export
+  --max-timem 90 --db state.db --out-dir logs/scan_export
 
 # Sync tcp with time limit
 sudo bs tcp -d discord.com --strategy "fake:blob=stun:repeats=6" --max-timem 15

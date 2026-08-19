@@ -34,12 +34,23 @@ files for Keenetic / OpenWrt / Linux routers.
 ```bash
 pip install blockchecks
 
-# First scan — ~30 strategies against discord.com
+# Smoke test — 20 strategies, adaptive queue + preflight ON by default
+sudo bs scan -d discord.com --profile smoke --generate
+
+# Full scan — ~30 strategies against discord.com
 sudo bs scan -d discord.com --generate --parallel 4
 
 # Resume after interruption (checkpoint/resume)
 sudo bs scan -d discord.com --generate --resume
+
+# Long-term mass campaign (20h series bundle)
+sudo bs full --profile 20h
 ```
+
+**Run profiles** (`--profile smoke|fast|20h`) bundle common flag sets for
+`scan`, `pair`, and `full`. Protective features are **ON by default** — disable
+with `--no-adaptive`, `--no-preflight` (or use `--quick` for prolog-only),
+`--no-ech`, `--no-wssize`.
 
 ## Export a router config
 

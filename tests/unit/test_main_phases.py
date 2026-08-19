@@ -149,8 +149,9 @@ def test_load_run_domains_ok():
     loaded = MagicMock()
     loaded.domains = ["a.com", "b.com"]
     loaded.skipped = []
-    with patch("blockchecks.main_phases.load_domains", return_value=loaded), patch(
-        "blockchecks.main_phases.auto_enable_gv_ggc"
+    with (
+        patch("blockchecks.main_phases.load_domains", return_value=loaded),
+        patch("blockchecks.main_phases.auto_enable_gv_ggc"),
     ):
         domains, fname, rc = load_run_domains(args)
     assert rc is None
@@ -162,18 +163,23 @@ def test_load_run_domains_ok():
 
 def test_prepare_run_dns_rc():
     args = _args()
-    with patch("blockchecks.main_phases.prepare_dns_for_run",
-               return_value=(None, [], 7)), patch(
-        "blockchecks.data_block.provider.provider_name"):
+    with (
+        patch("blockchecks.main_phases.prepare_dns_for_run", return_value=(None, [], 7)),
+        patch("blockchecks.data_block.provider.provider_name"),
+    ):
         cache, audits, rc = prepare_run_dns(args, ["a.com"])
     assert rc == 7
 
 
 def test_prepare_run_dns_ok():
     args = _args()
-    with patch("blockchecks.main_phases.prepare_dns_for_run",
-               return_value=(MagicMock(), [MagicMock()], None)), patch(
-        "blockchecks.data_block.provider.provider_name"):
+    with (
+        patch(
+            "blockchecks.main_phases.prepare_dns_for_run",
+            return_value=(MagicMock(), [MagicMock()], None),
+        ),
+        patch("blockchecks.data_block.provider.provider_name"),
+    ):
         cache, audits, rc = prepare_run_dns(args, ["a.com"])
     assert rc is None and audits
 
@@ -186,8 +192,9 @@ def test_run_preflight_filter_exit():
     preflight = MagicMock()
     preflight.exit_code = 5
     preflight.error = "err"
-    with patch("blockchecks.engine.preflight.run_preflight_async",
-               new=AsyncMock(return_value=preflight)):
+    with patch(
+        "blockchecks.engine.preflight.run_preflight_async", new=AsyncMock(return_value=preflight)
+    ):
         domains, primary, rc = asyncio.run(run_preflight_filter(args, ["a.com"], "a.com", None))
     assert rc == 5
 
@@ -197,8 +204,9 @@ def test_run_preflight_filter_skip_all():
     preflight = MagicMock()
     preflight.exit_code = None
     preflight.skip_domains = ["a.com"]
-    with patch("blockchecks.engine.preflight.run_preflight_async",
-               new=AsyncMock(return_value=preflight)):
+    with patch(
+        "blockchecks.engine.preflight.run_preflight_async", new=AsyncMock(return_value=preflight)
+    ):
         domains, primary, rc = asyncio.run(run_preflight_filter(args, ["a.com"], "a.com", None))
     assert rc == 0 and domains == []
 
@@ -208,8 +216,9 @@ def test_run_preflight_filter_partial_skip():
     preflight = MagicMock()
     preflight.exit_code = None
     preflight.skip_domains = ["a.com"]
-    with patch("blockchecks.engine.preflight.run_preflight_async",
-               new=AsyncMock(return_value=preflight)):
+    with patch(
+        "blockchecks.engine.preflight.run_preflight_async", new=AsyncMock(return_value=preflight)
+    ):
         domains, primary, rc = asyncio.run(
             run_preflight_filter(args, ["a.com", "b.com"], "a.com", None)
         )
@@ -223,8 +232,7 @@ def test_run_preflight_filter_partial_skip():
 
 def test_build_full_run_context():
     args = _args()
-    with patch("blockchecks.main_phases.repeats_from_args",
-               return_value=(1, False, "fast", False)):
+    with patch("blockchecks.main_phases.repeats_from_args", return_value=(1, False, "fast", False)):
         ctx = build_full_run_context(args, MagicMock(), ["a.com"], "f", None, [])
     assert isinstance(ctx, FullRunContext)
     assert ctx.primary == "youtube.com"
@@ -286,7 +294,7 @@ def test_generate_strategy_items_tcp_only():
 
 
 def test_configure_tcp_execution_classic():
-    args = _args()
+    args = _args(no_adaptive=True)
     ctx = build_full_run_context(args, MagicMock(), ["a.com"], "f", None, [])
     with patch("blockchecks.main_phases.fanout_allowed", return_value=(False, "")):
         configure_tcp_execution(ctx)
@@ -339,9 +347,10 @@ def test_build_matrix_fingerprint():
 def test_build_async_runner():
     args = _args()
     ctx = build_full_run_context(args, MagicMock(), ["a.com"], "f", None, [])
-    with patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"), patch(
-        "blockchecks.main_phases.AsyncTestRunner"
-    ) as RunnerCls:
+    with (
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+        patch("blockchecks.main_phases.AsyncTestRunner") as RunnerCls,
+    ):
         build_async_runner(ctx)
     kwargs = RunnerCls.call_args.kwargs
     assert kwargs["pool_size"] == 2
@@ -412,19 +421,20 @@ def test_tcp_coverage_phase_sequential():
     ctx = _mk_ctx()
     ctx.tcp_items = [MagicMock()]
     ctx.total_tcp_jobs = 1
-    with patch("blockchecks.main_phases.warn_zero_pass_domains",
-               new=AsyncMock(return_value=[])), patch(
-        "blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
+    with (
+        patch("blockchecks.main_phases.warn_zero_pass_domains", new=AsyncMock(return_value=[])),
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+    ):
         asyncio.run(run_tcp_coverage_phase(ctx))
 
 
 def test_tcp_coverage_phase_adaptive():
     ctx = _mk_ctx(use_adaptive=True)
     ctx.tcp_items = [MagicMock()]
-    with patch("blockchecks.main_phases._run_tcp_adaptive",
-               new=AsyncMock()) as adaptive, patch(
-        "blockchecks.main_phases.warn_zero_pass_domains",
-        new=AsyncMock(return_value=[])):
+    with (
+        patch("blockchecks.main_phases._run_tcp_adaptive", new=AsyncMock()) as adaptive,
+        patch("blockchecks.main_phases.warn_zero_pass_domains", new=AsyncMock(return_value=[])),
+    ):
         asyncio.run(run_tcp_coverage_phase(ctx))
     adaptive.assert_awaited_once()
 
@@ -432,10 +442,10 @@ def test_tcp_coverage_phase_adaptive():
 def test_tcp_coverage_phase_family_gates():
     ctx = _mk_ctx(use_family_gates=True)
     ctx.tcp_items = [MagicMock()]
-    with patch("blockchecks.main_phases._run_tcp_family_gates",
-               new=AsyncMock()) as fg, patch(
-        "blockchecks.main_phases.warn_zero_pass_domains",
-        new=AsyncMock(return_value=[])):
+    with (
+        patch("blockchecks.main_phases._run_tcp_family_gates", new=AsyncMock()) as fg,
+        patch("blockchecks.main_phases.warn_zero_pass_domains", new=AsyncMock(return_value=[])),
+    ):
         asyncio.run(run_tcp_coverage_phase(ctx))
     fg.assert_awaited_once()
 
@@ -463,17 +473,22 @@ def test_discover_voice_endpoint_skipped_tcp_only():
 
 def test_discover_voice_endpoint_dns_fallback():
     ctx = _mk_ctx()
-    with patch("blockchecks.checkers.voice_dns.discover_dns_alive",
-               new=AsyncMock(side_effect=RuntimeError("down"))):
+    with patch(
+        "blockchecks.checkers.voice_dns.discover_dns_alive",
+        new=AsyncMock(side_effect=RuntimeError("down")),
+    ):
         ip, port = asyncio.run(discover_voice_endpoint(ctx))
     assert ip == DEFAULT_VOICE_IP
 
 
 def test_discover_voice_endpoint_ok():
     ctx = _mk_ctx()
-    with patch("blockchecks.checkers.voice_dns.discover_dns_alive",
-               new=AsyncMock(return_value=[{"ip": "1.2.3.4", "port": 50004,
-                                            "method": "x", "bootstrap": True}])):
+    with patch(
+        "blockchecks.checkers.voice_dns.discover_dns_alive",
+        new=AsyncMock(
+            return_value=[{"ip": "1.2.3.4", "port": 50004, "method": "x", "bootstrap": True}]
+        ),
+    ):
         ip, port = asyncio.run(discover_voice_endpoint(ctx))
     assert ip == "1.2.3.4" and port == 50004
 
@@ -498,8 +513,10 @@ def test_run_quic_phase_runs():
     ctx.args.tcp_only = False
     ctx.args.no_quic = False
     ctx.runner.test_quic = AsyncMock(return_value=MagicMock(success=True))
-    with patch("blockchecks.main_phases.supports_http3", return_value=True), patch(
-        "blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
+    with (
+        patch("blockchecks.main_phases.supports_http3", return_value=True),
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+    ):
         asyncio.run(run_quic_phase(ctx))
     ctx.runner.test_quic.assert_awaited()
 
@@ -523,8 +540,7 @@ def test_cleanup_runner():
     ctx.deadline = AsyncMock()
     ctx.deadline.cancel = AsyncMock()
     ctx.runner = AsyncMock()
-    with patch("blockchecks.main_phases.finalize_db_and_weights",
-               new=AsyncMock()) as fin:
+    with patch("blockchecks.main_phases.finalize_db_and_weights", new=AsyncMock()) as fin:
         asyncio.run(cleanup_runner(ctx))
     ctx.deadline.cancel.assert_awaited_once()
     ctx.runner.stop.assert_awaited_once()
@@ -533,26 +549,33 @@ def test_cleanup_runner():
 
 def test_export_and_summarize():
     ctx = _mk_ctx()
-    with patch("blockchecks.engine.run_finalize.maybe_write_best_config_data_block",
-               new=AsyncMock()), patch(
-        "blockchecks.engine.run_finalize.maybe_sync_data_block", new=AsyncMock()), patch(
-        "blockchecks.main_phases.maybe_export_configs",
-        new=AsyncMock(return_value=None)), patch(
-        "blockchecks.main_phases.write_run_summary", return_value="/tmp/s.json"), patch(
-        "blockchecks.engine.run_finalize.run_exit_code", return_value=0):
+    with (
+        patch(
+            "blockchecks.engine.run_finalize.maybe_write_best_config_data_block", new=AsyncMock()
+        ),
+        patch("blockchecks.engine.run_finalize.maybe_sync_data_block", new=AsyncMock()),
+        patch("blockchecks.main_phases.maybe_export_configs", new=AsyncMock(return_value=None)),
+        patch("blockchecks.main_phases.write_run_summary", return_value="/tmp/s.json"),
+        patch("blockchecks.engine.run_finalize.run_exit_code", return_value=0),
+    ):
         rc = asyncio.run(export_and_summarize(ctx))
     assert rc == 0
 
 
 def test_export_and_summarize_with_export():
     ctx = _mk_ctx()
-    with patch("blockchecks.engine.run_finalize.maybe_write_best_config_data_block",
-               new=AsyncMock()), patch(
-        "blockchecks.engine.run_finalize.maybe_sync_data_block", new=AsyncMock()), patch(
-        "blockchecks.main_phases.maybe_export_configs",
-        new=AsyncMock(return_value={"keenetic": "k", "raw": "r", "user_list": "u"})), patch(
-        "blockchecks.main_phases.write_run_summary", return_value="/tmp/s.json"), patch(
-        "blockchecks.engine.run_finalize.run_exit_code", return_value=1):
+    with (
+        patch(
+            "blockchecks.engine.run_finalize.maybe_write_best_config_data_block", new=AsyncMock()
+        ),
+        patch("blockchecks.engine.run_finalize.maybe_sync_data_block", new=AsyncMock()),
+        patch(
+            "blockchecks.main_phases.maybe_export_configs",
+            new=AsyncMock(return_value={"keenetic": "k", "raw": "r", "user_list": "u"}),
+        ),
+        patch("blockchecks.main_phases.write_run_summary", return_value="/tmp/s.json"),
+        patch("blockchecks.engine.run_finalize.run_exit_code", return_value=1),
+    ):
         rc = asyncio.run(export_and_summarize(ctx))
     assert rc == 1
 
@@ -585,8 +608,7 @@ def test_arm_stop_handlers_registers():
 
     ctx = _mk_ctx()
     loop = MagicMock()
-    with patch("blockchecks.main_phases.asyncio.get_running_loop",
-               return_value=loop):
+    with patch("blockchecks.main_phases.asyncio.get_running_loop", return_value=loop):
         arm_stop_handlers(ctx)
     assert loop.add_signal_handler.call_count == 3
 
@@ -601,10 +623,8 @@ def test_arm_stop_handlers_signal_fallback(monkeypatch):
 
     loop = MagicMock()
     loop.add_signal_handler.side_effect = _raise
-    monkeypatch.setattr("blockchecks.main_phases.signal.signal",
-                        lambda *a, **k: None)
-    with patch("blockchecks.main_phases.asyncio.get_running_loop",
-               return_value=loop):
+    monkeypatch.setattr("blockchecks.main_phases.signal.signal", lambda *a, **k: None)
+    with patch("blockchecks.main_phases.asyncio.get_running_loop", return_value=loop):
         arm_stop_handlers(ctx)
 
 
@@ -615,8 +635,7 @@ def test_tcp_sequential_runs_jobs():
     ctx.tcp_items = [MagicMock()]
     progress = MagicMock()
     ctx.runner.test_tcp = AsyncMock(return_value=MagicMock(success=True))
-    with patch("blockchecks.main_phases.resolve_probe_backend",
-               return_value="classic"):
+    with patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
         asyncio.run(_run_tcp_sequential(ctx, progress))
     ctx.runner.test_tcp.assert_awaited()
 
@@ -628,8 +647,7 @@ def test_tcp_sequential_stop_event():
     ctx.tcp_items = [MagicMock()]
     ctx.stop.set()
     progress = MagicMock()
-    with patch("blockchecks.main_phases.resolve_probe_backend",
-               return_value="classic"):
+    with patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
         asyncio.run(_run_tcp_sequential(ctx, progress))
     ctx.runner.test_tcp.assert_not_awaited()
 
@@ -660,14 +678,15 @@ def test_tcp_adaptive():
     aq.metrics.fanout_enqueued = 0
     aq.metrics.half_mark_jobs = False
     progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
-    with patch("blockchecks.main_phases.build_adaptive_queue",
-               new=AsyncMock(return_value=([MagicMock()], 0))), patch(
-        "blockchecks.main_phases.run_adaptive_tcp",
-        new=AsyncMock(return_value=aq)), patch(
-        "blockchecks.main_phases.resolve_probe_backend",
-        return_value="classic"), patch(
-        "blockchecks.main_phases.persist_adaptive_weights",
-        new=AsyncMock()):
+    with (
+        patch(
+            "blockchecks.main_phases.build_adaptive_queue",
+            new=AsyncMock(return_value=([MagicMock()], 0)),
+        ),
+        patch("blockchecks.main_phases.run_adaptive_tcp", new=AsyncMock(return_value=aq)),
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+        patch("blockchecks.main_phases.persist_adaptive_weights", new=AsyncMock()),
+    ):
         asyncio.run(_run_tcp_adaptive(ctx, progress))
     ctx.aq_result = aq
 
@@ -682,8 +701,10 @@ def test_tcp_family_gates():
     ctx.args.timeout = 5.0
     ctx.scan_level = "fast"
     progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
-    with patch("blockchecks.main_phases.run_tcp_with_family_gates",
-               new=AsyncMock(return_value=([MagicMock()], 1, 0, 1))):
+    with patch(
+        "blockchecks.main_phases.run_tcp_with_family_gates",
+        new=AsyncMock(return_value=([MagicMock()], 1, 0, 1)),
+    ):
         asyncio.run(_run_tcp_family_gates(ctx, progress))
     assert progress.done == 1
 
@@ -699,12 +720,15 @@ def test_tcp_fanout():
     ctx.args.protocol = "tls12"
     ctx.curl_parallel = 2
     progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
-    with patch("blockchecks.main_phases.resolve_probe_backend",
-               return_value="classic"), patch(
-        "blockchecks.main_phases.fanout_batches",
-        return_value=[["a.com", "b.com"]]), patch.object(
-        ctx.runner, "test_tcp_domains",
-        new=AsyncMock(return_value=[MagicMock(success=True), MagicMock(success=False)])):
+    with (
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+        patch("blockchecks.main_phases.fanout_batches", return_value=[["a.com", "b.com"]]),
+        patch.object(
+            ctx.runner,
+            "test_tcp_domains",
+            new=AsyncMock(return_value=[MagicMock(success=True), MagicMock(success=False)]),
+        ),
+    ):
         asyncio.run(_run_tcp_fanout(ctx, progress))
     assert progress.passed == 1
 
@@ -727,9 +751,13 @@ def test_run_pairs_phase_with_working_tcp():
     pair = MagicMock()
     pair.overall = "PASS"
     ctx.runner.test_pair_matrix = AsyncMock(return_value=[pair])
-    with patch("blockchecks.checkers.voice_dns.resolve_voice_targets",
-               return_value=[("1.2.3.4", 50004)]), patch(
-        "blockchecks.checkers.voice_dns.pair_log_domain", return_value="a.com"):
+    with (
+        patch(
+            "blockchecks.checkers.voice_dns.resolve_voice_targets",
+            return_value=[("1.2.3.4", 50004)],
+        ),
+        patch("blockchecks.checkers.voice_dns.pair_log_domain", return_value="a.com"),
+    ):
         asyncio.run(run_pairs_phase(ctx, "1.2.3.4", 50004))
 
 
@@ -760,15 +788,16 @@ def test_sequential_bridge_isolates_domains():
 
     from blockchecks.engine.generators.base import StrategyItem
 
-    ctx.tcp_items = [
-        StrategyItem(label=f"s{i}", strategy=f"fake:repeats={i}") for i in range(3)
-    ]
+    ctx.tcp_items = [StrategyItem(label=f"s{i}", strategy=f"fake:repeats={i}") for i in range(3)]
     ctx.domains = ["a.com", "b.com", "c.com", "d.com", "e.com"]
 
     with patch("blockchecks.engine.config.AQ_DOMAIN_ISOLATE", True):
         ctx.stop = asyncio.Event()
         progress = SimpleNamespace(
-            done=0, skipped=0, passed=0, report=lambda: None,
+            done=0,
+            skipped=0,
+            passed=0,
+            report=lambda: None,
         )
         asyncio.run(_run_tcp_sequential_bridge(ctx, progress))
 
@@ -806,12 +835,16 @@ def test_sequential_bridge_warns_when_isolation_off():
     ctx.tcp_items = [StrategyItem(label="s1", strategy="fake:repeats=6")]
     ctx.domains = ["a.com", "b.com"]
 
-    with patch("blockchecks.engine.config.AQ_DOMAIN_ISOLATE", False) as iso, patch(
-        "blockchecks.main_phases.print"
-    ) as mock_print:
+    with (
+        patch("blockchecks.engine.config.AQ_DOMAIN_ISOLATE", False) as iso,
+        patch("blockchecks.main_phases.print") as mock_print,
+    ):
         ctx.stop = asyncio.Event()
         progress = SimpleNamespace(
-            done=0, skipped=0, passed=0, report=lambda: None,
+            done=0,
+            skipped=0,
+            passed=0,
+            report=lambda: None,
         )
         asyncio.run(_run_tcp_sequential_bridge(ctx, progress))
 

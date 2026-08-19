@@ -37,15 +37,18 @@ async def test_log_tcp_persists_fail_phase(tmp_path):
     store = open_run_store(tmp_path / "fp.db")
     await store.init()
     await store.log_tcp(
-        "s1", "discord.com", "FAIL", 100.0, 0,
+        "s1",
+        "discord.com",
+        "FAIL",
+        100.0,
+        0,
         error="curl: (35) Recv failure: Connection reset",
-        config_path="fake:blob=stun", fail_phase="tls_rst_at_sni",
+        config_path="fake:blob=stun",
+        fail_phase="tls_rst_at_sni",
     )
     await store.flush()
     con = sqlite3.connect(tmp_path / "fp.db")
-    row = con.execute(
-        "SELECT fail_phase FROM tcp_results WHERE domain='discord.com'"
-    ).fetchone()
+    row = con.execute("SELECT fail_phase FROM tcp_results WHERE domain='discord.com'").fetchone()
     assert row is not None
     assert row[0] == "tls_rst_at_sni"
     con.close()

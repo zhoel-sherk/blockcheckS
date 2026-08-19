@@ -98,8 +98,6 @@ def test_bridge_worker_session_context():
     ):
         inst = m_cls.return_value
         inst.boot.return_value = 0.1
-        with bridge_worker_session(
-            "bs-p0", ["fake:blob=stun:repeats=6"], protocol="tls12"
-        ) as s:
+        with bridge_worker_session("bs-p0", ["fake:blob=stun:repeats=6"], protocol="tls12") as s:
             assert s is inst
         inst.shutdown.assert_called_once()

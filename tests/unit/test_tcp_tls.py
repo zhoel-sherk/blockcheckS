@@ -82,7 +82,9 @@ def _fake_response(status, content=b"", headers=None):
 def test_check_tls_success():
     with (
         patch("blockchecks.checkers.tcp_tls.curl_cffi.Session") as mocksess,
-        patch("blockchecks.checkers.tcp_tls.time.perf_counter", side_effect=[1.0, 1.1, 1.2, 1.3, 1.4]),
+        patch(
+            "blockchecks.checkers.tcp_tls.time.perf_counter", side_effect=[1.0, 1.1, 1.2, 1.3, 1.4]
+        ),
     ):
         inst = mocksess.return_value.__enter__.return_value
         inst.get.return_value = _fake_response(200, b"x" * 500, {"Server": "gws"})
@@ -96,12 +98,12 @@ def test_check_tls_success():
 def test_check_tls_redirect_fail():
     with (
         patch("blockchecks.checkers.tcp_tls.curl_cffi.Session") as mocksess,
-        patch("blockchecks.checkers.tcp_tls.time.perf_counter", side_effect=[1.0, 1.1, 1.2, 1.3, 1.4]),
+        patch(
+            "blockchecks.checkers.tcp_tls.time.perf_counter", side_effect=[1.0, 1.1, 1.2, 1.3, 1.4]
+        ),
     ):
         inst = mocksess.return_value.__enter__.return_value
-        inst.get.return_value = _fake_response(
-            301, b"", {"Location": "https://gov.ru/block"}
-        )
+        inst.get.return_value = _fake_response(301, b"", {"Location": "https://gov.ru/block"})
         r = check_tls("example.com", timeout=2.0, verify_content=False)
     assert r.success is False
     assert "suspicious redirect" in r.error
@@ -112,7 +114,9 @@ def test_check_tls_pre_resolved_ip_uses_curl_resolve():
     with (
         patch("blockchecks.checkers.tcp_tls.curl_cffi.Session") as mocksess,
         patch("blockchecks.checkers.dns_secure.apply_curl_resolve") as m_apply,
-        patch("blockchecks.checkers.tcp_tls.time.perf_counter", side_effect=[1.0, 1.1, 1.2, 1.3, 1.4]),
+        patch(
+            "blockchecks.checkers.tcp_tls.time.perf_counter", side_effect=[1.0, 1.1, 1.2, 1.3, 1.4]
+        ),
     ):
         inst = mocksess.return_value.__enter__.return_value
         inst.get.return_value = _fake_response(200, b"x" * 500)
@@ -126,7 +130,9 @@ def test_check_tls_request_error_classified():
 
     with (
         patch("blockchecks.checkers.tcp_tls.curl_cffi.Session") as mocksess,
-        patch("blockchecks.checkers.tcp_tls.time.perf_counter", side_effect=[1.0, 1.1, 1.2, 1.3, 1.4]),
+        patch(
+            "blockchecks.checkers.tcp_tls.time.perf_counter", side_effect=[1.0, 1.1, 1.2, 1.3, 1.4]
+        ),
     ):
         inst = mocksess.return_value.__enter__.return_value
         inst.get.side_effect = RequestsError("curl timeout")

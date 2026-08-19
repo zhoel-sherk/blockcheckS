@@ -55,11 +55,7 @@ def wait_nfqws2_ready(
         time.sleep(settle_min)
     deadline = start + max(settle_max, settle_min)
     while time.perf_counter() < deadline:
-        ready = (
-            nfqws2_running_in_ns(ns_name)
-            if need <= 1
-            else nfqws2_count_in_ns(ns_name) >= need
-        )
+        ready = nfqws2_running_in_ns(ns_name) if need <= 1 else nfqws2_count_in_ns(ns_name) >= need
         if ready:
             return time.perf_counter() - start
         if settle_poll > 0:

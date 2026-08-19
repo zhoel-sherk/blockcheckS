@@ -220,18 +220,14 @@ def test_validate_custom_lua_params_undocumented():
 def test_validate_custom_lua_params_ok():
     from blockchecks.engine.conf_builder import validate_custom_lua_params
 
-    assert validate_custom_lua_params(
-        "dupfake:blob=stun:repeats=6:tcp_ts=-1000"
-    ) == []
+    assert validate_custom_lua_params("dupfake:blob=stun:repeats=6:tcp_ts=-1000") == []
     assert validate_custom_lua_params("fake:blob=stun:repeats=6") == []
 
 
 def test_validate_custom_lua_params_optional_allowed():
     from blockchecks.engine.conf_builder import validate_custom_lua_params
 
-    assert validate_custom_lua_params(
-        "dupfake:blob=stun:repeats=6:optional"
-    ) == []
+    assert validate_custom_lua_params("dupfake:blob=stun:repeats=6:optional") == []
 
 
 def test_build_raw_conf_ipset_ips_inline():
@@ -250,8 +246,10 @@ def test_build_raw_conf_ipset_file():
 
 def test_build_raw_conf_ipset_file_wins_over_ips():
     conf = build_raw_conf(
-        tcp_strategies=["fake:blob=stun"], udp_strategies=[],
-        ipset_ips=["1.2.3.4"], ipset_file="/tmp/u.ipset",
+        tcp_strategies=["fake:blob=stun"],
+        udp_strategies=[],
+        ipset_ips=["1.2.3.4"],
+        ipset_file="/tmp/u.ipset",
     )
     assert "--ipset=@/tmp/u.ipset" in conf
     assert "--ipset-ip" not in conf
@@ -377,6 +375,4 @@ def test_raw_blobs_only_from_cores():
     assert "--blob=stun:" in working
     assert "discord_udp" not in working
     assert "max_ru" not in working
-    assert "(" not in "\n".join(
-        ln for ln in conf.splitlines() if ln.lstrip().startswith("#")
-    )
+    assert "(" not in "\n".join(ln for ln in conf.splitlines() if ln.lstrip().startswith("#"))

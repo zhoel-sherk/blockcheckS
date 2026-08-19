@@ -125,8 +125,9 @@ def test_fetch_maks_voice_ips_ok(monkeypatch):
 def test_fetch_maks_voice_ips_fallback_global(monkeypatch):
     import blockchecks.checkers.voice_dns as vd
 
-    monkeypatch.setattr(vd, "_maks_get",
-                        lambda url, timeout: None if "regions/" in url else "9.9.9.9\n")
+    monkeypatch.setattr(
+        vd, "_maks_get", lambda url, timeout: None if "regions/" in url else "9.9.9.9\n"
+    )
     assert vd.fetch_maks_voice_ips("russia") == ["9.9.9.9"]
 
 
@@ -164,6 +165,7 @@ async def test_discover_dns_alive_returns_probed(monkeypatch):
     import blockchecks.checkers.voice_dns as vd
 
     monkeypatch.setattr(vd, "_load_cache", lambda: None)
+
     async def _fake_range():
         return {"35.1.2.3": ["finland14000.discord.gg"]}
 
@@ -180,9 +182,13 @@ async def test_discover_dns_alive_returns_probed(monkeypatch):
     monkeypatch.setattr("blockchecks.checkers.udp_voice.voice_udp_probe", fake_probe)
     monkeypatch.setattr(vd, "_save_cache", lambda endpoints: None)
 
-    with patch.object(vd, "udp_discover_bootstrap",
-                      return_value=MagicMock(__enter__=MagicMock(return_value=True),
-                                             __exit__=MagicMock(return_value=None))):
+    with patch.object(
+        vd,
+        "udp_discover_bootstrap",
+        return_value=MagicMock(
+            __enter__=MagicMock(return_value=True), __exit__=MagicMock(return_value=None)
+        ),
+    ):
         eps = await vd.discover_dns_alive(
             count=1, use_cache=False, use_maks=False, use_bootstrap=False
         )
@@ -194,6 +200,7 @@ async def test_discover_dns_alive_no_candidates(monkeypatch):
     import blockchecks.checkers.voice_dns as vd
 
     monkeypatch.setattr(vd, "_load_cache", lambda: None)
+
     async def _empty_range():
         return {}
 
@@ -204,8 +211,7 @@ async def test_discover_dns_alive_no_candidates(monkeypatch):
     monkeypatch.setattr(vd, "fetch_maks_region_ips", _no_maks)
     monkeypatch.setattr(vd, "fetch_maks_voice_ips", _no_maks)
 
-    eps = await vd.discover_dns_alive(count=1, use_cache=False, use_maks=False,
-                                      use_bootstrap=False)
+    eps = await vd.discover_dns_alive(count=1, use_cache=False, use_maks=False, use_bootstrap=False)
     assert eps == []
 
 
@@ -250,11 +256,18 @@ async def test_discover_dns_alive_stops_on_stop_event(monkeypatch):
     stop = asyncio.Event()
     stop.set()
 
-    with patch.object(vd, "udp_discover_bootstrap",
-                      return_value=MagicMock(__enter__=MagicMock(return_value=True),
-                                             __exit__=MagicMock(return_value=None))):
+    with patch.object(
+        vd,
+        "udp_discover_bootstrap",
+        return_value=MagicMock(
+            __enter__=MagicMock(return_value=True), __exit__=MagicMock(return_value=None)
+        ),
+    ):
         eps = await vd.discover_dns_alive(
-            count=1, use_cache=False, use_maks=False, use_bootstrap=False,
+            count=1,
+            use_cache=False,
+            use_maks=False,
+            use_bootstrap=False,
             stop_event=stop,
         )
     # Stop fired before probing: the gather must bail out (no hang).

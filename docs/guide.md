@@ -63,6 +63,18 @@ sudo bs full
 sudo bs full --parallel 2 --resume
 sudo bs full --max 500 --domains-file presets/domains/critical.txt
 
+# Run profiles (--profile smoke|fast|20h) — predefined flag bundles:
+sudo bs scan -d discord.com --profile smoke    # rapid 20-item smoke test
+sudo bs scan -d discord.com --profile fast     # 100-item fast scan
+sudo bs full --profile 20h                     # 20-hour mass campaign bundle
+
+# Protective & intelligent features are ON by default (inverse flags to disable):
+#   Adaptive queue: default ON (disable: --no-adaptive; --adaptive kept as inverse alias)
+#   Preflight & triage: default ON (skip all: --no-preflight; prolog-only: --quick)
+#   Encrypted Client Hello: default ON (disable: --no-ech; alias: --disable-ech)
+#   Wssize fallback: default ON on scan/pair/full (disable: --no-wssize)
+#   Secure DNS: default ON (disable: --no-secure-dns)
+
 # Probe backend (default lua_bridge since 1.2.1a):
 #   no flag  → lua_bridge (one nfqws2 per batch, /dev/shm IPC)
 #   --classic / --probe-backend classic → legacy per-strategy restart
@@ -77,6 +89,41 @@ bc-nfconf --db state.db --limit 3 --out-dir output
 # Voice UDP smoke (sudo + nfqws2 + discord_udp blob):
 ./scripts/voice_smoke.sh
 ```
+
+### Run profiles (`--profile`)
+
+Profiles apply a predefined bundle of flags via `cli/profiles.py` (after argparse,
+before command dispatch). Granular flags still override profile values.
+
+| Profile | Key settings |
+|---------|----------------|
+| `smoke` | `max=20`, `scan_level=fast`, `parallel=1`, `curl_parallel=1`, `timeout=2.0`, `quick=True` |
+| `fast` | `max=100`, `scan_level=fast`, `timeout=3.0` |
+| `20h` | `scan_level=full`, `resume=True`, `no_preflight=True`, `no_wssize=True`, `timeout=2.0`, `allow_dns_hijack=True`, `fan_out=True` |
+
+The `20h` profile matches the long-term series A→F baseline; see
+[long_term_runs.md](long_term_runs.md).
+
+### Defaults & inverse flags (1.3.7)
+
+Campaign commands (`scan`, `pair`, `full`) share a unified parser via
+`add_campaign_args()` — flag names and defaults are synchronized across all three.
+
+| Feature | Default | Disable / shortcut |
+|---------|---------|-------------------|
+| Adaptive queue (AQ) | ON | `--no-adaptive` |
+| Preflight (full) | ON | `--no-preflight` (skip all) or `--quick` (prolog only) |
+| ECH (Encrypted Client Hello) | ON | `--no-ech` (`--disable-ech` alias) |
+| Wssize TLS 1.2 fallback | ON | `--no-wssize` |
+| Secure DNS (DoH) | ON | `--no-secure-dns` |
+
+Fine-grained preflight skips (`--skip-baseline`, `--skip-ip-block`,
+`--skip-port-block`, `--skip-prolog`, `--skip-dns-audit`) remain for scripts and
+partial control; `--no-preflight` and `--quick` cover the common cases.
+
+`--adaptive` is kept as an inverse alias (sets `no_adaptive=False`); AQ is already
+ON by default — explicit `--adaptive` is only needed to cancel a prior
+`--no-adaptive` on the same command line.
 
 ## UDP vs Discord-UDP
 

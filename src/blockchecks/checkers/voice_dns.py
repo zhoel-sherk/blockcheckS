@@ -40,14 +40,12 @@ MAKS_IP_LIST_URL = (
     "/regions/{region}/{region}-voice-ip-list.txt"
 )
 MAKS_GLOBAL_IP_LIST_URL = (
-    "https://raw.githubusercontent.com/Maks-gaming/discord-servers/main"
-    "/data/voice-ip-list.txt"
+    "https://raw.githubusercontent.com/Maks-gaming/discord-servers/main/data/voice-ip-list.txt"
 )
 # Region-prefixed hostnames (finland14000.discord.gg, frankfurt14000…) — used to
 # pick the region's endpoints out of the global list via DNS re-resolution.
 MAKS_GLOBAL_DOMAIN_LIST_URL = (
-    "https://raw.githubusercontent.com/Maks-gaming/discord-servers/main"
-    "/data/voice-domain-list.txt"
+    "https://raw.githubusercontent.com/Maks-gaming/discord-servers/main/data/voice-domain-list.txt"
 )
 
 # Region prefixes → hostname prefixes in the domain list
@@ -566,9 +564,7 @@ async def discover_dns_alive(
                         t.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
                     break
-                done, pending = await asyncio.wait(
-                    tasks, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 results.extend(t.result() for t in done)
                 tasks = list(pending)
         except asyncio.CancelledError:

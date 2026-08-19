@@ -50,9 +50,7 @@ def normalize_provider_name(org: str) -> str:
 def _query_ipinfo(timeout: float = 5.0) -> str | None:
     """Return ``org`` from ipinfo.io, or None on any failure."""
     try:
-        with urllib.request.urlopen(
-            "https://ipinfo.io/json", timeout=timeout
-        ) as resp:
+        with urllib.request.urlopen("https://ipinfo.io/json", timeout=timeout) as resp:
             data = json.load(resp)
         org = data.get("org") if isinstance(data, dict) else None
         return str(org).strip() if org else None
@@ -119,7 +117,7 @@ def _write_provider_to_cfg(name: str) -> None:
     if not provider_seen:
         if out and out[-1].strip():
             out.append("")
-        out.append('[provider]')
+        out.append("[provider]")
         out.append(f'name = "{name}"')
     elif not replaced:
         out.append(f'name = "{name}"')

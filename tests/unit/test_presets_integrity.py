@@ -124,7 +124,9 @@ def test_resolve_strategy_preset_all_extensions(name: str, expected_suffix: str)
     from blockchecks.engine.preset_paths import resolve_strategy_preset
 
     path = resolve_strategy_preset(name)
-    assert path.suffix == expected_suffix, f"{name} resolved to {path.suffix}, want {expected_suffix}"
+    assert path.suffix == expected_suffix, (
+        f"{name} resolved to {path.suffix}, want {expected_suffix}"
+    )
     assert path.is_file()
 
 

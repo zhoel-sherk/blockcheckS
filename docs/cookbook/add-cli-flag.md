@@ -2,15 +2,31 @@
 
 CLI lives in [`src/blockchecks/cli/`](../src/blockchecks/cli/) (entry point `bs`).
 
+## Campaign commands (`scan`, `pair`, `full`)
+
+Shared flags for matrix campaigns are registered via `add_campaign_args()` in
+[`cli/parser.py`](../src/blockchecks/cli/parser.py). When adding a flag that
+applies to all three commands, add it there (with `mode` guards as needed) —
+do not duplicate per-command parsers.
+
+Run profiles (`--profile smoke|fast|20h`) are defined in
+[`cli/profiles.py`](../src/blockchecks/cli/profiles.py); extend `PROFILES` dict
+and `apply_profile()` if adding a new profile.
+
+Typed config propagation: handlers should build `RunSpec.from_args(args)` and
+pass via `CampaignContext` (see [`engine/run_spec.py`](../src/blockchecks/engine/run_spec.py)).
+
 ## 1. Add argparse option
 
-In [`cli/parser.py`](../src/blockchecks/cli/parser.py), add to the relevant subparser:
+In [`cli/parser.py`](../src/blockchecks/cli/parser.py), add to the relevant subparser
+or to `add_campaign_args()` / a shared helper (`add_adaptive_args`, `add_secure_dns_args`, …):
 
 ```python
 p.add_argument("--my-flag", action="store_true", help="...")
 ```
 
-For `bs full`, also add to [`main.py`](../src/blockchecks/main.py) parser if not shared.
+For `bs full`, campaign flags live in `add_campaign_args(parser, mode="full")`;
+`main.py` calls the same helper — no separate duplicate parser.
 
 > **pydantic CliApp negation (1.3.x):** the main `bs` entry parses via
 > pydantic-settings `CliApp` (models derived from parser actions). A flag named
@@ -18,12 +34,17 @@ For `bs full`, also add to [`main.py`](../src/blockchecks/main.py) parser if not
 > genuinely-named `--no-<field>` flag, register it in `_NO_PREFIX_FIELDS`
 > (`cli/cliapp.py`), or it will silently never become True.
 
+> **Inverse / protective defaults (1.3.7):** features like AQ, preflight, ECH,
+> and wssize are ON by default. Add `--no-<feature>` to disable; keep a positive
+> alias only when backward compatibility requires it (e.g. `--adaptive` →
+> `dest="no_adaptive", action="store_false"`).
+
 ## 2. Propagate to runner
 
 | Command | Propagate to |
 |---------|--------------|
-| `scan`, `pair` | `cmd_pair` / `AsyncTestRunner` kwargs |
-| `full` | `main.py` → `run_full()` |
+| `scan`, `pair` | `cmd_pair` / `RunSpec.from_args` → `AsyncTestRunner` kwargs |
+| `full` | `main.py` → `RunSpec.from_args` → `CampaignContext` → `run_full()` |
 | `tcp`, `udp` | `cmd_tcp` / `TestRunner` |
 
 Use `getattr(args, "my_flag", False)` for optional flags on shared parsers.

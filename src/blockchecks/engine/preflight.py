@@ -78,16 +78,18 @@ class PreflightOptions:
         cls, args, *, dns_cache: DnsRunCache | None = None, store: object = None
     ) -> PreflightOptions:
         """Build options from CLI namespace (pair/main shared)."""
+        no_preflight = bool(getattr(args, "no_preflight", False))
+        quick = bool(getattr(args, "quick", False))
         return cls(
             unblocked_dom=getattr(args, "unblocked_dom", None) or UNBLOCKED_DOM,
             timeout=min(getattr(args, "timeout", 5.0), 8.0),
-            skip_baseline=getattr(args, "skip_baseline", False),
-            skip_port_block=getattr(args, "skip_port_block", False),
-            skip_prolog=getattr(args, "skip_prolog", False),
-            skip_ip_block=getattr(args, "skip_ip_block", False),
-            skip_nfqws2_check=getattr(args, "skip_nfqws2_check", False),
+            skip_baseline=no_preflight or quick or getattr(args, "skip_baseline", False),
+            skip_port_block=no_preflight or quick or getattr(args, "skip_port_block", False),
+            skip_prolog=no_preflight or getattr(args, "skip_prolog", False),
+            skip_ip_block=no_preflight or quick or getattr(args, "skip_ip_block", False),
+            skip_nfqws2_check=no_preflight or getattr(args, "skip_nfqws2_check", False),
             abort_on_nfqws2=getattr(args, "abort_on_nfqws2", False),
-            skip_dns_audit=getattr(args, "skip_dns_audit", False),
+            skip_dns_audit=no_preflight or getattr(args, "skip_dns_audit", False),
             force=getattr(args, "force", False),
             verify_content=getattr(args, "prolog_content", False),
             dns_cache=dns_cache,
@@ -155,9 +157,7 @@ def run_unblocked_baseline(
         # No live resolution → use data_block cached IP (anti-hijack fallback)
         if not resolved_ip:
             resolved_ip = _data_block_cached_ip(dom)
-        r = check_tls(
-            dom, timeout=timeout, pre_resolved_ip=resolved_ip, verify_content=False
-        )
+        r = check_tls(dom, timeout=timeout, pre_resolved_ip=resolved_ip, verify_content=False)
         if r.success:
             return True, dom
     last = _baseline_candidates(unblocked_dom)[-1]
@@ -428,13 +428,11 @@ def _triage_domain(
         if qip:
             qr = probe_quic_initial(qip, 443, timeout=min(opts.timeout, 3.0))
             triage.quic_drop = qr.phase in (
-                FailPhase.QUIC_DROP, FailPhase.UDP_BLOCKED,
+                FailPhase.QUIC_DROP,
+                FailPhase.UDP_BLOCKED,
             )
             triage.udp_blocked = qr.phase == FailPhase.UDP_BLOCKED
-            print(
-                f"  Triage {domain}: QUIC Initial {qr.phase.value}"
-                f" ({qr.blob_used})"
-            )
+            print(f"  Triage {domain}: QUIC Initial {qr.phase.value} ({qr.blob_used})")
     except Exception as e:  # noqa: BLE001
         print(f"  Triage {domain}: QUIC probe skipped ({e})")
 
@@ -479,11 +477,7 @@ def _voice_endpoint_candidates() -> list[tuple[str, int]]:
             data = _json.loads(VOICE_DNS_CACHE_FILE.read_text(encoding="utf-8"))
             eps = data.get("endpoints", [])
             if eps:
-                return [
-                    (e["ip"], int(e.get("port", 50004)))
-                    for e in eps[:3]
-                    if e.get("ip")
-                ]
+                return [(e["ip"], int(e.get("port", 50004))) for e in eps[:3] if e.get("ip")]
     except Exception:
         pass
     return [("35.217.42.214", 50004)]

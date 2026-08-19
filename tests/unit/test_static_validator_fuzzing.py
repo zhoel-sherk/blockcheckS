@@ -114,7 +114,7 @@ def test_validate_strategy_surrogate_pairs(raw: str) -> None:
 
 
 @_FAST
-@given(st.text(alphabet="abc:=\"\\<>0123456789-_", max_size=200))
+@given(st.text(alphabet='abc:="\\<>0123456789-_', max_size=200))
 def test_validate_strategy_specials(raw: str) -> None:
     result = validate_strategy(raw)
     assert isinstance(result.issues, list)

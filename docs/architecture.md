@@ -1,6 +1,6 @@
 # Architecture — blockcheckS
 
-Canonical data-flow reference for the async scan path (1.3.1+).
+Canonical data-flow reference for the async scan path (1.3.7+).
 
 ## Main runtime flow (`bs scan` / `bs pair` / `bs full`)
 
@@ -10,7 +10,7 @@ sequenceDiagram
   participant DNS as DoH_dns_secure
   participant PF as preflight
   participant MG as MatrixGenerator
-  participant AQ as AdaptiveQueue_optional
+  participant AQ as AdaptiveQueue_default_ON
   participant AR as AsyncTestRunner
   participant NP as NetNsPool
   participant NFQ as nfqws2_daemon
@@ -20,7 +20,7 @@ sequenceDiagram
   CLI->>DNS: prepare_dns_for_run domains
   CLI->>PF: baseline reachability
   CLI->>MG: generate strategies
-  CLI->>AQ: optional fan-out / adaptive
+  CLI->>AQ: fan-out / adaptive (default ON, --no-adaptive disables)
   CLI->>AR: test_batch_tcp / test_pair_matrix
   AR->>NP: acquire netns worker
   AR->>NFQ: start_daemon in netns
@@ -69,7 +69,10 @@ Pi2 / ~1 GB RAM: keep `--parallel 1` (max 2).
 
 | Task | Module |
 |------|--------|
-| CLI / argparse | `blockchecks.cli` (entry: `bs.py`) |
+| CLI / argparse | `blockchecks.cli` (entry: `bs.py`; unified `add_campaign_args`) |
+| Run profiles | [`cli/profiles.py`](../src/blockchecks/cli/profiles.py) (`--profile smoke\|fast\|20h`) |
+| Terminal output | [`terminal.py`](../src/blockchecks/terminal.py) (`supports_color`, `init_terminal`, `C`, `error`/`warn`/`heading`) |
+| Typed run config | [`engine/run_spec.py`](../src/blockchecks/engine/run_spec.py) (`RunSpec`, `CampaignContext`) |
 | Mass orchestration | [`main.py`](../src/blockchecks/main.py) |
 | Strategy matrix | [`engine/matrix_generator.py`](../src/blockchecks/engine/matrix_generator.py) |
 | Domain loader + denylist | [`engine/domain_loader.py`](../src/blockchecks/engine/domain_loader.py) |
@@ -171,7 +174,13 @@ flowchart TD
 ## Preflight Triage (Wave 1 + Wave 2)
 
 Before the strategy scan, `run_preflight_async` builds a deterministic
-`TriageProfile` of the ISP/DPI interference:
+`TriageProfile` of the ISP/DPI interference.
+
+**CLI control (1.3.7):** preflight runs by default on `scan`/`pair`/`full`.
+`--no-preflight` skips all checks (prolog, baseline, IP-block, port-block,
+DNS audit, nfqws2 host check). `--quick` runs prolog only and skips deep
+baseline/IP-block/port-block probes. Granular `--skip-*` flags remain for
+partial control (see `PreflightOptions.from_args` in `preflight.py`).
 
 ```
 preflight (run_preflight_async)
@@ -189,6 +198,20 @@ It also exposes `to_context()` — a compact feature vector for the online
 bandit / S0 offline ranker. Per-probe failure phases are persisted to
 `tcp_results.fail_phase` (via `classify_fail_phase`), and Lua `rst_in` events
 (TTL of DPI RST) map to `TLS_RST_AT_SNI`.
+
+## Typed execution config (`RunSpec`)
+
+Since 1.3.7, campaign commands build a typed `RunSpec` from argparse
+(`RunSpec.from_args`) instead of propagating raw `Namespace` objects through
+phases. `CampaignContext` bundles `RunSpec` with runtime state (domains, DB,
+runner, items). Key fields:
+
+- `use_adaptive` — derived from `not args.no_adaptive` (AQ default ON)
+- `try_wssize` — derived from `not args.no_wssize` (wssize default ON)
+- `disable_ech` — from `--no-ech` / `--disable-ech`
+- `no_preflight` / `quick` — preflight shortcuts
+
+`main_phases.py` and pair handlers consume `CampaignContext` for phase dispatch.
 
 ## Service layer — `bs serve`
 

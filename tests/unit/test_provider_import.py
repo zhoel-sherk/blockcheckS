@@ -93,7 +93,9 @@ def test_merge_into_user_matrix(tmp_path):
     existing = tmp_path / "m.yaml"
     existing.write_text("old:strategy\n")
     sf = tmp_path / "summary.json"
-    sf.write_text('{"provider_id": "p1", "custom_strategies": {"tls12": ["fake:blob=stun:repeats=6"]}}')
+    sf.write_text(
+        '{"provider_id": "p1", "custom_strategies": {"tls12": ["fake:blob=stun:repeats=6"]}}'
+    )
     path = merge_into_user_matrix(sf, existing)
     content = Path(path).read_text()
     assert "old:strategy" in content
@@ -133,7 +135,6 @@ def test_main_ok(tmp_path):
 
     f = tmp_path / "summary.json"
     f.write_text('{"provider_id": "p1", "custom_strategies": {"tls12": ["fake:a"]}}')
-    with patch("blockchecks.provider_import.write_shortlist_presets",
-               return_value={"tls12": "x"}):
+    with patch("blockchecks.provider_import.write_shortlist_presets", return_value={"tls12": "x"}):
         rc = main(["-i", str(f)])
     assert rc == 0

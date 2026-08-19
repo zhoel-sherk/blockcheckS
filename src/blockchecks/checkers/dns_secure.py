@@ -271,9 +271,7 @@ def audit_domain(
     if bad_udp or bad_doh:
         result.tampering_detected = True
         result.verdict = "sinkhole"
-        result.description = "Sinkhole/bogon DNS answer: " + ", ".join(
-            bad_udp or bad_doh
-        )
+        result.description = "Sinkhole/bogon DNS answer: " + ", ".join(bad_udp or bad_doh)
         return result
 
     match (bool(result.udp_ips), bool(result.doh_ips)):

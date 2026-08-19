@@ -3,8 +3,6 @@
 import asyncio
 import time
 
-from colorama import Fore, Style
-
 from blockchecks.cli.commands.pair_phases import (
     STANDARD_TCP_SOURCES,
     StopHandlerState,
@@ -22,6 +20,7 @@ from blockchecks.cli.commands.pair_phases import (
     validate_pair_domain,
 )
 from blockchecks.cli.presets import list_presets
+from blockchecks.cli.profiles import apply_profile
 from blockchecks.engine.config import (
     DEFAULT_CURL_PARALLEL,
     MAX_CURL_PARALLEL,
@@ -30,9 +29,7 @@ from blockchecks.engine.config import (
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.run_finalize import finalize_db_and_weights, run_exit_code
 from blockchecks.engine.store import DEFAULT_DB_BATCH, matrix_fingerprint, open_run_store
-
-YELLOW = Fore.YELLOW
-RESET = Style.RESET_ALL
+from blockchecks.terminal import CYAN, RESET, YELLOW
 
 
 async def cmd_pair(args):
@@ -49,6 +46,7 @@ async def cmd_pair(args):
 
 
 async def _cmd_pair_run(args):
+    apply_profile(args)
     db = open_run_store(
         args.db,
         batch_size=int(getattr(args, "db_batch", DEFAULT_DB_BATCH)),
@@ -126,12 +124,12 @@ async def _cmd_pair_run(args):
 
         t0 = time.perf_counter()
         scan_level = getattr(args, "scan_level", "fast")
-        use_adaptive = bool(getattr(args, "adaptive", False) or getattr(args, "fan_out", False))
+        use_adaptive = not bool(getattr(args, "no_adaptive", False))
         protocol = getattr(args, "protocol", "tls12") or "tls12"
         curl_parallel = max(
             1, min(getattr(args, "curl_parallel", DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
         )
-        if getattr(args, "fan_out", False) and curl_parallel <= 1:
+        if (getattr(args, "fan_out", False) or use_adaptive) and curl_parallel <= 1:
             curl_parallel = min(max(4, DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
         use_family_gates = (
             scan_level != "full"
@@ -188,7 +186,7 @@ async def _cmd_pair_run(args):
             )
 
         elapsed = time.perf_counter() - t0
-        print(f"\n  {Fore.CYAN}Done in {elapsed:.0f}s{RESET}")
+        print(f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
 
     finally:
         if deadline:

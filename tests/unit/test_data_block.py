@@ -58,7 +58,14 @@ async def test_dns_records_upsert(store: ProviderStore):
 @pytest.mark.asyncio
 async def test_dns_tampered_rows(store: ProviderStore):
     await store.save_dns_tampered(
-        [{"domain": "signal.org", "udp_ips": "1.2.3.4", "doh_ips": "5.6.7.8", "verdict": "tampered"}]
+        [
+            {
+                "domain": "signal.org",
+                "udp_ips": "1.2.3.4",
+                "doh_ips": "5.6.7.8",
+                "verdict": "tampered",
+            }
+        ]
     )
     # tampered table exists and rows are inserted
     import aiosqlite
@@ -100,8 +107,7 @@ async def test_hosts_write_merges_existing_entries(store: ProviderStore):
     """A run auditing only some domains must not wipe unrelated hosts entries."""
     # Seed the hosts file with a pinned domain not in the new records.
     store.hosts_file.write_text(
-        "162.159.137.232\tdiscord.com\n"
-        "142.251.38.100\tgoogleapis.com\n",
+        "162.159.137.232\tdiscord.com\n142.251.38.100\tgoogleapis.com\n",
         encoding="utf-8",
     )
     path = store.write_hosts({"discord.com": ["162.159.135.232"]})
@@ -178,13 +184,14 @@ def test_best_config_write(store: ProviderStore):
 
 # ── provider_name resolution (network + config paths) ─────────────────
 
+
 def test_provider_name_reads_cfg(monkeypatch, tmp_path):
     import blockchecks.data_block.provider as prov
 
     cfg_dir = tmp_path / "cfg"
     cfg_dir.mkdir()
     cfg_file = cfg_dir / "config.toml"
-    cfg_file.write_text("[provider]\nname = \"llc_trc_fiord\"\n")
+    cfg_file.write_text('[provider]\nname = "llc_trc_fiord"\n')
     monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
     prov._CACHE.clear()
     assert prov.provider_name(allow_detect=False) == "llc_trc_fiord"
@@ -201,7 +208,7 @@ def test_provider_name_auto_detect_writes(monkeypatch, tmp_path):
     monkeypatch.setattr(prov, "_query_ipinfo", lambda timeout=5.0: "My ISP LLC")
     name = prov.provider_name(allow_detect=True)
     assert name == "my_isp_llc"
-    assert "name = \"my_isp_llc\"" in cfg_file.read_text()
+    assert 'name = "my_isp_llc"' in cfg_file.read_text()
 
 
 def test_provider_name_auto_detect_network_failure(monkeypatch, tmp_path):
@@ -224,9 +231,10 @@ def test_get_provider_dir(monkeypatch, tmp_path):
     cfg_dir = tmp_path / "cfg"
     cfg_dir.mkdir()
     cfg_file = cfg_dir / "config.toml"
-    cfg_file.write_text("[provider]\nname = \"p1\"\n")
+    cfg_file.write_text('[provider]\nname = "p1"\n')
     monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
     import blockchecks.engine.config as cfg_mod
+
     monkeypatch.setattr(cfg_mod, "PROJECT_DIR", str(tmp_path))
     prov._CACHE.clear()
     d = prov.get_provider_dir(allow_detect=False)
@@ -234,6 +242,7 @@ def test_get_provider_dir(monkeypatch, tmp_path):
 
 
 # ── ProviderStore.sync_commit (git subprocess) ────────────────────────
+
 
 def test_sync_commit_no_git_repo(tmp_path, store):
     assert store.sync_commit() is False

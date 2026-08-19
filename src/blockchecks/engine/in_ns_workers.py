@@ -48,7 +48,9 @@ from blockchecks.service.probe import probe_request_dict as _probe_request_dict
 def udp_filter_covers_port(spec: str, port: int) -> bool:
     """True if a nfqws2 --filter-udp value includes ``port``."""
     parts = [p.strip() for p in spec.split(",") if p.strip()]
-    bounds = [(p.partition("-")[0], p.partition("-")[2] or p) if "-" in p else (p, p) for p in parts]
+    bounds = [
+        (p.partition("-")[0], p.partition("-")[2] or p) if "-" in p else (p, p) for p in parts
+    ]
     return any(a.isdigit() and b.isdigit() and int(a) <= port <= int(b) for a, b in bounds)
 
 
@@ -835,4 +837,3 @@ def _dispatch_worker_main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_dispatch_worker_main())
-

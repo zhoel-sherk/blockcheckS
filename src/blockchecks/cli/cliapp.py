@@ -43,22 +43,28 @@ _USER_CFG: dict[str, Any] | None = None
 # Fields whose --no-<name> flag pydantic parses as negation (False) instead of
 # setting True; re-applied in _dispatch_subcommand from main()'s argv capture.
 _NO_FLAGS_CAPTURED: set[str] = set()
-_NO_PREFIX_FIELDS = frozenset({
-    "no_wssize",
-    "no_http",
-    "no_quic",
-    "no_voice",
-    "no_secure_dns",
-    "no_auto_pin",
-    "no_settle_profile",
-    "no_hostlist",
-    "no_common_only",
-    "no_family_gates",
-    "no_adaptive_weights",
-    "no_write_profile",
-    "no_fetch_deps",
-    "no_export_on_stop",
-})
+_NO_PREFIX_FIELDS = frozenset(
+    {
+        "no_adaptive",
+        "no_preflight",
+        "no_ech",
+        "no_sync",
+        "no_wssize",
+        "no_http",
+        "no_quic",
+        "no_voice",
+        "no_secure_dns",
+        "no_auto_pin",
+        "no_settle_profile",
+        "no_hostlist",
+        "no_common_only",
+        "no_family_gates",
+        "no_adaptive_weights",
+        "no_write_profile",
+        "no_fetch_deps",
+        "no_export_on_stop",
+    }
+)
 
 
 def _annotation_for_action(action: argparse.Action) -> Any:
@@ -312,9 +318,11 @@ def _run_udp(model: BaseModel) -> int:
 def _run_pair(model: BaseModel) -> int:
     from blockchecks.cli.commands.pair import cmd_pair
     from blockchecks.cli.parser import ensure_system_deps_or_exit
+    from blockchecks.cli.profiles import apply_profile
 
     ns = _to_namespace(model)
     ns.command = "pair"
+    apply_profile(ns)
     if getattr(ns, "list_presets", False):
         from blockchecks.cli.presets import list_presets
 
@@ -337,10 +345,12 @@ def _run_pair(model: BaseModel) -> int:
 def _run_scan(model: BaseModel) -> int:
     from blockchecks.cli.commands.pair import cmd_pair
     from blockchecks.cli.parser import ensure_system_deps_or_exit
+    from blockchecks.cli.profiles import apply_profile
     from blockchecks.engine.config import CONFIGS_DIR, DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
 
     ns = _to_namespace(model)
     ns.command = "scan"
+    apply_profile(ns)
     if getattr(ns, "list_presets", False):
         from blockchecks.cli.presets import list_presets
 
@@ -398,6 +408,7 @@ def _run_bench(model: BaseModel) -> int:
 def _run_full(model: BaseModel) -> int:
     global _FULL_RUN_ACTIVE
     from blockchecks.cli.parser import ensure_system_deps_or_exit
+    from blockchecks.cli.profiles import apply_profile
     from blockchecks.main import run_full
 
     if _FULL_RUN_ACTIVE:
@@ -406,6 +417,7 @@ def _run_full(model: BaseModel) -> int:
 
     ns = _to_namespace(model)
     ns.command = "full"
+    apply_profile(ns)
     code = ensure_system_deps_or_exit(ns)
     if code:
         return code
@@ -468,7 +480,9 @@ def build_cli_root() -> type[BaseSettings]:
             "serve", raw_blurbs, "Resident probe server (Unix socket + optional HTTP bridge)"
         ),
         "mcp": _parser_blurb(
-            "mcp", raw_blurbs, "Model Context Protocol server (stdio) bridging LLM → bs serve daemon"
+            "mcp",
+            raw_blurbs,
+            "Model Context Protocol server (stdio) bridging LLM → bs serve daemon",
         ),
     }
 
@@ -577,9 +591,7 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
     if cli_args is None:
-        cli_args = expand_bare_nfqws2_debug(
-            expand_bare_generate(normalize_cli_args(sys.argv[1:]))
-        )
+        cli_args = expand_bare_nfqws2_debug(expand_bare_generate(normalize_cli_args(sys.argv[1:])))
 
     Root = build_cli_root()
     # pydantic-settings 2.14 treats "--no-<field>" as a negation, so a field

@@ -371,7 +371,9 @@ class TestGgcProbe:
             disable_ech=True,
             timeout=5.0,
         )
-        sess, _, _ = self._mk_session(302, {"Server": "gws", "Location": "http://81.88.1.1/blocked"})
+        sess, _, _ = self._mk_session(
+            302, {"Server": "gws", "Location": "http://81.88.1.1/blocked"}
+        )
         with patch("curl_cffi.Session", sess):
             r = run_curl_probe(req)
         assert r.success is False
@@ -422,9 +424,11 @@ def test_curl_probe_worker_main_stdin():
             "repeats": 1,
         }
     )
-    with patch("sys.stdin", StringIO(payload)), patch(
-        "blockchecks.engine._curl_probe_worker.run_payload", return_value={"ok": True}
-    ), patch("sys.stdout", new_callable=StringIO) as out:
+    with (
+        patch("sys.stdin", StringIO(payload)),
+        patch("blockchecks.engine._curl_probe_worker.run_payload", return_value={"ok": True}),
+        patch("sys.stdout", new_callable=StringIO) as out,
+    ):
         rc = main([])
     assert rc == 0
     assert '"ok": true' in out.getvalue()
@@ -433,9 +437,7 @@ def test_curl_probe_worker_main_stdin():
 def test_curl_probe_worker_main_no_input():
     from blockchecks.engine._curl_probe_worker import main
 
-    with patch("sys.stdin", StringIO("")), patch(
-        "sys.stderr", new_callable=StringIO
-    ) as err:
+    with patch("sys.stdin", StringIO("")), patch("sys.stderr", new_callable=StringIO) as err:
         rc = main([])
     assert rc == 2
     assert "usage:" in err.getvalue()

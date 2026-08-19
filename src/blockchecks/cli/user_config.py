@@ -56,8 +56,16 @@ def apply_parser_defaults(parser: argparse.ArgumentParser, cfg: dict[str, Any]) 
             defaults["out_dir"] = str(expand_path(paths["out_dir"], default=DEFAULT_OUT_DIR))
     run = cfg.get("run") or {}
     if isinstance(run, dict):
-        for key in ("parallel", "scan_level", "timeout", "max", "bridge_batch",
-                    "adaptive_epsilon", "max_timeh", "max_timem"):
+        for key in (
+            "parallel",
+            "scan_level",
+            "timeout",
+            "max",
+            "bridge_batch",
+            "adaptive_epsilon",
+            "max_timeh",
+            "max_timem",
+        ):
             if key in run:
                 defaults[key] = run[key]
         # Non-CLI run settings → env for engine readers.

@@ -8,9 +8,9 @@ import os
 import sys
 from collections.abc import Callable
 
-from colorama import init as colorama_init
+from blockchecks.terminal import init_terminal
 
-colorama_init(autoreset=True)
+init_terminal()
 
 from blockchecks.cli.commands.pair import cmd_pair
 from blockchecks.cli.commands.tcp import cmd_tcp
@@ -46,26 +46,42 @@ def add_adaptive_args(parser: argparse.ArgumentParser) -> None:
     """AQ flags (full + scan/pair)."""
     g = parser.add_argument_group("adaptive queue (AQ)")
     g.add_argument(
-        "--adaptive",
+        "--no-adaptive",
         action="store_true",
-        help="Online priority queue with cross-domain fan-out on PASS",
+        help="Disable adaptive priority queue (run purely sequential matrix; default: adaptive ON)",
+    )
+    g.add_argument(
+        "--adaptive",
+        action="store_false",
+        dest="no_adaptive",
+        help="Enable adaptive priority queue (default: ON)",
     )
     g.add_argument(
         "--fan-out",
         action="store_true",
-        help="Shorthand: --adaptive with curl-parallel≥4 (AQ2+AQ5)",
+        help="Shorthand: adaptive with curl-parallel>=4 (AQ2+AQ5)",
     )
     g.add_argument(
         "--adaptive-epsilon",
         type=float,
         default=0.1,
         metavar="E",
-        help="ε-greedy exploration rate (default 0.1)",
+        help="epsilon-greedy exploration rate (default 0.1)",
     )
     g.add_argument(
         "--no-adaptive-weights",
         action="store_true",
         help="Do not load/save scan_weights in state.db",
+    )
+
+
+def add_profile_args(parser: argparse.ArgumentParser) -> None:
+    """Register --profile smoke|fast|20h."""
+    parser.add_argument(
+        "--profile",
+        choices=["smoke", "fast", "20h"],
+        default=None,
+        help="Predefined flag bundle (smoke=quick 20-item, fast=100-item, 20h=long-term series)",
     )
 
 
@@ -260,6 +276,16 @@ def add_secure_dns_args(
     if not include_preflight:
         return
     g = parser.add_argument_group("preflight")
+    g.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="Skip all preflight checks (prolog, IP-block, port-block, baseline)",
+    )
+    g.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick preflight: run prolog only, skip deep baseline/IP-block/port-block probes",
+    )
     g.add_argument("--skip-ip-block", action="store_true", help="Skip IP-block cross-test")
     g.add_argument(
         "--unblocked-dom",
@@ -304,6 +330,230 @@ def add_system_deps_args(parser: argparse.ArgumentParser) -> None:
         "--skip-deps-check",
         action="store_true",
         help="Skip verify_system_dependencies (advanced)",
+    )
+
+
+def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") -> None:
+    """Unified argument builder for scan, pair, and full matrix campaigns.
+
+    Synchronizes flag names and default values across all campaign commands.
+    """
+    if mode in ("scan", "pair"):
+        parser.add_argument("-d", "--domain", default=None, help="Target domain (e.g. youtube.com)")
+    else:  # full
+        parser.add_argument("-d", "--domain", help="Single domain to test")
+        parser.add_argument("--domains-file", help="Path to domain list file")
+
+    parser.add_argument(
+        "--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)"
+    )
+    parser.add_argument(
+        "-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})"
+    )
+    parser.add_argument(
+        "--generate",
+        nargs="?",
+        const="custom,configs",
+        default="",
+        help="Use matrix generator (sources: custom,configs,fake,faked,...)",
+    )
+    parser.add_argument(
+        "--tcp-sources",
+        default="standard,custom,configs,flowseal"
+        if mode == "full"
+        else ("custom,configs" if mode == "pair" else ""),
+        help="TCP strategy sources (comma-separated)",
+    )
+
+    if mode in ("pair", "full"):
+        parser.add_argument(
+            "--udp-sources",
+            default="custom,standard_udp",
+            help="UDP sources: custom,standard_udp,configs,flowseal,game",
+        )
+
+    if mode == "full":
+        parser.add_argument("--quic-sources", default="standard_quic")
+        parser.add_argument("--http-sources", default="custom,standard_http")
+        parser.add_argument("--no-http", action="store_true", help="Skip HTTP :80 strategy phase")
+        parser.add_argument("--no-quic", action="store_true", help="Skip QUIC strategy phase")
+        parser.add_argument("--no-voice", action="store_true", help="Skip UDP voice phase")
+        parser.add_argument(
+            "--tcp-only", action="store_true", help="Skip UDP, QUIC, and HTTP phases"
+        )
+
+    parser.add_argument(
+        "--no-ech",
+        "--disable-ech",
+        dest="disable_ech",
+        action="store_true",
+        help="Disable Encrypted Client Hello (force plaintext SNI)",
+    )
+    parser.add_argument(
+        "--no-wssize",
+        action="store_true",
+        default=False,
+        help="Skip wssize fallback on TLS 1.2 FAIL (faster, lower coverage)",
+    )
+    if mode in ("scan", "pair"):
+        parser.add_argument(
+            "--list-presets", action="store_true", help="List available presets and exit"
+        )
+
+    parser.add_argument(
+        "--protocol",
+        default="tls12",
+        choices=["tls12", "tls13"],
+        help="TLS protocol version to test",
+    )
+    parser.add_argument(
+        "--scan-level",
+        default="full" if mode == "full" else "fast",
+        choices=["single", "fast", "full"],
+        help="Scan thoroughness level",
+    )
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=effective_default_pool_size(),
+        help="Parallel netns pool size",
+    )
+    parser.add_argument(
+        "--max",
+        type=int,
+        default=0 if mode == "full" else 100,
+        help="Cap strategy matrix count (0=uncapped)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=3.0,
+        help="Curl probe timeout in seconds (default: 3.0)",
+    )
+    if mode in ("pair", "full"):
+        parser.add_argument(
+            "--udp-timeout",
+            type=float,
+            default=3.0,
+            help="UDP voice probe timeout in seconds (default: 3.0)",
+        )
+    parser.add_argument("--user-matrix", default="", help="Path to custom strategy list file")
+
+    add_store_args(parser)
+    parser.add_argument(
+        "--db-batch",
+        type=int,
+        default=500,
+        help="Buffer N DB writes before flush (default 500)",
+    )
+    parser.add_argument(
+        "--resume", action="store_true", help="Resume prior run: skip domain×strategy in DB"
+    )
+
+    add_secure_dns_args(parser, include_preflight=True)
+    add_ip_pin_args(parser)
+    add_system_deps_args(parser)
+    add_curl_repeats_args(parser, include_quic_timeout=(mode == "full"))
+    add_family_gate_args(parser)
+    add_domain_filter_args(parser)
+    add_adaptive_args(parser)
+    add_curl_fanout_args(parser)
+    add_profile_args(parser)
+    add_lua_bridge_args(parser)
+    add_time_limit_args(parser, include_export=True)
+
+    parser.add_argument(
+        "--export-limit", type=int, default=3, help="Max strategies to export per category"
+    )
+    parser.add_argument(
+        "--no-common-only",
+        action="store_true",
+        help="Export best per-domain instead of COMMON intersection",
+    )
+
+    if mode in ("pair", "full"):
+        parser.add_argument("--ip", default=DEFAULT_VOICE_IP, help="Discord voice server IP")
+        parser.add_argument(
+            "--port", type=int, default=DEFAULT_VOICE_PORT, help="Discord voice server UDP port"
+        )
+        parser.add_argument(
+            "--discover-dns",
+            nargs="?",
+            const=5,
+            type=int,
+            default=5 if mode == "full" else None,
+            help="DNS + Maks-gaming IP list + dual UDP probe (no VPN)",
+        )
+        parser.add_argument(
+            "--discover-dns-no-bootstrap",
+            action="store_true",
+            help="Skip nfqws2 UDP bootstrap during --discover-dns",
+        )
+        parser.add_argument(
+            "--auto-discover",
+            nargs="?",
+            const=5,
+            type=int,
+            default=None,
+            help="DNS + gateway discover via sing-box (VPN path)",
+        )
+        parser.add_argument(
+            "--voice-region",
+            default=os.environ.get("BLOCKCHECKS_VOICE_REGION", "finland"),
+            metavar="REGION",
+            help="Discord voice region for endpoint discovery",
+        )
+        parser.add_argument(
+            "--voice-burst",
+            action="store_true",
+            help="Also probe with a >16KB UDP media burst (voice-traffic heuristic)",
+        )
+        parser.add_argument(
+            "--full-voice", action="store_true", help="Complete Discord voice gateway handshake"
+        )
+        parser.add_argument(
+            "--udp-bypass", action="store_true", help="Probe UDP through bypass path"
+        )
+
+    if mode == "pair":
+        parser.add_argument(
+            "--tcp-only", action="store_true", help="Skip UDP pair testing (TCP scan only)"
+        )
+        parser.add_argument("-c", "--config", help="Single TCP .conf file")
+        parser.add_argument("-u", "--udp-config", help="Single UDP .conf file")
+        parser.add_argument(
+            "-C", "--configs-dir", default=CONFIGS_DIR, help="Directory of TCP configs"
+        )
+
+    if mode == "full":
+        parser.add_argument(
+            "--pair-max", type=int, default=200, help="Cap TCP×UDP pair combinations"
+        )
+        parser.add_argument(
+            "--isp-interface", default="eth3", help="Router WAN interface for exported conf"
+        )
+        parser.add_argument("--prefix", default="/opt/etc/nfqws2", help="Router nfqws2 prefix path")
+        parser.add_argument("--mode", default="auto", choices=["auto", "list", "all"])
+        add_protocol_phase_args(parser)
+        g = parser.add_argument_group("settle profile (B11)")
+        g.add_argument(
+            "--settle-profile",
+            default=None,
+            metavar="PATH",
+            help="Load settle/curl timings from bench-settle JSON",
+        )
+        g.add_argument(
+            "--no-settle-profile",
+            action="store_true",
+            help="Ignore settle profile even if logs/settle_profile.json exists",
+        )
+
+    parser.add_argument(
+        "--nfqws2-debug",
+        nargs="?",
+        const="1",
+        default=None,
+        help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
     )
 
 
@@ -470,75 +720,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_system_deps_args(udp)
 
     scan = sub.add_parser("scan", help="Async TCP strategy batch scan")
-    scan.add_argument("-d", "--domain", default=None)
-    scan.add_argument(
-        "--generate",
-        nargs="?",
-        const="custom,configs",
-        default="",
-        help="Use matrix generator (sources: custom,configs,fake,faked,...)",
-    )
-    scan.add_argument(
-        "--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)"
-    )
-    scan.add_argument(
-        "-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})"
-    )
-    scan.add_argument(
-        "--disable-ech",
-        action="store_true",
-        help="Disable Encrypted Client Hello (force plaintext SNI)",
-    )
-    scan.add_argument(
-        "--no-wssize",
-        action="store_true",
-        default=False,
-        help="Skip wssize fallback on TLS 1.2 FAIL (faster, lower coverage)",
-    )
-    scan.add_argument("--list-presets", action="store_true", help="List available presets and exit")
-    scan.add_argument(
-        "--protocol",
-        default="tls12",
-        choices=["tls12", "tls13"],
-        help="TLS protocol version to test",
-    )
-    scan.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
-    scan.add_argument("--parallel", type=int, default=effective_default_pool_size())
-    scan.add_argument("--max", type=int, default=100)
-    scan.add_argument("--timeout", type=float, default=3.0)
-    scan.add_argument("--user-matrix", default="")
-    add_store_args(scan)
-    scan.add_argument(
-        "--db-batch",
-        type=int,
-        default=500,
-        help="Buffer N DB writes before flush (0=immediate, default)",
-    )
-    scan.add_argument("--resume", action="store_true")
-    add_secure_dns_args(scan, include_preflight=True)
-    add_ip_pin_args(scan)
-    add_system_deps_args(scan)
-    add_curl_repeats_args(scan)
-    add_family_gate_args(scan)
-    add_domain_filter_args(scan)
-    add_adaptive_args(scan)
-    add_curl_fanout_args(scan)
-    add_lua_bridge_args(scan)
-    add_time_limit_args(scan, include_export=True)
-    scan.add_argument("--export-limit", type=int, default=3)
-    scan.add_argument(
-        "--no-common-only",
-        action="store_true",
-        help="Export best per-domain instead of COMMON intersection",
-    )
-    scan.add_argument("--tcp-sources", default="")
-    scan.add_argument(
-        "--nfqws2-debug",
-        nargs="?",
-        const="1",
-        default=None,
-        help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
-    )
+    add_campaign_args(scan, mode="scan")
 
     composite = sub.add_parser("composite", help="Test composite nfqws2 config")
     composite.add_argument("-c", "--config", required=True, help="Path to composite .conf file")
@@ -550,124 +732,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_system_deps_args(composite)
 
     pair = sub.add_parser("pair", help="TCP x UDP pair matrix (async)")
-    pair.add_argument("-d", "--domain", default=None)
-    pair.add_argument(
-        "--generate", nargs="?", const="custom,configs", default="", help="Use matrix generator"
-    )
-    pair.add_argument(
-        "--tcp-sources",
-        default="custom,configs",
-        help="TCP sources: custom,configs,fake,faked (fakedsplit),hostfake,fake_multi,fake_faked (fake+fakedsplit)",
-    )
-    pair.add_argument(
-        "--udp-sources",
-        default="custom,standard_udp",
-        help="UDP sources: custom,standard_udp,configs,flowseal,game",
-    )
-    pair.add_argument(
-        "--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)"
-    )
-    pair.add_argument(
-        "--disable-ech",
-        action="store_true",
-        help="Disable Encrypted Client Hello (force plaintext SNI)",
-    )
-    pair.add_argument(
-        "--no-wssize",
-        action="store_true",
-        default=False,
-        help="Skip wssize fallback on TLS 1.2 FAIL (faster, lower coverage)",
-    )
-    pair.add_argument("--list-presets", action="store_true", help="List available presets and exit")
-    pair.add_argument(
-        "-M", "--strategy-preset", default=None, help="Strategy preset (presets/strategies/{name})"
-    )
-    pair.add_argument(
-        "--protocol",
-        default="tls12",
-        choices=["tls12", "tls13"],
-        help="TLS protocol version to test",
-    )
-    pair.add_argument("--scan-level", default="fast", choices=["single", "fast", "full"])
-    pair.add_argument("--parallel", type=int, default=effective_default_pool_size())
-    pair.add_argument("--max", type=int, default=100)
-    pair.add_argument("--timeout", type=float, default=3.0)
-    pair.add_argument("--udp-timeout", type=float, default=3.0)
-    pair.add_argument(
-        "--tcp-only", action="store_true", help="Skip UDP pair testing (TCP scan only)"
-    )
-    pair.add_argument("-c", "--config", help="Single TCP .conf file")
-    pair.add_argument("-u", "--udp-config", help="Single UDP .conf file")
-    pair.add_argument("-C", "--configs-dir", default=CONFIGS_DIR)
-    pair.add_argument("--ip", default=DEFAULT_VOICE_IP)
-    pair.add_argument("--port", type=int, default=DEFAULT_VOICE_PORT)
-    pair.add_argument(
-        "--discover-dns",
-        nargs="?",
-        const=5,
-        type=int,
-        default=None,
-        help="DNS + Maks-gaming IP list + dual UDP probe (no VPN)",
-    )
-    pair.add_argument(
-        "--discover-dns-no-bootstrap",
-        action="store_true",
-        help="Skip nfqws2 UDP bootstrap during --discover-dns",
-    )
-    pair.add_argument(
-        "--auto-discover",
-        nargs="?",
-        const=5,
-        type=int,
-        default=None,
-        help="DNS + gateway discover via sing-box (VPN path)",
-    )
-    pair.add_argument(
-        "--voice-region",
-        default=os.environ.get("BLOCKCHECKS_VOICE_REGION", "finland"),
-        metavar="REGION",
-        help="Discord voice region for endpoint discovery "
-        "(finland/russia/frankfurt/…; default BLOCKCHECKS_VOICE_REGION or finland)",
-    )
-    pair.add_argument(
-        "--voice-burst",
-        action="store_true",
-        help="Also probe with a >16KB UDP media burst (voice-traffic heuristic)",
-    )
-    pair.add_argument("--full-voice", action="store_true")
-    pair.add_argument("--udp-bypass", action="store_true")
-    pair.add_argument("--user-matrix", default="", help="Path to custom strategy list file")
-    add_store_args(pair)
-    pair.add_argument(
-        "--db-batch",
-        type=int,
-        default=500,
-        help="Buffer N DB writes before flush (0=immediate, default)",
-    )
-    pair.add_argument("--resume", action="store_true")
-    add_secure_dns_args(pair, include_preflight=True)
-    add_ip_pin_args(pair)
-    add_system_deps_args(pair)
-    add_curl_repeats_args(pair)
-    add_family_gate_args(pair)
-    add_domain_filter_args(pair)
-    add_adaptive_args(pair)
-    add_curl_fanout_args(pair)
-    add_lua_bridge_args(pair)
-    add_time_limit_args(pair, include_export=True)
-    pair.add_argument("--export-limit", type=int, default=3)
-    pair.add_argument(
-        "--no-common-only",
-        action="store_true",
-        help="Export best per-domain instead of COMMON intersection",
-    )
-    pair.add_argument(
-        "--nfqws2-debug",
-        nargs="?",
-        const="1",
-        default=None,
-        help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
-    )
+    add_campaign_args(pair, mode="pair")
 
     sub.add_parser(
         "mcp",

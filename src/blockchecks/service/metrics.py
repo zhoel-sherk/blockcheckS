@@ -194,7 +194,7 @@ class MemoryMonitor:
         """Sample all nfqws2 daemons in *ns_name* (default: discover via pgrep)."""
         if not self.enabled:
             return
-        for pid in (pids if pids is not None else find_nfqws2_pids(ns_name)):
+        for pid in pids if pids is not None else find_nfqws2_pids(ns_name):
             self.record_pid(pid)
 
     def sample_worker(self) -> MemorySample | None:
@@ -232,7 +232,5 @@ class MemoryMonitor:
         return {
             "enabled": self.enabled,
             "windows": {str(k): len(w.samples) for k, w in self._windows.items()},
-            "worker_rss_mib": (
-                self._last_py_sample.rss_mib if self._last_py_sample else None
-            ),
+            "worker_rss_mib": (self._last_py_sample.rss_mib if self._last_py_sample else None),
         }
