@@ -6,9 +6,9 @@ description: "Use when working with blockcheckS (DPI strategy tester for zapret2
 
 blockcheckS is a mass DPI-strategy tester for zapret2/nfqws2. The MCP server
 (`bs-mcp`) connects it to opencode / Claude / Cursor. This skill is a cheatsheet:
-which tool to use when.
+which tool to use when. For complete API and transport contracts, see [docs/api.md](api.md) and [docs/mcp.md](mcp.md).
 
-## 1. MCP tools (12)
+## 1. MCP tools (17)
 
 ### No daemon required (always work, including during an A→F run)
 | Tool | What it does |

@@ -2,6 +2,7 @@
 
 blockcheckS поставляет **FastMCP-сервер** — шлюз между локальными LLM-клиентами
 (Claude Desktop, Cursor, opencode) и резидентным демоном `bs serve`.
+Детали общего контракта сокета и HTTP-моста описаны в [docs/api.md](api.md).
 
 Схема:
 

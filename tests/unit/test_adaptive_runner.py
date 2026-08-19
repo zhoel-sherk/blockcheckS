@@ -362,7 +362,7 @@ async def test_bridge_worker_progress_before_batch_flush():
     queue = MagicMock()
     runner = MagicMock()
     runner._run_probe_batch = AsyncMock(
-        side_effect=lambda items, domain, timeout, backend, domains=None: [
+        side_effect=lambda items, domain, timeout, backend, domains=None, stop_event=None: [
             MagicMock(success=True) for _ in items
         ]
     )

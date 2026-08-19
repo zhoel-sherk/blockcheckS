@@ -1,4 +1,4 @@
-"""Unit tests for the authenticated HTTP bridge (gp-integration).
+"""Unit tests for the authenticated HTTP bridge (http bridge).
 
 These tests exercise the raw asyncio HTTP server on an ephemeral port:
 authentication (401 vs 200), route dispatch (/api/* and legacy /probe),

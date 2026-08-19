@@ -70,7 +70,14 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except (ProcessLookupError, OSError):
                 pass
-            proc.wait(timeout=5)
+            try:
+                proc.wait(timeout=5)
+            except sp.TimeoutExpired:
+                # The process tree is stuck in an uninterruptible state (D) —
+                # SIGKILL cannot reap it. Do NOT block on it further; return a
+                # timeout result and let the caller's teardown deal with the
+                # hung netns (the daemon will be pkilled/destroyed separately).
+                pass
             return {
                 "success": False,
                 "http_code": 0,

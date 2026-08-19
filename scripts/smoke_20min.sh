@@ -10,7 +10,7 @@
 #   6. googlevideo GV1             (GGC/ytcdn binary probe)
 #   7. voice UDP                   (discord_udp discovery + probe)
 #   8. HTTP plaintext              (conservative 200..399 only)
-#   9. HTTP service layer (bs serve) — auth, /api/* routes, SSE (gp-integration)
+#   9. HTTP service layer (bs serve) — auth, /api/* routes, SSE (http bridge / API layer)
 #
 # Needs: sudo + nfqws2 + blobs. Run from repo root.
 set -euo pipefail

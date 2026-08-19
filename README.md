@@ -3,7 +3,7 @@
 [![version](https://img.shields.io/badge/version-1.3.6-green)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1266%20passed-success)](#)
+[![tests](https://img.shields.io/badge/tests-1300%20passed-success)](#)
 
 **Твой провайдер режет YouTube, Discord и Telegram через DPI?**
 *blockcheckS за 10 минут найдёт работающий обход из 10 000+ комбинаций,
@@ -214,6 +214,7 @@ bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset
 | [MCP Server](docs/mcp.md) | Установка MCP в Claude Desktop / Cursor / opencode |
 | [Raspberry Pi (armv7l)](docs/install-rpi.md) | Установка на RPi 2+ без компиляции |
 | [Glossary](docs/glossary.md) | Терминология: netns, NFQUEUE, pair matrix, ... |
+| [API](docs/api.md) | HTTP/socket/MCP контракты, правила |
 | [Changelog](changelog.md) | История версий (1.3.6 и ранее) |
 | [Roadmap](docs/todo.md) | Бэклог: P1 (скорость), P2 (voice/GP), P3 (ML) |
 

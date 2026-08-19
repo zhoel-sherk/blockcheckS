@@ -205,8 +205,11 @@ class AsyncTestRunner:
         timeout: float,
         backend: str,
         domains: list[str] | None = None,
+        stop_event: asyncio.Event | None = None,
     ) -> list[TcpTestResult]:
         if not items:
+            return []
+        if stop_event is not None and stop_event.is_set():
             return []
         protocol = getattr(items[0], "protocol", "tls12") or "tls12"
         ctx = BatchContext(
@@ -218,7 +221,7 @@ class AsyncTestRunner:
             domains=domains,
         )
         async with self.semaphore:
-            result = await self._probe_service(backend).run_batch(ctx, timeout)
+            result = await self._probe_service(backend).run_batch(ctx, timeout, stop_event)
         return list(result.results)
 
     def _next_probe_gen(self) -> int:
