@@ -216,11 +216,12 @@ fanout = transfer, provider-preflight = cold-start prior). Цель старых
 - [x] **SVC-6** активная кампания → `/probe` `423` `{"status":"busy","reason":"campaign_active","active_run":...}` (fail-fast, E2E подтверждено) (2026-08-14)
 - [x] **SVC-7** серии нет → сервис держит пул прогретым, обслуживает on-the-fly (E2E: /probe ripe.net → FAIL connect_timeout) (2026-08-14)
 
-### Контракт
+### Контракт (docs/api.md)
 - [x] **SVC-8** `POST /probe` → `[{domain, strategy_id, status, fail_phase, latency_ms, http_code, fingerprint_matched}]`
       — fail_phase классификатор (`classify_fail_phase`), E2E подтверждено. (2026-08-14)
 - [x] **SVC-9** `GET /status` → `{status, active_run, pool_size, started, uptime_s}`; `POST /stop`. (2026-08-14)
 - [x] **SVC-10** systemd unit `blockcheck-serve.service` + install/uninstall (по образцу series) — DONE (1.3.1, `systemd/blockcheck-serve.service`)
+- [x] **API Contract** Единый контракт HTTP/socket/MCP описан в `docs/api.md`.
 
 ### Интеграция GP
 - [ ] **SVC-11** GP root-helper runner POST'ит на socket вместо exec `blockcheck2.sh`;

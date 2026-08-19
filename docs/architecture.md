@@ -199,6 +199,7 @@ Resident on-the-fly probe server (`service/probe_service.py` + `server.py`):
   returns `423 busy/campaign_active` (fail-fast); otherwise serves requests.
 - Contract: `POST /probe {domains, strategies, protocol, timeout}` →
   `[{domain, strategy_id, status, fail_phase, latency_ms, http_code, fingerprint_matched}]`.
+  См. [docs/api.md](api.md) для полного контракта API.
 
 ## DNS resolution
 
@@ -222,4 +223,5 @@ lookups. `--no-secure-dns` skips DoH.
 
 - Private settle helpers; async_runner thin aliases (`_nfqws2_daemon` → `start_daemon`)
 
+См. правила для публичных API в [docs/api.md](api.md) §10.
 See [package.md](package.md) for import graph. Operational guide: [guide.md](guide.md).

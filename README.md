@@ -214,6 +214,7 @@ bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset
 | [MCP Server](docs/mcp.md) | Установка MCP в Claude Desktop / Cursor / opencode |
 | [Raspberry Pi (armv7l)](docs/install-rpi.md) | Установка на RPi 2+ без компиляции |
 | [Glossary](docs/glossary.md) | Терминология: netns, NFQUEUE, pair matrix, ... |
+| [API](docs/api.md) | HTTP/socket/MCP контракты, правила |
 | [Changelog](changelog.md) | История версий (1.3.6 и ранее) |
 | [Roadmap](docs/todo.md) | Бэклог: P1 (скорость), P2 (voice/GP), P3 (ML) |
 

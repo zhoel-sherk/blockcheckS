@@ -46,3 +46,6 @@
 | **TLS fingerprint** | `run_tls_profile_probe` — контрастные профили chrome/firefox/safari/bare → fingerprint-block + ClientHello размер |
 | **rst_in** | DPI-инжектированный RST (scan_bridge Lua) — `bridge_rst_in` + TTL → `fail_phase=TLS_RST_AT_SNI` |
 | **bs serve** | Резидентный on-the-fly probe server (Unix socket + HTTP bridge); Fair Exclusion через run_control |
+| **HTTP bridge** | HTTP-слой поверх socket core в `bs serve` (порт 8089). Обеспечивает REST API и SSE. Задокументирован в `docs/api.md` |
+| **SSE (Server-Sent Events)** | Протокол для стриминга realtime-уведомлений (`/api/events`) о прогрессе проверок |
+| **Hybrid envelope** | Единый формат JSON-ответов (`{"status":"ok", "ok":true, "data":...}`) для HTTP, Socket и MCP слоёв |
