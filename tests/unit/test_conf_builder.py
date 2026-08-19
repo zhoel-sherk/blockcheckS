@@ -138,31 +138,31 @@ def test_build_keenetic_conf_no_blobs_dir():
 
 
 def test_custom_lua_comment_dupfake():
-    from blockchecks.engine.conf_builder import custom_lua_comment
+    from blockchecks.engine.conf_builder import custom_lua_copy_comments
 
-    hint = custom_lua_comment("dupfake:blob=tls_clienthello:repeats=6:tcp_ts=-1000")
-    assert hint is not None
+    comments = custom_lua_copy_comments("dupfake:blob=tls_clienthello:repeats=6:tcp_ts=-1000")
+    assert comments
+    hint = comments[0]
     assert hint.startswith("# COPY lua:")
     assert "lua/custom/dupfake.lua" in hint
     assert "-> /opt/etc/nfqws2/lua/dupfake.lua" in hint
 
 
 def test_custom_lua_comment_unknown_function_defaults():
-    from blockchecks.engine.conf_builder import custom_lua_comment
+    from blockchecks.engine.conf_builder import custom_lua_copy_comments
 
-    hint = custom_lua_comment("mystery_core:pos=1")
-    assert hint is None  # only registered custom functions trigger a hint
+    assert custom_lua_copy_comments("mystery_core:pos=1") == []
 
 
 def test_custom_lua_comment_stock_no_hint():
-    from blockchecks.engine.conf_builder import custom_lua_comment
+    from blockchecks.engine.conf_builder import custom_lua_copy_comments
 
     for strat in (
         "fake:blob=stun:repeats=6",
         "hostfakesplit:nofake2:tcp_ts=-1000:repeats=1",
         "multisplit:pos=1:seqovl=568",
     ):
-        assert custom_lua_comment(strat) is None
+        assert custom_lua_copy_comments(strat) == []
 
 
 def test_build_raw_conf_includes_custom_lua_hint():

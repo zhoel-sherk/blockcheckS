@@ -93,15 +93,6 @@ def load_custom_lua_manifest() -> dict[str, dict[str, Any]]:
     return registry
 
 
-def custom_lua_comment(strategy: str, prefix: str = DEFAULT_KEENETIC_PREFIX) -> str | None:
-    """COPY comment for a custom Lua function, or None.
-
-    ``# COPY lua: <abs source> -> {prefix}/lua/<file>``
-    """
-    comments = custom_lua_copy_comments(strategy, prefix)
-    return comments[0] if comments else None
-
-
 def _abs_or_str(p: Path) -> str:
     try:
         return str(p.resolve())
