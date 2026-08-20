@@ -225,11 +225,16 @@ def _keep_export_strategy(strat: str) -> bool:
 
 def desync_cli_lines(strategies: list[str]) -> list[str]:
     """``--lua-desync=fn:…`` or pass-through ``--`` fragments; never a .conf path."""
-    return [
-        part if part.startswith("--") else f"--lua-desync={_ensure_strategy_n(part, i)}"
-        for i, strat in enumerate(strategies, start=1)
-        for part in strategy_parts_for_export(strat)
-    ]
+    lines: list[str] = []
+    for i, strat in enumerate(strategies, start=1):
+        for part in strategy_parts_for_export(strat):
+            if part.startswith("--"):
+                lines.append(sanitize_arg_for_conf(part))
+            else:
+                lines.append(
+                    f"--lua-desync={sanitize_arg_for_conf(_ensure_strategy_n(part, i))}"
+                )
+    return lines
 
 
 def blob_copy_comment(name: str, prefix: str) -> str | None:
@@ -569,11 +574,13 @@ def build_raw_conf(
         if (Path(LUA_CUSTOM_DIR) / fname).is_file()
     ]
     blob_names = extract_blob_names(*cores)
+    hostlist_line = ["--hostlist-domains=" + ",".join(domains)] if domains else []
     ipset_lines = (
         [f"--ipset=@{ipset_file}"]
         if ipset_file
         else (["--ipset-ip=" + ",".join(ipset_ips)] if ipset_ips else [])
     )
+    profile_shared = [*ipset_lines, *hostlist_line]
     lines = [
         _hash_comment(f"blockcheckS raw nfqws2 conf host-oriented {ts}"),
         *([_hash_comment(comment)] if comment else []),
@@ -583,8 +590,7 @@ def build_raw_conf(
         "--bind-fix4",
         *lua_inits,
         *blob_cli_lines(blob_names, blobs_dir),
-        *ipset_lines,
-        *(["--hostlist-domains=" + ",".join(domains)] if domains else []),
+        *profile_shared,
         "--filter-tcp=443",
         "--filter-l3=ipv4",
         "--filter-l7=tls",
@@ -594,6 +600,7 @@ def build_raw_conf(
     if quic_strategies:
         lines += [
             "--new=quic",
+            *profile_shared,
             "--filter-udp=443",
             "--filter-l7=quic",
             "--payload=quic_initial",
@@ -602,6 +609,7 @@ def build_raw_conf(
     if udp_strategies:
         lines += [
             "--new=voice",
+            *profile_shared,
             "--filter-udp=50000-50100",
             "--filter-l3=ipv4",
             "--filter-l7=discord,stun",

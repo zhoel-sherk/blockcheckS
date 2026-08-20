@@ -28,17 +28,26 @@ function bs_write_ipc(event_tbl)
 end
 
 function bs_read_strategy_ipc()
-	local id_path = writable_file_name("strategy.id")
+	-- strategy.ready is the publish fence: Python replaces id/gen/cmd first,
+	-- then ready last.  Reading ready before id/gen avoids split-read races.
+	local ready_path = writable_file_name("strategy.ready")
+	local ready_f = io.open(ready_path, "r")
+	if not ready_f then return nil, nil end
+	local ready_gen = tonumber(ready_f:read("*l"))
+	ready_f:close()
+	if not ready_gen then return nil, nil end
+
 	local gen_path = writable_file_name("strategy.gen")
+	local gen_f = io.open(gen_path, "r")
+	if not gen_f then return nil, nil end
+	local gen = tonumber(gen_f:read("*l"))
+	gen_f:close()
+	if gen ~= ready_gen then return nil, nil end
+
+	local id_path = writable_file_name("strategy.id")
 	local id_f = io.open(id_path, "r")
 	if not id_f then return nil, nil end
 	local id = tonumber(id_f:read("*l"))
 	id_f:close()
-	local gen_f = io.open(gen_path, "r")
-	local gen = nil
-	if gen_f then
-		gen = tonumber(gen_f:read("*l"))
-		gen_f:close()
-	end
 	return id, gen
 end

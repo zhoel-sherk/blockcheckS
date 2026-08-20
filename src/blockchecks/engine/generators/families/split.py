@@ -9,36 +9,49 @@ from __future__ import annotations
 from blockchecks.engine.generators.families._helpers import _with_ack_drop, _with_send_md5
 
 
+def _disorder_seqovl_ok(pos: str, seqovl: int) -> bool:
+    """Zapret2 cancels disorder seqovl when seqovl >= (numeric_pos - 1)."""
+    head = pos.split(",", 1)[0].strip()
+    if not head.isdigit():
+        return True
+    return seqovl < int(head) - 1
+
+
 class SplitFamiliesMixin:
     """Strategy families built around TCP segment splitting/order manipulation."""
 
     def _fam_multisplit(self, items, seen, family, scan_level, _known_working):
         """Expand multisplit family."""
-        pos_seqovl_pairs = [
-            ("1", 1),
-            ("2", 652),
-            ("midsld", 1),
-            ("sniext+1", 679),
-            ("1,midsld", 1),
-            ("host+1", 681),
-        ]
-        for pos, seqovl in pos_seqovl_pairs:
-            for fool in family["foolings"]:
-                fool_str = f":{fool}" if fool else ""
-                for blob_name in family["seqovl_blobs"]:
-                    if blob_name == "0x00000000":
-                        continue
-                    strat = (
-                        f"multisplit:pos={pos}:seqovl={seqovl}:seqovl_pattern={blob_name}{fool_str}"
+        base_items: list[tuple[str, str, str]] = []
+        for pos in family["positions"]:
+            for seqovl in family["seqovl"]:
+                for fool in family["foolings"]:
+                    fool_str = f":{fool}" if fool else ""
+                    for blob_name in family["seqovl_blobs"]:
+                        if blob_name == "0x00000000":
+                            continue
+                        strat = (
+                            f"multisplit:pos={pos}:seqovl={seqovl}"
+                            f":seqovl_pattern={blob_name}{fool_str}"
+                        )
+                        label = f"std_split_{pos}_s{seqovl}_{blob_name}_{fool or 'nofool'}"
+                        self._add(items, seen, label, strat)
+                        if scan_level == "single":
+                            return items
+                        base_items.append((label, strat, fool))
+
+        if scan_level != "single":
+            for label, strat, _fool in base_items:
+                for ttl in family["ttl_static"]:
+                    self._add(items, seen, f"{label}_ttl{ttl}", f"{strat}:ip_ttl={ttl}")
+                for ttl in family["ttl_auto"]:
+                    self._add(
+                        items,
+                        seen,
+                        f"{label}_autottl{ttl}",
+                        f"{strat}:ip_autottl={ttl}",
                     )
-                    label = f"std_split_{pos}_s{seqovl}_{blob_name}_{fool or 'nofool'}"
-                    self._add(items, seen, label, strat)
-                    if scan_level == "single":
-                        return items
-                    for ttl in family["ttl_static"]:
-                        self._add(items, seen, f"{label}_ttl{ttl}", f"{strat}:ip_ttl={ttl}")
-                    for ttl in family["ttl_auto"]:
-                        self._add(items, seen, f"{label}_autottl{ttl}", f"{strat}:ip_autottl={ttl}")
+
         if family.get("padencap") and scan_level != "single":
             for tmod in ("rnd,dupsid,padencap", "rnd,dupsid"):
                 strat = (
@@ -60,6 +73,8 @@ class SplitFamiliesMixin:
                     if scan_level == "single":
                         return items
                     for seqovl in family["seqovl"]:
+                        if not _disorder_seqovl_ok(pos, seqovl):
+                            continue
                         strat = (
                             f"multidisorder:pos={pos}:seqovl={seqovl}:seqovl_pattern={blob_name}{f}"
                         )

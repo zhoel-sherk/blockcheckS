@@ -146,7 +146,7 @@ class TamperFamiliesMixin:
                     items,
                     seen,
                     f"std_quic_ip6_{fool.replace(':', '_')}",
-                    _with_ip6_send_drop(fool),
+                    f"--filter-l3=ipv6\n{_with_ip6_send_drop(fool)}",
                     protocol="quic",
                 )
         return items
@@ -198,9 +198,9 @@ class TamperFamiliesMixin:
                 for r in family["repeats"]:
                     s = (
                         f"--filter-udp={ports} "
-                        f"--blob=QUIC:@{_blob_abs(blob_name)} "
+                        f"--blob={blob_name}:@{_blob_abs(blob_name)} "
                         f"--payload=quic_initial "
-                        f"--lua-desync=fake:blob=QUIC:repeats={r}"
+                        f"--lua-desync=fake:blob={blob_name}:repeats={r}"
                     )
                     self._add(items, seen, f"std_udp_quic_{blob_name}_r{r}", s, protocol="quic")
                     if scan_level == "single":
@@ -216,9 +216,9 @@ class TamperFamiliesMixin:
                     for orng in family["out_range"]:
                         s = (
                             f"--filter-udp={ports} "
-                            f"--blob=GAME:@{_blob_abs(blob_name)} "
+                            f"--blob={blob_name}:@{_blob_abs(blob_name)} "
                             f"--payload=unknown "
-                            f"--lua-desync=fake:blob=GAME:repeats={r}"
+                            f"--lua-desync=fake:blob={blob_name}:repeats={r}"
                             + (f" --out-range={orng}" if orng else "")
                         )
                         self._add(
@@ -239,15 +239,15 @@ class TamperFamiliesMixin:
             for r in family["repeats"]:
                 s = (
                     f"--filter-udp=443 --filter-l7=stun "
-                    f"--blob=STUN:@{_blob_abs(b1)} "
+                    f"--blob={b1}:@{_blob_abs(b1)} "
                     f"--payload=stun "
-                    f"--lua-desync=fake:blob=STUN:repeats={r}\n"
+                    f"--lua-desync=fake:blob={b1}:repeats={r}\n"
                     f"--filter-udp=443 --filter-l7=discord "
-                    f"--blob=DISC:@{_blob_abs(b2)} "
+                    f"--blob={b2}:@{_blob_abs(b2)} "
                     f"--payload=discord_ip_discovery "
-                    f"--lua-desync=fake:blob=DISC:repeats={r}"
+                    f"--lua-desync=fake:blob={b2}:repeats={r}"
                 )
-                self._add(items, seen, f"std_udp_multiblob_{b1}+{b2}_r{r}", s)
+                self._add(items, seen, f"std_udp_multiblob_{b1}+{b2}_r{r}", s, protocol="udp_voice")
                 if scan_level == "single":
                     return items
 

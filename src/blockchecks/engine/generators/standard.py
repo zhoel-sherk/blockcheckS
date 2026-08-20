@@ -343,7 +343,7 @@ FAST_FOOLINGS_IPV6 = ["ip6_hopbyhop", "ip6_destopt"]
 
 # Extended repeats, TTL
 ALL_REPEATS = [6, 3, 1, 8, 10, 11, 12, 2, 4, 5, 7, 9, 14, 15, 20]  # 100,260 only for tcpseg
-ALL_TTL = [1, 5, 7, 12, 63, 64, 127, 128, 255, 256, 512]  # >255 = out-of-range fooling wrap/cast
+ALL_TTL = [1, 5, 7, 12, 63, 64, 127, 128, 255]  # zapret2 ttl_discover: 0 <= ttl <= 255
 ALL_AUTOTTL = ["-1,3-20", "-2,5-15", "-3,7-12", "-4,3-20", "-5,5-15"]
 
 # All split positions from blockcheck2.sh
@@ -633,7 +633,7 @@ class StandardGenerator(
         # note: syn|synack (two-packet) omitted — '|' breaks nfqws2 conf splitter
         "synack": {
             "modes": ["synack", "synack", "acksyn"],
-            "foolings": ["", "badsum", "ip_ttl=10"],
+            "foolings": [""],  # synack core does not support badsum / ip_ttl in zapret2
         },
         # blockcheck2 20/25/30/35/50: wssize companion (wsize=1:scale=6)
         "wssize": {
@@ -646,8 +646,8 @@ class StandardGenerator(
             "fools": [
                 "fool=bs_dataofs:badsum",
                 "fool=bs_dataofs:ip_ttl=10",
-                "fool=bs_iplen=64",
-                "fool=bs_iplen=78",
+                "fool=bs_iplen:len=64",
+                "fool=bs_iplen:len=78",
                 "fool=bs_corrupt_load",
                 "fool=bs_corrupt_load:badsum",
                 "fool=bs_corrupt_load:ip_ttl=8",

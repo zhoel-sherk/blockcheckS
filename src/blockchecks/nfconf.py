@@ -12,6 +12,7 @@ from pathlib import Path
 
 from blockchecks.engine.conf_builder import (
     DEFAULT_KEENETIC_PREFIX,
+    _keep_export_strategy,
     build_keenetic_conf,
     build_raw_conf,
     write_export_bundle,
@@ -36,22 +37,26 @@ async def collect_export_strategies(
     if common_only and domains and len(domains) > 1:
         for row in await db.get_common_tcp(domains, limit=limit):
             cfg = await db.get_strategy_config(row["strategy"], "tcp")
-            tcp_strats.append(cfg or row["strategy"])
+            if resolved := _resolve_export_strategy(cfg, row["strategy"]):
+                tcp_strats.append(resolved)
     if not tcp_strats:
         covered = await db.get_best_by_coverage(limit=limit)
         if covered:
             for row in covered:
                 cfg = await db.get_strategy_config(row["strategy"], "tcp")
-                tcp_strats.append(cfg or row["strategy"])
+                if resolved := _resolve_export_strategy(cfg, row["strategy"]):
+                    tcp_strats.append(resolved)
         else:
             for row in await db.get_best_tcp(domain, limit=limit):
                 cfg = await db.get_strategy_config(row["strategy"], "tcp")
-                tcp_strats.append(cfg or row["strategy"])
-        if not tcp_strats:
-            working = await db.get_working_tcp(domain)
-            for name in working[:limit]:
-                cfg = await db.get_strategy_config(name, "tcp")
-                tcp_strats.append(cfg or name)
+                if resolved := _resolve_export_strategy(cfg, row["strategy"]):
+                    tcp_strats.append(resolved)
+            if not tcp_strats:
+                working = await db.get_working_tcp(domain)
+                for name in working[:limit]:
+                    cfg = await db.get_strategy_config(name, "tcp")
+                    if resolved := _resolve_export_strategy(cfg, name):
+                        tcp_strats.append(resolved)
 
     udp_strats: list[str] = []
     pairs = await db.get_best_pairs(domain, limit=limit * 2)
@@ -62,13 +67,15 @@ async def collect_export_strategies(
             continue
         seen_udp.add(u)
         cfg = await db.get_strategy_config(u, "udp")
-        udp_strats.append(cfg or u)
+        if resolved := _resolve_export_strategy(cfg, u):
+            udp_strats.append(resolved)
         if len(udp_strats) >= limit:
             break
     if not udp_strats:
         for row in await db.get_best_udp(limit=limit):
             cfg = await db.get_strategy_config(row["strategy"], "udp")
-            udp_strats.append(cfg or row["strategy"])
+            if resolved := _resolve_export_strategy(cfg, row["strategy"]):
+                udp_strats.append(resolved)
     if not udp_strats:
         udp_strats = ["fake:blob=discord_udp:repeats=6"]
 
@@ -76,7 +83,8 @@ async def collect_export_strategies(
     quic_strats: list[str] = []
     for row in await db.get_best_quic(domain, limit=limit):
         cfg = await db.get_strategy_config(row["strategy"], "quic")
-        quic_strats.append(cfg or row["strategy"])
+        if resolved := _resolve_export_strategy(cfg, row["strategy"]):
+            quic_strats.append(resolved)
     if not quic_strats:
         quic_strats = ["fake:blob=quic_initial:repeats=11"]
     return tcp_strats, udp_strats, quic_strats
@@ -88,6 +96,15 @@ _IP2NET_CANDIDATES = (
 )
 
 _IPSET_INLINE_LIMIT = 64  # > this many IPs → write a file instead of inline
+
+
+def _resolve_export_strategy(config: str | None, name: str) -> str | None:
+    """Return exportable strategy text; skip DB labels when config is missing."""
+    if config:
+        return config if _keep_export_strategy(config) else None
+    if ":" in name and _keep_export_strategy(name):
+        return name
+    return None
 
 
 def _find_ip2net() -> str | None:

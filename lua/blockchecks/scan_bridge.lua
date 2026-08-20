@@ -53,6 +53,24 @@ function bs_timer_poll_strategy(name, data)
 end
 
 function smart_fallback(ctx, desync)
+	-- Inbound RST detector (DPI fake RST with high TTL ≥ 64).
+	-- Must run before bs_l7_ok: inbound RSTs carry no L7 payload.
+	if not desync.outgoing
+		and desync.dis.tcp
+		and bit32.band(desync.dis.tcp.th_flags, 0x04) ~= 0
+		and desync.dis.ip
+	then
+		local ttl = desync.dis.ip.ip_ttl
+		if ttl and ttl >= 64 then
+			bs_write_ipc({
+				event = "STRATEGY_FAIL",
+				reason = "rst_in",
+				gen = tonumber(_G.bs_active_gen) or 0,
+				ttl = ttl,
+			})
+		end
+	end
+
 	if not bs_l7_ok(desync.l7payload) then return end
 
 	-- Outbound retransmission detector (DPI silent-drop)
@@ -66,24 +84,6 @@ function smart_fallback(ctx, desync)
 				reason = "retrans",
 				gen = tonumber(_G.bs_active_gen) or 0,
 				ms = 0,
-			})
-		end
-		return
-	end
-
-	-- Inbound RST detector (DPI fake RST with high TTL ≥ 64)
-	if not desync.outgoing
-		and desync.dis.tcp
-		and bit32.band(desync.dis.tcp.th_flags, 0x04) ~= 0
-		and desync.dis.ip
-	then
-		local ttl = desync.dis.ip.ip_ttl
-		if ttl and ttl >= 64 then
-			bs_write_ipc({
-				event = "STRATEGY_FAIL",
-				reason = "rst_in",
-				gen = tonumber(_G.bs_active_gen) or 0,
-				ttl = ttl,
 			})
 		end
 	end
