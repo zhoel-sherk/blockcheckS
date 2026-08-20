@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from blockchecks.cli.commands.pair_phases import (
+    RESUME_FINGERPRINT_MISMATCH,
     StopHandlerState,
     build_pair_runner,
     finalize_pair_run,
@@ -320,7 +321,7 @@ def test_resume_fingerprint_mismatch():
     db.latest_checkpoint = AsyncMock(return_value=cp)
     with patch("blockchecks.cli.commands.pair_phases.fingerprint_mismatch", return_value=True):
         _, rc = asyncio.run(resolve_resume_checkpoint(args, db, "new"))
-    assert rc == 1
+    assert rc == RESUME_FINGERPRINT_MISMATCH
 
 
 def test_resume_match():
@@ -355,6 +356,21 @@ def test_load_strategy_items_generated():
     assert res.error_code is None
     assert len(res.tcp_items) == 1
     assert res.tcp_sources_list == ["custom", "configs"]
+
+
+def test_resume_checkpoint_generate_skips_triage():
+    triage = object()
+    args = _args(generate=True, config=None, user_matrix="", resume=True, triage=triage)
+    db = MagicMock()
+    db.latest_checkpoint = AsyncMock(return_value=MagicMock())
+    gen = MagicMock()
+    gen.generate_tcp = AsyncMock(return_value=[MagicMock()])
+    gen.generate_udp = AsyncMock(return_value=[MagicMock()])
+    with patch("blockchecks.cli.commands.pair_phases.MatrixGenerator", return_value=gen):
+        res = asyncio.run(load_strategy_items(args, db))
+    assert res.error_code is None
+    assert gen.generate_tcp.await_args.kwargs["triage"] is None
+    assert gen.generate_udp.await_args.kwargs["triage"] is None
 
 
 def test_load_strategy_items_tcp_only_skips_udp():

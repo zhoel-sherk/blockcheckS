@@ -127,6 +127,7 @@ while true; do
     TF=(--max-timem "\$(python3 -c "print(\$REMAIN/60.0)")")
   fi
   echo "=== G wave remain=\${REMAIN}s \${TF[*]} \$(date -Is) ==="
+  set +e
   bs pair -d discord.com --generate \\
     --tcp-sources fake \\
     --udp-sources custom,standard_udp,configs,flowseal \\
@@ -136,7 +137,13 @@ while true; do
     --allow-dns-hijack --resume --data-block-sync --no-preflight \\
     --skip-prolog --skip-ip-block --skip-port-block --skip-baseline --skip-dns-audit \\
     --db $DB --out-dir $OUT \\
-    "\${TF[@]}" || true
+    "\${TF[@]}"
+  rc=\$?
+  set -e
+  if [ "\$rc" -eq 4 ]; then
+    echo "=== G stop: matrix fingerprint mismatch (not retrying) ==="
+    break
+  fi
   NOW=\$(date +%s)
   if [ "\$NOW" -ge "\$END" ]; then
     break

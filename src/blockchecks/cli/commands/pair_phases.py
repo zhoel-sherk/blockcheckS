@@ -48,6 +48,7 @@ from blockchecks.engine.triage import disable_ech_from
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
 
 STANDARD_TCP_SOURCES = ("standard", "fake", "hostfake", "faked", "fake_multi", "fake_faked")
+RESUME_FINGERPRINT_MISMATCH = 4
 
 
 @dataclass
@@ -412,6 +413,17 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
     ), None
 
 
+async def _resume_generate_triage(args, db):
+    """Triage prune changes the item list; resume must keep the original matrix."""
+    if not getattr(args, "resume", False) or db is None:
+        return getattr(args, "triage", None)
+    latest = getattr(db, "latest_checkpoint", None)
+    if not callable(latest):
+        return getattr(args, "triage", None)
+    checkpoint = await latest()
+    return None if checkpoint else getattr(args, "triage", None)
+
+
 async def load_strategy_items(args, db) -> StrategyLoadResult:
     """Load or generate TCP/UDP strategy items."""
     strategy_preset = getattr(args, "strategy_preset", None)
@@ -464,6 +476,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
         tcp_sources = [s for s in tcp_src.split(",") if s]
         udp_sources = [s for s in udp_src.split(",") if s]
         tcp_sources_list = tcp_sources
+        gen_triage = await _resume_generate_triage(args, db)
 
         print(f"\n  {CYAN}Generating strategies...{RESET}")
         if not tcp_items:
@@ -476,7 +489,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
                 user_matrix=user_matrix,
                 run_set=run_set,
                 protocol=protocol,
-                triage=getattr(args, "triage", None),
+                triage=gen_triage,
             )
         if not udp_items and udp_sources and not args.tcp_only:
             udp_items = await scanner.generate_udp(
@@ -486,7 +499,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
                 max_count=max(1, args.max // 2) if args.max >= 2 else 50,
                 state_db=db,
                 user_matrix=user_matrix,
-                triage=getattr(args, "triage", None),
+                triage=gen_triage,
             )
         print(f"  Generated: {len(tcp_items)} TCP + {len(udp_items)} UDP strategies")
     elif not tcp_items:
@@ -545,7 +558,7 @@ def print_pair_banner(
 
 
 async def resolve_resume_checkpoint(args, db, fp: str) -> tuple[Any | None, int | None]:
-    """Load resume checkpoint; return (resume_from, exit_code) on fingerprint mismatch."""
+    """Load resume checkpoint; fingerprint mismatch returns RESUME_FINGERPRINT_MISMATCH."""
     resume_from = None
     if args.resume:
         resume_from = await db.latest_checkpoint()
@@ -553,7 +566,7 @@ async def resolve_resume_checkpoint(args, db, fp: str) -> tuple[Any | None, int 
             if fingerprint_mismatch(resume_from.fingerprint, fp):
                 print(f"  {RED}ERROR: matrix changed, refuse --resume; start fresh{RESET}")
                 print(f"  checkpoint fp={resume_from.fingerprint} current fp={fp}")
-                return None, 1
+                return None, RESUME_FINGERPRINT_MISMATCH
             print(
                 f"  {YELLOW}Resuming after {resume_from.tcp_label}+{resume_from.udp_label}{RESET}"
             )
