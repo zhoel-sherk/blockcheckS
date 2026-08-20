@@ -108,6 +108,22 @@ async def fake_daemon(tmp_path, monkeypatch):
                 writer.write(_ok({"netns_pool": ["bs-p-0"], "nfqws2_pids": [123]}))
             elif action == "get_telemetry":
                 writer.write(_ok({"active_run": None, "pool_size": 2}))
+            elif action == "set_debug":
+                writer.write(
+                    _ok({"enabled": bool(req.get("enabled", True)), "python_level": "DEBUG"})
+                )
+            elif action == "log_tail":
+                writer.write(
+                    _ok(
+                        {
+                            "source": req.get("source") or "python",
+                            "path": "/tmp/blockchecks.log",
+                            "lines": ["hello"],
+                            "offset": 5,
+                            "truncated": False,
+                        }
+                    )
+                )
             else:
                 writer.write(_err(f"unknown cmd: {action}"))
             await writer.drain()
@@ -207,6 +223,34 @@ async def test_dbg_dump_pool_state(fake_daemon):
     state = await dbg_dump_pool_state()
     assert "bs-p-0" in state["netns_pool"]
     assert state["nfqws2_pids"] == [123]
+
+
+async def test_set_debug_mode_tool(fake_daemon):
+    from blockchecks.mcp.server import set_debug_mode
+
+    st = await set_debug_mode(True)
+    assert st["enabled"] is True
+    assert st["python_level"] == "DEBUG"
+
+
+async def test_get_log_tail_from_disk(tmp_path, monkeypatch):
+    from blockchecks.engine import log as logmod
+    from blockchecks.mcp.server import get_log_tail
+
+    log_file = tmp_path / "blockchecks.log"
+    log_file.write_text("alpha\nbeta\n")
+    monkeypatch.setattr(logmod, "python_log_path", lambda: log_file)
+    result = await get_log_tail(source="python", tail=10, offset=0)
+    assert result["ok"] is True
+    assert result["lines"] == ["alpha", "beta"]
+    assert result["offset"] == log_file.stat().st_size
+
+
+async def test_get_log_tail_rejects_unknown_source():
+    from blockchecks.mcp.server import get_log_tail
+
+    with pytest.raises(ValueError, match="invalid source"):
+        await get_log_tail(source="etc_passwd")
 
 
 async def test_get_active_run_telemetry(fake_daemon):

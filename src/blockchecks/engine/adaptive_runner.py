@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +17,9 @@ from blockchecks.engine.adaptive_queue import (
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.store import RunStateStore
 from blockchecks.service.batch_scheduler import BatchJobAccumulator
+
+log = logging.getLogger(__name__)
+
 
 ProgressCb = Callable[[int, int, int], None]
 ResumeCb = Callable[[AdaptiveJob], Awaitable[bool]]
@@ -105,7 +109,7 @@ async def _apply_provider_weights(
         weights.boost_pass(fam, blobs, traits)
         boosted += 1
     if boosted:
-        print(f"  [AQ] provider-preflight: boosted {boosted} approved strategies")
+        log.info("%s", f"  [AQ] provider-preflight: boosted {boosted} approved strategies")
 
 
 async def run_adaptive_tcp_bridge(
@@ -170,7 +174,7 @@ class _RunStats:
         self.passed = 0
 
 
-async def _bridge_worker(
+async def _bridge_worker(  # noqa: C901
     runner,
     queue: AdaptiveJobQueue,
     stats: _RunStats,

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
+
 
 DEFAULT_PRESETS_DIR = Path(__file__).resolve().parents[2] / "presets" / "strategies"
 
@@ -206,14 +210,14 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = load_provider_summary(args.summary)
     written = write_shortlist_presets(summary, args.out_dir, prefix=args.prefix)
-    print(build_import_report(summary))
-    print("Wrote presets:")
+    log.info("%s", build_import_report(summary))
+    log.info("Wrote presets:")
     for proto, path in written.items():
-        print(f"  {proto}: {path}")
+        log.info("%s", f"  {proto}: {path}")
 
     if args.merge_matrix:
         path = merge_into_user_matrix(args.summary, args.merge_matrix)
-        print(f"Merged user-matrix: {path}")
+        log.info("%s", f"Merged user-matrix: {path}")
 
     if args.seed_db:
         import asyncio
@@ -222,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
 
         shortlist = provider_summary_to_shortlist(summary)
         seeded = asyncio.run(seed_state_db(shortlist, args.seed_db))
-        print(f"Seeded {seeded} rows → {args.seed_db}")
+        log.info("%s", f"Seeded {seeded} rows → {args.seed_db}")
     return 0
 
 

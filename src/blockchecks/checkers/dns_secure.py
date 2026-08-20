@@ -5,6 +5,7 @@ Builds a per-run cache and can pick a working DoH server.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 import struct
 import time
@@ -20,6 +21,9 @@ from blockchecks.engine.config import (
     DOH_SERVERS,
     UDP_DNS_SERVERS,
 )
+
+log = logging.getLogger(__name__)
+
 
 # libcurl CURLOPT_RESOLVE (for tcp_tls helper)
 try:
@@ -414,21 +418,21 @@ def audit_domains(
 
 def print_audit_table(results: list[DnsAuditResult]) -> None:
     """Print the UDP vs DoH comparison table."""
-    print("\n  DNS audit (UDP vs DoH)")
-    print(f"  {'-' * 72}")
-    print(f"  {'Domain':<24}{'UDP':<22}{'DoH':<22}{'Verdict'}")
-    print(f"  {'-' * 72}")
+    log.info("\n  DNS audit (UDP vs DoH)")
+    log.info("%s", f"  {'-' * 72}")
+    log.info("%s", f"  {'Domain':<24}{'UDP':<22}{'DoH':<22}{'Verdict'}")
+    log.info("%s", f"  {'-' * 72}")
     for r in results:
         udp = ", ".join(r.udp_ips[:2]) if r.udp_ips else (r.udp_error or "--")
         doh = ", ".join(r.doh_ips[:2]) if r.doh_ips else (r.doh_error or "--")
         tag = "OK" if not r.tampering_detected else "TAMPERED"
-        print(f"  {r.domain:<24}{udp:<22}{doh:<22}{tag}")
+        log.info("%s", f"  {r.domain:<24}{udp:<22}{doh:<22}{tag}")
     tampered = sum(1 for r in results if r.tampering_detected)
-    print(f"  {'-' * 72}")
-    print(f"  Tampered: {tampered}/{len(results)}")
+    log.info("%s", f"  {'-' * 72}")
+    log.info("%s", f"  Tampered: {tampered}/{len(results)}")
     for r in results:
         if r.tampering_detected:
-            print(f"    {r.domain}: {r.description}")
+            log.info("%s", f"    {r.domain}: {r.description}")
 
 
 def has_dns_hijack(results: list[DnsAuditResult]) -> bool:
@@ -588,7 +592,7 @@ def prepare_dns_for_run(
         results = audit_domains(domains, doh_url=url, timeout=timeout)
         print_audit_table(results)
         if has_dns_hijack(results) and not allow_hijack:
-            print(
+            log.error(
                 "\n  ERROR: DNS hijack detected. Use --allow-dns-hijack to continue "
                 "or --no-secure-dns to disable DoH pre-resolve."
             )

@@ -5,6 +5,7 @@ With a token: Gateway WS then Voice WS OP2 Ready. Without a token: caller uses a
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
 import threading
@@ -19,6 +20,9 @@ from blockchecks.engine.config import (
     SING_BOX_CONFIG,
     SOCKS5_PROXY,
 )
+
+log = logging.getLogger(__name__)
+
 
 _singbox_lock = threading.Lock()
 _singbox_proc: subprocess.Popen | None = None
@@ -58,17 +62,17 @@ def _manage_singbox(start: bool) -> subprocess.Popen | None:
 @asynccontextmanager
 async def _singbox_session() -> AsyncIterator[subprocess.Popen | None]:
     """Async CM: start sing-box for discovery, always stop on exit."""
-    print("[discovery] Starting sing-box proxy...")
+    log.info("[discovery] Starting sing-box proxy...")
     sb = await asyncio.to_thread(_manage_singbox, True)
     if not sb:
-        print("[discovery] sing-box unavailable — using static IP")
+        log.info("[discovery] sing-box unavailable — using static IP")
         yield None
         return
     try:
         yield sb
     finally:
         await asyncio.to_thread(_manage_singbox, False)
-        print("[discovery] sing-box stopped")
+        log.info("[discovery] sing-box stopped")
 
 
 def load_token() -> str | None:
@@ -80,7 +84,7 @@ def load_token() -> str | None:
     except OSError:
         return None
     if mode & 0o002:
-        print(f"[discovery] WARNING: refusing world-writable settings file: {settings}")
+        log.warning("%s", f"[discovery] WARNING: refusing world-writable settings file: {settings}")
         return None
     import configparser as cp
 
@@ -128,7 +132,7 @@ async def discover_voice_endpoint() -> dict | None:
         try:
             return await _discover_via_gateway(token)
         except Exception as e:
-            print(f"[discovery] Failed: {e}")
+            log.info("%s", f"[discovery] Failed: {e}")
             return None
 
 
@@ -278,8 +282,9 @@ async def _discover_via_gateway(token: str) -> dict | None:
             await vws.close()
 
         if result:
-            print(
-                f"[discovery] Voice server: {result['ip']}:{result['port']} (SSRC={result['ssrc']})"
+            log.info(
+                "%s",
+                f"[discovery] Voice server: {result['ip']}:{result['port']} (SSRC={result['ssrc']})",
             )
         return result or None
 
@@ -307,14 +312,14 @@ async def discover_multiple(
                     seen_ips.add(ip)
                     endpoints.append(ep)
         except Exception as e:
-            print(f"[discovery] DNS layer failed: {e}")
+            log.info("%s", f"[discovery] DNS layer failed: {e}")
 
     if len(endpoints) >= count:
         return endpoints[:count]
 
     token = load_token()
     if token and len(endpoints) < count:
-        print(f"[discovery] Gateway layer (up to {count - len(endpoints)} more)...")
+        log.info("%s", f"[discovery] Gateway layer (up to {count - len(endpoints)} more)...")
         for _ in range(min(count - len(endpoints), 3)):
             try:
                 ep = await discover_voice_endpoint()
@@ -328,7 +333,7 @@ async def discover_multiple(
                         }
                     )
             except Exception as e:
-                print(f"[discovery] Gateway attempt failed: {e}")
+                log.info("%s", f"[discovery] Gateway attempt failed: {e}")
                 break
 
     return endpoints[:count]

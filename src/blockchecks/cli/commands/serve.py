@@ -5,10 +5,13 @@ Refuses to start while a campaign holds run.lock; holds the same lock while runn
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from blockchecks.service.probe_service import ProbeService
 from blockchecks.service.run_control import read_active_run, run_session
 from blockchecks.service.server import ProbeServer
+
+log = logging.getLogger(__name__)
 
 
 def _resolve_http_token(args) -> str | None:
@@ -46,9 +49,10 @@ def cmd_serve(args) -> int:
     # Fair exclusion startup check: refuse to start if a campaign is active.
     active = read_active_run()
     if active is not None:
-        print(
+        log.info(
+            "%s",
             f"  [serve] active campaign: {active.command} (pid {active.pid}). "
-            "Start serve when the campaign is done, or use it after --resume finishes."
+            "Start serve when the campaign is done, or use it after --resume finishes.",
         )
         return 2
 
@@ -58,15 +62,16 @@ def cmd_serve(args) -> int:
         async with run_session("serve", argv=["serve"]):
             try:
                 await service.start()
-                print(
+                log.info(
+                    "%s",
                     f"  [serve] pool ready ({service.pool_size} netns), "
-                    f"lua_bridge={service.lua_bridge}"
+                    f"lua_bridge={service.lua_bridge}",
                 )
                 http_port = getattr(args, "http_port", None)
                 if http_port:
                     http_token = _resolve_http_token(args)
                     if not http_token:
-                        print(
+                        log.warning(
                             "  [serve] WARNING: --http-port set but no token (--http-token / env "
                             "BLOCKCHECKS_HTTP_TOKEN / config.toml [http] token). HTTP bridge disabled."
                         )
@@ -83,5 +88,5 @@ def cmd_serve(args) -> int:
     try:
         return asyncio.run(_run())
     except KeyboardInterrupt:
-        print("\n  [serve] stopped")
+        log.info("\n  [serve] stopped")
         return 0

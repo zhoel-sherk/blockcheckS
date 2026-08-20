@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
@@ -16,6 +17,9 @@ from blockchecks.engine.settle_profile import (
 )
 from blockchecks.engine.strategy_loader import StrategyLoader
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
+
+log = logging.getLogger(__name__)
+
 
 DEFAULT_SETTLE = (0.1, 0.2, 0.5, 1.0, 2.0)
 DEFAULT_CURL = (0.5, 1.0, 1.5, 2.0)
@@ -36,13 +40,13 @@ def _load_strategies(args) -> list[StrategyItem]:
         path = resolve_strategy_preset(preset)
         raw = StrategyLoader.from_file(str(path))
     except PresetPathError as e:
-        print(f"{RED}ERROR: {e}{RESET}")
+        log.error("%s", f"{RED}ERROR: {e}{RESET}")
         return []
     except FileNotFoundError:
         if getattr(args, "strategy", None):
             raw = StrategyLoader.from_string(args.strategy)
         else:
-            print(f"{RED}ERROR: strategy preset '{preset}' not found{RESET}")
+            log.error("%s", f"{RED}ERROR: strategy preset '{preset}' not found{RESET}")
             return []
     return [StrategyItem(f"bench_{i}", s) for i, s in enumerate(raw)]
 
@@ -71,8 +75,8 @@ async def cmd_bench_settle(args) -> int:
     if dns_rc:
         return dns_rc
 
-    print(f"\n  {CYAN}bench-settle — {domain}{RESET}")
-    print(f"  Strategies: {len(items)}  settle={settle_times}  curl={curl_timeouts}")
+    log.info("%s", f"\n  {CYAN}bench-settle — {domain}{RESET}")
+    log.info("%s", f"  Strategies: {len(items)}  settle={settle_times}  curl={curl_timeouts}")
 
     runner = AsyncTestRunner(pool_size=1, secure_dns=secure_dns, dns_cache=dns_cache)
     await runner.start()
@@ -118,12 +122,13 @@ async def cmd_bench_settle(args) -> int:
                         }
                     )
                     mark = f"{GREEN}PASS{RESET}" if ok else f"{RED}FAIL{RESET}"
-                    print(
+                    log.info(
+                        "%s",
                         f"  {item.label[:24]:24s} settle={settle_max:.1f}s "
                         f"curl={curl_t:.1f}s → {mark} "
                         f"settle={data.get('settle_ms', 0):.0f}ms "
                         f"lat={data.get('latency_ms', 0):.0f}ms "
-                        f"tot={total_ms:.0f}ms"
+                        f"tot={total_ms:.0f}ms",
                     )
     finally:
         await runner.pool.release(ns_name)
@@ -137,18 +142,20 @@ async def cmd_bench_settle(args) -> int:
     if out_path and rows:
         profile = build_profile_from_rows(rows, domain=domain)
         saved = save_profile(profile, out_path)
-        print(f"\n  {GREEN}Profile written: {saved}{RESET}")
+        log.info("%s", f"\n  {GREEN}Profile written: {saved}{RESET}")
         if profile.defaults:
-            print(
+            log.info(
+                "%s",
                 f"  defaults: settle_max={profile.defaults.settle_max}s "
                 f"curl={profile.defaults.curl_timeout}s "
-                f"({len(profile.strategies)} strategies)"
+                f"({len(profile.strategies)} strategies)",
             )
     elif pass_settles:
-        print(
+        log.info(
+            "%s",
             f"\n  {GREEN}Min settle with PASS: {pass_settles[0]:.1f}s "
-            f"(use BLOCKCHECKS_NFQWS2_SETTLE_MAX={pass_settles[0]}){RESET}"
+            f"(use BLOCKCHECKS_NFQWS2_SETTLE_MAX={pass_settles[0]}){RESET}",
         )
     else:
-        print(f"\n  {YELLOW}No PASS in grid — check domain/strategy/preflight{RESET}")
+        log.info("%s", f"\n  {YELLOW}No PASS in grid — check domain/strategy/preflight{RESET}")
     return 0

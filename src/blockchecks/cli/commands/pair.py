@@ -1,6 +1,7 @@
 """Async TCP x UDP pair matrix command."""
 
 import asyncio
+import logging
 import time
 
 from blockchecks.cli.commands.pair_phases import (
@@ -30,6 +31,8 @@ from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.run_finalize import finalize_db_and_weights, run_exit_code
 from blockchecks.engine.store import DEFAULT_DB_BATCH, matrix_fingerprint, open_run_store
 from blockchecks.terminal import CYAN, RESET, YELLOW
+
+log = logging.getLogger(__name__)
 
 
 async def cmd_pair(args):
@@ -80,7 +83,7 @@ async def _cmd_pair_run(args):
     if deadline:
         deadline.arm()
         await deadline.start_background()
-        print(f"  Time limit: {deadline.budget_label()}")
+        log.info("%s", f"  Time limit: {deadline.budget_label()}")
 
     try:
         await runner.start()
@@ -180,13 +183,14 @@ async def _cmd_pair_run(args):
         aq_result = phase.aq_result
 
         if stop_event.is_set() and deadline and deadline.triggered:
-            print(
+            log.info(
+                "%s",
                 f"\n  {YELLOW}TIME LIMIT reached ({deadline.budget_label()})"
-                f" — skipping optional phases{RESET}"
+                f" — skipping optional phases{RESET}",
             )
 
         elapsed = time.perf_counter() - t0
-        print(f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
+        log.info("%s", f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
 
     finally:
         restore_signals()

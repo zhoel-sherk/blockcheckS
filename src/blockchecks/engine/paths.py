@@ -224,45 +224,11 @@ def apply_pycache_prefix() -> None:
     os.environ.setdefault("PYTHONPYCACHEPREFIX", prefix)
 
 
-def configure_logging(*, level: str | int | None = None) -> None:
-    """Configure the ``blockchecks`` logger: file handler + stderr.
+def configure_logging(*, level: str | int | None = None, console: str = "stdout") -> None:
+    """Delegate to ``blockchecks.engine.log`` (rotating file + operator streams)."""
+    from blockchecks.engine.log import configure_logging as _configure
 
-    Ensures warnings/info from module loggers (paths, presets, …) are not
-    silently dropped in production. The file lives under ``RUNTIME_LOGS_DIR``;
-    level defaults to ``BLOCKCHECKS_LOG_LEVEL`` env (default WARNING).
-
-    Idempotent: existing ``blockchecks`` handlers are left untouched (so tests
-    using ``caplog`` keep their own configuration).
-    """
-    if logging.getLogger("blockchecks").handlers:
-        return
-    ensure_dirs()
-    log_level = logging.WARNING
-    if level is not None:
-        log_level = level
-    else:
-        v = os.environ.get("BLOCKCHECKS_LOG_LEVEL", "").strip()
-        if v:
-            log_level = getattr(logging, v.upper(), logging.WARNING)
-
-    root = logging.getLogger("blockchecks")
-    root.setLevel(log_level)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-
-    try:
-        RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(RUNTIME_LOGS_DIR / "blockchecks.log", encoding="utf-8")
-        fh.setLevel(log_level)
-        fh.setFormatter(formatter)
-        root.addHandler(fh)
-        reclaim_sudo_ownership(RUNTIME_LOGS_DIR / "blockchecks.log")
-    except OSError:
-        pass
-
-    sh = logging.StreamHandler()
-    sh.setLevel(log_level)
-    sh.setFormatter(formatter)
-    root.addHandler(sh)
+    _configure(level=level, console=console)
 
 
 def migrate_legacy_state_db(

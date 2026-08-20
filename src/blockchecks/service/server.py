@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import signal
 import time
 from pathlib import Path
 from typing import Any
 
 from blockchecks.engine.paths import STATE_DIR
 from blockchecks.service.probe_service import ProbeRequest, ProbeService
+
+log = logging.getLogger(__name__)
+
 
 SOCKET_PATH = STATE_DIR / "blockchecks.sock"
 
@@ -209,6 +214,10 @@ class ProbeServer:
             return await self._handle_dbg_dump_pool()
         if cmd == "get_telemetry":
             return self._envelope(await self._handle_get_telemetry())
+        if cmd == "set_debug":
+            return self._envelope(self._handle_set_debug(req))
+        if cmd == "log_tail":
+            return self._envelope(self._handle_log_tail(req))
         if cmd == "results":
             return self._envelope(await self._handle_results(req))
         if cmd == "stop":
@@ -285,7 +294,9 @@ class ProbeServer:
                 "client_hello_len": t.client_hello_len if t else 0,
                 "quic_blocked": bool(t and t.quic_drop),
                 "dns_tampered": bool(t and (t.dns_hijacked or t.dns_sinkhole)),
-                "recommended_generators": map_triage_to_generators(t) if t else list(DEFAULT_FAMILIES),
+                "recommended_generators": map_triage_to_generators(t)
+                if t
+                else list(DEFAULT_FAMILIES),
                 "unbypassable_l3": bool(t and t.unbypassable_l3),
                 "stall_phase": (t.stall_phase.value if t and t.stall_phase else None),
                 "rst_at_sni": bool(t and t.rst_at_sni),
@@ -347,7 +358,9 @@ class ProbeServer:
             runner = self.service.runner
             tick = asyncio.create_task(_tick())
             sink: list[dict[str, Any]] = []
-            restore_runner = _tap_runner_passes(runner, sink) if runner is not None else lambda: None
+            restore_runner = (
+                _tap_runner_passes(runner, sink) if runner is not None else lambda: None
+            )
             restore_queue = _tap_queue_passes(queue, sink)
             try:
                 async with self.service._lock:
@@ -502,9 +515,49 @@ class ProbeServer:
                 "uptime_s": round(self.service.uptime, 1) if self.service.started else 0.0,
                 "run_lock_present": RUN_LOCK_FILE.exists(),
             }
+            from blockchecks.engine.log import debug_status
+
+            data["debug"] = debug_status()
             return {"status": "ok", "results": data, **data}
         except Exception as err:
             return self._envelope({"status": "error", "error": f"get_telemetry failed: {err}"})
+
+    @staticmethod
+    def _as_bool(val: Any, default: bool = False) -> bool:
+        if val is None:
+            return default
+        if isinstance(val, bool):
+            return val
+        return str(val).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _as_int(val: Any, default: int) -> int:
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _handle_set_debug(req: dict) -> dict:
+        from blockchecks.engine.log import set_debug_mode
+
+        enabled = ProbeServer._as_bool(req.get("enabled"), True)
+        data = set_debug_mode(enabled)
+        return {"status": "ok", "results": data, **data}
+
+    @staticmethod
+    def _handle_log_tail(req: dict) -> dict:
+        from blockchecks.engine.log import log_tail
+
+        source = str(req.get("source") or "python")
+        tail = ProbeServer._as_int(req.get("tail"), 200)
+        offset = ProbeServer._as_int(req.get("offset"), 0)
+        raw = ProbeServer._as_bool(req.get("raw"))
+        strip = not ProbeServer._as_bool(req.get("ansi"))
+        data = log_tail(source, tail=tail, offset=offset, strip_ansi=strip, raw=raw)
+        if not data.get("ok"):
+            return {"status": "error", "error": data.get("error") or "log_tail failed", **data}
+        return {"status": "ok", "results": data, **data}
 
     async def _handle_results(self, req: dict) -> dict:
         """Return best PASS strategies from a run database (on-the-fly).
@@ -633,7 +686,18 @@ class ProbeServer:
         from blockchecks.engine.paths import reclaim_sudo_ownership
 
         reclaim_sudo_ownership(self.socket_path)
-        print(f"  [serve] listening on {self.socket_path}")
+        log.info("%s", f"  [serve] listening on {self.socket_path}")
+        loop = asyncio.get_running_loop()
+
+        def _on_usr1() -> None:
+            from blockchecks.engine.log import toggle_debug_mode
+
+            toggle_debug_mode()
+
+        try:
+            loop.add_signal_handler(signal.SIGUSR1, _on_usr1)
+        except (NotImplementedError, RuntimeError):
+            pass
         async with self._server:
             await self._stop.wait()
 
@@ -731,6 +795,12 @@ class ProbeServer:
             return resp, self._busy_status_code(resp)
         if path == "/api/telemetry" and method in {"GET", "HEAD"}:
             return self._envelope(await self._handle_get_telemetry()), 200
+        if (path == "/api/logs" or path.startswith("/api/logs?")) and method in {
+            "GET",
+            "HEAD",
+        }:
+            req = self._parse_query_params(path)
+            return self._envelope(self._handle_log_tail(req)), 200
         if path == "/api/results" or path.startswith("/api/results?"):
             req = self._parse_query_params(path)
             return self._envelope(await self._handle_results(req)), 200
@@ -742,6 +812,7 @@ class ProbeServer:
             "/api/find-strategy": "find_strategy",
             "/api/generate-config": "generate_config",
             "/api/dbg-probe": "dbg_probe",
+            "/api/set-debug": "set_debug",
         }
         if path in action_paths and method == "POST":
             req = self._parse_http_body(body)
@@ -779,7 +850,7 @@ class ProbeServer:
         ``/api/events`` for on-the-fly progress.
         """
         if not token:
-            print("  [serve] HTTP bridge disabled: no token provided")
+            log.info("  [serve] HTTP bridge disabled: no token provided")
             return
 
         async def _send_json(
@@ -842,6 +913,6 @@ class ProbeServer:
                         pass
 
         self._http = await asyncio.start_server(_handle, host, port)
-        print(f"  [serve] authenticated HTTP bridge on http://{host}:{port}")
+        log.info("%s", f"  [serve] authenticated HTTP bridge on http://{host}:{port}")
         async with self._http:
             await self._stop.wait()

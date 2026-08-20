@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Literal
+
+log = logging.getLogger(__name__)
+
 
 StopReason = Literal["time_limit", "signal", None]
 
@@ -111,9 +115,9 @@ class RunDeadline:
             self.reason = "time_limit"
             self.stop_event.set()
             # Visible in campaign/smoke logs; loops poll stop_event after each job
-            print(
+            log.info(
+                "%s",
                 f"  [deadline] fired after {self.budget_label()} — stop_event set (graceful stop)",
-                flush=True,
             )
 
     def expired(self) -> bool:

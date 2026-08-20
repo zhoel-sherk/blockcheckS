@@ -243,6 +243,32 @@ def test_nfqws2_debug_env_propagated_by_dispatch_subcommand():
 
 
 @pytest.mark.unit
+def test_debug_flag_calls_set_debug_mode():
+    """``--debug`` is the unified toggle (Python DEBUG + nfqws2)."""
+    import os
+
+    from blockchecks.cli import cliapp as ca
+    from blockchecks.engine.log import debug_status, set_debug_mode
+
+    os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+    os.environ.pop("BLOCKCHECKS_LOG_LEVEL", None)
+    try:
+        Root = build_cli_root()
+        model = Root(_cli_parse_args=["scan", "--debug", "--max", "1"])
+        sub = get_subcommand(model, is_required=True)
+        assert sub.debug is True
+        ca._apply_debug_flags(sub)
+        st = debug_status()
+        assert st["enabled"] is True
+        assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") == "1"
+        assert os.environ.get("BLOCKCHECKS_LOG_LEVEL") == "DEBUG"
+    finally:
+        set_debug_mode(False)
+        os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
+        os.environ.pop("BLOCKCHECKS_LOG_LEVEL", None)
+
+
+@pytest.mark.unit
 def test_no_prefix_flags_set_true_by_dispatch():
     """pydantic parses --no-<field> as negation; _dispatch_subcommand must
     re-apply the captured field as True (no_http/no_quic/no_voice/...)."""

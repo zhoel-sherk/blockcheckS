@@ -549,6 +549,11 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
         )
 
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Python DEBUG logs + nfqws2 --debug=1 (toggle at runtime with SIGUSR1)",
+    )
+    parser.add_argument(
         "--nfqws2-debug",
         nargs="?",
         const="1",
@@ -638,6 +643,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bearer token for the HTTP bridge (default: BLOCKCHECKS_HTTP_TOKEN env "
         "or config.toml [http] token)",
     )
+    serve.add_argument(
+        "--debug",
+        action="store_true",
+        help="Python DEBUG logs + nfqws2 --debug=1 (toggle at runtime with SIGUSR1)",
+    )
 
     tcp = sub.add_parser("tcp", help="Single TCP strategy test (sync)")
     tcp.add_argument("-d", "--domain", required=True)
@@ -659,6 +669,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_time_limit_args(tcp)
     add_curl_repeats_args(tcp)
     add_backend_args(tcp)
+    tcp.add_argument(
+        "--debug",
+        action="store_true",
+        help="Python DEBUG logs + nfqws2 --debug=1 (toggle at runtime with SIGUSR1)",
+    )
     tcp.add_argument(
         "--nfqws2-debug",
         nargs="?",
@@ -709,6 +724,11 @@ def build_parser() -> argparse.ArgumentParser:
     udp.add_argument("--timeout", type=float, default=3.0)
     udp.add_argument("--qnum", type=int, default=201)
     udp.add_argument("--ns")
+    udp.add_argument(
+        "--debug",
+        action="store_true",
+        help="Python DEBUG logs + nfqws2 --debug=1 (toggle at runtime with SIGUSR1)",
+    )
     udp.add_argument(
         "--nfqws2-debug",
         nargs="?",
@@ -779,9 +799,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def dispatch(args: argparse.Namespace) -> int:
-    dbg = getattr(args, "nfqws2_debug", None)
-    if dbg is not None:
-        os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
+    if getattr(args, "debug", False):
+        from blockchecks.engine.log import set_debug_mode
+
+        set_debug_mode(True)
+    else:
+        dbg = getattr(args, "nfqws2_debug", None)
+        if dbg is not None:
+            os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
 
     live = {"tcp", "udp", "scan", "pair", "composite", "bench-settle"}
     # Skip deps when listing presets under scan/pair.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from unittest.mock import MagicMock, patch
 
@@ -64,7 +65,15 @@ def test_status_tag():
     assert "THROTTLED" in status_tag(False, throttled=True)
 
 
-def test_error_and_warn(capsys):
+def test_error_and_warn(capsys, tmp_path, monkeypatch):
+    from blockchecks.engine.log import configure_logging
+
+    monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", tmp_path)
+    root = logging.getLogger("blockchecks")
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        h.close()
+    configure_logging(level=logging.INFO)
     error("test error")
     err_out = capsys.readouterr().err
     assert "ERROR:" in err_out
@@ -74,9 +83,20 @@ def test_error_and_warn(capsys):
     err_out2 = capsys.readouterr().err
     assert "WARNING:" in err_out2
     assert "test warning" in err_out2
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        h.close()
 
 
-def test_heading_and_eprint(capsys):
+def test_heading_and_eprint(capsys, tmp_path, monkeypatch):
+    from blockchecks.engine.log import configure_logging
+
+    monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", tmp_path)
+    root = logging.getLogger("blockchecks")
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        h.close()
+    configure_logging(level=logging.INFO)
     heading("TEST SECTION")
     out = capsys.readouterr().out
     assert "TEST SECTION" in out
@@ -84,6 +104,9 @@ def test_heading_and_eprint(capsys):
     eprint("direct eprint")
     err = capsys.readouterr().err
     assert "direct eprint" in err
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        h.close()
 
 
 def test_color_constants():

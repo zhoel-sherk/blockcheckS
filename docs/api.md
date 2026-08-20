@@ -49,7 +49,8 @@
 |---|---|---|---|
 | GET / HEAD | `/api/health` | Проверка доступности | **Не требует auth** |
 | GET / HEAD | `/api/status` | Статус демона и текущих кампаний | |
-| GET / HEAD | `/api/telemetry` | Системные метрики (RAM, netns) | |
+| GET / HEAD | `/api/telemetry` | Системные метрики (RAM, netns) + `debug` snapshot | |
+| GET / HEAD | `/api/logs` | Хвост лога по каналу (`python` / `campaign` / `nfqws2`) | Query: `?source=&tail=&offset=&raw=&ansi=` |
 | GET | `/api/results` | Результаты лучшей кампании | Параметры: `?db=&limit=&domains=` |
 | POST | `/api/stop` | Остановка текущих задач/кампаний | |
 | POST | `/api/probe` | Выполнение зондирования | Возможен код 423 (busy) |
@@ -57,6 +58,7 @@
 | POST | `/api/find-strategy`| Поиск рабочей стратегии | |
 | POST | `/api/generate-config`| Генерация конфигурации роутера | |
 | POST | `/api/dbg-probe` | Прямой probe (отладка) | |
+| POST | `/api/set-debug` | Включить/выключить unified debug (`{enabled}`) | Python DEBUG + `BLOCKCHECKS_NFQWS2_DEBUG` |
 | GET / HEAD | `/api/events` | SSE-стриминг событий | Возвращает поток `text/event-stream` |
 
 **Legacy-эндпоинты** (сохранены для обратной совместимости, новые клиенты использовать не должны):
@@ -66,7 +68,7 @@
 ## 5. Socket core — actions
 
 Запрос к сокету должен быть валидным JSON с полем `action` (предпочтительно) или `cmd` (legacy).
-Возможные действия: `probe`, `status`, `triage`, `find_strategy`, `generate_config`, `dbg_probe`, `dbg_inspect_lua`, `dbg_dump_pool`, `get_telemetry`, `results`, `stop`.
+Возможные действия: `probe`, `status`, `triage`, `find_strategy`, `generate_config`, `dbg_probe`, `dbg_inspect_lua`, `dbg_dump_pool`, `get_telemetry`, `set_debug`, `log_tail`, `results`, `stop`.
 
 Формат запроса:
 ```json
@@ -78,10 +80,10 @@
 
 ## 6. MCP-инструменты (сводка)
 
-Реализовано **17 инструментов**. Детали и контракты — в [docs/mcp.md](mcp.md), воркфлоу — в [docs/mcp-skill.md](mcp-skill.md).
+Реализовано **19 инструментов**. Детали и контракты — в [docs/mcp.md](mcp.md), воркфлоу — в [docs/mcp-skill.md](mcp-skill.md).
 
-- **Слой A (требуют демон):** `triage_domain`, `find_working_strategy`, `generate_router_config`, `get_service_status`
-- **Слой A2 (без демона):** `get_series_status`, `query_strategies`, `get_presets`, `stop_campaign` (через socket_core)
+- **Слой A (требуют демон):** `triage_domain`, `find_working_strategy`, `generate_router_config`, `get_service_status`, `set_debug_mode`
+- **Слой A2 (без демона):** `get_series_status`, `query_strategies`, `get_presets`, `stop_campaign` (через socket_core), `get_log_tail` (диск: python/campaign)
 - **Слой B (требуют демон, отладка):** `dbg_probe_raw`, `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`
 - **Слой B (без демона):** `dbg_validate_strategy_syntax`
 - **Слой C (без демона, RO):** `get_nfqws2_status`, `get_zapret2_config`, `list_zapret2_blobs`, `get_ipset_status`
@@ -96,6 +98,17 @@
 - `probe_done`: завершение. Payload: `{type, count}`.
 
 Для поддержания соединения отправляется `: heartbeat` каждые 15 секунд.
+
+WebUI **не стримит** содержимое лог-файлов через SSE. Для хвоста `blockchecks.log` / campaign / nfqws2 используйте poll:
+
+```
+GET /api/logs?source=python&tail=200&offset=0
+```
+
+- `source` — только enum: `python` | `campaign` | `nfqws2` (нет path-параметров).
+- `offset` — байтовый курсор. Если файл усечён/ротирован (`offset > size`), ответ `truncated: true` и чтение с нуля.
+- ANSI снимается в JSON. `ansi=1` оставляет escape-коды. Для `nfqws2` IP/длинный hex редактируются, пока не передан `raw=1`.
+- Во время `bs full` (A→F) HTTP-мост часто **не запущен** (fair exclusion). Кампания: MCP `get_log_tail` с диска или poll файла `logs/run_*_LATEST.logpath`.
 
 ## 8. Fair exclusion (Взаимоисключение)
 

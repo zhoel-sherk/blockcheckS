@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from blockchecks.service.run_control import request_graceful_stop
+
+log = logging.getLogger(__name__)
 
 
 def cmd_stop(args) -> int:
@@ -10,5 +14,5 @@ def cmd_stop(args) -> int:
         force=bool(getattr(args, "force", False)),
         wait_sec=float(getattr(args, "wait", 120.0)),
     )
-    print(f"  {message}")
+    log.info("%s", f"  {message}")
     return code

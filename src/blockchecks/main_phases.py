@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import time
@@ -54,6 +55,8 @@ from blockchecks.engine.store import (
 from blockchecks.engine.tcp_fanout import fanout_allowed, fanout_batches
 from blockchecks.engine.triage import disable_ech_from
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
+
+log = logging.getLogger(__name__)
 
 
 def cap_strategy_count(n: int) -> int:
@@ -131,7 +134,6 @@ class FullRunContext:
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     deadline: RunDeadline | None = None
     signal_interrupted: bool = False
-    debug_requested: bool = False
     aq_result: Any = None
     voice_eps: list = field(default_factory=list)
     repeats: int = 0
@@ -164,9 +166,10 @@ class TcpProgress:
         elapsed = now - self.t0
         rate = self.done / elapsed if elapsed > 0 else 0
         left = (self.total - self.done) / rate if rate > 0 else 0
-        print(
+        log.info(
+            "%s",
             f"  [{self.done}/{self.total}] pass={self.passed} skip={self.skipped} "
-            f"{rate:.2f}/s ETA {left / 60:.0f}m"
+            f"{rate:.2f}/s ETA {left / 60:.0f}m",
         )
 
 
@@ -187,16 +190,17 @@ def load_run_domains(args) -> tuple[list[str], str, int | None]:
             allow_unsafe=getattr(args, "allow_unsafe_domains", False),
         )
     except FileNotFoundError:
-        print(f"{RED}ERROR: domains file not found: {domains_file}{RESET}")
+        log.error("%s", f"{RED}ERROR: domains file not found: {domains_file}{RESET}")
         return [], domains_file, 1
     domains = loaded.domains
     if not domains:
-        print(
-            f"{RED}ERROR: no domains left after denylist filter (use --allow-unsafe-domains){RESET}"
+        log.error(
+            "%s",
+            f"{RED}ERROR: no domains left after denylist filter (use --allow-unsafe-domains){RESET}",
         )
         return [], domains_file, 1
     if loaded.skipped:
-        print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
+        log.info("%s", f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
     auto_enable_gv_ggc(domains)
     return domains, domains_file, None
 
@@ -232,7 +236,7 @@ async def run_preflight_filter(
         PreflightOptions.from_args(args, dns_cache=dns_cache, store=store),
     )
     if preflight.exit_code:
-        print(f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")
+        log.error("%s", f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")
         return domains, primary, preflight.exit_code
     from blockchecks.engine.triage import TriageProfile
 
@@ -240,10 +244,10 @@ async def run_preflight_filter(
     args.triage = t if isinstance(t, TriageProfile) else None
     if preflight.skip_domains:
         skipped = sorted(preflight.skip_domains)
-        print(f"  {YELLOW}Prolog skip: {', '.join(skipped)}{RESET}")
+        log.info("%s", f"  {YELLOW}Prolog skip: {', '.join(skipped)}{RESET}")
         domains = [d for d in domains if d not in preflight.skip_domains]
         if not domains:
-            print(f"{YELLOW}All domains work without bypass — nothing to test{RESET}")
+            log.info("%s", f"{YELLOW}All domains work without bypass — nothing to test{RESET}")
             return domains, primary, 0
         if primary in preflight.skip_domains:
             primary = domains[0]
@@ -293,26 +297,31 @@ def build_full_run_context(
 
 def print_full_run_banner(ctx: FullRunContext) -> None:
     args = ctx.args
-    print(f"\n  {CYAN}blockcheckS — FULL run{RESET}")
-    print(f"  Domains:    {len(ctx.domains)} from {ctx.domains_file}")
-    print(f"  Primary:    {ctx.primary}")
-    print(f"  TCP src:    {ctx.tcp_sources}  level={ctx.scan_level}  max={args.max or 'uncapped'}")
+    log.info("%s", f"\n  {CYAN}blockcheckS — FULL run{RESET}")
+    log.info("%s", f"  Domains:    {len(ctx.domains)} from {ctx.domains_file}")
+    log.info("%s", f"  Primary:    {ctx.primary}")
+    log.info(
+        "%s",
+        f"  TCP src:    {ctx.tcp_sources}  level={ctx.scan_level}  max={args.max or 'uncapped'}",
+    )
     if not getattr(args, "no_http", False):
-        print(f"  HTTP src:   {ctx.http_sources}")
-    print(f"  UDP src:    {ctx.udp_sources}")
-    print(f"  QUIC src:   {ctx.quic_sources}")
-    print(f"  Parallel:   {ctx.parallel}  resume={bool(args.resume)}")
+        log.info("%s", f"  HTTP src:   {ctx.http_sources}")
+    log.info("%s", f"  UDP src:    {ctx.udp_sources}")
+    log.info("%s", f"  QUIC src:   {ctx.quic_sources}")
+    log.info("%s", f"  Parallel:   {ctx.parallel}  resume={bool(args.resume)}")
     if not getattr(args, "no_quic", False) and not args.tcp_only:
         if supports_http3():
-            print(f"  HTTP/3:     {GREEN}curl v3only supported{RESET}")
+            log.info("%s", f"  HTTP/3:     {GREEN}curl v3only supported{RESET}")
         else:
-            print(f"  {YELLOW}HTTP/3: curl lacks --http3-only — QUIC phase will fail{RESET}")
-    print(f"  DB:         {args.db}")
+            log.info(
+                "%s", f"  {YELLOW}HTTP/3: curl lacks --http3-only — QUIC phase will fail{RESET}"
+            )
+    log.info("%s", f"  DB:         {args.db}")
 
 
 async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> int | None:
     args = ctx.args
-    print(f"\n  {CYAN}[1/{ctx.steps}] Generating strategies...{RESET}")
+    log.info("%s", f"\n  {CYAN}[1/{ctx.steps}] Generating strategies...{RESET}")
     if not ctx.skip_tcp_tls:
         ctx.tcp_items = await gen.generate_tcp(
             sources=ctx.tcp_sources,
@@ -351,22 +360,26 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             triage=ctx.triage,
         )
 
-    print(
+    log.info(
+        "%s",
         f"  TCP={len(ctx.tcp_items)}  HTTP={len(ctx.http_items)}  "
-        f"UDP={len(ctx.udp_items)}  QUIC={len(ctx.quic_items)}"
+        f"UDP={len(ctx.udp_items)}  QUIC={len(ctx.quic_items)}",
     )
     if ctx.skip_tcp_tls:
-        print(
-            f"  {YELLOW}TCP TLS phase skipped (--tls{args.protocol.replace('tls', '')}-off){RESET}"
+        log.info(
+            "%s",
+            f"  {YELLOW}TCP TLS phase skipped (--tls{args.protocol.replace('tls', '')}-off){RESET}",
         )
     elif not ctx.tcp_items:
-        print(f"{RED}ERROR: no TCP strategies generated{RESET}")
+        log.error("%s", f"{RED}ERROR: no TCP strategies generated{RESET}")
         return 1
 
     ctx.total_tcp_jobs = len(ctx.tcp_items) * len(ctx.domains) if ctx.tcp_items else 0
     if ctx.total_tcp_jobs:
         eta_sec = ctx.total_tcp_jobs * 3.0 / max(ctx.parallel, 1)
-        print(f"  TCP jobs:   {ctx.total_tcp_jobs}  (~ETA {eta_sec / 3600:.1f}h @ ~3s/job)")
+        log.info(
+            "%s", f"  TCP jobs:   {ctx.total_tcp_jobs}  (~ETA {eta_sec / 3600:.1f}h @ ~3s/job)"
+        )
     return None
 
 
@@ -395,20 +408,21 @@ def configure_tcp_execution(ctx: FullRunContext) -> None:
     )
     use_fanout = fanout_ok and curl_parallel > 1 and not use_adaptive
     if curl_parallel > 1 and not fanout_ok and fanout_note.startswith("family"):
-        print(f"  {YELLOW}curl-parallel disabled: {fanout_note}{RESET}")
+        log.info("%s", f"  {YELLOW}curl-parallel disabled: {fanout_note}{RESET}")
         curl_parallel = 1
     elif use_fanout:
-        print(f"  {GREEN}curl-parallel: {curl_parallel}{RESET} (B2 fan-out)")
+        log.info("%s", f"  {GREEN}curl-parallel: {curl_parallel}{RESET} (B2 fan-out)")
         if fanout_note:
-            print(f"  {YELLOW}{fanout_note}{RESET}")
+            log.info("%s", f"  {YELLOW}{fanout_note}{RESET}")
     if use_adaptive:
         eps = getattr(args, "adaptive_epsilon", 0.1)
-        print(
+        log.info(
+            "%s",
             f"  {GREEN}Adaptive queue:{RESET} ε={eps}"
-            + (f", curl-parallel={curl_parallel}" if curl_parallel > 1 else "")
+            + (f", curl-parallel={curl_parallel}" if curl_parallel > 1 else ""),
         )
     if use_family_gates:
-        print(f"  Family gates: {GREEN}on{RESET} (need_* chain)")
+        log.info("%s", f"  Family gates: {GREEN}on{RESET} (need_* chain)")
 
     ctx.use_adaptive = use_adaptive
     ctx.curl_parallel = curl_parallel
@@ -433,7 +447,7 @@ def print_settle_profile(settle_profile: Any) -> None:
             if d
             else f"{len(settle_profile.strategies)} strategies"
         )
-        print(f"  {GREEN}Settle profile:{RESET} {settle_profile.source_path} ({hint})")
+        log.info("%s", f"  {GREEN}Settle profile:{RESET} {settle_profile.source_path} ({hint})")
 
 
 def build_matrix_fingerprint(ctx: FullRunContext) -> str:
@@ -443,7 +457,7 @@ def build_matrix_fingerprint(ctx: FullRunContext) -> str:
         scan_level=ctx.scan_level,
         max_count=ctx.args.max,
     )
-    print(f"  Fingerprint:{fp}")
+    log.info("%s", f"  Fingerprint:{fp}")
     return fp
 
 
@@ -478,22 +492,12 @@ def arm_stop_handlers(ctx: FullRunContext) -> Callable[[], None]:
         ctx.stop.set()
 
     def _debug(*_a):
-        """SIGUSR1: toggle nfqws2 --debug on the next daemon boot (recycle)."""
-        currently = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
-        if currently in ("1", "true", "on", "yes"):
-            os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
-            print(
-                f"  {YELLOW}[debug] SIGUSR1 — nfqws2 --debug OFF on next restart{RESET}",
-                flush=True,
-            )
-        else:
-            os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = "1"
-            ctx.debug_requested = True
-            print(
-                f"  {YELLOW}[debug] SIGUSR1 — nfqws2 --debug will be enabled "
-                f"on the next daemon start{RESET}",
-                flush=True,
-            )
+        """SIGUSR1: toggle Python DEBUG + nfqws2 --debug (next probe)."""
+        from blockchecks.engine.log import toggle_debug_mode
+
+        st = toggle_debug_mode()
+        on = "ON" if st["enabled"] else "OFF"
+        log.info("%s", f"  {YELLOW}[debug] SIGUSR1 — debug {on} on next probe{RESET}")
 
     handlers = (
         (signal.SIGINT, _stop),
@@ -536,17 +540,18 @@ async def arm_run_deadline(ctx: FullRunContext) -> None:
     if ctx.deadline:
         ctx.deadline.arm()
         await ctx.deadline.start_background()
-        print(f"  Time limit: {ctx.deadline.budget_label()}")
+        log.info("%s", f"  Time limit: {ctx.deadline.budget_label()}")
 
 
 def print_optional_phases_skip(ctx: FullRunContext) -> None:
     if ctx.deadline and ctx.deadline.triggered:
-        print(
+        log.info(
+            "%s",
             f"\n  {YELLOW}TIME LIMIT reached ({ctx.deadline.budget_label()})"
-            f" — skipping optional phases{RESET}"
+            f" — skipping optional phases{RESET}",
         )
     elif ctx.signal_interrupted:
-        print(f"\n  {YELLOW}Stopped — skipping optional phases{RESET}")
+        log.info("%s", f"\n  {YELLOW}Stopped — skipping optional phases{RESET}")
 
 
 async def _run_in_chunks(
@@ -562,7 +567,7 @@ async def _run_in_chunks(
     for i in range(0, len(items), n):
         if stop.is_set():
             if on_stop:
-                print(on_stop)
+                log.info("%s", on_stop)
             return
         await asyncio.gather(*[factory(x) for x in items[i : i + n]])
 
@@ -600,7 +605,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     )
     progress.done = skipped
     progress.report()
-    print(f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
+    log.info("%s", f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
 
     def _progress(d: int, s: int, p: int):
         progress.done, progress.skipped, progress.passed = d, s, p
@@ -635,14 +640,16 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     progress.passed = ctx.aq_result.passed
     m = ctx.aq_result.metrics
     if m.time_to_first_pass is not None:
-        print(
-            f"  AQ first PASS: {m.time_to_first_pass:.1f}s  fan-out enqueued: {m.fanout_enqueued}"
+        log.info(
+            "%s",
+            f"  AQ first PASS: {m.time_to_first_pass:.1f}s  fan-out enqueued: {m.fanout_enqueued}",
         )
     if m.half_mark_jobs and ctx.aq_result.passed:
         pct = 100.0 * m.passes_before_half / ctx.aq_result.passed
-        print(
+        log.info(
+            "%s",
             f"  AQ passes before 50% jobs: {m.passes_before_half} "
-            f"({pct:.0f}% of {ctx.aq_result.passed} total passes)"
+            f"({pct:.0f}% of {ctx.aq_result.passed} total passes)",
         )
 
 
@@ -672,7 +679,7 @@ async def _run_tcp_family_gates(ctx: FullRunContext, progress: TcpProgress) -> N
 
     for domain in ctx.domains:
         if ctx.stop.is_set():
-            print(f"  {YELLOW}Stopped by signal{RESET}")
+            log.info("%s", f"  {YELLOW}Stopped by signal{RESET}")
             break
         await _run_domain(domain)
 
@@ -770,10 +777,11 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
     batch_size = max(1, int(ctx.runner.bridge_batch))
     isolate = bool(AQ_DOMAIN_ISOLATE)
     if not isolate:
-        print(
+        log.warning(
+            "%s",
             f"  {YELLOW}WARNING: domain isolation is OFF (set [run] domain_isolate"
             f"=true or BLOCKCHECKS_AQ_DOMAIN_ISOLATE=1 in settings.ini). Parallel"
-            f"netns may probe the same domain → false-positive results.{RESET}"
+            f"netns may probe the same domain → false-positive results.{RESET}",
         )
 
     jobs: list[tuple[StrategyItem, str]] = []
@@ -874,10 +882,12 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
 
 async def run_tcp_coverage_phase(ctx: FullRunContext) -> None:
     if not ctx.tcp_items:
-        print(f"\n  {CYAN}[2/{ctx.steps}] TCP × coverage skipped{RESET}")
+        log.info("%s", f"\n  {CYAN}[2/{ctx.steps}] TCP × coverage skipped{RESET}")
         return
 
-    print(f"\n  {CYAN}[2/{ctx.steps}] TCP × coverage ({len(ctx.domains)} domains)...{RESET}")
+    log.info(
+        "%s", f"\n  {CYAN}[2/{ctx.steps}] TCP × coverage ({len(ctx.domains)} domains)...{RESET}"
+    )
     progress = TcpProgress(total=ctx.total_tcp_jobs)
 
     if ctx.use_adaptive:
@@ -889,9 +899,10 @@ async def run_tcp_coverage_phase(ctx: FullRunContext) -> None:
     else:
         await _run_tcp_sequential(ctx, progress)
 
-    print(
+    log.info(
+        "%s",
         f"  {GREEN}TCP done: {progress.passed} PASS, {progress.skipped} skipped, "
-        f"{progress.done - progress.skipped - progress.passed} FAIL/other{RESET}"
+        f"{progress.done - progress.skipped - progress.passed} FAIL/other{RESET}",
     )
     zero_warn = getattr(ctx.args, "zero_pass_warn", 10)
     if zero_warn > 0:
@@ -899,15 +910,18 @@ async def run_tcp_coverage_phase(ctx: FullRunContext) -> None:
             ctx.db, ctx.domains, min_results=zero_warn, protos=("tcp",)
         )
         if zero_domains:
-            print(
-                f"  {YELLOW}WARN: 0% PASS after {zero_warn}+ runs: {', '.join(zero_domains)}{RESET}"
+            log.warning(
+                "%s",
+                f"  {YELLOW}WARN: 0% PASS after {zero_warn}+ runs: {', '.join(zero_domains)}{RESET}",
             )
 
 
 async def run_http_phase(ctx: FullRunContext) -> None:
     args = ctx.args
     if not ctx.stop.is_set() and ctx.http_items and not getattr(args, "no_http", False):
-        print(f"\n  {CYAN}[3/{ctx.steps}] HTTP :80 ({len(ctx.http_items)} strategies)...{RESET}")
+        log.info(
+            "%s", f"\n  {CYAN}[3/{ctx.steps}] HTTP :80 ({len(ctx.http_items)} strategies)...{RESET}"
+        )
         http_done = http_passed = http_skipped = 0
 
         async def _one_http(item: StrategyItem, domain: str):
@@ -929,12 +943,13 @@ async def run_http_phase(ctx: FullRunContext) -> None:
 
         http_jobs = [(item, d) for item in ctx.http_items for d in ctx.domains]
         await _run_in_chunks(http_jobs, _one_http_pair, chunk=200, stop=ctx.stop)
-        print(
+        log.info(
+            "%s",
             f"  {GREEN}HTTP done: {http_passed} PASS, {http_skipped} skipped, "
-            f"{http_done - http_skipped - http_passed} FAIL/other{RESET}"
+            f"{http_done - http_skipped - http_passed} FAIL/other{RESET}",
         )
     elif not ctx.stop.is_set() and not getattr(args, "no_http", False):
-        print(f"\n  {CYAN}[3/{ctx.steps}] HTTP skipped (no strategies){RESET}")
+        log.info("%s", f"\n  {CYAN}[3/{ctx.steps}] HTTP skipped (no strategies){RESET}")
 
 
 def _voice_step(ctx: FullRunContext) -> int:
@@ -954,7 +969,7 @@ async def discover_voice_endpoint(ctx: FullRunContext) -> tuple[str, int]:
     voice_step = _voice_step(ctx)
     voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
     if not ctx.stop.is_set() and not args.tcp_only and not args.no_voice:
-        print(f"\n  {CYAN}[{voice_step}/{ctx.steps}] Voice discover-dns...{RESET}")
+        log.info("%s", f"\n  {CYAN}[{voice_step}/{ctx.steps}] Voice discover-dns...{RESET}")
         try:
             from blockchecks.checkers.voice_dns import discover_dns_alive
 
@@ -966,22 +981,23 @@ async def discover_voice_endpoint(ctx: FullRunContext) -> tuple[str, int]:
             if eps:
                 ctx.voice_eps = eps
                 voice_ip, voice_port = eps[0]["ip"], eps[0]["port"]
-                print(
+                log.info(
+                    "%s",
                     f"  {GREEN}Voice {voice_ip}:{voice_port} "
                     f"({len(eps)} endpoints) "
                     f"method={eps[0].get('method')} "
-                    f"bootstrap={eps[0].get('bootstrap')}{RESET}"
+                    f"bootstrap={eps[0].get('bootstrap')}{RESET}",
                 )
                 for ep in eps[1:3]:
-                    print(f"  {GREEN}  + {ep['ip']}:{ep['port']}{RESET}")
+                    log.info("%s", f"  {GREEN}  + {ep['ip']}:{ep['port']}{RESET}")
                 if len(eps) > 3:
-                    print(f"  {GREEN}  ... and {len(eps) - 3} more{RESET}")
+                    log.info("%s", f"  {GREEN}  ... and {len(eps) - 3} more{RESET}")
             else:
-                print(f"  {YELLOW}No alive voice — using defaults{RESET}")
+                log.info("%s", f"  {YELLOW}No alive voice — using defaults{RESET}")
         except Exception as e:
-            print(f"  {YELLOW}discover-dns error: {e}{RESET}")
+            log.error("%s", f"  {YELLOW}discover-dns error: {e}{RESET}")
     elif not ctx.stop.is_set():
-        print(f"\n  {CYAN}[{voice_step}/{ctx.steps}] Voice discover skipped{RESET}")
+        log.info("%s", f"\n  {CYAN}[{voice_step}/{ctx.steps}] Voice discover skipped{RESET}")
     return voice_ip, voice_port
 
 
@@ -990,12 +1006,13 @@ async def run_quic_phase(ctx: FullRunContext) -> None:
     quic_step = _quic_step(ctx)
     if not ctx.stop.is_set() and ctx.quic_items and not args.tcp_only and not args.no_quic:
         quic_timeout = getattr(args, "quic_timeout", args.timeout)
-        print(
+        log.info(
+            "%s",
             f"\n  {CYAN}[{quic_step}/{ctx.steps}] HTTP/3 QUIC "
-            f"({len(ctx.quic_items)} strategies, timeout={quic_timeout}s)...{RESET}"
+            f"({len(ctx.quic_items)} strategies, timeout={quic_timeout}s)...{RESET}",
         )
         if not supports_http3():
-            print(f"  {YELLOW}Skipping QUIC tests — HTTP/3 not supported{RESET}")
+            log.info("%s", f"  {YELLOW}Skipping QUIC tests — HTTP/3 not supported{RESET}")
             return
 
         quic_done = quic_passed = quic_skipped = 0
@@ -1031,12 +1048,13 @@ async def run_quic_phase(ctx: FullRunContext) -> None:
 
         quic_jobs = [(item, d) for item in ctx.quic_items for d in ctx.domains]
         await _run_in_chunks(quic_jobs, _one_quic_pair, chunk=200, stop=ctx.stop)
-        print(
+        log.info(
+            "%s",
             f"  {GREEN}QUIC done: {quic_passed} PASS, {quic_skipped} skipped, "
-            f"{quic_done - quic_skipped - quic_passed} FAIL/other{RESET}"
+            f"{quic_done - quic_skipped - quic_passed} FAIL/other{RESET}",
         )
     elif not ctx.stop.is_set():
-        print(f"\n  {CYAN}[{quic_step}/{ctx.steps}] QUIC skipped{RESET}")
+        log.info("%s", f"\n  {CYAN}[{quic_step}/{ctx.steps}] QUIC skipped{RESET}")
 
 
 async def run_pairs_phase(
@@ -1047,7 +1065,7 @@ async def run_pairs_phase(
     args = ctx.args
     pair_step = _pair_step(ctx)
     if not ctx.stop.is_set() and not args.tcp_only and ctx.udp_items:
-        print(f"\n  {CYAN}[{pair_step}/{ctx.steps}] Pair matrix...{RESET}")
+        log.info("%s", f"\n  {CYAN}[{pair_step}/{ctx.steps}] Pair matrix...{RESET}")
         details = await ctx.db.get_working_tcp_details(ctx.primary)
         by_status = {d["name"]: d for d in details}
         covered = await ctx.db.get_best_by_coverage(limit=args.pair_max)
@@ -1070,9 +1088,10 @@ async def run_pairs_phase(
             if args.resume:
                 resume_from = await ctx.db.latest_checkpoint()
                 if resume_from and fingerprint_mismatch(resume_from.fingerprint, ctx.fp):
-                    print(
+                    log.info(
+                        "%s",
                         f"  {YELLOW}Pair checkpoint fp mismatch "
-                        f"({resume_from.fingerprint}≠{ctx.fp}) — full pair re-run{RESET}"
+                        f"({resume_from.fingerprint}≠{ctx.fp}) — full pair re-run{RESET}",
                     )
                     resume_from = None
             from blockchecks.checkers.voice_dns import pair_log_domain, resolve_voice_targets
@@ -1080,12 +1099,12 @@ async def run_pairs_phase(
             targets = resolve_voice_targets(voice_ip, voice_port, ctx.voice_eps)
             multi = len(targets) > 1
             if multi:
-                print(f"  {YELLOW}Multi-EP fan-out: {len(targets)} endpoints{RESET}")
+                log.info("%s", f"  {YELLOW}Multi-EP fan-out: {len(targets)} endpoints{RESET}")
             pairs = []
             for ip, port in targets:
                 log_dom = pair_log_domain(ctx.primary, ip, port, multi=multi)
                 if multi:
-                    print(f"  {CYAN}pairs ep={ip}:{port}{RESET}")
+                    log.info("%s", f"  {CYAN}pairs ep={ip}:{port}{RESET}")
                 batch = await ctx.runner.test_pair_matrix(
                     tcp_results,
                     ctx.udp_items[: max(1, args.pair_max // 2)],
@@ -1100,11 +1119,11 @@ async def run_pairs_phase(
                 )
                 pairs.extend(batch)
             n_pass = sum(1 for p in pairs if p.overall == "PASS")
-            print(f"  Pairs PASS={n_pass}/{len(pairs)}")
+            log.info("%s", f"  Pairs PASS={n_pass}/{len(pairs)}")
         else:
-            print(f"  {YELLOW}No working TCP for pairs{RESET}")
+            log.info("%s", f"  {YELLOW}No working TCP for pairs{RESET}")
     elif not ctx.stop.is_set():
-        print(f"\n  {CYAN}[{pair_step}/{ctx.steps}] Pairs skipped{RESET}")
+        log.info("%s", f"\n  {CYAN}[{pair_step}/{ctx.steps}] Pairs skipped{RESET}")
 
 
 async def cleanup_runner(ctx: FullRunContext) -> None:
@@ -1120,12 +1139,13 @@ def print_aq_stop_metrics(ctx: FullRunContext) -> None:
         return
     m = ctx.aq_result.metrics
     if ctx.stop.is_set() and m.time_to_first_pass is not None:
-        print(f"  AQ first PASS: {m.time_to_first_pass:.1f}s")
+        log.info("%s", f"  AQ first PASS: {m.time_to_first_pass:.1f}s")
     if ctx.stop.is_set() and m.half_mark_jobs and ctx.aq_result.passed:
         pct = 100.0 * m.passes_before_half / ctx.aq_result.passed
-        print(
+        log.info(
+            "%s",
             f"  AQ passes before 50% jobs: {m.passes_before_half} "
-            f"({pct:.0f}% of {ctx.aq_result.passed} total passes)"
+            f"({pct:.0f}% of {ctx.aq_result.passed} total passes)",
         )
 
 
@@ -1148,10 +1168,10 @@ async def export_and_summarize(ctx: FullRunContext) -> int:
         deadline=ctx.deadline,
     )
     if export_result:
-        print(f"\n  {CYAN}Export configs...{RESET}")
-        print(f"  {GREEN}{export_result['keenetic']}{RESET}")
-        print(f"  {GREEN}{export_result['raw']}{RESET}")
-        print(f"  {GREEN}{export_result['user_list']}{RESET}")
+        log.info("%s", f"\n  {CYAN}Export configs...{RESET}")
+        log.info("%s", f"  {GREEN}{export_result['keenetic']}{RESET}")
+        log.info("%s", f"  {GREEN}{export_result['raw']}{RESET}")
+        log.info("%s", f"  {GREEN}{export_result['user_list']}{RESET}")
 
     print_aq_stop_metrics(ctx)
 
@@ -1178,6 +1198,6 @@ async def export_and_summarize(ctx: FullRunContext) -> int:
             "half_mark_jobs": ctx.aq_result.metrics.half_mark_jobs,
         }
     summary_path = write_run_summary(getattr(ctx.args, "out_dir", None) or "logs", summary_payload)
-    print(f"  Run summary: {summary_path}")
+    log.info("%s", f"  Run summary: {summary_path}")
 
     return run_exit_code(ctx.stop.is_set(), ctx.deadline, ctx.signal_interrupted)

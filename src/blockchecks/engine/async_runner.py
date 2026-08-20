@@ -3,6 +3,7 @@ Each job uses a pooled netns. curl_cffi runs in a worker thread (libcurl is not 
 """
 
 import asyncio
+import logging
 import os
 
 from blockchecks.checkers.dns_secure import DnsRunCache
@@ -21,6 +22,9 @@ from blockchecks.service.batch_service import ProbeBatchService
 from blockchecks.service.netns_pool import NetNsPool
 from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW, status_tag
+
+log = logging.getLogger(__name__)
+
 
 # Auto-pin: known-good strategy plus a short budget to probe candidate
 # IPs at startup. Pinned IPs override DoH order against per-IP throttling.
@@ -274,15 +278,16 @@ class AsyncTestRunner:
                 if self.dns_cache.pinned_ip(domain) != picked:
                     self.dns_cache.add_pin(domain, picked)
                 tag = "file" if existing == picked else "auto"
-                print(f"  {CYAN}[dns] pinned {domain} -> {picked} ({tag}){RESET}")
+                log.info("%s", f"  {CYAN}[dns] pinned {domain} -> {picked} ({tag}){RESET}")
             elif existing:
                 # No candidate passed — keep the old pin as a best-effort target
                 # rather than dropping it (a stale pin still beats a DoH rotate
                 # onto a throttled IP).
                 self.dns_cache.add_pin(domain, existing)
-                print(
+                log.info(
+                    "%s",
                     f"  {YELLOW}[dns] pin kept for {domain} -> {existing} "
-                    f"(no working fallback){RESET}"
+                    f"(no working fallback){RESET}",
                 )
 
         if self.pinned_path:
@@ -290,11 +295,13 @@ class AsyncTestRunner:
             if merged != file_pins:
                 try:
                     save_pins(self.pinned_path, merged)
-                    print(f"  {CYAN}[dns] saved pinned IPs -> {self.pinned_path}{RESET}")
+                    log.info("%s", f"  {CYAN}[dns] saved pinned IPs -> {self.pinned_path}{RESET}")
                 except OSError as e:
-                    print(f"  {YELLOW}[dns] cannot save pins {self.pinned_path}: {e}{RESET}")
+                    log.info(
+                        "%s", f"  {YELLOW}[dns] cannot save pins {self.pinned_path}: {e}{RESET}"
+                    )
             else:
-                print(f"  {CYAN}[dns] pins unchanged -> {self.pinned_path}{RESET}")
+                log.info("%s", f"  {CYAN}[dns] pins unchanged -> {self.pinned_path}{RESET}")
 
     async def _probe_pin_ip(self, domain: str, ip: str) -> bool:
         """Return True when ``fake:blob=stun`` passes to *domain* via *ip*."""
@@ -479,9 +486,10 @@ class AsyncTestRunner:
                         break
                     # timeout = TSPU dropped this variant; try the next fallback.
                     if variant != variants[-1]:
-                        print(
+                        log.info(
+                            "%s",
                             f"  {YELLOW}[quic] {item.label[:24]} timeout "
-                            f"— trying fallback: {variant[:40]}...{RESET}"
+                            f"— trying fallback: {variant[:40]}...{RESET}",
                         )
 
                 if self.db:
@@ -550,9 +558,10 @@ class AsyncTestRunner:
 
             result.fail_phase = classify_fail_phase(result.error, result.http_code).value
         if "bridge_applied" in data and data.get("bridge_applied") is False and result.success:
-            print(
+            log.warning(
+                "%s",
                 f"  {YELLOW}WARN: bridge PASS without APPLIED event for "
-                f"{item.label[:24]} (strategy may not have been picked up by nfqws2){RESET}"
+                f"{item.label[:24]} (strategy may not have been picked up by nfqws2){RESET}",
             )
         return result
 
@@ -750,9 +759,10 @@ class AsyncTestRunner:
             bridge = await self._test_batch_tcp_bridge(strategies, domain, timeout)
             for c, b in zip(classic, bridge, strict=False):
                 if c.success != b.success or c.http_code != b.http_code:
-                    print(
+                    log.info(
+                        "%s",
                         f"  {RED}BRIDGE_COMPARE drift: {c.item.label[:24]} "
-                        f"classic={c.success}/{c.http_code} bridge={b.success}/{b.http_code}{RESET}"
+                        f"classic={c.success}/{c.http_code} bridge={b.success}/{b.http_code}{RESET}",
                     )
             return bridge
 
@@ -796,7 +806,7 @@ class AsyncTestRunner:
             status = f"HTTP {r.http_code}" if r.http_code else ""
             err = f" — {r.error[:40]}" if r.error else ""
             label = r.item.label[:30]
-            print(f"  [{tag}] {lat:>6s}  {status:>8s}  {label}{err}")
+            log.info("%s", f"  [{tag}] {lat:>6s}  {status:>8s}  {label}{err}")
 
     async def test_pair_matrix(
         self,
@@ -837,7 +847,7 @@ class AsyncTestRunner:
             working = [(i, r) for i, r in enumerate(tcp_results) if r.success]
 
         if not working:
-            print(f"\n  {RED}No PASS TCP — UDP skipped{RESET}")
+            log.info("%s", f"\n  {RED}No PASS TCP — UDP skipped{RESET}")
             return pairs
 
         total = len(working) * len(udp_strategies)
@@ -851,23 +861,26 @@ class AsyncTestRunner:
             except Exception:
                 completed = set()
         if isinstance(resume_from, Checkpoint) and resume_from.tcp_label:
-            print(
+            log.info(
+                "%s",
                 f"  {YELLOW}Resuming after "
                 f"{resume_from.tcp_label}+{resume_from.udp_label} "
-                f"({len(completed)} pairs in DB){RESET}"
+                f"({len(completed)} pairs in DB){RESET}",
             )
         elif resume_from is not None and getattr(resume_from, "tcp_label", None):
-            print(
+            log.info(
+                "%s",
                 f"  {YELLOW}Resuming after "
                 f"{resume_from.tcp_label}+{getattr(resume_from, 'udp_label', '')} "
-                f"({len(completed)} pairs in DB){RESET}"
+                f"({len(completed)} pairs in DB){RESET}",
             )
         elif completed:
-            print(f"  {YELLOW}Resuming: {len(completed)} pairs already in DB{RESET}")
+            log.info("%s", f"  {YELLOW}Resuming: {len(completed)} pairs already in DB{RESET}")
         ep_tag = f" ep={voice_ip}:{voice_port}" if pair_domain else ""
-        print(
+        log.info(
+            "%s",
             f"  {CYAN}Pair matrix: {len(working)} TCP × {len(udp_strategies)} UDP "
-            f"= {total} pairs, {self.pool.size} parallel{ep_tag}{RESET}"
+            f"= {total} pairs, {self.pool.size} parallel{ep_tag}{RESET}",
         )
 
         async def run_pair(tcp_i: int, tcp_r: TcpTestResult, udp_s: StrategyItem, pair_idx: int):
@@ -928,9 +941,10 @@ class AsyncTestRunner:
                     }[pair.overall]
                     udp_tag = f"{GREEN}{udp_ms:.0f}ms{RESET}" if udp_ok else f"{RED}timeout{RESET}"
                     voice_tag = " [voice]" if full_voice else ""
-                    print(
+                    log.info(
+                        "%s",
                         f"  [{pair_tag}] {tcp_r.item.label[:22]:22s} "
-                        f"+ {udp_s.label[:22]:22s}  udp={udp_tag}{voice_tag}"
+                        f"+ {udp_s.label[:22]:22s}  udp={udp_tag}{voice_tag}",
                     )
 
                     if udp_ok:
@@ -981,7 +995,7 @@ class AsyncTestRunner:
 
         for res in await asyncio.gather(*tasks, return_exceptions=True):
             if isinstance(res, BaseException):
-                print(f"  {RED}pair task error: {type(res).__name__}: {res}{RESET}")
+                log.error("%s", f"  {RED}pair task error: {type(res).__name__}: {res}{RESET}")
         return pairs
 
     # Matrix display
@@ -995,8 +1009,8 @@ class AsyncTestRunner:
         udp_names = sorted(set(p.udp_item.label for p in pairs))
         pair_map = {f"{p.tcp_item.label}|{p.udp_item.label}": p for p in pairs}
 
-        print(f"\n  {CYAN}╔{'═' * 60}╗{RESET}")
-        print(f"  {CYAN}║{'TCP×UDP Pair Matrix':^60s}║{RESET}")
+        log.info("%s", f"\n  {CYAN}╔{'═' * 60}╗{RESET}")
+        log.info("%s", f"  {CYAN}║{'TCP×UDP Pair Matrix':^60s}║{RESET}")
 
         passed = 0
         for tcp in tcp_names:
@@ -1012,7 +1026,7 @@ class AsyncTestRunner:
                 else:
                     tag = f"{RED}FAIL{RESET}"
                 udp_lat = f"{p.udp_ms:.0f}ms" if p.udp_ok else "timeout"
-                print(f"  {tag:12s} {tcp[:22]:22s} + {udp[:22]:22s}  udp={udp_lat}")
+                log.info("%s", f"  {tag:12s} {tcp[:22]:22s} + {udp[:22]:22s}  udp={udp_lat}")
 
-        print(f"  {CYAN}{'═' * 60}{RESET}")
-        print(f"  {GREEN}{passed} PASS{RESET} / {len(pairs)} pairs")
+        log.info("%s", f"  {CYAN}{'═' * 60}{RESET}")
+        log.info("%s", f"  {GREEN}{passed} PASS{RESET} / {len(pairs)} pairs")

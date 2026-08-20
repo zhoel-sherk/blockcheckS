@@ -4,6 +4,7 @@ Also reads public discord-servers lists and checks STUN liveness.
 
 import asyncio
 import json
+import logging
 import os
 import random
 import socket
@@ -15,6 +16,9 @@ import urllib.request
 from contextlib import contextmanager
 
 from blockchecks.engine.paths import VOICE_DNS_CACHE_FILE
+
+log = logging.getLogger(__name__)
+
 
 # DNS range for finland region (the only active one)
 DNS_RANGE = (14000, 14148)
@@ -167,12 +171,13 @@ async def discover_voice_endpoints(count: int = 5, use_cache: bool = True) -> li
                     seen_ips.add(ip)
                     endpoints.append(ep)
                 if len(endpoints) >= count:
-                    print(f"[voice-dns] Using {len(endpoints[:count])} cached endpoints")
+                    log.info("%s", f"[voice-dns] Using {len(endpoints[:count])} cached endpoints")
                     return endpoints[:count]
 
     # Layer 1: DNS bulk
-    print(
-        f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}..."
+    log.info(
+        "%s",
+        f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}...",
     )
     ip_map = await resolve_finland_range()
 
@@ -194,7 +199,7 @@ async def discover_voice_endpoints(count: int = 5, use_cache: bool = True) -> li
     if endpoints:
         _save_cache(endpoints)
 
-    print(f"[voice-dns] Discovered {len(endpoints[:count])} endpoints")
+    log.info("%s", f"[voice-dns] Discovered {len(endpoints[:count])} endpoints")
     return endpoints[:count]
 
 
@@ -302,12 +307,12 @@ def fetch_maks_voice_ips(region: str = "finland", timeout: float = 5.0) -> list[
     if text is None:
         text = _maks_get(MAKS_GLOBAL_IP_LIST_URL, timeout)
         if text is not None:
-            print(f"[voice-dns] Maks-gaming ({region}): region 404 → global list")
+            log.info("%s", f"[voice-dns] Maks-gaming ({region}): region 404 → global list")
     if text is None:
-        print("[voice-dns] Maks-gaming fetch failed (continuing with DNS)")
+        log.info("[voice-dns] Maks-gaming fetch failed (continuing with DNS)")
         return []
     ips = parse_maks_ip_list(text)
-    print(f"[voice-dns] Maks-gaming ({region}): {len(ips)} IPs")
+    log.info("%s", f"[voice-dns] Maks-gaming ({region}): {len(ips)} IPs")
     return ips
 
 
@@ -328,7 +333,7 @@ def fetch_maks_region_ips(region: str = "russia", timeout: float = 8.0) -> list[
         if line.startswith(prefix) and line.endswith(".discord.gg"):
             hosts.append(line)
     if not hosts:
-        print(f"[voice-dns] Maks-gaming region '{region}': no matching hosts")
+        log.info("%s", f"[voice-dns] Maks-gaming region '{region}': no matching hosts")
         return []
 
     async def _resolve_all():
@@ -342,7 +347,7 @@ def fetch_maks_region_ips(region: str = "russia", timeout: float = 8.0) -> list[
         if ip and ip not in seen:
             seen.add(ip)
             ips.append(ip)
-    print(f"[voice-dns] Maks-gaming ({region}): {len(ips)} IPs from {len(hosts)} hosts")
+    log.info("%s", f"[voice-dns] Maks-gaming ({region}): {len(ips)} IPs from {len(hosts)} hosts")
     return ips
 
 
@@ -402,10 +407,10 @@ def udp_discover_bootstrap(
         fw.prepare_udp(ports="50000:50100", qnum=q)
         mgr.start_config(conf_path)
         active = True
-        print(f"[voice-dns] Bootstrap nfqws2 UDP active (qnum={q}, {strategy})")
+        log.info("%s", f"[voice-dns] Bootstrap nfqws2 UDP active (qnum={q}, {strategy})")
         yield True
     except Exception as e:
-        print(f"[voice-dns] Bootstrap failed (probing without nfqws2): {e}")
+        log.info("%s", f"[voice-dns] Bootstrap failed (probing without nfqws2): {e}")
         yield False
     finally:
         try:
@@ -422,10 +427,10 @@ def udp_discover_bootstrap(
             except OSError:
                 pass
         if active:
-            print("[voice-dns] Bootstrap nfqws2 stopped")
+            log.info("[voice-dns] Bootstrap nfqws2 stopped")
 
 
-async def discover_dns_alive(
+async def discover_dns_alive(  # noqa: C901
     count: int = 5,
     *,
     candidates: int = 64,
@@ -475,9 +480,10 @@ async def discover_dns_alive(
                     port=ep.get("port"),
                 )
 
-    print(
+    log.info(
+        "%s",
         f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg "
-        f"range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}..."
+        f"range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}...",
     )
     ip_map = await resolve_finland_range()
     dns_ips = list(ip_map.keys())
@@ -510,14 +516,15 @@ async def discover_dns_alive(
 
     ordered = list(meta.values())[:candidates]
     if not ordered:
-        print("[voice-dns] No DNS/Maks candidates to probe")
+        log.info("[voice-dns] No DNS/Maks candidates to probe")
         return []
 
     sem = asyncio.Semaphore(STUN_PROBE_CONCURRENCY)
-    print(
+    log.info(
+        "%s",
         f"[voice-dns] Dual-probing {len(ordered)} candidates "
         f"(dns+={dns_seed} maks+={maks_seed}, "
-        f"concurrency={STUN_PROBE_CONCURRENCY}, bootstrap={use_bootstrap})..."
+        f"concurrency={STUN_PROBE_CONCURRENCY}, bootstrap={use_bootstrap})...",
     )
 
     with udp_discover_bootstrap(enabled=use_bootstrap) as boot_on:
@@ -569,9 +576,10 @@ async def discover_dns_alive(
         _save_cache(alive)
 
     methods = sorted({a.get("method", "") for a in alive if a.get("method")})
-    print(
+    log.info(
+        "%s",
         f"[voice-dns] dns-alive: {len(alive)}/{len(ordered)} probed "
         f"(dns={dns_seed} maks={maks_seed}, bootstrap={boot_on}, "
-        f"methods={methods or ['none']})"
+        f"methods={methods or ['none']})",
     )
     return alive

@@ -127,6 +127,28 @@ def pytest_configure(config):
 
 
 @pytest.fixture
+def operator_logs(tmp_path, monkeypatch, capsys):
+    """Attach INFO operator handlers so capsys sees log.info output.
+
+    Depends on *capsys* so StreamHandler binds to the captured stdout/stderr.
+    """
+    import logging
+
+    from blockchecks.engine.log import configure_logging
+
+    monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", tmp_path)
+    root = logging.getLogger("blockchecks")
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        handler.close()
+    configure_logging(level=logging.INFO)
+    yield
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        handler.close()
+
+
+@pytest.fixture
 def nfqws2_available():
     """Skip integration if nfqws2 binary missing."""
     from blockchecks.engine.config import NFQWS2_BIN

@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 
 import pytest
 
 from blockchecks.engine import paths
 from blockchecks.engine.run_finalize import write_run_summary
+
+
+def _clear_blockchecks_logger() -> None:
+    root = logging.getLogger("blockchecks")
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        h.close()
+    root.setLevel(logging.NOTSET)
 
 
 @pytest.mark.unit
@@ -19,22 +28,79 @@ def test_cliapp_main_configures_python_logging(tmp_path, monkeypatch):
 
     logs_dir = tmp_path / "state" / "logs"
     monkeypatch.setattr(paths, "RUNTIME_LOGS_DIR", logs_dir)
+    monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", logs_dir)
     monkeypatch.setattr(paths, "STATE_DIR", tmp_path / "state")
 
-    # Clear any handlers configured by earlier tests/imports.
-    root = logging.getLogger("blockchecks")
-    for h in list(root.handlers):
-        root.removeHandler(h)
-
+    _clear_blockchecks_logger()
     configure_logging(level=logging.WARNING)
 
-    handlers = [h for h in root.handlers if isinstance(h, logging.FileHandler)]
+    handlers = [
+        h for h in logging.getLogger("blockchecks").handlers if isinstance(h, logging.FileHandler)
+    ]
     assert handlers, "blockchecks logger has no file handler after configure_logging()"
     handler_path = Path(handlers[0].baseFilename)
     assert str(handler_path).startswith(str(logs_dir))
-    root.warning("hello-probe")
+    logging.getLogger("blockchecks").warning("hello-probe")
     handlers[0].flush()
     assert "hello-probe" in handler_path.read_text(encoding="utf-8")
+    _clear_blockchecks_logger()
+
+
+@pytest.mark.unit
+def test_configure_logging_reapplies_level(tmp_path, monkeypatch):
+    from blockchecks.engine.log import configure_logging
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", logs_dir)
+    monkeypatch.setattr(paths, "RUNTIME_LOGS_DIR", logs_dir)
+    _clear_blockchecks_logger()
+    configure_logging(level=logging.WARNING)
+    configure_logging(level=logging.DEBUG)
+    assert logging.getLogger("blockchecks").level == logging.DEBUG
+    _clear_blockchecks_logger()
+
+
+@pytest.mark.unit
+def test_set_debug_mode_flips_logger_and_env(tmp_path, monkeypatch):
+    from blockchecks.engine.log import configure_logging, set_debug_mode
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", logs_dir)
+    monkeypatch.setattr(paths, "RUNTIME_LOGS_DIR", logs_dir)
+    monkeypatch.delenv("BLOCKCHECKS_NFQWS2_DEBUG", raising=False)
+    monkeypatch.delenv("BLOCKCHECKS_LOG_LEVEL", raising=False)
+    _clear_blockchecks_logger()
+    configure_logging(level=logging.INFO)
+    st = set_debug_mode(True)
+    assert st["enabled"] is True
+    assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") == "1"
+    assert os.environ.get("BLOCKCHECKS_LOG_LEVEL") == "DEBUG"
+    st2 = set_debug_mode(False)
+    assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "") == ""
+    assert st2["python_level"] in {"INFO", "20"}
+    _clear_blockchecks_logger()
+
+
+@pytest.mark.unit
+def test_log_tail_offset_and_rotation(tmp_path, monkeypatch):
+    from blockchecks.engine.log import log_tail
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", logs_dir)
+    path = logs_dir / "blockchecks.log"
+    path.write_text("one\n\x1b[31mtwo\x1b[0m\nthree\n", encoding="utf-8")
+    first = log_tail("python", tail=10, offset=0)
+    assert first["ok"] is True
+    assert first["lines"] == ["one", "two", "three"]
+    assert first["offset"] == path.stat().st_size
+    path.write_text("new\n", encoding="utf-8")  # truncate/rotate
+    rotated = log_tail("python", tail=10, offset=first["offset"])
+    assert rotated["truncated"] is True
+    assert rotated["lines"] == ["new"]
+    assert log_tail("nope")["ok"] is False
 
 
 @pytest.mark.unit

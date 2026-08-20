@@ -31,6 +31,7 @@ from blockchecks.engine.config import (
 
 log = logging.getLogger(__name__)
 
+
 # Keenetic Entware layout (override via prefix=)
 DEFAULT_KEENETIC_PREFIX = "/opt/etc/nfqws2"
 
@@ -227,9 +228,7 @@ def desync_cli_lines(strategies: list[str]) -> list[str]:
             if part.startswith("--"):
                 lines.append(sanitize_arg_for_conf(part))
             else:
-                lines.append(
-                    f"--lua-desync={sanitize_arg_for_conf(_ensure_strategy_n(part, i))}"
-                )
+                lines.append(f"--lua-desync={sanitize_arg_for_conf(_ensure_strategy_n(part, i))}")
     return lines
 
 

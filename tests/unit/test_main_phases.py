@@ -389,11 +389,11 @@ def test_print_optional_phases_skip_deadline():
     print_optional_phases_skip(ctx)
 
 
-def test_tcp_progress_report(capsys):
+def test_tcp_progress_report(caplog):
     p = TcpProgress(total=10, done=50, passed=2, skipped=1)
-    p.report()
-    out = capsys.readouterr().out
-    assert "[50/10]" in out or "pass=" in out
+    with caplog.at_level("INFO", logger="blockchecks"):
+        p.report()
+    assert "[50/10]" in caplog.text or "pass=" in caplog.text
 
 
 # ── async phases (mocked runner/db) ──────────────────────────────────
@@ -864,7 +864,7 @@ def test_sequential_bridge_warns_when_isolation_off():
 
     with (
         patch("blockchecks.engine.config.AQ_DOMAIN_ISOLATE", False) as iso,
-        patch("blockchecks.main_phases.print") as mock_print,
+        patch("blockchecks.main_phases.log.warning") as mock_warn,
     ):
         ctx.stop = asyncio.Event()
         progress = SimpleNamespace(
@@ -876,7 +876,7 @@ def test_sequential_bridge_warns_when_isolation_off():
         asyncio.run(_run_tcp_sequential_bridge(ctx, progress))
 
     assert iso is not None
-    warned = any("domain isolation is OFF" in str(a) for a, _ in mock_print.call_args_list)
+    warned = any("domain isolation is OFF" in str(a) for a, _ in mock_warn.call_args_list)
     assert warned, "expected isolation warning"
     assert progress.done == 2
 

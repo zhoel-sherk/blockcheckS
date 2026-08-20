@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import time
 from dataclasses import dataclass, field
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -66,11 +69,11 @@ def run_port_block_probe(
 
 
 def print_port_block_report(report: PortBlockReport) -> None:
-    print(f"\n  Port block probe: {report.domain}:{report.port}")
+    log.info("%s", f"\n  Port block probe: {report.domain}:{report.port}")
     if not report.probes:
-        print("  No IPs to probe")
+        log.info("  No IPs to probe")
         return
     for p in report.probes:
         tag = "OK" if p.reachable else "FAIL"
         err = f" ({p.error})" if p.error else ""
-        print(f"    [{tag}] {p.ip}:{p.port}  {p.latency_ms:.0f}ms{err}")
+        log.info("%s", f"    [{tag}] {p.ip}:{p.port}  {p.latency_ms:.0f}ms{err}")

@@ -124,11 +124,11 @@ def test_fetch_deps_enabled(monkeypatch):
     assert sd.fetch_deps_enabled(False) is True
 
 
-def test_deps_report_print(capsys):
+def test_deps_report_print(caplog):
     report = sd.DepsReport(ok=True, nfqws2="/x/nfqws2", warnings=["w1"])
-    report.print_report()
-    out = capsys.readouterr().out
-    assert "OK" in out and "w1" in out
+    with caplog.at_level("INFO", logger="blockchecks"):
+        report.print_report()
+    assert "OK" in caplog.text and "w1" in caplog.text
 
 
 # ── resolve_nfqws2_bin ────────────────────────────────────────────────

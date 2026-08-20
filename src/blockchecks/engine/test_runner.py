@@ -1,6 +1,7 @@
 """Sequential strategy tests: one nfqws2, one domain, then optional UDP voice."""
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -9,6 +10,8 @@ from dataclasses import dataclass, field
 
 from blockchecks.service.firewall import Firewall
 from blockchecks.service.nfqws2 import Nfqws2Manager
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -251,7 +254,9 @@ class TestRunner:
             tag = "OK" if r.success else "FAIL"
             status = f"HTTP {r.http_status}" if r.http_status else ""
             err = f" — {r.error[:60]}" if r.error else ""
-            print(f"  [{tag}] {r.latency_ms:6.0f}ms  {status}  strategy={r.strategy[:70]}{err}")
+            log.info(
+                "%s", f"  [{tag}] {r.latency_ms:6.0f}ms  {status}  strategy={r.strategy[:70]}{err}"
+            )
 
         report.total_time_sec = time.perf_counter() - t0
         return report
@@ -278,7 +283,9 @@ class TestRunner:
             tag = "OK" if r.success else "FAIL"
             status = f"HTTP {r.http_status}" if r.http_status else ""
             err = f" — {r.error[:60]}" if r.error else ""
-            print(f"  [{tag}] {r.latency_ms:6.0f}ms  {status}  config={r.strategy[:60]}{err}")
+            log.info(
+                "%s", f"  [{tag}] {r.latency_ms:6.0f}ms  {status}  config={r.strategy[:60]}{err}"
+            )
 
         report.total_time_sec = time.perf_counter() - t0
         return report
@@ -370,7 +377,7 @@ class TestRunner:
             tag = "OK" if r.success else "FAIL"
             err = f" — {r.error[:60]}" if r.error else ""
             lat = f"{r.latency_ms:.0f}ms" if r.success else ""
-            print(f"  [{tag}] {lat:>6s}  config={r.strategy[:55]}{err}")
+            log.info("%s", f"  [{tag}] {lat:>6s}  config={r.strategy[:55]}{err}")
 
         report.total_time_sec = time.perf_counter() - t0
         return report

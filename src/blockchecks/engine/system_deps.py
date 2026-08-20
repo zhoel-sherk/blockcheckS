@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import platform
 import shutil
@@ -17,6 +18,9 @@ from pathlib import Path
 
 from blockchecks.engine import config as cfg
 from blockchecks.engine.paths import CACHE_DIR, DATA_DIR, ensure_dirs
+
+log = logging.getLogger(__name__)
+
 
 ZAPRET2_REPO = "bol-van/zapret2"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{ZAPRET2_REPO}/releases/latest"
@@ -111,11 +115,11 @@ class DepsReport:
         except Exception:
             y = r = g = reset = ""
         for w in self.warnings:
-            print(f"  {y}WARN{reset}: {w}")
+            log.warning("%s", f"  {y}WARN{reset}: {w}")
         for e in self.errors:
-            print(f"  {r}ERROR{reset}: {e}")
+            log.error("%s", f"  {r}ERROR{reset}: {e}")
         if self.ok and self.nfqws2:
-            print(f"  {g}OK{reset}: nfqws2 → {self.nfqws2}")
+            log.info("%s", f"  {g}OK{reset}: nfqws2 → {self.nfqws2}")
 
 
 def fetch_deps_enabled(default: bool = True) -> bool:
@@ -246,7 +250,7 @@ def _seed_blobs_from_fake(fake_dir: Path, blobs_dir: Path) -> int:
     return n
 
 
-def ensure_zapret2_vendor(*, offline: bool = False) -> tuple[str, str, str]:
+def ensure_zapret2_vendor(*, offline: bool = False) -> tuple[str, str, str]:  # noqa: C901
     """Download + extract official zapret2 release into DATA_DIR.
 
     Returns (nfqws2_path, blobs_dir, lua_dir).
@@ -265,7 +269,7 @@ def ensure_zapret2_vendor(*, offline: bool = False) -> tuple[str, str, str]:
     DL_CACHE.mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "bin").mkdir(parents=True, exist_ok=True)
 
-    print(f"  [deps] fetching zapret2 latest ({arch})…")
+    log.info("%s", f"  [deps] fetching zapret2 latest ({arch})…")
     try:
         meta = json.loads(_http_get(GITHUB_API_LATEST).decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
@@ -285,7 +289,7 @@ def ensure_zapret2_vendor(*, offline: bool = False) -> tuple[str, str, str]:
 
     tar_path = DL_CACHE / asset_name
     if not tar_path.is_file() or tar_path.stat().st_size < 1000:
-        print(f"  [deps] downloading {asset_name}…")
+        log.info("%s", f"  [deps] downloading {asset_name}…")
         _http_get(tar_url, dest=tar_path)
 
     if sha_url:
@@ -372,7 +376,7 @@ def ensure_zapret2_vendor(*, offline: bool = False) -> tuple[str, str, str]:
     if fake_dir.is_dir():
         os.environ["BLOCKCHECKS_FAKE_FILES"] = str(fake_dir)
 
-    print(f"  [deps] zapret2 {tag} → {VENDOR_ROOT}")
+    log.info("%s", f"  [deps] zapret2 {tag} → {VENDOR_ROOT}")
     return str(nfqws2), str(blobs), str(lua_dir)
 
 

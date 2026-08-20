@@ -104,6 +104,32 @@ before command dispatch). Granular flags still override profile values.
 The `20h` profile matches the long-term series A→F baseline; see
 [long_term_runs.md](long_term_runs.md).
 
+### Debug и логи
+
+stdlib `logging` only (без loguru/structlog). Логгер `blockchecks`, модули —
+`logging.getLogger(__name__)`. Единая ручка: `set_debug_mode(enabled)`.
+
+| Как включить | Что происходит |
+|--------------|----------------|
+| `--debug` (`bs tcp`/`udp`/`scan`/`pair`/`full`/`serve`) | Python DEBUG + `BLOCKCHECKS_NFQWS2_DEBUG=1` |
+| `--nfqws2-debug [1\|syslog\|@path]` | Только nfqws2, без Python DEBUG |
+| `BLOCKCHECKS_LOG_LEVEL=DEBUG` | Уровень Python-логгера при старте |
+| SIGUSR1 (кампания или `bs serve`) | Toggle; nfqws2 подхватит **на следующем probe** |
+| MCP `set_debug_mode` / `POST /api/set-debug` | То же через демон |
+
+Операторский INFO на stdout — только текст сообщения (как раньше `print`). WARNING/ERROR — stderr. Файл: `~/.local/state/blockcheckS/logs/blockchecks.log` (rotation 10 MiB × 3). `bs mcp` / `bs-mcp` пишут консоль в **stderr**, чтобы JSON-RPC stdout оставался чистым.
+
+Хвост логов:
+
+```bash
+# HTTP (нужен bs serve + Bearer)
+curl -H "Authorization: Bearer $TOKEN" \
+  'http://127.0.0.1:8089/api/logs?source=python&tail=200&offset=0'
+# MCP: get_log_tail(source="campaign") — с диска, без демона
+```
+
+`source`: только `python` | `campaign` | `nfqws2`. При ротации файла `truncated: true`.
+
 ### Defaults & inverse flags (1.3.7)
 
 Campaign commands (`scan`, `pair`, `full`) share a unified parser via
@@ -283,7 +309,8 @@ pytest -m "not integration"
 - Юнит-тесты (`pytest`) запускаются БЕЗ sudo.
 
 **Все стратегии FAIL / parse: / timeout**
-- nfqws2 крашнулся при старте? Проверь `BLOCKCHECKS_NFQWS2_DEBUG=1 bs tcp ...`.
+- nfqws2 крашнулся при старте? Включи unified debug: `bs tcp --debug ...` или `BLOCKCHECKS_NFQWS2_DEBUG=1`.
+  На лету: `kill -USR1 <pid>` (следующий probe). Хвост: MCP `get_log_tail` / `GET /api/logs`.
 - Увеличь таймаут: `--timeout 20` (дефолт 3).
 - Проверь iptables: `sudo iptables -L OUTPUT -n | grep NFQUEUE`.
 - Для googlevideo.com: это известная проблема — IP `142.251.x.x` блокируется на уровне IP (не SNI).

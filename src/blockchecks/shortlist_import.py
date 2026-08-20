@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 from blockchecks.engine.store import open_run_store
 from blockchecks.provider_import import DEFAULT_PRESETS_DIR, write_shortlist_presets
+
+log = logging.getLogger(__name__)
+
 
 SCHEMA = "blockchecks.shortlist/v1"
 
@@ -194,11 +198,11 @@ def main(argv: list[str] | None = None) -> int:
         db_path=args.db,
         seed_db=args.seed_db or bool(args.db),
     )
-    print(f"Imported {args.input} (schema={result['schema']})")
+    log.info("%s", f"Imported {args.input} (schema={result['schema']})")
     for proto, path in result["presets"].items():
-        print(f"  {proto}: {path}")
+        log.info("%s", f"  {proto}: {path}")
     if "seeded_rows" in result:
-        print(f"  seeded: {result['seeded_rows']} DB rows")
+        log.info("%s", f"  seeded: {result['seeded_rows']} DB rows")
     return 0
 
 

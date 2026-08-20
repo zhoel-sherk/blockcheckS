@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from typing import Any
@@ -65,27 +66,34 @@ class C:
     BRIGHT = BRIGHT
 
 
+def _emit(level: int, msg: str, *, to_stderr: bool) -> None:
+    root = logging.getLogger("blockchecks")
+    if not root.handlers:
+        print(msg, file=sys.stderr if to_stderr else sys.stdout)  # noqa: print
+        return
+    logging.getLogger("blockchecks.terminal").log(level, "%s", msg)
+
+
 def eprint(*args: Any, **kwargs: Any) -> None:
-    """Print to sys.stderr with colorama support."""
-    kwargs.setdefault("file", sys.stderr)
-    print(*args, **kwargs)
+    """Log to stderr (operator warnings/errors)."""
+    _emit(logging.WARNING, " ".join(str(a) for a in args), to_stderr=True)
 
 
 def error(msg: str, *, prefix: bool = True) -> None:
-    """Print error message to sys.stderr."""
+    """Log error message (stderr handler)."""
     tag = f"{RED}ERROR:{RESET} " if prefix else ""
-    eprint(f"{tag}{msg}")
+    _emit(logging.ERROR, f"{tag}{msg}", to_stderr=True)
 
 
 def warn(msg: str, *, prefix: bool = True) -> None:
-    """Print warning message to sys.stderr."""
+    """Log warning message (stderr handler)."""
     tag = f"{YELLOW}WARNING:{RESET} " if prefix else ""
-    eprint(f"{tag}{msg}")
+    _emit(logging.WARNING, f"{tag}{msg}", to_stderr=True)
 
 
 def heading(msg: str) -> None:
-    """Print styled section heading to sys.stdout."""
-    print(f"\n{CYAN}=== {msg} ==={RESET}")
+    """Log styled section heading (stdout operator stream)."""
+    _emit(logging.INFO, f"\n{CYAN}=== {msg} ==={RESET}", to_stderr=False)
 
 
 def status_tag(success: bool, *, throttled: bool = False) -> str:

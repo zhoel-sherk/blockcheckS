@@ -12,7 +12,7 @@ from blockchecks.cli.presets import list_presets
 pytestmark = pytest.mark.unit
 
 
-def test_list_presets_with_bundled(tmp_path, capsys, monkeypatch):
+def test_list_presets_with_bundled(tmp_path, caplog, monkeypatch):
     import blockchecks.cli.presets as p
 
     dom_dir = tmp_path / "presets" / "domains"
@@ -31,20 +31,20 @@ def test_list_presets_with_bundled(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(p, "USER_PRESETS_DIR", tmp_path / "user")
 
     with patch("blockchecks.cli.presets.RESERVED_DOMAIN_FILES", set()):
-        list_presets()
+        with caplog.at_level("INFO", logger="blockchecks"):
+            list_presets()
 
-    out = capsys.readouterr().out
-    assert "general" in out
-    assert "quick" in out
-    assert "mydom" in out
+    assert "general" in caplog.text
+    assert "quick" in caplog.text
+    assert "mydom" in caplog.text
 
 
-def test_list_presets_no_files(capsys, monkeypatch):
+def test_list_presets_no_files(caplog, monkeypatch):
     import blockchecks.cli.presets as p
 
     empty = Path("/nonexistent-presets")
     monkeypatch.setattr(p, "PROJECT_DIR", str(empty))
     monkeypatch.setattr(p, "USER_PRESETS_DIR", empty / "user")
-    list_presets()
-    out = capsys.readouterr().out
-    assert "Domain presets" in out
+    with caplog.at_level("INFO", logger="blockchecks"):
+        list_presets()
+    assert "Domain presets" in caplog.text

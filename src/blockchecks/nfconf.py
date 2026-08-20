@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import subprocess
 import sys
@@ -23,8 +24,10 @@ from blockchecks.engine.domain_loader import DEFAULT_DOMAINS_FILE, read_domain_l
 from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR, expand_path
 from blockchecks.engine.store import RunStateStore, open_run_store
 
+log = logging.getLogger(__name__)
 
-async def collect_export_strategies(
+
+async def collect_export_strategies(  # noqa: C901
     db: RunStateStore,
     *,
     domain: str,
@@ -380,15 +383,15 @@ def main(argv: list[str] | None = None) -> int:
             use_all_providers=not args.no_all_providers,
         )
     )
-    print(f"  keenetic: {result['keenetic']}")
-    print(f"  raw:      {result['raw']}")
-    print(f"  user.list:{result['user_list']}")
-    print(f"  TCP ({len(result['tcp'])}):")
+    log.info("%s", f"  keenetic: {result['keenetic']}")
+    log.info("%s", f"  raw:      {result['raw']}")
+    log.info("%s", f"  user.list:{result['user_list']}")
+    log.info("%s", f"  TCP ({len(result['tcp'])}):")
     for s in result["tcp"]:
-        print(f"    - {s[:90]}")
-    print(f"  UDP ({len(result['udp'])}):")
+        log.info("%s", f"    - {s[:90]}")
+    log.info("%s", f"  UDP ({len(result['udp'])}):")
     for s in result["udp"]:
-        print(f"    - {s[:90]}")
+        log.info("%s", f"    - {s[:90]}")
     return 0
 
 

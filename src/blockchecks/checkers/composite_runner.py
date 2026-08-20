@@ -5,6 +5,7 @@ Hostlists already split traffic, so one process covers the full set.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import subprocess as sp
@@ -21,6 +22,9 @@ from blockchecks.engine.config import PYTHON_BIN as PYTHON
 from blockchecks.service.nfqws2 import start_daemon
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 from blockchecks.terminal import CYAN, GREEN, RED, RESET
+
+log = logging.getLogger(__name__)
+
 
 DOMAINS = [
     "discord.com",
@@ -61,11 +65,13 @@ async def run(
 
     config_abs = os.path.abspath(config_path)
     if not os.path.exists(config_abs):
-        print(f"{RED}Config not found: {config_abs}{RESET}")
+        log.info("%s", f"{RED}Config not found: {config_abs}{RESET}")
         return 1
 
-    print(f"\n{CYAN}composite{RESET}  {os.path.basename(config_abs)}  {len(domains)} domains")
-    print()
+    log.info(
+        "%s", f"\n{CYAN}composite{RESET}  {os.path.basename(config_abs)}  {len(domains)} domains"
+    )
+    log.info("")
 
     # One netns + one nfqws2 for ALL domains
     runner = AsyncTestRunner(pool_size=1)
@@ -142,7 +148,7 @@ async def run(
                         error="invalid domain",
                     )
                 )
-                print(f"  {RED}FAIL{RESET}  {domain}  — invalid domain")
+                log.info("%s", f"  {RED}FAIL{RESET}  {domain}  — invalid domain")
                 continue
             payload = {
                 "mode": "single",
@@ -166,7 +172,7 @@ async def run(
             lat = f"{result.latency_ms:.0f}ms" if result.latency_ms else ""
             code_str = f"HTTP {result.http_code}" if result.http_code else ""
             err = f" — {result.error[:50]}" if result.error else ""
-            print(f"  {tag}  {domain:30s}  {lat:>8s}  {code_str}{err}")
+            log.info("%s", f"  {tag}  {domain:30s}  {lat:>8s}  {code_str}{err}")
 
     finally:
         await runner.pool.release(ns_name)
@@ -174,5 +180,5 @@ async def run(
 
     elapsed = time.perf_counter() - t0
     passed = sum(1 for r in results if r.success)
-    print(f"\n  {passed}/{len(results)} passed in {elapsed:.1f}s")
+    log.info("%s", f"\n  {passed}/{len(results)} passed in {elapsed:.1f}s")
     return 0 if passed > 0 else 1

@@ -99,15 +99,16 @@ def test_run_ip_block_preflight_skips_ref():
     assert mock.call_count == 2
 
 
-def test_print_ip_block_report_skipped(capsys):
+def test_print_ip_block_report_skipped(caplog):
     from blockchecks.checkers.ip_block import IpBlockReport, print_ip_block_report
 
     report = IpBlockReport("blocked.com", "ref.com", skipped=True, skip_reason="no baseline")
-    print_ip_block_report(report)
-    assert "SKIP" in capsys.readouterr().out
+    with caplog.at_level("INFO", logger="blockchecks"):
+        print_ip_block_report(report)
+    assert "SKIP" in caplog.text
 
 
-def test_print_ip_block_report_full(capsys):
+def test_print_ip_block_report_full(caplog):
     from blockchecks.checkers.ip_block import IpBlockReport, print_ip_block_report
 
     report = IpBlockReport("blocked.com", "ref.com")
@@ -122,5 +123,6 @@ def test_print_ip_block_report_full(capsys):
     probe.result.http_status = 200
     probe.result.error = None
     report.probes = [probe]
-    print_ip_block_report(report)
-    assert "SNI-based block likely" in capsys.readouterr().out
+    with caplog.at_level("INFO", logger="blockchecks"):
+        print_ip_block_report(report)
+    assert "SNI-based block likely" in caplog.text

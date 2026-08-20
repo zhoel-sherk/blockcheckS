@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from typing import TYPE_CHECKING
@@ -22,6 +23,8 @@ from blockchecks.service.lua_bridge_ipc import LuaBridge
 from blockchecks.service.lua_netns import _netns_tcp_probe_cleanup
 from blockchecks.service.lua_session import BridgeSession, strategy_text_from_item
 from blockchecks.terminal import CYAN, RESET, YELLOW
+
+log = logging.getLogger(__name__)
 
 #: Max seconds to wait for a free netns before bailing out of a batch. Prevents
 #: a graceful stop (or a hung batch holding the whole pool) from deadlocking
@@ -265,9 +268,10 @@ class ProbeBatchService:
                 elif _debug_env() != boot_debug:
                     # SIGUSR1 toggled nfqws2 --debug while this batch was running:
                     # restart the daemon so the next probe picks it up.
-                    print(
+                    log.info(
+                        "%s",
                         f"  {YELLOW}[debug] restarting nfqws2 in {ns_name} "
-                        f"(debug={'1' if _debug_env() else '0'}){RESET}"
+                        f"(debug={'1' if _debug_env() else '0'}){RESET}",
                     )
                     session.boot()
                     boot_debug = _debug_env()
@@ -324,9 +328,10 @@ class ProbeBatchService:
             return
         self.memory_monitor.record_ns(ns_name)
         if self.memory_monitor.worker_over_limit():
-            print(
+            log.info(
+                "%s",
                 f"  {YELLOW}[mem] python worker RSS over threshold "
-                f"(see BLOCKCHECKS_MEM_PY_MAX_MIB){RESET}"
+                f"(see BLOCKCHECKS_MEM_PY_MAX_MIB){RESET}",
             )
 
     def _maybe_recycle(self, ns_name: str, session: BridgeSession) -> bool:
@@ -339,7 +344,9 @@ class ProbeBatchService:
             return False
         for pid, reason in candidates:
             self.memory_monitor.clear(pid)
-            print(f"  {YELLOW}[mem] recycle nfqws2 pid={pid} ({reason}) in {ns_name}{RESET}")
+            log.info(
+                "%s", f"  {YELLOW}[mem] recycle nfqws2 pid={pid} ({reason}) in {ns_name}{RESET}"
+            )
         session.boot()
         self._record_daemon_mem(ns_name)
         return True
@@ -429,10 +436,11 @@ class ProbeBatchService:
 
     def _log_batch(self, ctx: BatchContext, ns_name: str, result: BatchProbeResult) -> None:
         fill = f" fill={result.batch_fill_ratio:.0%}"
-        print(
+        log.info(
+            "%s",
             f"  {CYAN}[batch] id={ctx.batch_id} ns={ns_name} n={len(ctx.items)} "
             f"settle={result.settle_ms:.0f}ms wall={result.batch_wall_ms:.0f}ms "
-            f"backend={result.backend}{fill}{RESET}"
+            f"backend={result.backend}{fill}{RESET}",
         )
 
 
@@ -445,9 +453,10 @@ def warn_fanout_bridge_once() -> None:
     if _FANOUT_BRIDGE_WARNED:
         return
     _FANOUT_BRIDGE_WARNED = True
-    print(
+    log.warning(
+        "%s",
         f"  {YELLOW}WARN: --lua-bridge ignored for fan-out waves "
-        f"(classic per-strategy nfqws2){RESET}"
+        f"(classic per-strategy nfqws2){RESET}",
     )
 
 

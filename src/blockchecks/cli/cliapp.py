@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from collections.abc import Sequence
@@ -18,6 +19,9 @@ from pydantic_settings import (
     SettingsConfigDict,
     get_subcommand,
 )
+
+log = logging.getLogger(__name__)
+
 
 _GENERATE_DEFAULT = "custom,configs"
 
@@ -247,7 +251,7 @@ def _dispatch_subcommand(root: BaseModel) -> int:
     sub = get_subcommand(root, is_required=False)
     if sub is None:
         return 2
-    _apply_nfqws2_debug_env(sub)
+    _apply_debug_flags(sub)
     # pydantic-settings 2.14 parses "--no-<field>" as negation, so fields named
     # ``no_*`` arrive False; re-apply the captured flags from main().
     for _field in _NO_FLAGS_CAPTURED:
@@ -260,23 +264,27 @@ def _dispatch_subcommand(root: BaseModel) -> int:
 
 
 def _apply_nfqws2_debug_env(sub: BaseModel) -> None:
-    """Propagate ``--nfqws2-debug`` from the parsed subcommand into the env.
-
-    The argparse ``dispatch()`` path sets ``BLOCKCHECKS_NFQWS2_DEBUG`` before
-    running the command; the CliApp path bypasses ``dispatch()``, so without
-    this the flag is silently ignored. ``nfqws2_debug_conf_line()`` and the
-    nfqws2 managers read this env var.
-    """
+    """Propagate ``--nfqws2-debug`` from the parsed subcommand into the env."""
     dbg = getattr(sub, "nfqws2_debug", None)
     if dbg is not None:
         os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
+
+
+def _apply_debug_flags(sub: BaseModel) -> None:
+    """Apply ``--debug`` (Python+nfqws2) or nfqws2-only env from the subcommand."""
+    if getattr(sub, "debug", False):
+        from blockchecks.engine.log import set_debug_mode
+
+        set_debug_mode(True)
+        return
+    _apply_nfqws2_debug_env(sub)
 
 
 def _print_validation_error(exc: pydantic_core.ValidationError) -> int:
     """Print required-flag errors without a traceback (argparse-style exit 2)."""
     errs = exc.errors()
     if not errs:
-        print("ERROR: invalid arguments", file=sys.stderr)
+        print("ERROR: invalid arguments", file=sys.stderr)  # noqa: print
         return 2
     e = errs[0]
     loc = ".".join(str(x) for x in e.get("loc", ()) if x != "__root__")
@@ -286,9 +294,9 @@ def _print_validation_error(exc: pydantic_core.ValidationError) -> int:
     if ctx.get("expected"):
         extra = f" (expected {ctx['expected']})"
     if loc:
-        print(f"ERROR: --{loc.replace('.', ' ')}: {msg}{extra}", file=sys.stderr)
+        print(f"ERROR: --{loc.replace('.', ' ')}: {msg}{extra}", file=sys.stderr)  # noqa: print
     else:
-        print(f"ERROR: {msg}{extra}", file=sys.stderr)
+        print(f"ERROR: {msg}{extra}", file=sys.stderr)  # noqa: print
     return 2
 
 
@@ -409,7 +417,7 @@ def _run_full(model: BaseModel) -> int:
     from blockchecks.main import run_full
 
     if _FULL_RUN_ACTIVE:
-        print("ERROR: nested bs full invocation blocked (VPS-2 guard)")
+        log.error("ERROR: nested bs full invocation blocked (VPS-2 guard)")
         return 2
 
     ns = _to_namespace(model)
@@ -607,7 +615,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         code = exc.code
         if isinstance(code, str):
-            print(code, file=sys.stderr)
+            print(code, file=sys.stderr)  # noqa: print
             return 1
         return int(code or 0)
     except pydantic_core.ValidationError as exc:
@@ -620,6 +628,6 @@ def main(argv: list[str] | None = None) -> int:
         return _CLI_EXIT_CODE
     sub = get_subcommand(result, is_required=False)
     if sub is None:
-        print("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full|stop")
+        log.info("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full|stop")
         return 2
     return 0

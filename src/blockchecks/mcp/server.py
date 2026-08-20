@@ -37,8 +37,6 @@ def get_manifest_path() -> Path:
     return Path(__file__).resolve().parents[2] / "presets" / "manifest.toml"
 
 
-
-
 class TriageResult(BaseModel):
     domain: str
     l3_status: str = Field(description="L3 reachable, syn_ack, or icmp blocked")
@@ -99,8 +97,6 @@ class StrategySyntaxCheck(BaseModel):
     detected_conflicts: list[str] = Field(default_factory=list)
 
 
-
-
 async def _send_daemon_request(
     action: str,
     payload: dict[str, Any],
@@ -144,8 +140,6 @@ async def _send_daemon_request(
     finally:
         writer.close()
         await writer.wait_closed()
-
-
 
 
 @mcp.tool()
@@ -258,6 +252,35 @@ async def get_service_status() -> dict[str, Any]:
 
 
 @mcp.tool()
+async def set_debug_mode(enabled: bool = True) -> dict[str, Any]:
+    """Enable or disable unified debug (Python DEBUG + nfqws2 --debug=1). Requires bs serve."""
+    response = await _send_daemon_request("set_debug", {"enabled": enabled}, timeout=10.0)
+    if not response.get("ok"):
+        raise RuntimeError(f"set_debug failed: {response.get('error', 'Unknown error')}")
+    return response.get("data", {})
+
+
+@mcp.tool()
+async def get_log_tail(
+    source: str = "python",
+    tail: int = 200,
+    offset: int = 0,
+    raw: bool = False,
+) -> dict[str, Any]:
+    """Tail a labeled log channel (python / campaign / nfqws2). Campaign/python work from disk; daemon optional.
+
+    Byte *offset* for polling. If the file rotated, *truncated* is true and offset resets.
+    ANSI is stripped. nfqws2 redacts IPs unless raw=True.
+    """
+    from blockchecks.engine.log import LOG_SOURCES, log_tail
+
+    if source not in LOG_SOURCES:
+        raise ValueError(f"invalid source {source!r}; allowed: {sorted(LOG_SOURCES)}")
+    # Disk path: works during A→F when bs serve cannot start (like get_series_status).
+    return log_tail(source, tail=tail, offset=offset, raw=raw, strip_ansi=True)
+
+
+@mcp.tool()
 async def get_series_status() -> dict[str, Any]:
     """
     Reads the long-term campaign status directly from disk (run.lock + state.db)
@@ -319,6 +342,9 @@ async def get_series_status() -> dict[str, Any]:
     payload["progress"] = _read_progress_line(info)
     payload["state_dir"] = str(STATE_DIR)
     payload["logs_dir"] = str(RUNTIME_LOGS_DIR)
+    from blockchecks.engine.log import debug_status
+
+    payload["debug"] = debug_status()
     return payload
 
 
@@ -407,8 +433,6 @@ def _latest_run_logpath(info) -> Path | None:
         if matches:
             return Path(matches[-1])
     return None
-
-
 
 
 @mcp.tool()
@@ -558,8 +582,6 @@ def _resolve_db_path(db_path: str | None) -> Path | None:
     return DEFAULT_DB_PATH
 
 
-
-
 @mcp.tool()
 async def dbg_probe_raw(
     domain: str,
@@ -700,7 +722,6 @@ async def dbg_dump_pool_state() -> dict[str, Any]:
     if not response.get("ok"):
         raise RuntimeError(f"Pool state dump failed: {response.get('error', 'Unknown error')}")
     return response.get("data", {})
-
 
 
 _ZAPRET2_DIR = Path("/opt/zapret2")
@@ -872,8 +893,6 @@ async def probe_strategy(domain: str, strategy: str, fake_blob: str | None = Non
     return await dbg_probe_raw(domain, strategy, fake_blob, dry_run_db=True)
 
 
-
-
 @mcp.resource("blockchecks://presets/manifest")
 def get_presets_manifest() -> str:
     """Returns the TOML contents of presets/manifest.toml for available strategy families and domains."""
@@ -893,8 +912,6 @@ async def get_active_run_telemetry() -> str:
         return json.dumps({"error": str(err), "status": "daemon_unreachable"}, indent=2)
 
 
-
-
 def main() -> None:
     """Runs the FastMCP server over standard I/O (STDIN/STDOUT)."""
     try:
@@ -902,11 +919,14 @@ def main() -> None:
     except ImportError:
         import sys
 
-        print(
+        print(  # noqa: print
             "Missing optional dependency 'mcp'.\nInstall: pip install 'blockchecks[mcp]'",
             file=sys.stderr,
         )
         sys.exit(1)
+    from blockchecks.engine.log import configure_logging
+
+    configure_logging(console="stderr")
     mcp.run()
 
 

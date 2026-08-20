@@ -1,9 +1,13 @@
 """Paths, BLOCKCHECKS_* env, and numeric defaults."""
 
+import logging
 import os
 import sys
 import time
 from pathlib import Path
+
+log = logging.getLogger(__name__)
+
 
 # Resolvable paths
 
@@ -280,12 +284,11 @@ def _warn_mem_low(avail: int, cap: int, base: int) -> None:
     if _mem_warned:
         return
     _mem_warned = True
-    import sys
 
-    print(
+    log.warning(
+        "%s",
         f"  WARNING: MemAvailable={avail} kB < {cap}; "
         f"default --parallel capped {base} → 1 (override with --parallel)",
-        file=sys.stderr,
     )
 
 

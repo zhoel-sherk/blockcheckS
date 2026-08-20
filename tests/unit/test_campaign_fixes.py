@@ -82,15 +82,15 @@ async def test_adaptive_stops_mid_batch_when_deadline_sets_stop():
 
 
 @pytest.mark.asyncio
-async def test_deadline_fires_and_sets_stop(capsys):
+async def test_deadline_fires_and_sets_stop(caplog):
     stop = asyncio.Event()
     deadline = RunDeadline(stop, budget_sec=0.05)
-    deadline.arm()
-    await deadline.start_background()
-    await asyncio.sleep(0.1)
+    with caplog.at_level("INFO", logger="blockchecks"):
+        deadline.arm()
+        await deadline.start_background()
+        await asyncio.sleep(0.1)
     assert stop.is_set()
     assert deadline.triggered
     assert deadline.reason == "time_limit"
-    out = capsys.readouterr().out
-    assert "deadline" in out.lower() or "fired" in out.lower()
+    assert "deadline" in caplog.text.lower() or "fired" in caplog.text.lower()
     await deadline.cancel()

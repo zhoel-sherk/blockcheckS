@@ -4,11 +4,14 @@ baseline host on its own IP, blocked SNI to a clean IP, clean SNI to each blocke
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from blockchecks.checkers.dns_secure import DnsRunCache, pick_working_doh
 from blockchecks.checkers.tcp_tls import TlsResult, check_tls
 from blockchecks.engine.config import UNBLOCKED_DOM
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -103,24 +106,26 @@ def run_ip_block_cross_test(
 
 def print_ip_block_report(report: IpBlockReport) -> None:
     """Human-readable summary."""
-    print(f"\n  IP-block cross-test: {report.blocked_domain} (ref {report.unblocked_domain})")
+    log.info(
+        "%s", f"\n  IP-block cross-test: {report.blocked_domain} (ref {report.unblocked_domain})"
+    )
     if report.skipped:
-        print(f"  SKIP: {report.skip_reason}")
+        log.info("%s", f"  SKIP: {report.skip_reason}")
         return
-    print(f"  Baseline {report.unblocked_domain}: OK")
-    print(f"  Unblocked IP: {report.unblocked_ip}")
-    print(f"  Blocked IPs:  {', '.join(report.blocked_ips[:5]) or '—'}")
+    log.info("%s", f"  Baseline {report.unblocked_domain}: OK")
+    log.info("%s", f"  Unblocked IP: {report.unblocked_ip}")
+    log.info("%s", f"  Blocked IPs:  {', '.join(report.blocked_ips[:5]) or '—'}")
     for p in report.probes:
         tag = "OK" if p.result.success else "FAIL"
         st = p.result.http_status or p.result.error or "?"
-        print(f"    [{tag}] {p.label} → HTTP {st}")
+        log.info("%s", f"    [{tag}] {p.label} → HTTP {st}")
     if report.sni_block_likely:
-        print("  → SNI-based block likely (blocked host works on clean IP)")
+        log.info("  → SNI-based block likely (blocked host works on clean IP)")
     if report.ip_block_on:
         cdn_hint = _cdn_hint(report.ip_block_on)
-        print(f"  → IP block likely on: {', '.join(report.ip_block_on)}")
+        log.info("%s", f"  → IP block likely on: {', '.join(report.ip_block_on)}")
         if cdn_hint:
-            print(f"    ⚠  {cdn_hint}")
+            log.info("%s", f"    ⚠  {cdn_hint}")
 
 
 _CDN_OCTETS: tuple[str, ...] = (

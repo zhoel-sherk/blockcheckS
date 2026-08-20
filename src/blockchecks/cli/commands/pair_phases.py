@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import glob
+import logging
 import os
 import signal
 from collections.abc import Callable
@@ -47,6 +48,9 @@ from blockchecks.engine.store import fingerprint_mismatch
 from blockchecks.engine.strategy_loader import StrategyLoader
 from blockchecks.engine.triage import disable_ech_from
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
+
+log = logging.getLogger(__name__)
+
 
 STANDARD_TCP_SOURCES = ("standard", "fake", "hostfake", "faked", "fake_multi", "fake_faked")
 RESUME_FINGERPRINT_MISMATCH = 4
@@ -93,22 +97,24 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
             allow_unsafe=getattr(args, "allow_unsafe_domains", False),
         )
     except PresetPathError as e:
-        print(f"  {RED}ERROR: {e}{RESET}")
+        log.error("%s", f"  {RED}ERROR: {e}{RESET}")
         return preset_domains, 1
     except FileNotFoundError:
-        print(f"  {YELLOW}Preset '{preset_name}' not found. Available:{RESET}")
+        log.info("%s", f"  {YELLOW}Preset '{preset_name}' not found. Available:{RESET}")
         for f in sorted(glob.glob(os.path.join(PROJECT_DIR, "presets/domains", "*.txt"))):
             if os.path.basename(f) in RESERVED_DOMAIN_FILES:
                 continue
-            print(f"    {os.path.basename(f).replace('.txt', '')}")
+            log.info("%s", f"    {os.path.basename(f).replace('.txt', '')}")
         return preset_domains, 1
 
     preset_domains = loaded.domains
-    print(f"  {CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}")
+    log.info("%s", f"  {CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}")
     if loaded.skipped:
-        print(f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
+        log.info("%s", f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
     if not preset_domains:
-        print(f"  {RED}ERROR: preset empty after denylist (use --allow-unsafe-domains){RESET}")
+        log.error(
+            "%s", f"  {RED}ERROR: preset empty after denylist (use --allow-unsafe-domains){RESET}"
+        )
         return preset_domains, 1
     auto_enable_gv_ggc(preset_domains)
     return preset_domains, None
@@ -117,7 +123,7 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
 def validate_pair_domain(args, preset_domains: list[str]) -> int | None:
     """Ensure a test domain is available; return exit code on error."""
     if not args.domain and not preset_domains:
-        print(f"{RED}ERROR: --domain or --preset required{RESET}")
+        log.error("%s", f"{RED}ERROR: --domain or --preset required{RESET}")
         return 1
     if not args.domain and preset_domains:
         args.domain = preset_domains[0]
@@ -188,9 +194,10 @@ async def prepare_dns_and_preflight(
 
         pins = load_pins(pin_path)
         if pins:
-            print(
+            log.info(
+                "%s",
                 f"  {CYAN}[dns] pinned IPs from {pin_path}: "
-                f"{', '.join(f'{d}={ip}' for d, ip in pins.items())}{RESET}"
+                f"{', '.join(f'{d}={ip}' for d, ip in pins.items())}{RESET}",
             )
         if dns_cache is not None:
             dns_cache.set_pins(pins)
@@ -205,15 +212,17 @@ async def prepare_dns_and_preflight(
         PreflightOptions.from_args(args, dns_cache=dns_cache, store=store),
     )
     if preflight.exit_code:
-        print(f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")
+        log.error("%s", f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")
         return DnsPreflightResult(dns_cache, dns_audits, exit_code=preflight.exit_code)
     from blockchecks.engine.triage import TriageProfile
 
     t = preflight.triage if isinstance(preflight.triage, TriageProfile) else None
     args.triage = t
     if args.domain and args.domain in preflight.skip_domains and not getattr(args, "force", False):
-        print(f"{YELLOW}Prolog: {args.domain} works without bypass — nothing to test{RESET}")
-        print(f"{YELLOW}Use --force to run strategy matrix anyway{RESET}")
+        log.info(
+            "%s", f"{YELLOW}Prolog: {args.domain} works without bypass — nothing to test{RESET}"
+        )
+        log.info("%s", f"{YELLOW}Use --force to run strategy matrix anyway{RESET}")
         return DnsPreflightResult(dns_cache, dns_audits, exit_code=0, triage=t)
     return DnsPreflightResult(dns_cache, dns_audits, triage=t)
 
@@ -283,13 +292,11 @@ def register_stop_handlers(
         state.request_stop(deadline, stop_event)
 
     def _toggle_debug():
-        currently = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
-        if currently in ("1", "true", "on", "yes"):
-            os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
-            print("  [debug] SIGUSR1 — nfqws2 --debug OFF on next restart", flush=True)
-        else:
-            os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = "1"
-            print("  [debug] SIGUSR1 — nfqws2 --debug ON on next restart", flush=True)
+        from blockchecks.engine.log import toggle_debug_mode
+
+        st = toggle_debug_mode()
+        on = "ON" if st["enabled"] else "OFF"
+        log.info("%s", f"  [debug] SIGUSR1 — debug {on} on next probe")
 
     handlers = (
         (signal.SIGINT, _request_stop),
@@ -343,7 +350,7 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
         getattr(args, "auto_discover", None),
     )
     if mutex_err:
-        print(f"{RED}{mutex_err}{RESET}")
+        log.info("%s", f"{RED}{mutex_err}{RESET}")
         return None, 1
 
     token = load_token()
@@ -360,9 +367,10 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
 
     if not explicit_ip and dns_count is not None:
         count = dns_count
-        print(
+        log.info(
+            "%s",
             f"\n  {CYAN}DNS-alive discovering {count} voice endpoints "
-            f"(DNS + Maks-gaming + STUN)...{RESET}"
+            f"(DNS + Maks-gaming + STUN)...{RESET}",
         )
         try:
             multi_eps = await discover_dns_alive(
@@ -376,56 +384,59 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
                     src = ep.get("source", "dns-alive")
                     ms = ep.get("stun_ms", "?")
                     method = ep.get("method", "?")
-                    print(
+                    log.info(
+                        "%s",
                         f"  {GREEN}  {ep['ip']}:{ep['port']} "
                         f"({ep.get('hostname', '')}) "
-                        f"[{src} {method} {ms}ms]{RESET}"
+                        f"[{src} {method} {ms}ms]{RESET}",
                     )
                 if len(multi_eps) > 3:
-                    print(f"  {GREEN}  ... and {len(multi_eps) - 3} more{RESET}")
+                    log.info("%s", f"  {GREEN}  ... and {len(multi_eps) - 3} more{RESET}")
                 voice_ip = multi_eps[0]["ip"]
                 voice_port = multi_eps[0]["port"]
                 boot = "on" if multi_eps[0].get("bootstrap") else "off"
-                print(
+                log.info(
+                    "%s",
                     f"  {GREEN}Voice source: dns-alive "
                     f"({len(multi_eps)}/{count}) {voice_ip}:{voice_port} "
                     f"method={multi_eps[0].get('method', '?')} "
-                    f"bootstrap={boot}{RESET}"
+                    f"bootstrap={boot}{RESET}",
                 )
             else:
-                print(
+                log.info(
+                    "%s",
                     f"  {YELLOW}No alive endpoints — using static DEFAULT_VOICE_* "
-                    f"(try --auto-discover / VPN if needed){RESET}"
+                    f"(try --auto-discover / VPN if needed){RESET}",
                 )
                 voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
         except Exception as e:
-            print(f"  {YELLOW}discover-dns error: {e}{RESET}")
+            log.error("%s", f"  {YELLOW}discover-dns error: {e}{RESET}")
             voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
     elif not explicit_ip and auto_count is not None:
         count = auto_count
-        print(f"\n  {CYAN}Auto-discovering {count} voice endpoints...{RESET}")
+        log.info("%s", f"\n  {CYAN}Auto-discovering {count} voice endpoints...{RESET}")
         try:
             from blockchecks.checkers.voice_discovery import discover_multiple
 
             multi_eps = await discover_multiple(count, use_dns=True)
             if multi_eps:
                 for ep in multi_eps[:3]:
-                    print(f"  {GREEN}  {ep['ip']}:{ep['port']} ({ep['hostname']}){RESET}")
+                    log.info("%s", f"  {GREEN}  {ep['ip']}:{ep['port']} ({ep['hostname']}){RESET}")
                 if len(multi_eps) > 3:
-                    print(f"  {GREEN}  ... and {len(multi_eps) - 3} more{RESET}")
+                    log.info("%s", f"  {GREEN}  ... and {len(multi_eps) - 3} more{RESET}")
                 voice_ip = multi_eps[0]["ip"]
                 voice_port = multi_eps[0]["port"]
             else:
-                print(f"  {YELLOW}No endpoints found — using static{RESET}")
+                log.info("%s", f"  {YELLOW}No endpoints found — using static{RESET}")
         except Exception as e:
-            print(f"  {YELLOW}Discovery error: {e}{RESET}")
+            log.error("%s", f"  {YELLOW}Discovery error: {e}{RESET}")
 
     if args.full_voice and not has_token:
-        print(f"  {YELLOW}No Discord token. --full-voice → STUN only{RESET}")
-        print(f"  Add token to {DPI_TESTER_SETTINGS}")
+        log.info("%s", f"  {YELLOW}No Discord token. --full-voice → STUN only{RESET}")
+        log.info("%s", f"  Add token to {DPI_TESTER_SETTINGS}")
 
     if full_voice:
-        print(f"  {CYAN}Full-voice mode: gateway WS → OP2 Ready → UDP endpoint{RESET}")
+        log.info("%s", f"  {CYAN}Full-voice mode: gateway WS → OP2 Ready → UDP endpoint{RESET}")
 
     return VoiceContext(
         voice_ip=voice_ip,
@@ -456,10 +467,10 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
         try:
             sp_path = resolve_strategy_preset(strategy_preset)
         except PresetPathError as e:
-            print(f"  {RED}ERROR: {e}{RESET}")
+            log.error("%s", f"  {RED}ERROR: {e}{RESET}")
             return StrategyLoadResult([], [], [], set(), error_code=1)
         except FileNotFoundError:
-            print(f"  {RED}ERROR: strategy preset '{strategy_preset}' not found{RESET}")
+            log.error("%s", f"  {RED}ERROR: strategy preset '{strategy_preset}' not found{RESET}")
             return StrategyLoadResult([], [], [], set(), error_code=1)
         args.user_matrix = str(sp_path)
 
@@ -501,7 +512,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
         tcp_sources_list = tcp_sources
         gen_triage = await _resume_generate_triage(args, db)
 
-        print(f"\n  {CYAN}Generating strategies...{RESET}")
+        log.info("%s", f"\n  {CYAN}Generating strategies...{RESET}")
         if not tcp_items:
             tcp_items = await scanner.generate_tcp(
                 sources=tcp_sources or ["custom", "configs"],
@@ -524,7 +535,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
                 user_matrix=user_matrix,
                 triage=gen_triage,
             )
-        print(f"  Generated: {len(tcp_items)} TCP + {len(udp_items)} UDP strategies")
+        log.info("%s", f"  Generated: {len(tcp_items)} TCP + {len(udp_items)} UDP strategies")
     elif not tcp_items:
         loader = StrategyLoader()
         tcp_configs = loader.from_config_dir(args.configs_dir or CONFIGS_DIR)
@@ -563,20 +574,23 @@ def print_pair_banner(
     """Print run header; return 1 if no TCP strategies."""
     domains_to_test = preset_domains if preset_domains else [args.domain]
 
-    print(f"\n  {CYAN}blockcheckS — {'Pair Matrix' if not args.tcp_only else 'TCP Scan'}{RESET}")
-    print(
-        f"  Domain:     {', '.join(domains_to_test[:5])}{'...' if len(domains_to_test) > 5 else ''}"
+    log.info(
+        "%s", f"\n  {CYAN}blockcheckS — {'Pair Matrix' if not args.tcp_only else 'TCP Scan'}{RESET}"
     )
-    print(f"  TCP:        {len(tcp_items)} strategies")
-    print(f"  UDP:        {len(udp_items)} strategies")
-    print(f"  Voice:      {voice_ip}:{voice_port}")
+    log.info(
+        "%s",
+        f"  Domain:     {', '.join(domains_to_test[:5])}{'...' if len(domains_to_test) > 5 else ''}",
+    )
+    log.info("%s", f"  TCP:        {len(tcp_items)} strategies")
+    log.info("%s", f"  UDP:        {len(udp_items)} strategies")
+    log.info("%s", f"  Voice:      {voice_ip}:{voice_port}")
     if not tcp_items:
-        print("  ERROR: no strategies loaded")
+        log.error("  ERROR: no strategies loaded")
         return 1
-    print(f"  Full Voice: {'discovery+STUN' if full_voice else 'STUN only'}")
-    print(f"  UDP Bypass: {'yes' if args.udp_bypass else 'no'}")
-    print(f"  Workers:    {pool_size}")
-    print(f"  DB:         {args.db}")
+    log.info("%s", f"  Full Voice: {'discovery+STUN' if full_voice else 'STUN only'}")
+    log.info("%s", f"  UDP Bypass: {'yes' if args.udp_bypass else 'no'}")
+    log.info("%s", f"  Workers:    {pool_size}")
+    log.info("%s", f"  DB:         {args.db}")
     return None
 
 
@@ -587,14 +601,17 @@ async def resolve_resume_checkpoint(args, db, fp: str) -> tuple[Any | None, int 
         resume_from = await db.latest_checkpoint()
         if resume_from:
             if fingerprint_mismatch(resume_from.fingerprint, fp):
-                print(f"  {RED}ERROR: matrix changed, refuse --resume; start fresh{RESET}")
-                print(f"  checkpoint fp={resume_from.fingerprint} current fp={fp}")
+                log.error(
+                    "%s", f"  {RED}ERROR: matrix changed, refuse --resume; start fresh{RESET}"
+                )
+                log.info("%s", f"  checkpoint fp={resume_from.fingerprint} current fp={fp}")
                 return None, RESUME_FINGERPRINT_MISMATCH
-            print(
-                f"  {YELLOW}Resuming after {resume_from.tcp_label}+{resume_from.udp_label}{RESET}"
+            log.info(
+                "%s",
+                f"  {YELLOW}Resuming after {resume_from.tcp_label}+{resume_from.udp_label}{RESET}",
             )
         else:
-            print(f"  {YELLOW}No checkpoint found — starting fresh{RESET}")
+            log.info("%s", f"  {YELLOW}No checkpoint found — starting fresh{RESET}")
     return resume_from, None
 
 
@@ -618,15 +635,18 @@ async def _run_pair_matrix_multi_ep(
     multi = len(targets) > 1
     if multi:
         n_pairs = len([r for r in tcp_results if r.success]) * len(udp_items) * len(targets)
-        print(
+        log.info(
+            "%s",
             f"  {YELLOW}Multi-EP fan-out: {len(targets)} endpoints × pairs "
-            f"(~{n_pairs} probes){RESET}"
+            f"(~{n_pairs} probes){RESET}",
         )
     all_pairs: list = []
     for ip, port in targets:
         log_dom = pair_log_domain(domain, ip, port, multi=multi)
         if multi:
-            print(f"\n  {CYAN}[UDP Pairs]{RESET} ep={ip}:{port}  {len(udp_items)} strategies...")
+            log.info(
+                "%s", f"\n  {CYAN}[UDP Pairs]{RESET} ep={ip}:{port}  {len(udp_items)} strategies..."
+            )
         batch = await runner.test_pair_matrix(
             tcp_results,
             udp_items,
@@ -663,9 +683,10 @@ async def run_adaptive_pair_phase(
 ) -> PhaseResult:
     """Adaptive TCP queue phase with optional UDP pair matrix."""
     eps = getattr(args, "adaptive_epsilon", 0.1)
-    print(
+    log.info(
+        "%s",
         f"  {GREEN}Adaptive queue:{RESET} ε={eps}"
-        + (f", curl-parallel={curl_parallel}" if curl_parallel > 1 else "")
+        + (f", curl-parallel={curl_parallel}" if curl_parallel > 1 else ""),
     )
 
     async def _resume_job(job):
@@ -684,7 +705,7 @@ async def run_adaptive_pair_phase(
         resume_check=_resume_job if getattr(args, "resume", False) else None,
         triage=getattr(args, "triage", None),
     )
-    print(f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
+    log.info("%s", f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
     aq_result = await run_adaptive_tcp(
         runner,
         queue,
@@ -701,8 +722,9 @@ async def run_adaptive_pair_phase(
         await persist_adaptive_weights(db, aq_result.weights)
     m = aq_result.metrics
     if m.time_to_first_pass is not None:
-        print(
-            f"  AQ first PASS: {m.time_to_first_pass:.1f}s  fan-out enqueued: {m.fanout_enqueued}"
+        log.info(
+            "%s",
+            f"  AQ first PASS: {m.time_to_first_pass:.1f}s  fan-out enqueued: {m.fanout_enqueued}",
         )
 
     pairs: list = []
@@ -712,7 +734,7 @@ async def run_adaptive_pair_phase(
         by_label = {i.label: i for i in tcp_items}
         tcp_results = tcp_results_from_details(by_label, details, primary)
         if tcp_results:
-            print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
+            log.info("%s", f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
             pairs = await _run_pair_matrix_multi_ep(
                 runner,
                 tcp_results,
@@ -729,7 +751,7 @@ async def run_adaptive_pair_phase(
             )
             AsyncTestRunner.print_matrix(pairs)
         else:
-            print(f"  {YELLOW}No working TCP for pairs after AQ{RESET}")
+            log.info("%s", f"  {YELLOW}No working TCP for pairs after AQ{RESET}")
 
     return PhaseResult([], pairs, tcp_passed, aq_result=aq_result)
 
@@ -759,7 +781,7 @@ async def run_standard_pair_phase(
     for domain in domains_to_test:
         if stop_event.is_set():
             break
-        print(f"\n  {CYAN}[TCP Phase]{RESET} {domain}: {len(tcp_items)} strategies...")
+        log.info("%s", f"\n  {CYAN}[TCP Phase]{RESET} {domain}: {len(tcp_items)} strategies...")
         if use_family_gates:
             tcp_results, _, _, _ = await run_tcp_with_family_gates(
                 runner,
@@ -774,7 +796,7 @@ async def run_standard_pair_phase(
         all_tcp_results.extend(tcp_results)
         domain_passed = sum(1 for r in tcp_results if r.success)
         tcp_passed += domain_passed
-        print(f"\n  TCP {domain}: {GREEN}{domain_passed}{RESET}/{len(tcp_results)} passed")
+        log.info("%s", f"\n  TCP {domain}: {GREEN}{domain_passed}{RESET}/{len(tcp_results)} passed")
 
         for r in tcp_results:
             if r.success:
@@ -783,7 +805,7 @@ async def run_standard_pair_phase(
         if not args.tcp_only and udp_items and domain == domains_to_test[0]:
             if stop_event.is_set():
                 break
-            print(f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
+            log.info("%s", f"\n  {CYAN}[UDP Pairs]{RESET} {len(udp_items)} strategies...")
             pairs = await _run_pair_matrix_multi_ep(
                 runner,
                 tcp_results,
@@ -832,10 +854,10 @@ async def finalize_pair_run(
             deadline=deadline,
         )
         if export_result:
-            print(f"\n  {CYAN}Export configs...{RESET}")
-            print(f"  {GREEN}{export_result['keenetic']}{RESET}")
-            print(f"  {GREEN}{export_result['raw']}{RESET}")
-            print(f"  {GREEN}{export_result['user_list']}{RESET}")
+            log.info("%s", f"\n  {CYAN}Export configs...{RESET}")
+            log.info("%s", f"  {GREEN}{export_result['keenetic']}{RESET}")
+            log.info("%s", f"  {GREEN}{export_result['raw']}{RESET}")
+            log.info("%s", f"  {GREEN}{export_result['user_list']}{RESET}")
 
     summary_payload = {
         "command": "scan" if getattr(args, "tcp_only", False) else "pair",

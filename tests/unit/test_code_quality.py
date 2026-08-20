@@ -31,6 +31,15 @@ CQ_MUTABLE = "CQ008"
 CQ_BARE_EXC = "CQ009"
 CQ_NEEDLESS_BOOL = "CQ010"
 CQ_FLAG_LOOP = "CQ011"
+CQ_PRINT = "CQ015"
+
+_PRINT_ALLOW_NAMES = frozenset(
+    {
+        "_probe_worker.py",
+        "_curl_probe_worker.py",
+        "in_ns_workers.py",
+    }
+)
 
 _NOQA_RE = re.compile(r"\bnoqa\s*:\s*([A-Z0-9,\s]+)", re.IGNORECASE)
 
@@ -182,6 +191,20 @@ class CodeQualityVisitor(ast.NodeVisitor):
         for case in node.cases:
             self._visit_stmts(case.body)
         self._leave_block()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        self.generic_visit(node)
+        if not isinstance(node.func, ast.Name) or node.func.id != "print":
+            return
+        if self.file_path.name in _PRINT_ALLOW_NAMES:
+            return
+        if self._noqa(node.lineno, "PRINT"):
+            return
+        self._emit(
+            CQ_PRINT,
+            node,
+            "operator print() — use logging.getLogger(__name__) or `# noqa: print`",
+        )
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self._track_bool_flag(node)

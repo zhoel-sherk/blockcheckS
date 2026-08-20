@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import signal
@@ -21,6 +22,8 @@ from blockchecks.service.nfqws2_settle import (
     wait_nfqws2_ready,
 )
 
+log = logging.getLogger(__name__)
+
 
 def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
     """Ensure conf contains --daemon and optional --debug=@log. Returns log path."""
@@ -39,7 +42,7 @@ def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
         lines.insert(1 if lines and lines[0].startswith("--daemon") else 0, dbg)
         changed = True
         if dbg_path:
-            print(f"  [nfqws2 debug] {dbg_path}")
+            log.info("%s", f"  [nfqws2 debug] {dbg_path}")
     if changed:
         try:
             with open(config_path, "w", encoding="utf-8") as f:
@@ -212,7 +215,7 @@ class Nfqws2Manager:
             lines.append(dbg)
             self.last_debug_log = dbg_path
             if dbg_path:
-                print(f"  [nfqws2 debug] {dbg_path}")
+                log.info("%s", f"  [nfqws2 debug] {dbg_path}")
         for lua in get_lua_init_scripts():
             if os.path.exists(lua):
                 lines.append(f"--lua-init=@{lua}")

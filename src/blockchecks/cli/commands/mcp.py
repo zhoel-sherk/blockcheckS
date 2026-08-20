@@ -11,7 +11,7 @@ def cmd_mcp(_args) -> int:
     try:
         from blockchecks.mcp import main as mcp_main
     except ImportError:
-        print(
+        print(  # noqa: print
             "Missing optional dependency 'mcp'.\n"
             "Install: pip install 'blockchecks[mcp]'\n"
             "or:\n"

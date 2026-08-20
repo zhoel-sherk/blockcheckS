@@ -14,7 +14,7 @@ def main() -> int:
     try:
         from blockchecks.mcp.server import main as _run
     except ImportError:
-        print(
+        print(  # noqa: print
             "Missing optional dependency 'mcp'.\n"
             "Install: pip install 'blockchecks[mcp]'\n"
             "or:\n"

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, field
 
 from blockchecks.engine.config import PROJECT_DIR
 from blockchecks.engine.paths import SETTLE_PROFILE_FILE
+
+log = logging.getLogger(__name__)
+
 
 PROFILE_VERSION = 1
 DEFAULT_PROFILE_PATH = str(SETTLE_PROFILE_FILE)
@@ -169,10 +173,11 @@ def auto_load_profile() -> SettleProfile | None:
         return None
     d = profile.defaults
     if d is not None and d.curl_timeout is not None and d.curl_timeout < AUTO_LOAD_MIN_CURL:
-        print(
+        log.info(
+            "%s",
             "  [settle] auto profile ignored: curl_timeout "
             f"{d.curl_timeout}s < {AUTO_LOAD_MIN_CURL}s (likely stale; "
-            "use --settle-profile to force)"
+            "use --settle-profile to force)",
         )
         return None
     return profile

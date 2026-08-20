@@ -68,7 +68,9 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 | A | `find_working_strategy` | AQ-поиск стратегий с `time_limit_sec` (≤60) |
 | A | `generate_router_config` | nfqws2 .conf для Keenetic / OpenWrt / Linux |
 | A | `get_service_status` | Статус демона (pool, uptime, активная серия) — требует `bs serve` |
+| A | `set_debug_mode` | Unified debug: Python DEBUG + nfqws2 `--debug=1` (требует `bs serve`) |
 | A | `get_series_status` | Статус кампании **напрямую из диска** (run.lock + state.db) — без демона; работает пока серия A→F владеет pool |
+| A | `get_log_tail` | Хвост лога `python` / `campaign` / `nfqws2` с диска (без демона для python/campaign) |
 | A2 | `query_strategies` | Топ-стратегии для домена из state.db (read-only, без демона/root) |
 | A2 | `get_presets` | Список strategy/domain пресетов из `presets/` (read-only) |
 | A2 | `stop_campaign` | Graceful stop активной кампании через демон (`bs serve`) |
@@ -89,11 +91,11 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 > прямо в blockchecks (LAYER C) — один MCP на всё. Чтение файлов zapret2
 > остаётся доступным через обычные средства агента.
 
-> **Без демона работают**: `get_series_status`, `query_strategies`, `get_presets`,
+> **Без демона работают**: `get_series_status`, `get_log_tail` (python/campaign), `query_strategies`, `get_presets`,
 > `dbg_validate_strategy_syntax`, `get_nfqws2_status`, `get_zapret2_config`,
 > `list_zapret2_blobs`, `get_ipset_status` + ресурс `presets/manifest`.
 > **Требуют `bs serve`**: `triage_domain`, `find_working_strategy`,
-> `generate_router_config`, `get_service_status`, `stop_campaign`, `dbg_probe_raw`,
+> `generate_router_config`, `get_service_status`, `set_debug_mode`, `stop_campaign`, `dbg_probe_raw`,
 > `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`.
 
 > **Скилл для LLM-агентов**: [docs/mcp-skill.md](mcp-skill.md) — шпаргалка
@@ -174,10 +176,10 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 Запросы: `{"action": "triage", "domain": "..."}` (или legacy `{"cmd": ...}`).
 
 Actions: `probe` `status` `triage` `find_strategy` `generate_config`
-`dbg_probe` `dbg_inspect_lua` `dbg_dump_pool` `get_telemetry` `stop`.
+`dbg_probe` `dbg_inspect_lua` `dbg_dump_pool` `get_telemetry` `set_debug` `log_tail` `stop`.
 
-Инструменты `get_series_status`, `query_strategies`, `get_presets` читают
-состояние напрямую из `run.lock` / `state.db` / `presets/` и **не требуют** ни
+Инструменты `get_series_status`, `get_log_tail`, `query_strategies`, `get_presets` читают
+состояние напрямую из `run.lock` / `state.db` / `presets/` / лог-файлов и **не требуют** ни
 демона, ни сокета (работают во время активной серии A→F).
 
 ---

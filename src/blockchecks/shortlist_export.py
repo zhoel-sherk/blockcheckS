@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import time
@@ -13,6 +14,9 @@ from blockchecks.engine.domain_loader import DEFAULT_DOMAINS_FILE, read_domain_l
 from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_SHORTLIST_DIR, expand_path
 from blockchecks.engine.store import RunStateStore, open_run_store
 from blockchecks.nfconf import collect_export_strategies
+
+log = logging.getLogger(__name__)
+
 
 SCHEMA = "blockchecks.shortlist/v1"
 
@@ -180,7 +184,9 @@ def main(argv: list[str] | None = None) -> int:
             include_common=args.common,
         )
     )
-    print(f"Wrote {output} ({len(payload.get('tcp', []))} tcp, schema={payload['schema']})")
+    log.info(
+        "%s", f"Wrote {output} ({len(payload.get('tcp', []))} tcp, schema={payload['schema']})"
+    )
     return 0
 
 

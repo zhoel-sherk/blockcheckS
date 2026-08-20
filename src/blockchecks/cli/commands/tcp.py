@@ -1,6 +1,7 @@
 """Synchronous TCP strategy test."""
 
 import asyncio
+import logging
 
 from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
@@ -9,6 +10,8 @@ from blockchecks.engine.run_deadline import RunDeadline, parse_time_limit_second
 from blockchecks.engine.strategy_loader import StrategyLoader
 from blockchecks.engine.test_runner import TestRunner
 from blockchecks.terminal import error
+
+log = logging.getLogger(__name__)
 
 
 def cmd_tcp(args):
@@ -55,8 +58,8 @@ def cmd_tcp(args):
     if not strategies:
         error("no strategies loaded")
         return 1
-    print("\n  blockcheckS — TCP TLS test")
-    print(f"  Domain: {args.domain}  Items: {len(strategies)}  Timeout: {args.timeout}s\n")
+    log.info("\n  blockcheckS — TCP TLS test")
+    log.info("%s", f"  Domain: {args.domain}  Items: {len(strategies)}  Timeout: {args.timeout}s\n")
     from blockchecks.data_block.provider import provider_name
 
     provider_name(allow_detect=True)
@@ -75,7 +78,7 @@ def cmd_tcp(args):
     if budget_sec is not None:
         deadline = RunDeadline(asyncio.Event(), budget_sec=budget_sec)
         deadline.arm()
-        print(f"  Time limit: {deadline.budget_label()}")
+        log.info("%s", f"  Time limit: {deadline.budget_label()}")
 
     repeats, parallel_repeats, repeats_mode, quick_break = repeats_from_args(args)
 
@@ -102,12 +105,14 @@ def cmd_tcp(args):
             qnum=args.qnum,
             deadline=deadline,
         )
-    print(
-        f"\n  Results: {report.passed}/{len(report.results)} passed ({report.total_time_sec:.1f}s)"
+    log.info(
+        "%s",
+        f"\n  Results: {report.passed}/{len(report.results)} passed ({report.total_time_sec:.1f}s)",
     )
     if report.stopped_reason == "time_limit" and deadline:
-        print(
+        log.info(
+            "%s",
             f"  Stopped: time limit ({deadline.budget_label()}) "
-            f"after {len(report.results)}/{total} strategies"
+            f"after {len(report.results)}/{total} strategies",
         )
     return 0 if report.passed > 0 else 1

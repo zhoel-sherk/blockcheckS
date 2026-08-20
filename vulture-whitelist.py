@@ -121,8 +121,6 @@ _.time_total_ms  # unused attribute (src/blockchecks/engine/test_runner.py:201)
 _.time_total_ms  # unused attribute (src/blockchecks/engine/test_runner.py:232)
 _.time_total_ms  # unused attribute (src/blockchecks/engine/test_runner.py:338)
 _.to_context  # unused method (src/blockchecks/engine/triage.py:116)
-debug_requested  # unused variable (src/blockchecks/main_phases.py:121)
-_.debug_requested  # unused attribute (src/blockchecks/main_phases.py:466)
 l3_status  # unused variable (src/blockchecks/mcp/server.py:57)
 quic_blocked  # unused variable (src/blockchecks/mcp/server.py:60)
 dns_tampered  # unused variable (src/blockchecks/mcp/server.py:61)
@@ -170,8 +168,11 @@ get_zapret2_config  # MCP tool (LAYER C)
 list_zapret2_blobs  # MCP tool (LAYER C)
 get_ipset_status  # MCP tool (LAYER C)
 probe_strategy  # MCP tool (LAYER C)
+set_debug_mode  # MCP tool (LAYER A)
+get_log_tail  # MCP tool (LAYER A)
 C  # terminal color namespace
 heading  # terminal helper
+eprint  # terminal helper
 time_limit_h  # RunSpec dataclass field
 time_limit_m  # RunSpec dataclass field
 raw_args  # RunSpec dataclass field

@@ -1,10 +1,13 @@
 """Load strategies from custom lists, config files, and a user matrix file."""
 
+import logging
 import os
 import sys
 
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
 from blockchecks.engine.store import RunStateStore
+
+log = logging.getLogger(__name__)
 
 
 class CustomListGenerator(StrategyGenerator):
@@ -118,7 +121,7 @@ class UserMatrixGenerator(StrategyGenerator):
             lines = sys.stdin.read().splitlines()
         else:
             if not os.path.exists(self.filepath):
-                print(f"[matrix] User matrix file not found: {self.filepath}")
+                log.info("%s", f"[matrix] User matrix file not found: {self.filepath}")
                 return []
             with open(self.filepath) as f:
                 lines = f.read().splitlines()

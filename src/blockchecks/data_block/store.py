@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import time
@@ -10,6 +11,9 @@ from pathlib import Path
 import aiosqlite
 
 from blockchecks.engine.paths import reclaim_sudo_ownership
+
+log = logging.getLogger(__name__)
+
 
 # Records older than this are re-validated via DoH instead of trusted from cache.
 DATA_BLOCK_DNS_TTL = float(os.environ.get("BLOCKCHECKS_DATA_BLOCK_DNS_TTL", str(7 * 86400)))
@@ -363,14 +367,14 @@ class ProviderStore:
         ):
             r = subprocess.run(prefix + cmd, cwd=repo, capture_output=True, text=True, timeout=30)
             if r.returncode != 0 and "nothing to commit" not in r.stdout + r.stderr:
-                print(f"  [data_block] git {cmd[1]} failed: {r.stderr[:200]}")
+                log.info("%s", f"  [data_block] git {cmd[1]} failed: {r.stderr[:200]}")
                 return False
         if push:
             r = subprocess.run(
                 prefix + ["git", "push"], cwd=repo, capture_output=True, text=True, timeout=60
             )
             if r.returncode != 0:
-                print(f"  WARNING: data_block push failed (creds?): {r.stderr[:200]}")
+                log.warning("%s", f"  WARNING: data_block push failed (creds?): {r.stderr[:200]}")
                 return False
         return True
 

@@ -156,6 +156,8 @@ def test_http_telemetry_endpoint(monkeypatch):
             assert code == 200
             assert resp.get("status") == "ok"
             assert "pool_size" in resp
+            assert "debug" in resp
+            assert "python_level" in resp["debug"]
         finally:
             await _stop_http_server(server, task)
 
@@ -329,5 +331,66 @@ def test_http_results_endpoint_reads_run_db(temp_db):
         names = [s["strategy"] for s in resp["tcp"]]
         assert "fake:blob=stun:repeats=6" in names
         assert "fake:blob=max_ru:repeats=6" in names
+
+    asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_http_logs_endpoint_tails_python_log(monkeypatch, tmp_path):
+    async def run():
+        from blockchecks.engine import log as logmod
+
+        log_file = tmp_path / "blockchecks.log"
+        log_file.write_text("line-a\nline-b\n")
+        monkeypatch.setattr(logmod, "python_log_path", lambda: log_file)
+        server, port, task = await _start_http_server(monkeypatch)
+        try:
+            client = _HttpProbe(port, token=HTTP_TOKEN)
+            code, resp = await client.request("GET", "/api/logs?source=python&tail=10&offset=0")
+            assert code == 200
+            assert resp.get("status") == "ok"
+            assert resp.get("ok") is True
+            data = resp.get("data") or resp
+            assert data["lines"] == ["line-a", "line-b"]
+            assert data["source"] == "python"
+            assert data["truncated"] is False
+        finally:
+            await _stop_http_server(server, task)
+
+    asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_http_logs_rejects_unknown_source(monkeypatch):
+    async def run():
+        server, port, task = await _start_http_server(monkeypatch)
+        try:
+            client = _HttpProbe(port, token=HTTP_TOKEN)
+            code, resp = await client.request("GET", "/api/logs?source=../../etc/passwd")
+            assert code == 200
+            assert resp.get("ok") is False
+            assert "invalid source" in (resp.get("error") or "")
+        finally:
+            await _stop_http_server(server, task)
+
+    asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_http_set_debug_post(monkeypatch):
+    async def run():
+        from blockchecks.engine.log import set_debug_mode
+
+        server, port, task = await _start_http_server(monkeypatch)
+        try:
+            client = _HttpProbe(port, token=HTTP_TOKEN)
+            code, resp = await client.request("POST", "/api/set-debug", {"enabled": True})
+            assert code == 200
+            assert resp.get("ok") is True
+            data = resp.get("data") or resp
+            assert data.get("enabled") is True
+        finally:
+            set_debug_mode(False)
+            await _stop_http_server(server, task)
 
     asyncio.run(run())

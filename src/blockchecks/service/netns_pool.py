@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import hashlib
+import logging
 import os
 import re
 import signal
@@ -14,6 +15,9 @@ import subprocess
 import threading
 import time
 import weakref
+
+log = logging.getLogger(__name__)
+
 
 BASE_CIDR = 20  # networks: 10.200.<n>.0/30 for pool member n
 _NETNS_BASE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -261,7 +265,7 @@ class NetNsPool:
                         pass
                 self._names.clear()
                 raise
-        print(f"[netns] Pool created: {self.size} namespaces")
+        log.info("%s", f"[netns] Pool created: {self.size} namespaces")
 
     async def seed(self) -> None:
         """Put created ns names onto the asyncio.Queue (event-loop only)."""
@@ -290,7 +294,7 @@ class NetNsPool:
         for name in names_to_destroy:
             self._destroy_one(name)
         if names_to_destroy:
-            print("[netns] Pool destroyed")
+            log.info("[netns] Pool destroyed")
 
     async def acquire(self) -> str:
         """Get a free netns from the pool. Blocks if all busy."""

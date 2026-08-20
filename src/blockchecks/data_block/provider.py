@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import urllib.error
@@ -10,6 +11,9 @@ import urllib.request
 from pathlib import Path
 
 from blockchecks.engine.paths import CONFIG_FILE
+
+log = logging.getLogger(__name__)
+
 
 DEFAULT_PROVIDER = "default"
 
@@ -134,14 +138,14 @@ def _ensure_provider_config(allow_detect: bool = True) -> str:
         return DEFAULT_PROVIDER
     org = _query_ipinfo()
     if not org:
-        print(
+        log.warning(
             "  WARNING: could not detect provider via ipinfo.io; "
             "data_block sync disabled for this run"
         )
         return DEFAULT_PROVIDER
     slug = normalize_provider_name(org)
     _write_provider_to_cfg(slug)
-    print(f"  [data_block] provider detected: {org} -> {slug}")
+    log.info("%s", f"  [data_block] provider detected: {org} -> {slug}")
     return slug
 
 

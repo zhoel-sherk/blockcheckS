@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from typing import TYPE_CHECKING
 
 from blockchecks.engine.byedpi_matrix_generator import ByedpiMatrixGenerator
@@ -30,6 +31,8 @@ from blockchecks.engine.store import RunStateStore
 
 if TYPE_CHECKING:
     from blockchecks.engine.triage import TriageProfile
+
+log = logging.getLogger(__name__)
 
 
 async def _call_generate(gen: StrategyGenerator, **kwargs):
@@ -123,7 +126,7 @@ class MatrixGenerator:
                 triage=triage,
             )
             dt = _time.perf_counter() - t1
-            print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
+            log.info("%s", f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
         return prune_items_by_triage(_dedupe(all_items, max_count), triage, scan_level=scan_level)
@@ -202,7 +205,7 @@ class MatrixGenerator:
                 triage=triage,
             )
             dt = _time.perf_counter() - t1
-            print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
+            log.info("%s", f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
         for item in all_items:
@@ -249,7 +252,7 @@ class MatrixGenerator:
                 triage=triage,
             )
             dt = _time.perf_counter() - t1
-            print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
+            log.info("%s", f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
         for item in all_items:
