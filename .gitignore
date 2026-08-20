@@ -10,6 +10,7 @@ build/
 .vscode/
 .idea/
 .DS_Store
+.cursor/
 .cursor-audit/
 
 # Project
