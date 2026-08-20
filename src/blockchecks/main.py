@@ -85,7 +85,7 @@ async def _run_full_campaign(args) -> int:
     ctx.fp = build_matrix_fingerprint(ctx)
 
     ctx.runner = build_async_runner(ctx)
-    arm_stop_handlers(ctx)
+    restore_signals = arm_stop_handlers(ctx)
     await arm_run_deadline(ctx)
 
     await ctx.runner.start()
@@ -94,12 +94,13 @@ async def _run_full_campaign(args) -> int:
 
         if ctx.stop.is_set():
             print_optional_phases_skip(ctx)
-
-        await run_http_phase(ctx)
-        voice_ip, voice_port = await discover_voice_endpoint(ctx)
-        await run_quic_phase(ctx)
-        await run_pairs_phase(ctx, voice_ip, voice_port)
+        else:
+            await run_http_phase(ctx)
+            voice_ip, voice_port = await discover_voice_endpoint(ctx)
+            await run_quic_phase(ctx)
+            await run_pairs_phase(ctx, voice_ip, voice_port)
     finally:
+        restore_signals()
         await cleanup_runner(ctx)
 
     return await export_and_summarize(ctx)
@@ -132,6 +133,9 @@ def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
     migrate_legacy_state_db(enabled=migrate_on)
     p = build_arg_parser(cfg)
     args = p.parse_args(argv)
+    from blockchecks.cli.profiles import flags_present_in_argv
+
+    args._explicit_cli = flags_present_in_argv(argv if argv is not None else sys.argv[1:])
     finalize_store_args(args, cfg)
     validate_time_limit_args(p, args)
     deps_rc = ensure_system_deps_or_exit(args)

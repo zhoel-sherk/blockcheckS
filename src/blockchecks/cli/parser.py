@@ -909,6 +909,9 @@ def _main_argparse(argv: list[str] | None = None) -> int:
     finally:
         sys.argv = old_argv
 
+    from blockchecks.cli.profiles import flags_present_in_argv
+
+    args._explicit_cli = flags_present_in_argv(argv)
     finalize_store_args(args, user_cfg)
     from blockchecks.engine.run_deadline import validate_time_limit_args
 

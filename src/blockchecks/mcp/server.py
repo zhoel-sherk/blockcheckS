@@ -466,7 +466,7 @@ async def query_strategies(
         try:
             con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
         except sqlite3.Error as err:
-            return {"error": f"cannot open {path}: {err}"}
+            return [{"error": f"cannot open {path}: {err}"}]
         try:
             cur = con.cursor()
             placeholders = ",".join("?" for _ in statuses)
@@ -487,7 +487,7 @@ async def query_strategies(
             cols = ["strategy", "latency_ms", "http_code", "status", "timestamp", "fail_phase"]
             return [dict(zip(cols, r)) for r in rows.fetchall()]
         except sqlite3.Error as err:
-            return {"error": str(err)}
+            return [{"error": str(err)}]
         finally:
             con.close()
 
@@ -506,7 +506,7 @@ async def get_presets(kind: str = "strategies") -> list[dict[str, Any]]:
     if kind not in ("strategies", "domains"):
         raise ValueError(f"Invalid kind '{kind}'. Allowed: strategies, domains")
 
-    base = Path(PROJECT_DIR) / "presets"
+    base = get_manifest_path().parent
     patterns = (
         (
             "strategies",
@@ -548,7 +548,17 @@ async def stop_campaign(wait: float = 30.0) -> dict[str, Any]:
     (action=stop → SIGTERM → flush → export). Requires `bs serve` to be up.
     """
     response = await _send_daemon_request("stop", {}, timeout=min(wait + 5.0, 90.0))
-    return response.get("data", {}) or response
+    data = dict(response.get("data") or {})
+    status = data.get("action_status") or data.get("status") or response.get("status")
+    # Legacy envelope used status="stopping" which mapped to ok=False.
+    if response.get("ok") or status == "stopping":
+        resolved = status or "stopping"
+        return {**data, "ok": True, "status": resolved, "action_status": resolved}
+    return {
+        "ok": False,
+        "error": response.get("error") or "stop failed",
+        "status": status or "error",
+    }
 
 
 def _resolve_db_path(db_path: str | None) -> Path | None:
@@ -732,6 +742,22 @@ def _zapret2_dir() -> Path | None:
     return _ZAPRET2_DIR if _ZAPRET2_DIR.is_dir() else None
 
 
+def _canonical_under(root: Path, path: str) -> Path | None:
+    """Resolve *path* under *root*; reject ``..`` and escapes."""
+    if not path or ".." in Path(path).parts:
+        return None
+    raw = Path(path)
+    candidate = raw if raw.is_absolute() else (root / raw)
+    try:
+        resolved = candidate.resolve()
+        allowed = root.resolve()
+    except OSError:
+        return None
+    if not resolved.is_relative_to(allowed):
+        return None
+    return resolved
+
+
 @mcp.tool()
 async def get_nfqws2_status() -> dict[str, Any]:
     """
@@ -766,11 +792,18 @@ async def get_zapret2_config(path: str | None = None) -> dict[str, Any]:
     root = _zapret2_dir()
     if root is None:
         return {"error": "zapret2 dir not found (set ZAPRET2_ROOT or install /opt/zapret2)"}
-    cfg = Path(path) if path else root / "config"
-    if not cfg.is_file():
-        cfg = root / "config.default"
-    if not cfg.is_file():
-        return {"error": f"no config at {cfg} or {root / 'config.default'}"}
+    if path:
+        cfg = _canonical_under(root, path)
+        if cfg is None:
+            return {"error": "path rejected (must stay under zapret2 dir)"}
+        if not cfg.is_file():
+            return {"error": f"no config at {cfg}"}
+    else:
+        cfg = root / "config"
+        if not cfg.is_file():
+            cfg = root / "config.default"
+        if not cfg.is_file():
+            return {"error": f"no config at {cfg} or {root / 'config.default'}"}
     try:
         text = cfg.read_text(encoding="utf-8", errors="replace")
     except OSError as err:

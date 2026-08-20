@@ -6,6 +6,7 @@ import asyncio
 import os
 import signal
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -469,7 +470,7 @@ def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
     )
 
 
-def arm_stop_handlers(ctx: FullRunContext) -> None:
+def arm_stop_handlers(ctx: FullRunContext) -> Callable[[], None]:
     def _stop(*_a):
         ctx.signal_interrupted = True
         if ctx.deadline and not ctx.deadline.triggered:
@@ -494,17 +495,40 @@ def arm_stop_handlers(ctx: FullRunContext) -> None:
                 flush=True,
             )
 
+    handlers = (
+        (signal.SIGINT, _stop),
+        (signal.SIGTERM, _stop),
+        (signal.SIGUSR1, _debug),
+    )
     try:
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGINT, _stop)
-        loop.add_signal_handler(signal.SIGTERM, _stop)
-        loop.add_signal_handler(signal.SIGUSR1, _debug)
+        for sig, fn in handlers:
+            loop.add_signal_handler(sig, fn)
+
+        def restore_loop() -> None:
+            for sig, _fn in handlers:
+                try:
+                    loop.remove_signal_handler(sig)
+                except (NotImplementedError, RuntimeError, OSError):
+                    pass
+
+        return restore_loop
     except (NotImplementedError, RuntimeError):
-        signal.signal(signal.SIGINT, lambda *_: _stop())
-        try:
-            signal.signal(signal.SIGUSR1, lambda *_: _debug())
-        except (AttributeError, OSError):
-            pass
+        previous: dict[int, Any] = {}
+        for sig, fn in handlers:
+            try:
+                previous[sig] = signal.signal(sig, lambda *_a, _f=fn: _f())
+            except (AttributeError, OSError, ValueError):
+                pass
+
+        def restore_prev() -> None:
+            for sig, old in previous.items():
+                try:
+                    signal.signal(sig, old)
+                except (ValueError, OSError):
+                    pass
+
+        return restore_prev
 
 
 async def arm_run_deadline(ctx: FullRunContext) -> None:
@@ -523,6 +547,24 @@ def print_optional_phases_skip(ctx: FullRunContext) -> None:
         )
     elif ctx.signal_interrupted:
         print(f"\n  {YELLOW}Stopped — skipping optional phases{RESET}")
+
+
+async def _run_in_chunks(
+    items: list,
+    factory,
+    *,
+    chunk: int,
+    stop: asyncio.Event,
+    on_stop: str | None = None,
+) -> None:
+    """Schedule coroutines per chunk so a stop event cannot leak unawaited ones."""
+    n = max(1, chunk)
+    for i in range(0, len(items), n):
+        if stop.is_set():
+            if on_stop:
+                print(on_stop)
+            return
+        await asyncio.gather(*[factory(x) for x in items[i : i + n]])
 
 
 async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
@@ -675,13 +717,14 @@ async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
                     return
             progress.report()
 
-    tasks = [_one_strategy(item) for item in ctx.tcp_items]
-    chunk = max(1, ctx.parallel)
-    for i in range(0, len(tasks), chunk):
-        if ctx.stop.is_set():
-            print(f"  {YELLOW}Stopped by signal{RESET}")
-            break
-        await asyncio.gather(*tasks[i : i + chunk])
+    stop_msg = f"  {YELLOW}Stopped by signal{RESET}"
+    await _run_in_chunks(
+        ctx.tcp_items,
+        _one_strategy,
+        chunk=max(1, ctx.parallel),
+        stop=ctx.stop,
+        on_stop=stop_msg,
+    )
 
 
 async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> None:
@@ -703,13 +746,13 @@ async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> Non
             progress.passed += 1
         progress.report()
 
-    tasks = [_one(item, domain) for item in ctx.tcp_items for domain in ctx.domains]
-    chunk = 200
-    for i in range(0, len(tasks), chunk):
-        if ctx.stop.is_set():
-            print(f"  {YELLOW}Stopped by signal{RESET}")
-            break
-        await asyncio.gather(*tasks[i : i + chunk])
+    async def _one_pair(pair: tuple[StrategyItem, str]):
+        item, domain = pair
+        await _one(item, domain)
+
+    stop_msg = f"  {YELLOW}Stopped by signal{RESET}"
+    jobs = [(item, domain) for item in ctx.tcp_items for domain in ctx.domains]
+    await _run_in_chunks(jobs, _one_pair, chunk=200, stop=ctx.stop, on_stop=stop_msg)
 
 
 async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress) -> None:
@@ -881,11 +924,12 @@ async def run_http_phase(ctx: FullRunContext) -> None:
             if r.success:
                 http_passed += 1
 
-        http_tasks = [_one_http(item, d) for item in ctx.http_items for d in ctx.domains]
-        for i in range(0, len(http_tasks), 200):
-            if ctx.stop.is_set():
-                break
-            await asyncio.gather(*http_tasks[i : i + 200])
+        async def _one_http_pair(pair: tuple[StrategyItem, str]):
+            item, domain = pair
+            await _one_http(item, domain)
+
+        http_jobs = [(item, d) for item in ctx.http_items for d in ctx.domains]
+        await _run_in_chunks(http_jobs, _one_http_pair, chunk=200, stop=ctx.stop)
         print(
             f"  {GREEN}HTTP done: {http_passed} PASS, {http_skipped} skipped, "
             f"{http_done - http_skipped - http_passed} FAIL/other{RESET}"
@@ -982,11 +1026,12 @@ async def run_quic_phase(ctx: FullRunContext) -> None:
             if r.success:
                 quic_passed += 1
 
-        quic_tasks = [_one_quic(item, d) for item in ctx.quic_items for d in ctx.domains]
-        for i in range(0, len(quic_tasks), 200):
-            if ctx.stop.is_set():
-                break
-            await asyncio.gather(*quic_tasks[i : i + 200])
+        async def _one_quic_pair(pair: tuple[StrategyItem, str]):
+            item, domain = pair
+            await _one_quic(item, domain)
+
+        quic_jobs = [(item, d) for item in ctx.quic_items for d in ctx.domains]
+        await _run_in_chunks(quic_jobs, _one_quic_pair, chunk=200, stop=ctx.stop)
         print(
             f"  {GREEN}QUIC done: {quic_passed} PASS, {quic_skipped} skipped, "
             f"{quic_done - quic_skipped - quic_passed} FAIL/other{RESET}"

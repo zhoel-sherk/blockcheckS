@@ -226,6 +226,8 @@ def _to_namespace(model: BaseModel, **extra: Any) -> argparse.Namespace:
     data = model.model_dump()
     data.update(extra)
     ns = argparse.Namespace(**data)
+    # Fields the user actually passed — apply_profile must not clobber them.
+    ns._explicit_cli = set(model.model_fields_set)
     # CliApp path: argparse.dispatch() calls finalize_store_args() post-parse to
     # fill None db/out_dir from config.toml / XDG defaults. CliApp bypasses
     # dispatch(), so apply it here or bs full/scan/pair would export nowhere.

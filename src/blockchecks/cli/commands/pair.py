@@ -75,7 +75,7 @@ async def _cmd_pair_run(args):
     pairs = []
 
     loop = asyncio.get_running_loop()
-    register_stop_handlers(loop, stop_state, deadline, stop_event)
+    restore_signals = register_stop_handlers(loop, stop_state, deadline, stop_event)
 
     if deadline:
         deadline.arm()
@@ -189,6 +189,7 @@ async def _cmd_pair_run(args):
         print(f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
 
     finally:
+        restore_signals()
         if deadline:
             await deadline.cancel()
         await finalize_db_and_weights(db, save_weights=False)

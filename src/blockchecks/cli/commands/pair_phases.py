@@ -6,6 +6,7 @@ import asyncio
 import glob
 import os
 import signal
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -275,8 +276,8 @@ def register_stop_handlers(
     state: StopHandlerState,
     deadline: RunDeadline | None,
     stop_event: asyncio.Event,
-) -> None:
-    """Register SIGINT/SIGTERM handlers using StopHandlerState."""
+) -> Callable[[], None]:
+    """Register SIGINT/SIGTERM handlers using StopHandlerState; return restore."""
 
     def _request_stop():
         state.request_stop(deadline, stop_event)
@@ -290,17 +291,39 @@ def register_stop_handlers(
             os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = "1"
             print("  [debug] SIGUSR1 — nfqws2 --debug ON on next restart", flush=True)
 
+    handlers = (
+        (signal.SIGINT, _request_stop),
+        (signal.SIGTERM, _request_stop),
+        (signal.SIGUSR1, _toggle_debug),
+    )
+    loop_bound = False
+    previous: dict[int, Any] = {}
+
+    def restore() -> None:
+        if loop_bound:
+            for sig, _fn in handlers:
+                try:
+                    loop.remove_signal_handler(sig)
+                except (NotImplementedError, RuntimeError, OSError):
+                    pass
+            return
+        for sig, old in previous.items():
+            try:
+                signal.signal(sig, old)
+            except (ValueError, OSError):
+                pass
+
     try:
-        loop.add_signal_handler(signal.SIGINT, _request_stop)
-        loop.add_signal_handler(signal.SIGTERM, _request_stop)
-        loop.add_signal_handler(signal.SIGUSR1, _toggle_debug)
+        for sig, fn in handlers:
+            loop.add_signal_handler(sig, fn)
+        loop_bound = True
     except (NotImplementedError, RuntimeError):
-        signal.signal(signal.SIGINT, lambda *_: _request_stop())
-        signal.signal(signal.SIGTERM, lambda *_: _request_stop())
-        try:
-            signal.signal(signal.SIGUSR1, lambda *_: _toggle_debug())
-        except (AttributeError, OSError):
-            pass
+        for sig, fn in handlers:
+            try:
+                previous[sig] = signal.signal(sig, lambda *_a, _f=fn: _f())
+            except (AttributeError, OSError, ValueError):
+                pass
+    return restore
 
 
 async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | None]:
@@ -646,9 +669,11 @@ async def run_adaptive_pair_phase(
     )
 
     async def _resume_job(job):
-        return bool(
-            getattr(args, "resume", False) and await db.has_tcp_result(job.item.label, job.domain)
-        )
+        return (job.item.label, job.domain) in completed_tcp
+
+    completed_tcp: set[tuple[str, str]] = set()
+    if getattr(args, "resume", False):
+        completed_tcp = await db.get_completed_tcp_keys()
 
     queue, skipped = await build_adaptive_queue(
         tcp_items,
