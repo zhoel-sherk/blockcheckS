@@ -26,6 +26,20 @@ SSE_HEARTBEAT_SECONDS = 15.0
 HTTP_HEADER_READ_TIMEOUT = 30.0
 
 
+def _triage_fail_phase(t) -> str:
+    from blockchecks.engine.fail_phase import FailPhase
+
+    skip = {FailPhase.UNKNOWN, FailPhase.PASS, None}
+    for phase in (
+        getattr(t, "handshake_phase", None),
+        getattr(t, "stall_phase", None),
+        getattr(t, "l3_phase", None),
+    ):
+        if phase not in skip:
+            return phase.value
+    return "pass"
+
+
 def _authorization_token(authorization: str | None) -> str | None:
     """Parse ``Authorization: Bearer <token>`` -> token or None."""
     if not isinstance(authorization, str):
@@ -137,28 +151,44 @@ class ProbeServer:
         if not domain:
             return self._envelope({"status": "error", "error": "triage requires 'domain'"})
         try:
-            from blockchecks.engine.fail_phase import FailPhase
             from blockchecks.engine.family_needs import map_triage_to_generators
+            from blockchecks.engine.family_registry import DEFAULT_FAMILIES
+            from blockchecks.engine.generators.base import StrategyItem
             from blockchecks.engine.preflight import PreflightOptions, run_preflight_async
 
-            report = await run_preflight_async([domain], PreflightOptions())
+            opts = PreflightOptions(skip_diagnostics=False)
+            runner = self.service.runner if self.service.started else None
+            if runner is not None:
+
+                async def probe(strategy: str) -> tuple[bool, str, int]:
+                    item = StrategyItem(label="preflight_diag", strategy=strategy)
+                    r = await runner.test_tcp(item, domain, timeout=min(opts.timeout, 5.0))
+                    return bool(r.success), r.error or "", int(r.http_code or 0)
+
+                opts.fooling_probe_fn = probe
+            report = await run_preflight_async([domain], opts)
             t = report.triage
             data = {
                 "domain": domain,
                 "l3_status": (t.l3_phase.value if t and t.l3_phase else "unknown"),
-                "fail_phase": (
-                    t.handshake_phase.value
-                    if t and t.handshake_phase and t.handshake_phase != FailPhase.PASS
-                    else "pass"
-                ),
+                "fail_phase": _triage_fail_phase(t),
                 "client_hello_len": t.client_hello_len if t else 0,
                 "quic_blocked": bool(t and t.quic_drop),
                 "dns_tampered": bool(t and (t.dns_hijacked or t.dns_sinkhole)),
-                "recommended_generators": map_triage_to_generators(t) if t else ["standard_fast"],
+                "recommended_generators": map_triage_to_generators(t) if t else list(DEFAULT_FAMILIES),
                 "unbypassable_l3": bool(t and t.unbypassable_l3),
                 "stall_phase": (t.stall_phase.value if t and t.stall_phase else None),
                 "rst_at_sni": bool(t and t.rst_at_sni),
                 "udp_blocked": bool(t and t.udp_blocked),
+                "voice_ok": bool(t and t.voice_ok),
+                "viable_foolings": list(t.viable_foolings) if t else [],
+                "viable_blobs": list(t.viable_blobs) if t else [],
+                "split_mode": t.split_mode if t else "",
+                "server_hops": t.server_hops if t else None,
+                "dpi_hops": t.dpi_hops if t else None,
+                "autottl_delta": t.autottl_delta if t else None,
+                "ech_blocked": t.ech_blocked if t else None,
+                "http_blocked": t.http_blocked if t else None,
             }
             return self._envelope({"status": "ok", "results": data, **data})
         except Exception as err:

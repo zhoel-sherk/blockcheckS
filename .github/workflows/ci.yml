@@ -46,12 +46,12 @@ jobs:
               tests/unit/test_strategy_loader.py tests/unit/test_tcp_redirect.py
               tests/unit/test_tcp_fanout.py tests/unit/test_wave4_perf.py
               tests/unit/test_blob_aliases.py tests/unit/test_family_needs.py
-              tests/unit/test_fail_phase.py tests/unit/test_todo_debt_w2w3.py
+              tests/unit/test_family_registry.py tests/unit/test_fail_phase.py tests/unit/test_todo_debt_w2w3.py
               tests/unit/test_wave_c.py tests/unit/test_wave3_audit.py
               tests/unit/test_wave_a_regressions.py tests/unit/test_full_export.py
               tests/unit/test_wave1_followups.py tests/unit/test_architecture.py
               tests/unit/test_conf_builder.py tests/unit/test_settle_profile.py
-              tests/unit/test_bench_settle.py
+              tests/unit/test_bench_settle.py tests/unit/test_blob_filter.py
               tests/unit/test_static_validator.py tests/unit/test_static_validator_fuzzing.py
           - name: "S2 Checkers & Service"
             files: >-
@@ -62,6 +62,7 @@ jobs:
               tests/unit/test_in_ns_workers.py tests/unit/test_ip_block.py
               tests/unit/test_ip_pin.py tests/unit/test_l3_triage.py
               tests/unit/test_port_block.py tests/unit/test_preflight.py
+              tests/unit/test_fooling_probe.py tests/unit/test_ttl_probe.py
               tests/unit/test_quic_http3.py tests/unit/test_quic_raw.py
               tests/unit/test_stream_triage.py tests/unit/test_tcp_tls.py
               tests/unit/test_triage.py tests/unit/test_udp_voice_probes.py

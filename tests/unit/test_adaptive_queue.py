@@ -129,6 +129,44 @@ def test_scan_weights_has_no_cluster_boost():
     assert w.trait.get("r6") > 0
 
 
+def test_scan_weights_seed_from_triage():
+    from blockchecks.engine.triage import TriageProfile
+
+    w = ScanWeights()
+    w.seed_from_triage(
+        TriageProfile(
+            silent_drop_after_sni=True,
+            viable_foolings=["tcp_ts=-1000"],
+            viable_blobs=["stun"],
+        )
+    )
+    assert w.family.get("fake", 1.0) >= 2.0
+    assert w.trait.get("fool:badsum") == 0.1
+    assert w.trait.get("fool:tcp_ts", 0) > 0
+    assert w.blob.get("stun", 0) > 0
+
+
+def test_scan_weights_seed_pos_and_blob_aliases():
+    from blockchecks.engine.triage import TriageProfile
+
+    w = ScanWeights()
+    w.seed_from_triage(
+        TriageProfile(
+            viable_blobs=["tls_clienthello"],
+            split_mode="sni_marker",
+        )
+    )
+    assert w.trait.get("pos:sniext+1", 0) > 0
+    assert w.blob.get("google", 0) > 0
+    assert w.blob.get("tls_clienthello", 0) > 0
+    w2 = ScanWeights()
+    w2.seed_from_triage(TriageProfile(split_mode="first_byte"))
+    assert w2.trait.get("pos:1", 0) > 0
+    w3 = ScanWeights()
+    w3.seed_from_triage(TriageProfile(split_mode="seqovl"))
+    assert w3.trait.get("fool:seqovl", 0) > 0
+
+
 @pytest.mark.asyncio
 async def test_filter_resume_pure_check():
     """filter_resume stays I/O-free — the caller supplies the check callback."""

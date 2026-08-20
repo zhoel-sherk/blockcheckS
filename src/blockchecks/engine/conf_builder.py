@@ -86,6 +86,8 @@ def load_custom_lua_manifest() -> dict[str, dict[str, Any]]:
                 "included": list(entry.get("included") or []),
                 "excluded": list(entry.get("excluded") or []),
                 "description": str(entry.get("description") or ""),
+                "requires_triage": list(entry.get("requires_triage") or []),
+                "blob_classes": list(entry.get("blob_classes") or []),
             }
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         pass

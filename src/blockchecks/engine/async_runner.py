@@ -108,12 +108,13 @@ class AsyncTestRunner:
         bridge_batch: int = 500,
         lua_bridge_compare: bool = False,
         lua_extra: list[str] | None = None,
+        netns_base: str | None = None,
     ):
         from blockchecks.engine.config import NETNS_BASE
 
         self.pool = NetNsPool(
             size=pool_size,
-            base=f"{NETNS_BASE}-{os.getpid() % 10000:04d}",
+            base=netns_base or f"{NETNS_BASE}-{os.getpid() % 10000:04d}",
         )
         self.semaphore = asyncio.Semaphore(pool_size)
         self.db = db

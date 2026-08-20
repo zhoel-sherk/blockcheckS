@@ -146,6 +146,14 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
             updated_at TEXT NOT NULL DEFAULT ''
         )"""
     )
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS triage_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            domain TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT ''
+        )"""
+    )
     await db.commit()
     # Query indexes (IF NOT EXISTS for upgrades from 1.0.x)
     await db.executescript(

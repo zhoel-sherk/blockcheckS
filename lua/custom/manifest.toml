@@ -35,6 +35,8 @@ included = [
   "tls_mod",
   "sni",
 ]
+requires_triage = ["silent_drop", "rst_at_sni"]
+blob_classes = ["stun", "tls_clienthello"]
 # Не имеет смысла с dupfake: позиционные/сегментирующие десинк-параметры
 # и окно/сегменты работают только со stock-ядрами split-семейств.
 excluded = [

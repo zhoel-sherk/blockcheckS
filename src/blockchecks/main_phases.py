@@ -51,6 +51,7 @@ from blockchecks.engine.store import (
     open_run_store,
 )
 from blockchecks.engine.tcp_fanout import fanout_allowed, fanout_batches
+from blockchecks.engine.triage import disable_ech_from
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
 
 
@@ -77,6 +78,21 @@ def split_sources(value: str) -> list[str]:
     return [s for s in value.split(",") if s]
 
 
+def _lua_extra_for(args: Any, triage: Any) -> list[str]:
+    """Merge CLI ``--lua-extra`` with custom Lua files activated by triage."""
+    extra = list(getattr(args, "lua_extra", None) or [])
+    if triage is None:
+        return extra
+    try:
+        from blockchecks.engine.blob_filter import lua_files_for_triage
+        from blockchecks.engine.config import LUA_CUSTOM_DIR
+
+        paths = [os.path.join(LUA_CUSTOM_DIR, name) for name in lua_files_for_triage(triage)]
+        return list(dict.fromkeys(extra + paths))
+    except Exception:
+        return extra
+
+
 @dataclass
 class FullRunContext:
     args: Any
@@ -97,6 +113,7 @@ class FullRunContext:
     parallel: int
     steps: int
     spec: RunSpec = field(default_factory=RunSpec)
+    triage: Any = None
     tcp_items: list[StrategyItem] = field(default_factory=list)
     udp_items: list[StrategyItem] = field(default_factory=list)
     quic_items: list[StrategyItem] = field(default_factory=list)
@@ -216,6 +233,10 @@ async def run_preflight_filter(
     if preflight.exit_code:
         print(f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")
         return domains, primary, preflight.exit_code
+    from blockchecks.engine.triage import TriageProfile
+
+    t = preflight.triage
+    args.triage = t if isinstance(t, TriageProfile) else None
     if preflight.skip_domains:
         skipped = sorted(preflight.skip_domains)
         print(f"  {YELLOW}Prolog skip: {', '.join(skipped)}{RESET}")
@@ -265,6 +286,7 @@ def build_full_run_context(
         parallel_repeats=parallel_repeats,
         repeats_mode=repeats_mode,
         quick_break=quick_break,
+        triage=getattr(args, "triage", None),
     )
 
 
@@ -298,6 +320,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             max_count=ctx.max_n,
             state_db=ctx.db,
             protocol=args.protocol,
+            triage=ctx.triage,
         )
     if not args.tcp_only:
         ctx.udp_items = await gen.generate_udp(
@@ -306,6 +329,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             scan_level=ctx.scan_level,
             max_count=max(50, ctx.max_n // 20),
             state_db=ctx.db,
+            triage=ctx.triage,
         )
     if not args.no_quic and not args.tcp_only:
         ctx.quic_items = await gen.generate_quic(
@@ -314,6 +338,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             scan_level=ctx.scan_level,
             max_count=max(30, ctx.max_n // 50) if ctx.max_n else 50,
             state_db=ctx.db,
+            triage=ctx.triage,
         )
     if not getattr(args, "no_http", False):
         ctx.http_items = await gen.generate_http(
@@ -322,6 +347,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             scan_level=ctx.scan_level,
             max_count=max(30, ctx.max_n // 20) if ctx.max_n else 50,
             state_db=ctx.db,
+            triage=ctx.triage,
         )
 
     print(
@@ -438,7 +464,8 @@ def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
         lua_bridge=resolve_probe_backend(args) == "lua_bridge",
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
         lua_bridge_compare=bool(getattr(args, "lua_bridge_compare", False)),
-        lua_extra=list(getattr(args, "lua_extra", None) or []),
+        lua_extra=_lua_extra_for(args, getattr(ctx, "triage", None)),
+        disable_ech=disable_ech_from(args, getattr(ctx, "triage", None)),
     )
 
 
@@ -527,6 +554,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         load_weights=not getattr(args, "no_adaptive_weights", False),
         resume_check=_resume_job if args.resume else None,
         provider_store=provider_store,
+        triage=ctx.triage,
     )
     progress.done = skipped
     progress.report()
@@ -544,7 +572,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
             timeout=args.timeout,
             curl_parallel=ctx.curl_parallel,
             protocol=args.protocol,
-            disable_ech=bool(getattr(args, "disable_ech", False)),
+            disable_ech=disable_ech_from(args, getattr(ctx, "triage", None)),
             stop_event=ctx.stop,
             on_progress=_progress,
             lua_bridge=resolve_probe_backend(args) == "lua_bridge",

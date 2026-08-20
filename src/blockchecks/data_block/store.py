@@ -317,6 +317,34 @@ class ProviderStore:
         reclaim_sudo_ownership(self.best_config)
         return self.best_config
 
+    # ── triage.toml ───────────────────────────────────────
+
+    @property
+    def triage_file(self) -> Path:
+        return self._dir / "triage.toml"
+
+    def save_triage(self, profile, *, primary_domain: str = "") -> Path:
+        """Write ISP triage prior next to best_config.conf."""
+        text = _dump_triage_toml(profile, primary_domain=primary_domain)
+        self.triage_file.write_text(text, encoding="utf-8")
+        reclaim_sudo_ownership(self.triage_file)
+        return self.triage_file
+
+    def load_triage(self):
+        """Load ``triage.toml`` if present; ``None`` when missing/invalid."""
+        path = self.triage_file
+        if not path.is_file():
+            return None
+        try:
+            import tomllib
+
+            raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        from blockchecks.engine.triage import TriageProfile
+
+        return TriageProfile.from_dict(_flatten_triage_toml(raw))
+
     # ── sync (opt-in) ─────────────────────────────────────
 
     def sync_commit(self, *, push: bool = False) -> bool:
@@ -350,6 +378,94 @@ class ProviderStore:
                 print(f"  WARNING: data_block push failed (creds?): {r.stderr[:200]}")
                 return False
         return True
+
+
+def _toml_str(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _toml_list(values: list[str]) -> str:
+    return "[" + ", ".join(_toml_str(v) for v in values) + "]"
+
+
+def _toml_bool(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def _flag_lines(d: dict) -> list[str]:
+    extra = [
+        *(
+            [f"ech_blocked = {_toml_bool(bool(d.get('ech_blocked')))}"]
+            if d.get("ech_blocked") is not None
+            else []
+        ),
+        *(
+            [f"http_blocked = {_toml_bool(bool(d.get('http_blocked')))}"]
+            if d.get("http_blocked") is not None
+            else []
+        ),
+    ]
+    return [
+        f"silent_drop_after_sni = {_toml_bool(bool(d.get('silent_drop_after_sni')))}",
+        f"rst_at_sni = {_toml_bool(bool(d.get('rst_at_sni')))}",
+        f"voice_ok = {_toml_bool(bool(d.get('voice_ok')))}",
+        f"udp_blocked = {_toml_bool(bool(d.get('udp_blocked')))}",
+        f"dns_hijacked = {_toml_bool(bool(d.get('dns_hijacked')))}",
+        f"dns_sinkhole = {_toml_bool(bool(d.get('dns_sinkhole')))}",
+        *extra,
+    ]
+
+
+def _hop_lines(d: dict) -> list[str]:
+    return [
+        f"{key} = {int(d[key])}"
+        for key in ("server_hops", "dpi_hops", "autottl_delta")
+        if d.get(key) is not None
+    ]
+
+
+def _dump_triage_toml(profile, *, primary_domain: str = "") -> str:
+    d = profile.to_dict()
+    notes = ["send:repeats=6 → SSL 35 on L4-checksum-normalizing DPI"]
+    hops = _hop_lines(d)
+    return "\n".join(
+        [
+            "version = 1",
+            f"updated_at = {_toml_str(_now())}",
+            f"primary_domain = {_toml_str(primary_domain or '')}",
+            "",
+            "[flags]",
+            *_flag_lines(d),
+            "",
+            "[hops]",
+            *(hops or ["# hops unknown"]),
+            "",
+            "[viable]",
+            f"foolings = {_toml_list(list(d.get('viable_foolings') or []))}",
+            f"blobs = {_toml_list(list(d.get('viable_blobs') or []))}",
+            f"split_mode = {_toml_str(str(d.get('split_mode') or ''))}",
+            "",
+            "[dead]",
+            f"foolings = {_toml_list(list(d.get('dead_foolings') or ['badsum', 'send']))}",
+            f"notes = {_toml_list(notes)}",
+            "",
+        ]
+    )
+
+
+def _flatten_triage_toml(raw: dict) -> dict:
+    flags = dict(raw.get("flags") or {})
+    hops = dict(raw.get("hops") or {})
+    viable = dict(raw.get("viable") or {})
+    dead = dict(raw.get("dead") or {})
+    return {
+        **flags,
+        **hops,
+        "viable_foolings": list(viable.get("foolings") or []),
+        "viable_blobs": list(viable.get("blobs") or []),
+        "split_mode": str(viable.get("split_mode") or ""),
+        "dead_foolings": list(dead.get("foolings") or []),
+    }
 
 
 def write_hosts_file(

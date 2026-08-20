@@ -39,6 +39,7 @@ async def build_adaptive_queue(
     load_weights: bool = True,
     resume_check: ResumeCb | None = None,
     provider_store: Any = None,
+    triage: Any = None,
 ) -> tuple[AdaptiveJobQueue, int]:
     """Create queue, optionally loading persisted weights and applying resume skip."""
     weights = ScanWeights()
@@ -49,6 +50,9 @@ async def build_adaptive_queue(
 
     if provider_store is not None:
         await _apply_provider_weights(provider_store, weights, domains)
+
+    if triage is not None:
+        weights.seed_from_triage(triage)
 
     queue = AdaptiveJobQueue.build(items, domains, weights=weights, epsilon=epsilon)
     skipped = 0

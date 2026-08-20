@@ -51,6 +51,13 @@ async def fake_daemon(tmp_path, monkeypatch):
                             "quic_blocked": True,
                             "dns_tampered": False,
                             "recommended_generators": ["quic_fake", "quic_ipfrag"],
+                            "voice_ok": True,
+                            "udp_blocked": False,
+                            "server_hops": 12,
+                            "dpi_hops": 3,
+                            "autottl_delta": 3,
+                            "ech_blocked": False,
+                            "http_blocked": False,
                         }
                     )
                 )
@@ -137,6 +144,21 @@ async def test_triage_domain(fake_daemon):
     assert result.l3_status == "syn_ack"
     assert result.quic_blocked is True
     assert result.recommended_generators == ["quic_fake", "quic_ipfrag"]
+    assert result.voice_ok is True
+    assert result.udp_blocked is False
+    assert result.server_hops == 12
+    assert result.dpi_hops == 3
+    assert result.autottl_delta == 3
+    assert result.ech_blocked is False
+    assert result.http_blocked is False
+
+
+async def test_triage_domain_timeout_120(monkeypatch):
+    import inspect
+
+    from blockchecks.mcp.server import triage_domain
+
+    assert "timeout=120" in inspect.getsource(triage_domain)
 
 
 async def test_find_working_strategy(fake_daemon):

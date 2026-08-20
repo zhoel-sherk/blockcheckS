@@ -122,9 +122,10 @@ def test_run_family_gates_stop_event():
 
 def test_map_triage_to_generators_empty_profile_falls_back_standard():
     from blockchecks.engine.family_needs import map_triage_to_generators
+    from blockchecks.engine.family_registry import DEFAULT_FAMILIES
     from blockchecks.engine.triage import TriageProfile
 
-    assert map_triage_to_generators(TriageProfile()) == ["standard_fast"]
+    assert map_triage_to_generators(TriageProfile()) == list(DEFAULT_FAMILIES)
 
 
 def test_map_triage_to_generators_stall_phase():
@@ -133,7 +134,7 @@ def test_map_triage_to_generators_stall_phase():
     from blockchecks.engine.triage import TriageProfile
 
     result = map_triage_to_generators(TriageProfile(stall_phase=FailPhase.DATA_STALL_16K))
-    assert result == ["wssize", "wsize"]
+    assert result == ["wssize"]
 
 
 def test_map_triage_to_generators_rst_at_sni():
@@ -141,7 +142,7 @@ def test_map_triage_to_generators_rst_at_sni():
     from blockchecks.engine.triage import TriageProfile
 
     result = map_triage_to_generators(TriageProfile(rst_at_sni=True))
-    assert result == ["split", "multisplit", "fake", "fakedsplit"]
+    assert result == ["multisplit", "fakedsplit", "multidisorder"]
 
 
 def test_map_triage_to_generators_quic_drop():
@@ -165,11 +166,9 @@ def test_map_triage_to_generators_combined_deduped():
     result = map_triage_to_generators(profile)
     assert result == [
         "wssize",
-        "wsize",
-        "split",
         "multisplit",
-        "fake",
         "fakedsplit",
+        "multidisorder",
         "quic_fake",
         "quic_ipfrag",
     ]
@@ -179,7 +178,8 @@ def test_map_triage_to_generators_combined_deduped():
 def test_map_triage_to_generators_unknown_stall_ignored():
     from blockchecks.engine.fail_phase import FailPhase
     from blockchecks.engine.family_needs import map_triage_to_generators
+    from blockchecks.engine.family_registry import DEFAULT_FAMILIES
     from blockchecks.engine.triage import TriageProfile
 
     result = map_triage_to_generators(TriageProfile(stall_phase=FailPhase.UNKNOWN))
-    assert result == ["standard_fast"]
+    assert result == list(DEFAULT_FAMILIES)

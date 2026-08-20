@@ -319,3 +319,33 @@ def test_query_ipinfo_error(monkeypatch):
 
     monkeypatch.setattr(prov.urllib.request, "urlopen", boom)
     assert prov._query_ipinfo() is None
+
+
+@pytest.mark.unit
+def test_triage_toml_roundtrip(store: ProviderStore):
+    from blockchecks.engine.triage import TriageProfile
+
+    src = TriageProfile(
+        silent_drop_after_sni=True,
+        voice_ok=True,
+        ech_blocked=False,
+        viable_foolings=["tcp_ts=-1000"],
+        viable_blobs=["stun", "tls_clienthello"],
+        split_mode="sni_marker",
+        server_hops=12,
+        dpi_hops=3,
+        autottl_delta=3,
+        dead_foolings=["badsum", "send"],
+    )
+    path = store.save_triage(src, primary_domain="youtube.com")
+    assert path.name == "triage.toml"
+    text = path.read_text(encoding="utf-8")
+    assert "null" not in text
+    loaded = store.load_triage()
+    assert loaded is not None
+    assert loaded.silent_drop_after_sni is True
+    assert loaded.voice_ok is True
+    assert loaded.viable_foolings == ["tcp_ts=-1000"]
+    assert loaded.dead_foolings == ["badsum", "send"]
+    assert loaded.server_hops == 12
+    assert loaded.split_mode == "sni_marker"

@@ -133,7 +133,7 @@ while true; do
     --scan-level full --max 200 --udp-bypass \\
     --ip 35.217.48.152 --port 50004 --discover-dns 5 \\
     --parallel 2 --timeout 3 --udp-timeout 3 \\
-    --allow-dns-hijack --resume --data-block-sync \\
+    --allow-dns-hijack --resume --data-block-sync --no-preflight \\
     --skip-prolog --skip-ip-block --skip-port-block --skip-baseline --skip-dns-audit \\
     --db $DB --out-dir $OUT \\
     "\${TF[@]}" || true

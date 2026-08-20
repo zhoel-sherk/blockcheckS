@@ -44,6 +44,7 @@ from blockchecks.engine.run_finalize import (
 )
 from blockchecks.engine.store import fingerprint_mismatch
 from blockchecks.engine.strategy_loader import StrategyLoader
+from blockchecks.engine.triage import disable_ech_from
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
 
 STANDARD_TCP_SOURCES = ("standard", "fake", "hostfake", "faked", "fake_multi", "fake_faked")
@@ -126,6 +127,7 @@ class DnsPreflightResult:
     dns_cache: Any
     dns_audits: list
     exit_code: int | None = None
+    triage: Any = None
 
 
 def _default_pin_path() -> str:
@@ -152,7 +154,9 @@ def _resolve_pin_path(args) -> str:
     )
 
 
-async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPreflightResult:
+async def prepare_dns_and_preflight(
+    args, preset_domains: list[str], store: Any = None
+) -> DnsPreflightResult:
     """DNS + preflight; exit_code set on failure or prolog skip."""
     domains_for_dns = list(
         dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))
@@ -196,16 +200,20 @@ async def prepare_dns_and_preflight(args, preset_domains: list[str]) -> DnsPrefl
 
     preflight = await run_preflight_async(
         test_domains,
-        PreflightOptions.from_args(args, dns_cache=dns_cache, store=None),
+        PreflightOptions.from_args(args, dns_cache=dns_cache, store=store),
     )
     if preflight.exit_code:
         print(f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")
         return DnsPreflightResult(dns_cache, dns_audits, exit_code=preflight.exit_code)
+    from blockchecks.engine.triage import TriageProfile
+
+    t = preflight.triage if isinstance(preflight.triage, TriageProfile) else None
+    args.triage = t
     if args.domain and args.domain in preflight.skip_domains and not getattr(args, "force", False):
         print(f"{YELLOW}Prolog: {args.domain} works without bypass — nothing to test{RESET}")
         print(f"{YELLOW}Use --force to run strategy matrix anyway{RESET}")
-        return DnsPreflightResult(dns_cache, dns_audits, exit_code=0)
-    return DnsPreflightResult(dns_cache, dns_audits)
+        return DnsPreflightResult(dns_cache, dns_audits, exit_code=0, triage=t)
+    return DnsPreflightResult(dns_cache, dns_audits, triage=t)
 
 
 def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncTestRunner:
@@ -213,10 +221,25 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
     secure_dns = SECURE_DNS_DEFAULT and not getattr(args, "no_secure_dns", False)
     repeats, parallel_repeats, repeats_mode, quick_break = repeats_from_args(args)
     lua_extra = list(getattr(args, "lua_extra", None) or [])
+    try:
+        from blockchecks.engine.blob_filter import lua_files_for_triage
+        from blockchecks.engine.config import LUA_CUSTOM_DIR
+
+        lua_extra = list(
+            dict.fromkeys(
+                lua_extra
+                + [
+                    os.path.join(LUA_CUSTOM_DIR, n)
+                    for n in lua_files_for_triage(getattr(args, "triage", None))
+                ]
+            )
+        )
+    except Exception:
+        pass
     return AsyncTestRunner(
         pool_size=pool_size,
         db=db,
-        disable_ech=bool(getattr(args, "disable_ech", False)),
+        disable_ech=disable_ech_from(args, getattr(args, "triage", None)),
         secure_dns=secure_dns,
         dns_cache=dns_cache,
         dns_audit={r.domain: r for r in dns_audits},
@@ -453,6 +476,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
                 user_matrix=user_matrix,
                 run_set=run_set,
                 protocol=protocol,
+                triage=getattr(args, "triage", None),
             )
         if not udp_items and udp_sources and not args.tcp_only:
             udp_items = await scanner.generate_udp(
@@ -462,6 +486,7 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
                 max_count=max(1, args.max // 2) if args.max >= 2 else 50,
                 state_db=db,
                 user_matrix=user_matrix,
+                triage=getattr(args, "triage", None),
             )
         print(f"  Generated: {len(tcp_items)} TCP + {len(udp_items)} UDP strategies")
     elif not tcp_items:
@@ -619,6 +644,7 @@ async def run_adaptive_pair_phase(
         epsilon=getattr(args, "adaptive_epsilon", 0.1),
         load_weights=not getattr(args, "no_adaptive_weights", False),
         resume_check=_resume_job if getattr(args, "resume", False) else None,
+        triage=getattr(args, "triage", None),
     )
     print(f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
     aq_result = await run_adaptive_tcp(

@@ -86,6 +86,7 @@ class RunSpec:
     mode: str = "auto"
     profile: str | None = None
     raw_args: Any = None
+    triage: Any = None
 
     @classmethod
     def from_args(cls, args: Any, *, command: str | None = None) -> RunSpec:
@@ -163,6 +164,7 @@ class RunSpec:
             mode=getattr(args, "mode", "auto") or "auto",
             profile=getattr(args, "profile", None),
             raw_args=args,
+            triage=getattr(args, "triage", None),
         )
 
 
@@ -176,6 +178,7 @@ class CampaignContext:
     primary: str = ""
     dns_cache: Any = None
     dns_audits: list[Any] = field(default_factory=list)
+    triage: Any = None
     stop: Any = field(default_factory=lambda: None)
     deadline: Any = None
     runner: Any = None

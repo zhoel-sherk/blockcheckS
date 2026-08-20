@@ -87,3 +87,14 @@ async def test_flowseal_full_expansion():
     assert len(items) > 100
     labels = {i.label.split("_")[1] if "_" in i.label else i.label for i in items}
     assert len(labels) > 5
+
+
+@pytest.mark.asyncio
+async def test_flowseal_prunes_dead_before_cap():
+    from blockchecks.engine.triage import TriageProfile
+
+    gen = FlowsealGenerator()
+    triage = TriageProfile(viable_foolings=["tcp_ts=-1000"], dead_foolings=["badsid"])
+    items = await gen.generate("tls12", scan_level="fast", max_count=20, triage=triage)
+    assert len(items) == 20
+    assert not any("badsid" in i.strategy for i in items)

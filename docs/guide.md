@@ -287,6 +287,10 @@ pytest -m "not integration"
 - Увеличь таймаут: `--timeout 20` (дефолт 3).
 - Проверь iptables: `sudo iptables -L OUTPUT -n | grep NFQUEUE`.
 - Для googlevideo.com: это известная проблема — IP `142.251.x.x` блокируется на уровне IP (не SNI).
+- **`send:repeats=6`** на DPI с нормализацией L4-checksum (Fryazino / Fiord) даёт SSL error 35.
+  Preflight-грид из 5 ячеек её не меряет; в матрице `send:{fool}:repeats=N` остаётся
+  только у geneva (`tamper._fam_geneva_fool`, repeats 1–2). ISP-blacklist —
+  `[dead].foolings` в `data_block/providers/<slug>/triage.toml`.
 
 **Детерминированный GGC-тест (обман ТСПУ, без 6h TTL)**
 - Подписанные `*.googlevideo.com` URL живут ровно 6 часов (`expire=21600`). Для

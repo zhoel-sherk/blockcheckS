@@ -5,10 +5,8 @@ from __future__ import annotations
 import pytest
 
 from blockchecks.engine.fail_phase import FailPhase
-from blockchecks.engine.generators.standard import (
-    StandardGenerator,
-    _static_numeric_split,
-)
+from blockchecks.engine.generators.families._helpers import _static_numeric_split
+from blockchecks.engine.generators.standard import StandardGenerator
 from blockchecks.engine.triage import TriageProfile
 
 
@@ -49,6 +47,32 @@ def test_triage_to_dict_and_context():
     c = t.to_context()
     assert c["dns_hijacked"] == 1
     assert c["fp_blocked"] == 0
+
+
+@pytest.mark.unit
+def test_from_dict_roundtrip_and_disable_ech():
+    from types import SimpleNamespace
+
+    from blockchecks.engine.triage import disable_ech_from
+
+    src = TriageProfile(
+        silent_drop_after_sni=True,
+        voice_ok=True,
+        viable_foolings=["tcp_ts=-1000"],
+        viable_blobs=["stun"],
+        split_mode="sni_marker",
+        server_hops=12,
+        ech_blocked=True,
+        dead_foolings=["send"],
+    )
+    restored = TriageProfile.from_dict(src.to_dict())
+    assert restored.silent_drop_after_sni is True
+    assert restored.voice_ok is True
+    assert restored.viable_blobs == ["stun"]
+    assert restored.dead_foolings == ["send"]
+    assert restored.ech_blocked is True
+    assert disable_ech_from(SimpleNamespace(disable_ech=False), restored) is True
+    assert disable_ech_from(SimpleNamespace(disable_ech=True), TriageProfile()) is True
 
 
 @pytest.mark.unit

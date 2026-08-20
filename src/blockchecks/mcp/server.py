@@ -61,6 +61,21 @@ class TriageResult(BaseModel):
     client_hello_len: int = Field(description="Calculated ClientHello size in bytes")
     quic_blocked: bool = Field(description="True if QUIC Initial is dropped or rejected")
     dns_tampered: bool = Field(description="True if ISP tampered with DNS responses")
+    rst_at_sni: bool = Field(False, description="DPI sends RST at ClientHello SNI")
+    viable_foolings: list[str] = Field(
+        default_factory=list, description="Foolings that passed the viability grid"
+    )
+    viable_blobs: list[str] = Field(
+        default_factory=list, description="Blob classes that passed the viability grid"
+    )
+    split_mode: str = Field("", description="Working split mode from the micro-probe")
+    voice_ok: bool = Field(False, description="UDP 16KB voice path already works")
+    udp_blocked: bool = Field(False, description="UDP 16KB voice burst was dropped")
+    server_hops: int | None = Field(None, description="Hops to origin from SYN-ACK TTL")
+    dpi_hops: int | None = Field(None, description="Hops to middlebox from RST TTL")
+    autottl_delta: int | None = Field(None, description="Suggested ip_autottl delta")
+    ech_blocked: bool | None = Field(None, description="True if ECH uniquely fails")
+    http_blocked: bool | None = Field(None, description="True if plaintext HTTP :80 is blocked")
     recommended_generators: list[str] = Field(
         description="Strategy families recommended for this target"
     )
@@ -159,7 +174,7 @@ async def triage_domain(domain: str, port: int = 443) -> TriageResult:
     Probes L3 connectivity, DNS integrity, TLS ClientHello sizes (Post-Quantum awareness),
     DPI RST injection phase, TCP Stream stall thresholds (7K/16K/42K), and Raw QUIC drops.
     """
-    response = await _send_daemon_request("triage", {"domain": domain, "port": port}, timeout=45.0)
+    response = await _send_daemon_request("triage", {"domain": domain, "port": port}, timeout=120.0)
 
     if not response.get("ok"):
         raise RuntimeError(f"Triage failed: {response.get('error', 'Unknown daemon error')}")
@@ -172,6 +187,17 @@ async def triage_domain(domain: str, port: int = 443) -> TriageResult:
         client_hello_len=data.get("client_hello_len", 0),
         quic_blocked=data.get("quic_blocked", False),
         dns_tampered=data.get("dns_tampered", False),
+        rst_at_sni=data.get("rst_at_sni", False),
+        viable_foolings=list(data.get("viable_foolings") or []),
+        viable_blobs=list(data.get("viable_blobs") or []),
+        split_mode=str(data.get("split_mode") or ""),
+        voice_ok=bool(data.get("voice_ok", False)),
+        udp_blocked=bool(data.get("udp_blocked", False)),
+        server_hops=data.get("server_hops"),
+        dpi_hops=data.get("dpi_hops"),
+        autottl_delta=data.get("autottl_delta"),
+        ech_blocked=data.get("ech_blocked"),
+        http_blocked=data.get("http_blocked"),
         recommended_generators=data.get("recommended_generators", []),
     )
 

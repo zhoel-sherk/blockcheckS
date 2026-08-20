@@ -135,3 +135,21 @@ async def test_generate_udp_game_not_in_default():
     assert game
     assert all(i.protocol == "udp_voice" for i in game)
     assert any("std_udp_game" in i.label or "filter-udp=" in i.strategy for i in game)
+
+
+@pytest.mark.asyncio
+async def test_generate_udp_skips_when_voice_ok():
+    from blockchecks.engine.triage import TriageProfile
+
+    items = await MatrixGenerator().generate_udp(
+        sources=["standard_udp"],
+        triage=TriageProfile(voice_ok=True, udp_blocked=False),
+    )
+    assert items == []
+    still = await MatrixGenerator().generate_udp(
+        sources=["standard_udp"],
+        scan_level="single",
+        max_count=5,
+        triage=TriageProfile(voice_ok=True, udp_blocked=True),
+    )
+    assert still

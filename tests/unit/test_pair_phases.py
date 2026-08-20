@@ -178,6 +178,26 @@ def test_prepare_dns_preflight_exit_code():
     assert res.exit_code == 3
 
 
+def test_prepare_dns_forwards_run_store():
+    args = _args()
+    store = MagicMock()
+    preflight = MagicMock(exit_code=0, skip_domains=set(), triage=None)
+    with (
+        patch(
+            "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
+            return_value=(MagicMock(), [], None),
+        ),
+        patch(
+            "blockchecks.engine.preflight.run_preflight_async",
+            new=AsyncMock(return_value=preflight),
+        ) as pf,
+        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.checkers.ip_pin.load_pins", return_value={}),
+    ):
+        asyncio.run(prepare_dns_and_preflight(args, [], store=store))
+    assert pf.await_args.args[1].store is store
+
+
 def test_prepare_dns_prolog_skip_domain():
     args = _args()
     preflight = MagicMock()

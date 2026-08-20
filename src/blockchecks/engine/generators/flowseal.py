@@ -90,14 +90,20 @@ class FlowsealGenerator(StrategyGenerator):
         scan_level: str = "fast",
         max_count: int = 100,
         run_set: set = None,
+        triage=None,
     ) -> list[StrategyItem]:
+        from blockchecks.engine.family_registry import prune_items_by_triage
+
+        self._triage = triage
         if protocol == "quic":
-            return list(self._take(self._iter_quic(), scan_level, max_count, "quic"))
-        if protocol == "udp_voice":
-            return list(self._take(self._iter_udp(), scan_level, max_count, "udp_voice"))
-        if protocol == "http":
-            return list(self._take(self._iter_http(), scan_level, max_count, "http"))
-        return list(self._take(self._iter_tcp(), scan_level, max_count, "tls12"))
+            items = list(self._take(self._iter_quic(), scan_level, max_count, "quic"))
+        elif protocol == "udp_voice":
+            items = list(self._take(self._iter_udp(), scan_level, max_count, "udp_voice"))
+        elif protocol == "http":
+            items = list(self._take(self._iter_http(), scan_level, max_count, "http"))
+        else:
+            items = list(self._take(self._iter_tcp(), scan_level, max_count, "tls12"))
+        return prune_items_by_triage(items, triage, scan_level=scan_level)
 
     def _take(
         self,
@@ -108,14 +114,25 @@ class FlowsealGenerator(StrategyGenerator):
     ) -> list[StrategyItem]:
         items: list[StrategyItem] = []
         seen: set[str] = set()
+        from blockchecks.engine.family_registry import prune_items_by_triage
+
+        triage = getattr(self, "_triage", None)
         for label, strategy in it:
             if strategy in seen:
                 continue
             seen.add(strategy)
-            items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
+            item = StrategyItem(label=label, strategy=strategy, protocol=protocol)
+            if not prune_items_by_triage([item], triage, scan_level=scan_level):
+                continue
+            items.append(item)
             if scan_level == "single" or len(items) >= max_count:
                 break
         return items
+
+    def _fools(self, src: list[str] | None = None) -> list[str]:
+        from blockchecks.engine.family_registry import filter_fooling_values
+
+        return filter_fooling_values(src or FOOLINGS, getattr(self, "_triage", None))
 
     def _iter_tcp(self) -> Iterator[tuple[str, str]]:
         blobs = _tcp_blobs()
@@ -135,7 +152,8 @@ class FlowsealGenerator(StrategyGenerator):
         yield (
             "flw_md_seed",
             (
-                "fake:blob=0x00000000:repeats=11:badsid:tls_mod=rnd,dupsid,sni=www.google.com\n"
+                f"fake:blob=0x00000000:repeats=11:{next(iter(self._fools()), 'tcp_ts=-1000') or 'tcp_ts=-1000'}"
+                f":tls_mod=rnd,dupsid,sni=www.google.com\n"
                 "multidisorder:pos=1,midsld"
             ),
         )
@@ -162,7 +180,7 @@ class FlowsealGenerator(StrategyGenerator):
         pairs = [(a, b) for i, a in enumerate(blobs) for b in blobs[i + 1 :]]
         for b1, b2 in pairs:
             for r in REPEATS:
-                for fool in FOOLINGS:
+                for fool in self._fools():
                     yield (
                         f"flw_multi_{b1}+{b2}_r{r}_{fool}",
                         f"fake:blob={b1}:repeats={r}:{fool}\nfake:blob={b2}:repeats={r}:{fool}",
@@ -185,7 +203,7 @@ class FlowsealGenerator(StrategyGenerator):
                         continue
                     for b3 in blobs[j + 1 :]:
                         for r in (6, 4, 8):
-                            for fool in ("tcp_ts=-1000", "badsid"):
+                            for fool in self._fools(["tcp_ts=-1000", "badsid"]):
                                 yield (
                                     f"flw_triple_{b1}+{b2}+{b3}_r{r}_{fool}",
                                     (
@@ -205,7 +223,7 @@ class FlowsealGenerator(StrategyGenerator):
                     )
                     for blob in blobs[:4]:
                         for r in (6, 8, 4):
-                            for fool in ("tcp_ts=-1000", "badsid"):
+                            for fool in self._fools(["tcp_ts=-1000", "badsid"]):
                                 yield (
                                     f"flw_fake_split_{blob}_r{r}_p{pos}_s{seqovl}_{pat}_{fool}",
                                     (
@@ -216,7 +234,7 @@ class FlowsealGenerator(StrategyGenerator):
 
     def _expand_fakedsplit(self, blobs: list[str]) -> Iterator[tuple[str, str]]:
         for pat in ["0x00000000", *blobs[:3]]:
-            for fool in FOOLINGS:
+            for fool in self._fools():
                 core = f"fakedsplit:pos=1:pattern={pat}:{fool}:repeats=1"
                 yield f"flw_fds_p1_{pat}_{fool}", core
                 for blob in blobs[:3]:
@@ -228,7 +246,7 @@ class FlowsealGenerator(StrategyGenerator):
 
     def _expand_hostfake(self, blobs: list[str]) -> Iterator[tuple[str, str]]:
         for host in HOSTS:
-            for fool in FOOLINGS_TS_MD5:
+            for fool in self._fools(FOOLINGS_TS_MD5):
                 for disorder in (False, True):
                     if disorder:
                         core = f"hostfakesplit:disorder_after:host={host}:{fool}:repeats=1"
@@ -257,7 +275,7 @@ class FlowsealGenerator(StrategyGenerator):
 
     def _expand_multidisorder(self, blobs: list[str]) -> Iterator[tuple[str, str]]:
         for pos in ("1", "midsld", "1,midsld"):
-            for fool in ("badsid", "tcp_ts=-1000"):
+            for fool in self._fools(["badsid", "tcp_ts=-1000"]):
                 for sni in SNI_LIST:
                     for r in (11, 8, 6):
                         for blob in ("0x00000000", *blobs[:2]):
@@ -272,7 +290,7 @@ class FlowsealGenerator(StrategyGenerator):
     def _expand_singles(self, blobs: list[str]) -> Iterator[tuple[str, str]]:
         for blob in blobs:
             for r in REPEATS:
-                for fool in FOOLINGS:
+                for fool in self._fools():
                     yield f"flw_fake_{blob}_r{r}_{fool}", f"fake:blob={blob}:repeats={r}:{fool}"
                 for sni in SNI_LIST:
                     for r2 in (6, 8):
@@ -302,7 +320,7 @@ class FlowsealGenerator(StrategyGenerator):
                     f"fake:blob={blob}:repeats={r}:tcp_ts=-1000:ip_id=zero",
                 )
         for r in (6, 11, 12):
-            for fool in FOOLINGS:
+            for fool in self._fools():
                 yield f"flw_null_r{r}_{fool}", f"fake:blob=0x00000000:repeats={r}:{fool}"
                 yield f"flw_blind_r{r}_{fool}", f"fake:repeats={r}:{fool}"
         # Flowseal ALT5: syndata + multidisorder link
@@ -338,7 +356,7 @@ class FlowsealGenerator(StrategyGenerator):
             if blob != "0x00000000" and not resolve_blob_path(blob):
                 continue
             for r in (6, 8, 11):
-                for fool in FOOLINGS:
+                for fool in self._fools():
                     yield (
                         f"flw_http_{blob}_r{r}_{fool}",
                         f"fake:blob={blob}:repeats={r}:{fool}",

@@ -216,3 +216,16 @@ async def test_flush_requeues_on_failure(tmp_path, monkeypatch):
         await store.flush()
     # Rows re-queued (nothing silently dropped).
     assert len(store._tcp_pending) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_save_triage_snapshot(tmp_path):
+    store = open_run_store(tmp_path / "triage.db")
+    await store.init()
+    await store.save_triage_snapshot("youtube.com", {"silent_drop_after_sni": True})
+    con = sqlite3.connect(tmp_path / "triage.db")
+    row = con.execute("SELECT domain, payload_json FROM triage_snapshots").fetchone()
+    con.close()
+    assert row[0] == "youtube.com"
+    assert "silent_drop" in row[1]

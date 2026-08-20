@@ -34,30 +34,11 @@ def map_triage_to_generators(profile) -> list[str]:
     """Recommend standard strategy families from a TriageProfile.
 
     Deterministic mapping used by the MCP ``triage`` action and generator
-    pruning. Order is meaningful (most promising first); duplicates removed.
+    pruning. Names match ``StandardGenerator`` expanders (not CLI aliases).
     """
-    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.engine.family_registry import families_for_profile
 
-    stall_phases = {
-        FailPhase.DATA_STALL_TLS_CERT,
-        FailPhase.DATA_STALL_FIRST_REQ,
-        FailPhase.DATA_STALL_7K,
-        FailPhase.DATA_STALL_16K,
-        FailPhase.DATA_STALL_42K,
-        FailPhase.DATA_STALL_64K_PLUS,
-        FailPhase.ZERO_WINDOW_STALL,
-    }
-    families: list[str] = []
-    stall = profile.stall_phase
-    if stall in stall_phases:
-        families.extend(["wssize", "wsize"])
-    if profile.rst_at_sni or stall == FailPhase.TLS_RST_AT_SNI:
-        families.extend(["split", "multisplit", "fake", "fakedsplit"])
-    if profile.quic_drop:
-        families.extend(["quic_fake", "quic_ipfrag"])
-    if not families:
-        families = ["standard_fast"]
-    return list(dict.fromkeys(families))
+    return families_for_profile(profile)
 
 
 def classify_strategy_family(item: StrategyItem) -> str:

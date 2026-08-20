@@ -201,6 +201,8 @@ def test_load_custom_lua_manifest_has_dupfake():
     assert m["dupfake"]["file"] == "dupfake.lua"
     assert "blob" in m["dupfake"]["included"]
     assert "pos" in m["dupfake"]["excluded"]
+    assert "silent_drop" in m["dupfake"]["requires_triage"]
+    assert "stun" in m["dupfake"]["blob_classes"]
 
 
 def test_validate_custom_lua_params_excluded():

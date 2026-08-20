@@ -3,7 +3,13 @@
 Facade over engine.generators.*. See docs/architecture.md.
 """
 
+from __future__ import annotations
+
+import inspect
+from typing import TYPE_CHECKING
+
 from blockchecks.engine.byedpi_matrix_generator import ByedpiMatrixGenerator
+from blockchecks.engine.family_registry import prune_items_by_triage
 from blockchecks.engine.generators import (
     HTTP_FAMILIES,
     QUIC_HTTP3_FAMILIES,
@@ -24,6 +30,29 @@ from blockchecks.engine.generators import (
     UserMatrixGenerator,
 )
 from blockchecks.engine.store import RunStateStore
+
+if TYPE_CHECKING:
+    from blockchecks.engine.triage import TriageProfile
+
+
+async def _call_generate(gen: StrategyGenerator, **kwargs):
+    """Pass only kwargs the generator's ``generate()`` accepts."""
+    sig = inspect.signature(gen.generate)
+    if any(p.kind is p.VAR_KEYWORD for p in sig.parameters.values()):
+        return await gen.generate(**kwargs)
+    accepted = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    return await gen.generate(**accepted)
+
+
+def _dedupe(items: list[StrategyItem], max_count: int) -> list[StrategyItem]:
+    seen: set[str] = set()
+    out: list[StrategyItem] = []
+    for item in items:
+        if item.strategy in seen:
+            continue
+        seen.add(item.strategy)
+        out.append(item)
+    return out[:max_count]
 
 
 class MatrixGenerator:
@@ -67,6 +96,7 @@ class MatrixGenerator:
         protocol: str = "tls12",
         user_matrix: str = "",
         run_set: set = None,
+        triage: TriageProfile | None = None,
     ) -> list[StrategyItem]:
         """Generate TCP strategies from specified sources."""
         if not sources:
@@ -85,27 +115,21 @@ class MatrixGenerator:
             if not gen:
                 continue
             t1 = _time.perf_counter()
-            items = await gen.generate(
+            items = await _call_generate(
+                gen,
                 protocol=protocol,
                 state_db=state_db,
                 domain=domain,
                 scan_level=scan_level,
                 max_count=max_count // len(sources) or max_count,
                 run_set=run_set,
+                triage=triage,
             )
             dt = _time.perf_counter() - t1
             print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
-        # Dedup by strategy string while preserving order
-        seen: set[str] = set()
-        deduped: list[StrategyItem] = []
-        for item in all_items:
-            if item.strategy in seen:
-                continue
-            seen.add(item.strategy)
-            deduped.append(item)
-        return deduped[:max_count]
+        return prune_items_by_triage(_dedupe(all_items, max_count), triage, scan_level=scan_level)
 
     async def generate_http(
         self,
@@ -116,8 +140,11 @@ class MatrixGenerator:
         state_db: RunStateStore = None,
         user_matrix: str = "",
         run_set: set = None,
+        triage: TriageProfile | None = None,
     ) -> list[StrategyItem]:
         """Generate HTTP :80 strategies (BC2-9)."""
+        if triage is not None and triage.http_blocked is False:
+            return []
         return await self.generate_tcp(
             sources=sources or ["custom", "standard_http"],
             domain=domain,
@@ -127,6 +154,7 @@ class MatrixGenerator:
             protocol="http",
             user_matrix=user_matrix,
             run_set=run_set,
+            triage=triage,
         )
 
     async def generate_udp(
@@ -137,9 +165,13 @@ class MatrixGenerator:
         max_count: int = 50,
         state_db: RunStateStore = None,
         user_matrix: str = "",
+        triage: TriageProfile | None = None,
     ) -> list[StrategyItem]:
         """Generate UDP strategies."""
         import time as _time
+
+        if triage is not None and triage.voice_ok and not triage.udp_blocked:
+            return []
 
         if not sources:
             sources = ["custom", "standard_udp"]
@@ -162,28 +194,24 @@ class MatrixGenerator:
                 continue
             proto = proto_by_src.get(src_name, "udp_voice")
             t1 = _time.perf_counter()
-            items = await gen.generate(
+            items = await _call_generate(
+                gen,
                 protocol=proto,
                 state_db=state_db,
                 domain=domain,
                 scan_level=scan_level,
                 max_count=max_count // len(sources) or max_count,
                 run_set=None,
+                triage=triage,
             )
             dt = _time.perf_counter() - t1
             print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
-        seen: set[str] = set()
-        deduped: list[StrategyItem] = []
         for item in all_items:
-            if item.strategy in seen:
-                continue
-            seen.add(item.strategy)
             if item.protocol != "udp_voice":
                 item.protocol = "udp_voice"
-            deduped.append(item)
-        return deduped[:max_count]
+        return prune_items_by_triage(_dedupe(all_items, max_count), triage, scan_level=scan_level)
 
     async def generate_quic(
         self,
@@ -194,6 +222,7 @@ class MatrixGenerator:
         state_db: RunStateStore = None,
         user_matrix: str = "",
         run_set: set = None,
+        triage: TriageProfile | None = None,
     ) -> list[StrategyItem]:
         """Generate HTTP/3 QUIC strategies (BC2-10)."""
         import time as _time
@@ -212,28 +241,24 @@ class MatrixGenerator:
             if not gen:
                 continue
             t1 = _time.perf_counter()
-            items = await gen.generate(
+            items = await _call_generate(
+                gen,
                 protocol="quic",
                 state_db=state_db,
                 domain=domain,
                 scan_level=scan_level,
                 max_count=max_count // len(sources) or max_count,
                 run_set=run_set,
+                triage=triage,
             )
             dt = _time.perf_counter() - t1
             print(f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
-        seen: set[str] = set()
-        deduped: list[StrategyItem] = []
         for item in all_items:
-            if item.strategy in seen:
-                continue
-            seen.add(item.strategy)
             if item.protocol != "quic":
                 item.protocol = "quic"
-            deduped.append(item)
-        return deduped[:max_count]
+        return prune_items_by_triage(_dedupe(all_items, max_count), triage, scan_level=scan_level)
 
     async def generate_pairs(
         self,
@@ -245,6 +270,7 @@ class MatrixGenerator:
         max_udp: int = 50,
         state_db: RunStateStore = None,
         user_matrix: str = "",
+        triage: TriageProfile | None = None,
     ) -> list[StrategyPair]:
         """Generate TCP×UDP strategy pairs with prioritization.
 
@@ -260,6 +286,7 @@ class MatrixGenerator:
             max_count=max_tcp,
             state_db=state_db,
             user_matrix=user_matrix,
+            triage=triage,
         )
         udp_items = await self.generate_udp(
             sources=udp_sources,
@@ -268,6 +295,7 @@ class MatrixGenerator:
             max_count=max_udp,
             state_db=state_db,
             user_matrix=user_matrix,
+            triage=triage,
         )
 
         # Get known working from state.db

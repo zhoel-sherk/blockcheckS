@@ -32,7 +32,9 @@
 | **settle profile** | Per-strategy calibrated timing (min settle + curl timeout) |
 | **adaptive queue** | Priority-based strategy ordering: epsilon-greedy + fan-out on PASS |
 | **system deps** | Auto-fetch nfqws2 + Lua + blobs on first live run (Phase 1.0.1) |
-| **preflight** | Startup checks: baseline reachability, IP-block, port-block, nfqws2 detection |
+| **preflight** | Startup checks: baseline, DNS audit, fooling grid, hops, ECH/HTTP, nfqws2 |
+| **triage.toml** | ISP prior in `data_block/providers/<slug>/` (hops, viable foolings/blobs, `[dead]`) |
+| **send:repeats=6** | Dead on L4-checksum-normalizing DPI (SSL 35); not in the 5-cell fooling grid |
 | **DoH** | DNS-over-HTTPS pre-resolution via Cloudflare/Google/Quad9 |
 | **GV-1** | Googlevideo videoplayback probe (signed CDN URL, not apex) |
 | **BC2** | blockcheck2.sh parity — foolings list, repeats logic, family ordering |

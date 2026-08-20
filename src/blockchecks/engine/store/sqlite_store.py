@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time
 from pathlib import Path
 
@@ -741,3 +742,16 @@ class SqliteRunStore:
                     (key, float(weight), ts),
                 )
             await db.commit()
+
+    async def save_triage_snapshot(self, domain: str, payload: dict) -> None:
+        """Persist a JSON triage snapshot for this run."""
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        async with aiosqlite.connect(self._path) as db:
+            await SqliteRunStore._apply_pragmas(db)
+            await db.execute(
+                """INSERT INTO triage_snapshots(domain, payload_json, created_at)
+                   VALUES(?,?,?)""",
+                (domain or "", json.dumps(payload, ensure_ascii=False), ts),
+            )
+            await db.commit()
+        reclaim_sudo_ownership(self._path)

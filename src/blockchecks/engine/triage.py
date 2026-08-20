@@ -13,6 +13,14 @@ from typing import Any
 from blockchecks.engine.fail_phase import FailPhase
 
 
+def _fail_phase(value: object) -> FailPhase:
+    if isinstance(value, FailPhase):
+        return value
+    if isinstance(value, str) and value in FailPhase._value2member_map_:
+        return FailPhase(value)
+    return FailPhase.UNKNOWN
+
+
 @dataclass
 class TriageProfile:
     """Interference profile derived from preflight probes (Phase 1-5)."""
@@ -49,6 +57,17 @@ class TriageProfile:
 
     # Per-domain detail (prolog/IP/stall) for the bandit context.
     domain_phases: dict[str, str] = field(default_factory=dict)
+
+    # Fooling / hop / split diagnostics (Tier 1 preflight)
+    viable_foolings: list[str] = field(default_factory=list)
+    viable_blobs: list[str] = field(default_factory=list)
+    split_mode: str = ""  # first_byte | sni_marker | disorder | seqovl | ""
+    server_hops: int | None = None
+    dpi_hops: int | None = None
+    autottl_delta: int | None = None
+    ech_blocked: bool | None = None
+    http_blocked: bool | None = None
+    dead_foolings: list[str] = field(default_factory=list)
 
     # ── convenience flags for generator pruning ──
 
@@ -111,7 +130,53 @@ class TriageProfile:
             "l7_impersonate_sufficient": self.l7_impersonate_sufficient,
             "prefer_contextual_split": self.prefer_contextual_split,
             "domain_phases": dict(self.domain_phases),
+            "viable_foolings": list(self.viable_foolings),
+            "viable_blobs": list(self.viable_blobs),
+            "split_mode": self.split_mode,
+            "server_hops": self.server_hops,
+            "dpi_hops": self.dpi_hops,
+            "autottl_delta": self.autottl_delta,
+            "ech_blocked": self.ech_blocked,
+            "http_blocked": self.http_blocked,
+            "dead_foolings": list(self.dead_foolings),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> TriageProfile:
+        """Rebuild a profile from ``to_dict`` / triage.toml flattened dict."""
+        if not data:
+            return cls()
+        phase = _fail_phase
+        return cls(
+            dns_hijacked=bool(data.get("dns_hijacked")),
+            dns_sinkhole=bool(data.get("dns_sinkhole")),
+            unbypassable_l3=bool(data.get("unbypassable_l3")),
+            l3_phase=phase(data.get("l3_phase")),
+            handshake_phase=phase(data.get("handshake_phase")),
+            rst_at_sni=bool(data.get("rst_at_sni")),
+            silent_drop_after_sni=bool(data.get("silent_drop_after_sni")),
+            stall_phase=phase(data.get("stall_phase")),
+            stall_at_bytes=data.get("stall_at_bytes"),
+            bandwidth_throttled=bool(data.get("bandwidth_throttled")),
+            read_rate_bps=float(data.get("read_rate_bps") or 0.0),
+            quic_drop=bool(data.get("quic_drop")),
+            udp_blocked=bool(data.get("udp_blocked")),
+            voice_ok=bool(data.get("voice_ok")),
+            client_hello_len=int(data.get("client_hello_len") or 0),
+            is_tls_fingerprint_blocked=bool(data.get("is_tls_fingerprint_blocked")),
+            requires_postquantum_awareness=bool(data.get("requires_postquantum_awareness")),
+            fingerprint_pass=dict(data.get("fingerprint_pass") or {}),
+            domain_phases=dict(data.get("domain_phases") or {}),
+            viable_foolings=list(data.get("viable_foolings") or []),
+            viable_blobs=list(data.get("viable_blobs") or []),
+            split_mode=str(data.get("split_mode") or ""),
+            server_hops=data.get("server_hops"),
+            dpi_hops=data.get("dpi_hops"),
+            autottl_delta=data.get("autottl_delta"),
+            ech_blocked=data.get("ech_blocked"),
+            http_blocked=data.get("http_blocked"),
+            dead_foolings=list(data.get("dead_foolings") or []),
+        )
 
     def to_context(self) -> dict[str, Any]:
         """Compact feature vector for the online bandit / S0 ranker."""
@@ -127,4 +192,13 @@ class TriageProfile:
             "client_hello_len": self.client_hello_len,
             "fp_blocked": int(self.is_tls_fingerprint_blocked),
             "pq_aware": int(self.requires_postquantum_awareness),
+            "split_mode": self.split_mode,
+            "n_foolings": len(self.viable_foolings),
         }
+
+
+def disable_ech_from(args: Any, triage: Any) -> bool:
+    """CLI ``--disable-ech`` or triage proving ECH uniquely fails."""
+    return bool(getattr(args, "disable_ech", False)) or (
+        getattr(triage, "ech_blocked", None) is True
+    )

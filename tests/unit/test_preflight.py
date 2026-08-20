@@ -11,6 +11,16 @@ from blockchecks.engine.preflight import (
     run_prolog,
     run_unblocked_baseline,
 )
+from blockchecks.engine.triage import TriageProfile
+
+
+@pytest.fixture(autouse=True)
+def _no_provider_io():
+    with (
+        patch("blockchecks.engine.preflight._load_prior_triage", return_value=TriageProfile()),
+        patch("blockchecks.engine.preflight._persist_triage", new_callable=AsyncMock),
+    ):
+        yield
 
 
 @pytest.mark.unit
@@ -81,11 +91,16 @@ def test_preflight_aborts_on_baseline_fail():
 
 @pytest.mark.unit
 def test_preflight_skips_domain_on_prolog():
+    from blockchecks.checkers.tcp_tls import TlsResult
+
     cache = MagicMock()
     cache.resolve.return_value = ["1.2.3.4"]
     with (
         patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "")),
-        patch("blockchecks.engine.preflight.run_prolog", return_value=True),
+        patch(
+            "blockchecks.engine.preflight.run_prolog_tls",
+            return_value=TlsResult(domain="discord.com", success=True, http_status=200),
+        ),
         patch("blockchecks.engine.preflight.run_port_block_probe"),
         patch("blockchecks.engine.preflight.print_port_block_report"),
         patch("blockchecks.engine.preflight.run_ip_block_cross_test"),
@@ -98,15 +113,22 @@ def test_preflight_skips_domain_on_prolog():
             PreflightOptions(skip_nfqws2_check=True, skip_ip_block=True, dns_cache=cache),
         )
     assert "discord.com" in r.skip_domains
+    assert r.triage is not None
+    assert r.triage.handshake_phase.value == "pass"
 
 
 @pytest.mark.unit
 def test_preflight_force_keeps_domain():
+    from blockchecks.checkers.tcp_tls import TlsResult
+
     cache = MagicMock()
     cache.resolve.return_value = ["1.2.3.4"]
     with (
         patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "")),
-        patch("blockchecks.engine.preflight.run_prolog", return_value=True),
+        patch(
+            "blockchecks.engine.preflight.run_prolog_tls",
+            return_value=TlsResult(domain="discord.com", success=True, http_status=200),
+        ),
         patch("blockchecks.engine.preflight.run_port_block_probe"),
         patch("blockchecks.engine.preflight.print_port_block_report"),
         patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
@@ -146,6 +168,18 @@ def test_preflight_options_from_args():
     assert o.unblocked_dom == "ref.com"
     assert o.timeout == 8.0  # capped
     assert o.skip_baseline and o.force and o.verify_content
+    assert o.skip_diagnostics is False
+
+
+def test_from_args_skip_diagnostics_quick_and_no_preflight():
+    from types import SimpleNamespace
+
+    campaign = SimpleNamespace(timeout=5.0)
+    assert PreflightOptions.from_args(campaign).skip_diagnostics is False
+    assert PreflightOptions.from_args(SimpleNamespace(quick=True, timeout=5.0)).skip_diagnostics is True
+    assert PreflightOptions.from_args(
+        SimpleNamespace(no_preflight=True, timeout=5.0)
+    ).skip_diagnostics is True
 
 
 def test_sync_dns_to_data_block(tmp_path):
@@ -309,7 +343,10 @@ def test_preflight_async_full():
             "blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "ref.com")
         ),
         patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
-        patch("blockchecks.engine.preflight.run_prolog", return_value=False),
+        patch(
+            "blockchecks.engine.preflight.run_prolog_tls",
+            return_value=MagicMock(success=False, error="timeout", http_status=0),
+        ),
         patch("blockchecks.engine.preflight.run_ip_block_cross_test", return_value=MagicMock()),
         patch("blockchecks.engine.preflight.print_ip_block_report"),
         patch("blockchecks.engine.preflight._triage_domain"),
@@ -317,3 +354,212 @@ def test_preflight_async_full():
         report = asyncio.run(run_preflight_async(["discord.com"], opts))
     assert report.exit_code == 0
     assert report.baseline_ok is True
+    assert report.triage is not None
+    assert report.triage.voice_ok is True
+
+
+def test_preflight_wires_dns_prolog_voice_into_triage():
+    from blockchecks.checkers.tcp_tls import TlsResult
+    from blockchecks.engine.fail_phase import FailPhase
+
+    cache = MagicMock()
+    cache.resolve.return_value = ["1.2.3.4"]
+    store = MagicMock()
+    store.write_dns_audit_log = AsyncMock()
+    tls = TlsResult(domain="youtube.com", success=False, http_status=0, error="Connection reset")
+    dns_rows = [
+        {
+            "domain": "youtube.com",
+            "tampered": True,
+            "udp_ips": "10.0.0.1",
+            "doh_ips": "1.2.3.4",
+            "verdict": "tampered",
+            "doh_server": "https://doh",
+        }
+    ]
+    with (
+        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")),
+        patch("blockchecks.engine.preflight._audit_domains_parallel", new=AsyncMock(return_value=dns_rows)),
+        patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(True, "burst dropped")),
+        patch("blockchecks.engine.preflight.run_prolog_tls", return_value=tls),
+        patch("blockchecks.engine.preflight.run_port_block_probe"),
+        patch("blockchecks.engine.preflight.print_port_block_report"),
+        patch("blockchecks.engine.preflight.run_ip_block_cross_test"),
+        patch("blockchecks.engine.preflight.print_ip_block_report"),
+        patch("blockchecks.engine.preflight._triage_domain"),
+    ):
+        r = run_preflight(
+            ["youtube.com"],
+            PreflightOptions(
+                skip_nfqws2_check=True,
+                skip_ip_block=True,
+                skip_port_block=True,
+                dns_cache=cache,
+                store=store,
+            ),
+        )
+    t = r.triage
+    assert t is not None
+    assert t.dns_hijacked is True
+    assert t.rst_at_sni is True
+    assert t.handshake_phase == FailPhase.TLS_RST_AT_SNI
+    assert t.voice_ok is False
+    assert t.udp_blocked is True
+    assert t.domain_phases["youtube.com"] == FailPhase.TLS_RST_AT_SNI.value
+
+
+def test_preflight_diagnostics_fooling_grid():
+    from blockchecks.checkers.tcp_tls import TlsResult
+
+    cache = MagicMock()
+    cache.resolve.return_value = ["1.2.3.4"]
+    cache.primary_ip.return_value = "1.2.3.4"
+
+    def probe(strategy: str):
+        if "badsum" in strategy:
+            return False, "SSL error 35", 0
+        return True, "", 200
+
+    with (
+        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")),
+        patch(
+            "blockchecks.engine.preflight.run_prolog_tls",
+            return_value=TlsResult(domain="youtube.com", success=False, error="timeout", http_status=0),
+        ),
+        patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
+        patch("blockchecks.engine.preflight._triage_domain"),
+        patch("blockchecks.checkers.ttl_probe.probe_ttl") as mock_ttl,
+        patch("blockchecks.checkers.fooling_probe.probe_ech_blocked", return_value=True),
+        patch("blockchecks.checkers.fooling_probe.probe_http_blocked", return_value=False),
+    ):
+        from blockchecks.checkers.ttl_probe import TtlProbeResult
+
+        mock_ttl.return_value = TtlProbeResult(server_hops=12, dpi_hops=3, autottl_delta=3)
+        r = run_preflight(
+            ["youtube.com"],
+            PreflightOptions(
+                skip_nfqws2_check=True,
+                skip_ip_block=True,
+                skip_port_block=True,
+                skip_dns_audit=True,
+                skip_diagnostics=False,
+                dns_cache=cache,
+                fooling_probe_fn=probe,
+            ),
+        )
+    t = r.triage
+    assert t is not None
+    assert "tcp_ts=-1000" in t.viable_foolings
+    assert "badsum" not in t.viable_foolings
+    assert t.server_hops == 12
+    assert t.dpi_hops == 3
+    assert t.ech_blocked is True
+    assert t.http_blocked is False
+    assert t.silent_drop_after_sni is True
+    assert "stun" in t.viable_blobs
+
+
+def test_dns_audit_without_store_sets_hijacked():
+    from blockchecks.checkers.tcp_tls import TlsResult
+    from blockchecks.engine.fail_phase import FailPhase
+
+    cache = MagicMock()
+    cache.resolve.return_value = ["1.2.3.4"]
+    tls = TlsResult(domain="youtube.com", success=False, http_status=0, error="timeout")
+    dns_rows = [
+        {
+            "domain": "youtube.com",
+            "tampered": True,
+            "udp_ips": "10.0.0.1",
+            "doh_ips": "1.2.3.4",
+            "verdict": "tampered",
+            "doh_server": "https://doh",
+        }
+    ]
+    with (
+        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")),
+        patch(
+            "blockchecks.engine.preflight._audit_domains_parallel",
+            new=AsyncMock(return_value=dns_rows),
+        ),
+        patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
+        patch("blockchecks.engine.preflight.run_prolog_tls", return_value=tls),
+        patch("blockchecks.engine.preflight._triage_domain"),
+    ):
+        r = run_preflight(
+            ["youtube.com"],
+            PreflightOptions(
+                skip_nfqws2_check=True,
+                skip_ip_block=True,
+                skip_port_block=True,
+                dns_cache=cache,
+                store=None,
+            ),
+        )
+    assert r.triage is not None
+    assert r.triage.dns_hijacked is True
+    assert r.triage.handshake_phase == FailPhase.CONNECT_TIMEOUT
+
+
+def test_live_probe_uses_pf_netns_and_stops():
+    import asyncio
+
+    from blockchecks.checkers.ttl_probe import TtlProbeResult
+    from blockchecks.engine.preflight import _run_diagnostics
+
+    runner = MagicMock()
+    runner.start = AsyncMock()
+    runner.stop = AsyncMock()
+    runner.test_tcp = AsyncMock(return_value=MagicMock(success=True, error="", http_code=200))
+    cache = MagicMock()
+    cache.primary_ip.return_value = "1.2.3.4"
+    with (
+        patch("blockchecks.engine.async_runner.AsyncTestRunner", return_value=runner) as ctor,
+        patch("blockchecks.checkers.ttl_probe.probe_ttl") as mock_ttl,
+        patch("blockchecks.checkers.fooling_probe.probe_ech_blocked", return_value=None),
+        patch("blockchecks.checkers.fooling_probe.probe_http_blocked", return_value=False),
+        patch(
+            "blockchecks.checkers.fooling_probe.run_fooling_grid_async",
+            new=AsyncMock(return_value=MagicMock(viable=["tcp_ts=-1000"])),
+        ),
+        patch(
+            "blockchecks.checkers.fooling_probe.run_split_grid_async",
+            new=AsyncMock(return_value="first_byte"),
+        ),
+        patch(
+            "blockchecks.checkers.fooling_probe.run_blob_grid_async",
+            new=AsyncMock(return_value=["stun"]),
+        ),
+    ):
+        mock_ttl.return_value = TtlProbeResult(server_hops=12, dpi_hops=3, autottl_delta=3)
+        asyncio.run(_run_diagnostics(TriageProfile(), "youtube.com", cache, PreflightOptions()))
+    assert ctor.call_args.kwargs["auto_pin"] is False
+    assert ctor.call_args.kwargs["netns_base"].startswith("bs-pf-")
+    runner.stop.assert_awaited()
+
+
+def test_handle_triage_reuses_started_runner():
+    import asyncio
+
+    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.service.server import ProbeServer
+
+    runner = MagicMock()
+    runner.test_tcp = AsyncMock(
+        return_value=MagicMock(success=True, error="", http_code=200)
+    )
+    service = MagicMock()
+    service.started = True
+    service.runner = runner
+    report = MagicMock(triage=TriageProfile(handshake_phase=FailPhase.PASS))
+    with (
+        patch(
+            "blockchecks.engine.preflight.run_preflight_async",
+            new=AsyncMock(return_value=report),
+        ) as pf,
+        patch("blockchecks.engine.async_runner.AsyncTestRunner") as ctor,
+    ):
+        asyncio.run(ProbeServer(service)._handle_triage({"domain": "youtube.com"}))
+    ctor.assert_not_called()
+    opts = pf.await_args.args[1]
+    assert callable(opts.fooling_probe_fn)

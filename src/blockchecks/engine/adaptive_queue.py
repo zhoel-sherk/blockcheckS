@@ -138,6 +138,12 @@ class AdaptiveMetrics:
 
 # ── AQ4: weight table ────────────────────────────────────────────────
 
+_SPLIT_POS_TRAITS = {
+    "first_byte": "pos:1",
+    "sni_marker": "pos:sniext+1",
+    "seqovl": "fool:seqovl",
+}
+
 
 @dataclass
 class ScanWeights:
@@ -157,6 +163,28 @@ class ScanWeights:
     family_boost: float = 1.0
     blob_boost: float = 0.5
     trait_boost: float = 0.4
+
+    def seed_from_triage(self, profile) -> None:
+        """Cold-start family/blob/trait weights from a preflight TriageProfile."""
+        if profile is None:
+            return
+        from blockchecks.engine.blob_filter import aliases_for_class
+        from blockchecks.engine.family_registry import dead_fooling_tokens, families_for_profile
+
+        for fam in families_for_profile(profile):
+            self.family[fam] = self.family.get(fam, 1.0) * 2.0
+        for tok in dead_fooling_tokens(profile):
+            self.trait[f"fool:{tok}"] = 0.1
+        for fool in profile.viable_foolings:
+            key = fool.split("=", 1)[0]
+            self.trait[f"fool:{key}"] = self.trait.get(f"fool:{key}", 0.0) + 0.8
+        for blob in profile.viable_blobs:
+            self.blob[blob] = self.blob.get(blob, 0.0) + 0.5
+            for alias in aliases_for_class(blob):
+                self.blob[alias] = self.blob.get(alias, 0.0) + 0.5
+        if profile.split_mode:
+            trait_key = _SPLIT_POS_TRAITS.get(profile.split_mode, f"pos:{profile.split_mode}")
+            self.trait[trait_key] = self.trait.get(trait_key, 0.0) + 0.4
 
     def get(self, family: str, blobs: list[str], traits: list[str]) -> float:
         score = self.family.get(family, 1.0)
