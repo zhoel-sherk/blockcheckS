@@ -22,9 +22,9 @@ def test_build_ip_discovery_request_74_bytes():
 
 
 def test_parse_ip_discovery_response_ok():
-    # Type=2, Len=70, SSRC, address "1.2.3.4", port 50001
+    # Type=2, Len=70, SSRC, address "1.2.3.4", port 50001 little-endian
     addr = b"1.2.3.4" + b"\x00" * (64 - 7)
-    data = b"\x00\x02\x00\x46" + b"\x00\x00\x00\x01" + addr + b"\xc3\x51"
+    data = b"\x00\x02\x00\x46" + b"\x00\x00\x00\x01" + addr + b"\x51\xc3"
     parsed = parse_ip_discovery_response(data)
     assert parsed is not None
     assert parsed["mapped_ip"] == "1.2.3.4"
@@ -62,7 +62,7 @@ def test_stun_probe_success():
 
 def test_ip_discovery_probe_success():
     addr = b"9.9.9.9" + b"\x00" * (64 - 7)
-    resp = b"\x00\x02\x00\x46" + b"\x00\x00\x00\x00" + addr + b"\xc3\x50"
+    resp = b"\x00\x02\x00\x46" + b"\x00\x00\x00\x00" + addr + b"\x50\xc3"
 
     sock = MagicMock()
     sock.recvfrom.return_value = (resp, ("35.217.2.2", 50000))
@@ -165,6 +165,26 @@ def test_voice_burst_probe_timeout():
 
     assert ok is False
     assert "timeout" in detail
+
+
+def test_voice_burst_probe_unauthenticated_rtp_stun_ok():
+    """Discord drops unauthenticated RTP; a later STUN reply means UDP is open."""
+    from blockchecks.checkers.udp_voice import voice_burst_probe
+
+    sock = MagicMock()
+    sock.recvfrom.side_effect = [
+        TimeoutError,
+        (b"\x01\x01\x00\x00\x21\x12\xa4\x42" + b"\x00" * 12, ("35.217.3.3", 50004)),
+    ]
+
+    with patch("socket.socket", return_value=sock):
+        ok, ms, detail = voice_burst_probe(
+            "35.217.3.3", 50004, timeout=1.0, burst_bytes=17408, packet_size=1400
+        )
+
+    assert ok is True
+    assert "unauthenticated RTP" in detail
+    assert "STUN" in detail
 
 
 def test_voice_udp_probe_try_burst_on_fail():

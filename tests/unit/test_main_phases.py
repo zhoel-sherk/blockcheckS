@@ -6,6 +6,8 @@ Covers the pure / orchestrator-level functions with mocked external deps.
 from __future__ import annotations
 
 import asyncio
+import signal
+import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -609,23 +611,33 @@ def test_arm_stop_handlers_registers():
     ctx = _mk_ctx()
     loop = MagicMock()
     with patch("blockchecks.main_phases.asyncio.get_running_loop", return_value=loop):
-        arm_stop_handlers(ctx)
+        restore = arm_stop_handlers(ctx)
     assert loop.add_signal_handler.call_count == 3
+    restore()
+    assert loop.remove_signal_handler.call_count == 3
 
 
 def test_arm_stop_handlers_signal_fallback(monkeypatch):
     from blockchecks.main_phases import arm_stop_handlers
 
     ctx = _mk_ctx()
+    seen: list[int] = []
 
     def _raise(*a, **k):
         raise NotImplementedError
 
+    def _sig(sig, handler):
+        seen.append(sig)
+        return signal.SIG_DFL
+
     loop = MagicMock()
     loop.add_signal_handler.side_effect = _raise
-    monkeypatch.setattr("blockchecks.main_phases.signal.signal", lambda *a, **k: None)
+    monkeypatch.setattr("blockchecks.main_phases.signal.signal", _sig)
     with patch("blockchecks.main_phases.asyncio.get_running_loop", return_value=loop):
-        arm_stop_handlers(ctx)
+        restore = arm_stop_handlers(ctx)
+    assert signal.SIGINT in seen
+    assert signal.SIGTERM in seen
+    restore()
 
 
 def test_tcp_sequential_runs_jobs():
@@ -650,6 +662,21 @@ def test_tcp_sequential_stop_event():
     with patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
         asyncio.run(_run_tcp_sequential(ctx, progress))
     ctx.runner.test_tcp.assert_not_awaited()
+
+
+def test_tcp_sequential_stop_does_not_leak_coroutines():
+    from blockchecks.main_phases import _run_tcp_sequential
+
+    ctx = _mk_ctx()
+    ctx.tcp_items = [MagicMock() for _ in range(250)]
+    ctx.domains = ["a.com", "b.com"]
+    ctx.stop.set()
+    progress = MagicMock()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
+            asyncio.run(_run_tcp_sequential(ctx, progress))
+    assert not any("never awaited" in str(w.message) for w in caught)
 
 
 # ── _run_tcp_adaptive / family_gates / fanout / run_pairs_phase ───────

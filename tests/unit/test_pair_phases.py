@@ -683,8 +683,10 @@ def test_register_stop_handlers(monkeypatch):
     loop = MagicMock()
     state = StopHandlerState()
     with patch("blockchecks.cli.commands.pair_phases.asyncio.get_running_loop", return_value=loop):
-        register_stop_handlers(loop, state, None, ev)
+        restore = register_stop_handlers(loop, state, None, ev)
     assert loop.add_signal_handler.call_count == 3
+    restore()
+    assert loop.remove_signal_handler.call_count == 3
 
 
 def test_load_strategy_items_configs_dir(tmp_path):

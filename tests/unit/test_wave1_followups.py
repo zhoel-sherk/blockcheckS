@@ -61,6 +61,38 @@ def test_invoke_curl_probe_worker_bad_json():
 
 
 @pytest.mark.unit
+def test_invoke_curl_probe_worker_ignores_stderr_warnings():
+    import subprocess
+
+    payload = {"mode": "single", "request": {"domain": "x"}}
+    fake = MagicMock()
+    fake.communicate.return_value = (
+        json.dumps({"success": True, "http_code": 200, "latency_ms": 12}),
+        "DeprecationWarning: foo\n",
+    )
+    fake.pid = 4242
+    with patch("blockchecks.service.probe.sp.Popen", return_value=fake) as popen:
+        out = invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", payload, 10.0)
+    assert out["success"] is True
+    assert popen.call_args.kwargs["stderr"] == subprocess.PIPE
+    assert popen.call_args.kwargs["stdout"] == subprocess.PIPE
+
+
+@pytest.mark.unit
+def test_invoke_curl_probe_worker_extracts_json_from_polluted_stdout():
+    fake = MagicMock()
+    fake.communicate.return_value = (
+        'WARNING: something\n{"success": true, "http_code": 200, "latency_ms": 3}\n',
+        None,
+    )
+    fake.pid = 4242
+    with patch("blockchecks.service.probe.sp.Popen", return_value=fake):
+        out = invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", {}, 10.0)
+    assert out["success"] is True
+    assert out["http_code"] == 200
+
+
+@pytest.mark.unit
 def test_invoke_curl_probe_worker_timeout_returns_failure_dict():
     """TimeoutExpired must become a failure dict, not crash the batch."""
     import subprocess

@@ -53,13 +53,37 @@ def test_parse_dns_response_extracts_a_records():
     """Crafted wire response with one A record → exact IP list."""
     import struct
 
-    # Header: qd=1, an=1
     header = struct.pack("!HHHHHH", 0x4242, 0x8180, 1, 1, 0, 0)
     qname = b"\x07example\x03com\x00"
-    question = qname + struct.pack("!HH", 1, 1)  # A IN
-    # Answer: pointer to qname at offset 12, type A, class IN, ttl, rdlength=4, 1.2.3.4
+    question = qname + struct.pack("!HH", 1, 1)
     answer = b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4) + bytes((1, 2, 3, 4))
     assert _parse_dns_response(header + question + answer) == ["1.2.3.4"]
+
+
+@pytest.mark.unit
+def test_parse_dns_response_mixed_compressed_answer_name():
+    """Answer name ``www`` + pointer must not skip an extra byte after the pointer."""
+    import struct
+
+    header = struct.pack("!HHHHHH", 0x4242, 0x8180, 1, 1, 0, 0)
+    qname = b"\x07example\x03com\x00"
+    question = qname + struct.pack("!HH", 1, 1)
+    aname = b"\x03www\xc0\x0c"
+    answer = aname + struct.pack("!HHIH", 1, 1, 60, 4) + bytes((9, 8, 7, 6))
+    assert _parse_dns_response(header + question + answer) == ["9.8.7.6"]
+
+
+@pytest.mark.unit
+def test_parse_dns_response_question_is_pointer():
+    """Question name encoded as a compression pointer (no trailing NUL)."""
+    import struct
+
+    # header | ptr→18 | QTYPE/QCLASS | labels at 18 | answer RR
+    header = struct.pack("!HHHHHH", 0x4242, 0x8180, 1, 1, 0, 0)
+    labels = b"\x07example\x03com\x00"
+    answer_rr = struct.pack("!HHIH", 1, 1, 60, 4) + bytes((5, 6, 7, 8))
+    wire = header + b"\xc0\x12" + struct.pack("!HH", 1, 1) + labels + answer_rr
+    assert _parse_dns_response(wire) == ["5.6.7.8"]
 
 
 @pytest.mark.unit
@@ -75,13 +99,31 @@ def test_udp_resolve_timeout():
 @pytest.mark.unit
 def test_audit_tampered_when_sets_disjoint():
     with (
-        patch("blockchecks.checkers.dns_secure.udp_resolve", return_value=(["8.47.69.6"], "", 1.0)),
-        patch("blockchecks.checkers.dns_secure.doh_query", return_value=(["104.18.1.1"], "", 2.0)),
+        patch("blockchecks.checkers.dns_secure.udp_resolve", return_value=(["81.88.1.1"], "", 1.0)),
+        patch("blockchecks.checkers.dns_secure.doh_query", return_value=(["93.184.216.34"], "", 2.0)),
     ):
-        r = audit_domain("cloudflare-ech.com", doh_url="https://example/dns-query")
+        r = audit_domain("example.com", doh_url="https://example/dns-query")
     assert r.tampering_detected
     assert r.verdict == "tampered"
     assert has_dns_hijack([r])
+
+
+@pytest.mark.unit
+def test_audit_ok_anycast_cdn_disjoint_ips():
+    with (
+        patch(
+            "blockchecks.checkers.dns_secure.udp_resolve",
+            return_value=(["104.16.1.1"], "", 1.0),
+        ),
+        patch(
+            "blockchecks.checkers.dns_secure.doh_query",
+            return_value=(["172.64.1.1"], "", 2.0),
+        ),
+    ):
+        r = audit_domain("cloudflare-ech.com", doh_url="https://example/dns-query")
+    assert not r.tampering_detected
+    assert r.verdict == "ok"
+    assert "anycast" in r.description.lower()
 
 
 @pytest.mark.unit

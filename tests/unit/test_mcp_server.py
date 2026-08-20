@@ -455,6 +455,7 @@ async def test_get_presets(tmp_path, monkeypatch):
     (strat_dir / "flowseal-fast.tls").write_text("s1\ns2\ns3\n")
     (strat_dir / "shortlist-tls12.tls").write_text("x\n")
     (dom_dir / "benchmark.txt").write_text("a.com\nb.com\n# comment\nc.com\n")
+    (tmp_path / "presets" / "manifest.toml").write_text("[presets]\n")
     monkeypatch.setattr(ms, "PROJECT_DIR", str(tmp_path))
 
     strats = await ms.get_presets("strategies")
@@ -478,11 +479,41 @@ async def test_stop_campaign_delegates_to_daemon(monkeypatch):
 
     async def fake_send(action, payload, timeout=30.0, socket_path=None):
         assert action == "stop"
-        return {"ok": True, "error": None, "data": {"status": "stopping"}}
+        return {"ok": True, "error": None, "data": {"action_status": "stopping"}}
 
     monkeypatch.setattr(ms, "_send_daemon_request", fake_send)
     result = await ms.stop_campaign()
     assert result.get("status") == "stopping"
+    assert result.get("action_status") == "stopping"
+    assert result.get("ok") is True
+
+
+async def test_stop_campaign_parses_legacy_stopping_envelope(monkeypatch):
+    from blockchecks.mcp import server as ms
+
+    async def fake_send(action, payload, timeout=30.0, socket_path=None):
+        return {"ok": False, "error": "cmd failed: stopping", "status": "stopping", "data": {}}
+
+    monkeypatch.setattr(ms, "_send_daemon_request", fake_send)
+    result = await ms.stop_campaign()
+    assert result.get("ok") is True
+    assert result.get("status") == "stopping"
+
+
+async def test_query_strategies_sqlite_error_returns_list(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = tmp_path / "broken.db"
+    db.write_bytes(b"")
+    from blockchecks.mcp.server import query_strategies
+
+    def boom(*_a, **_k):
+        raise sqlite3.Error("locked")
+
+    monkeypatch.setattr(sqlite3, "connect", boom)
+    result = await query_strategies("a.com", db_path=str(db))
+    assert isinstance(result, list)
+    assert "cannot open" in result[0]["error"]
 
 
 # ── LAYER C: zapret2 host status (read-only) ──────────────────────────
@@ -539,6 +570,24 @@ async def test_get_zapret2_config_missing_dir():
     result = await ms.get_zapret2_config()
     # Without /opt/zapret2 on CI, must degrade gracefully.
     assert "error" in result or "path" in result
+
+
+async def test_get_zapret2_config_rejects_traversal(tmp_path, monkeypatch):
+    import blockchecks.mcp.server as ms
+
+    zap = tmp_path / "zapret2"
+    zap.mkdir()
+    (zap / "config").write_text("NFQWS_BASE_ARGS=ok\n", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("nope\n", encoding="utf-8")
+    monkeypatch.setattr(ms, "_zapret2_dir", lambda: zap)
+
+    denied = await ms.get_zapret2_config("../secret.txt")
+    assert "error" in denied
+    abs_denied = await ms.get_zapret2_config(str(secret))
+    assert "error" in abs_denied
+    ok = await ms.get_zapret2_config("config")
+    assert ok["path"] == str((zap / "config").resolve())
 
 
 async def test_list_zapret2_blobs(tmp_path, monkeypatch):

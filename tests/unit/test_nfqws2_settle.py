@@ -9,14 +9,12 @@ from blockchecks.service.nfqws2_settle import (
 
 
 def test_nfqws2_running_in_ns_true():
-    mock_run = MagicMock(return_value=MagicMock(returncode=0, stdout="123\n"))
-    with patch("blockchecks.service.nfqws2_settle.sp.run", mock_run):
+    with patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[123]):
         assert nfqws2_running_in_ns("bs-p0") is True
 
 
 def test_nfqws2_running_in_ns_false():
-    mock_run = MagicMock(return_value=MagicMock(returncode=1, stdout=""))
-    with patch("blockchecks.service.nfqws2_settle.sp.run", mock_run):
+    with patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[]):
         assert nfqws2_running_in_ns("bs-p0") is False
 
 

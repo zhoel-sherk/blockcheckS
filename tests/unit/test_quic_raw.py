@@ -38,7 +38,17 @@ def test_synthetic_rfc9000_initial():
     pkt = _synthetic_rfc9000_initial()
     assert len(pkt) == 1200
     assert pkt[0] & 0x80  # LONG header form
+    assert pkt[0] & 0x40  # fixed bit
+    assert (pkt[0] & 0x30) == 0  # Initial
+    assert (pkt[0] & 0x03) == 0  # 1-byte packet number
     assert pkt[1:5] == b"\x00\x00\x00\x01"  # QUIC v1
+    # Length is a 2-byte varint (high bits 01) covering PN + payload
+    dcid_len = pkt[5]
+    length_off = 1 + 4 + 1 + dcid_len + 1 + 0 + 1  # token_len varint of 0
+    length_bytes = pkt[length_off : length_off + 2]
+    assert length_bytes[0] & 0xC0 == 0x40
+    length = ((length_bytes[0] & 0x3F) << 8) | length_bytes[1]
+    assert length == 1200 - length_off - 2
 
 
 @pytest.mark.unit

@@ -52,6 +52,16 @@ def test_collect_coverage_fallback():
     assert tcp == ["fake:b"]
 
 
+def test_collect_skips_label_when_config_missing():
+    db = _store()
+    db.get_best_by_coverage = AsyncMock(return_value=[{"strategy": "std_fake_stun_r6"}])
+    db.get_strategy_config = AsyncMock(return_value=None)
+    tcp, _, _ = asyncio.run(
+        collect_export_strategies(db, domain="d.com", limit=3, domains=["a.com", "b.com"])
+    )
+    assert tcp == []
+
+
 def test_collect_working_fallback():
     db = _store()
     db.get_working_tcp = AsyncMock(return_value=["fake:c"])

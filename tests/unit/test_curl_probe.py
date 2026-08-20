@@ -136,7 +136,16 @@ def test_run_curl_probe_slow_rate_fails():
     class FakeSession:
         curl = FakeCurl()
 
-        def get(self, url, timeout=None):
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, timeout=None, **kwargs):
             resp = MagicMock()
             resp.status_code = 200
             resp.content = b"x" * 400
@@ -654,3 +663,90 @@ def test_tls_403_with_eais_stub_fails():
 def test_tls_200_with_rtru_stub_fails():
     r = _run_plain_probe(200, b"<html>warning.rt.ru blocked</html>" * 5)
     assert r.success is False
+
+
+def test_small_fast_body_not_throttled_or_failed():
+    """Handshake-dominated elapsed must not FAIL/THROTTLE a small 200."""
+    class FakeCurl:
+        def setopt(self, opt, value):
+            pass
+
+    class FakeSession:
+        curl = FakeCurl()
+
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, timeout=None, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.content = b"x" * 400
+            resp.headers = {}
+            return resp
+
+    with patch("curl_cffi.Session", FakeSession):
+        with patch("time.perf_counter", side_effect=[0.0, 0.5]):
+            r = run_curl_probe(CurlProbeRequest(domain="discord.com", timeout=5.0))
+    assert r.success is True
+    assert r.throttled is False
+
+
+def test_login_error_query_not_blockpage():
+    r = _run_plain_probe(302, b"", {"Location": "https://example.com/login?error=invalid"})
+    assert r.success is True
+    assert r.error is None
+
+
+def test_plaintext_http_uses_http11(monkeypatch):
+    captured: dict = {}
+
+    class FakeCurl:
+        def setopt(self, opt, value):
+            pass
+
+    class FakeSession:
+        curl = FakeCurl()
+
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, timeout=None, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.content = b"x" * 400
+            resp.headers = {}
+            return resp
+
+    with patch("curl_cffi.Session", FakeSession):
+        run_curl_probe(CurlProbeRequest(domain="example.com", timeout=5.0, protocol="http"))
+    assert captured["kwargs"]["http_version"] == "v1"
+
+
+def test_googlevideo_follow_keeps_resolved_ip():
+    from blockchecks.checkers.curl_probe import _googlevideo_follow_request
+
+    req = CurlProbeRequest(
+        domain="googlevideo.com",
+        timeout=5.0,
+        resolved_ip="9.9.9.9",
+        resolve_name="rr1---sn-x.googlevideo.com",
+        googlevideo=True,
+    )
+    follow = _googlevideo_follow_request(
+        req, "https://rr2---sn-y.googlevideo.com/videoplayback?id=1"
+    )
+    assert follow is not None
+    assert follow.resolved_ip == "9.9.9.9"
+    assert follow.resolve_name == "rr2---sn-y.googlevideo.com"

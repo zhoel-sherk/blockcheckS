@@ -306,6 +306,28 @@ def test_check_udp_16kb_ok():
     assert blocked is False
 
 
+def test_check_udp_16kb_unauthenticated_rtp_not_blocked():
+    from blockchecks.engine.preflight import check_udp_16kb
+
+    with (
+        patch(
+            "blockchecks.engine.preflight._voice_endpoint_candidates",
+            return_value=[("1.2.3.4", 50004)],
+        ),
+        patch(
+            "blockchecks.checkers.udp_voice.voice_burst_probe",
+            return_value=(
+                True,
+                5.0,
+                "20B STUN after RTP burst (unauthenticated RTP dropped, UDP open)",
+            ),
+        ),
+    ):
+        blocked, detail = check_udp_16kb(5.0)
+    assert blocked is False
+    assert "unauthenticated" in detail or "answered" in detail
+
+
 def test_voice_endpoint_candidates_cache(tmp_path, monkeypatch):
     import json
 
@@ -551,6 +573,7 @@ def test_handle_triage_reuses_started_runner():
     service = MagicMock()
     service.started = True
     service.runner = runner
+    service._lock = asyncio.Lock()
     report = MagicMock(triage=TriageProfile(handshake_phase=FailPhase.PASS))
     with (
         patch(

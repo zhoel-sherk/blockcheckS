@@ -69,7 +69,7 @@ async def test_geneva_fool_hooks():
     items = await gen.generate(protocol="tls12", scan_level="fast", max_count=100)
     text = "\n".join(i.strategy for i in items)
     assert "send:fool=bs_dataofs" in text
-    assert "fool=bs_iplen=" in text
+    assert "fool=bs_iplen:len=" in text
     assert "fool=bs_corrupt_load" in text
     assert "fool=bs_corrupt_wscale" in text
     assert "fool=bs_corrupt_uto" in text
@@ -158,7 +158,7 @@ async def test_pool_sizes_stable():
     """Pool size guards against regression (full tls12 standard, flowseal)."""
     gen = StandardGenerator(strategy_types=["all"])
     items = await gen.generate(protocol="tls12", scan_level="full", max_count=100000)
-    assert len(items) == 24209, f"standard full pool changed: {len(items)}"
+    assert len(items) == 37545, f"standard full pool changed: {len(items)}"
     fg = FlowsealGenerator()
     fitems = await fg.generate(protocol="tls12", scan_level="full", max_count=100000)
     assert len(fitems) == 10183, f"flowseal full pool changed: {len(fitems)}"

@@ -176,3 +176,5 @@ time_limit_h  # RunSpec dataclass field
 time_limit_m  # RunSpec dataclass field
 raw_args  # RunSpec dataclass field
 CampaignContext  # execution context dataclass
+_.coverage_score  # unused method in DAO API
+

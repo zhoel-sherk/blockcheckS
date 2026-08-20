@@ -84,6 +84,29 @@ def test_build_keenetic_conf_multiline_strategy():
     assert "fake:blob=max_ru:repeats=6:strategy=1" in conf
 
 
+def test_build_raw_conf_propagates_hostlist_and_ipset_to_profiles():
+    conf = build_raw_conf(
+        tcp_strategies=["fake:blob=stun:repeats=6"],
+        udp_strategies=["fake:blob=discord_udp:repeats=6"],
+        quic_strategies=["fake:blob=quic_initial:repeats=11"],
+        domains=["discord.com"],
+        ipset_ips=["1.2.3.4"],
+    )
+    quic_section = conf.split("--new=quic", 1)[1].split("--new=voice", 1)[0]
+    voice_section = conf.split("--new=voice", 1)[1]
+    assert quic_section.count("--hostlist-domains=discord.com") == 1
+    assert voice_section.count("--hostlist-domains=discord.com") == 1
+    assert quic_section.count("--ipset-ip=1.2.3.4") == 1
+    assert voice_section.count("--ipset-ip=1.2.3.4") == 1
+
+
+def test_desync_cli_lines_escapes_out_range_lt():
+    from blockchecks.engine.conf_builder import desync_cli_lines
+
+    lines = desync_cli_lines(["--payload=empty --out-range=s1<d1\npktmod:ip_ttl=1"])
+    assert any("--out-range=s1\\<d1" in ln for ln in lines)
+
+
 def test_build_raw_conf_structure(tmp_path):
     conf = build_raw_conf(
         tcp_strategies=["fake:blob=stun:repeats=6"],
@@ -322,13 +345,13 @@ def test_keenetic_skips_unreadable_conf_path(tmp_path):
 
 def test_keenetic_strips_host_paths_from_cli_fragment():
     frag = (
-        "--filter-udp=443 --blob=QUIC:@/home/zhoel/workspace/blockcheckS/blobs/x.bin "
-        "--payload=quic_initial --lua-desync=fake:blob=QUIC:repeats=2"
+        "--filter-udp=443 --blob=quic_initial:@/home/zhoel/workspace/blockcheckS/blobs/x.bin "
+        "--payload=quic_initial --lua-desync=fake:blob=quic_initial:repeats=2"
     )
     conf = build_keenetic_conf(tcp_strategies=[frag], udp_strategies=[])
     assert "/home/" not in _working(conf)
-    assert "fake:blob=QUIC:repeats=2:strategy=1" in conf
-    assert "--blob=QUIC:@/home" not in _working(conf)
+    assert "fake:blob=quic_initial:repeats=2:strategy=1" in conf
+    assert "--blob=quic_initial:@/home" not in _working(conf)
 
 
 def test_write_export_bundle_copies_custom_blob_and_lua(tmp_path):

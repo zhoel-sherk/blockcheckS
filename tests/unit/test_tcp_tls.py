@@ -24,6 +24,21 @@ def test_is_suspicious_redirect_same_host_ok():
 
 
 @pytest.mark.unit
+def test_is_suspicious_redirect_subdomain_to_apex_ok():
+    assert is_suspicious_redirect("www.youtube.com", 301, "https://youtube.com/") is False
+    assert is_suspicious_redirect("www.youtube.com", 302, "https://youtube.com") is False
+    assert is_suspicious_redirect("m.youtube.com", 301, "https://youtube.com/watch") is False
+
+
+@pytest.mark.unit
+def test_is_suspicious_redirect_protocol_relative():
+    assert is_suspicious_redirect("youtube.com", 302, "//youtube.com/") is False
+    assert is_suspicious_redirect("www.youtube.com", 301, "//youtube.com/") is False
+    assert is_suspicious_redirect("discord.com", 302, "//gov.ru/block") is True
+    assert is_suspicious_redirect("discord.com", 302, "/channels") is False
+
+
+@pytest.mark.unit
 def test_is_suspicious_redirect_external_blocked():
     assert is_suspicious_redirect("discord.com", 301, "https://gov.ru/block") is True
     assert is_suspicious_redirect("discord.com", 200, "") is False

@@ -174,6 +174,47 @@ def test_campaign_full_success():
     db_open.assert_awaited_once()
 
 
+def test_campaign_skips_remaining_phases_on_stop():
+    args = _args()
+    ctx = _ctx()
+    ctx.stop.set()
+    http = AsyncMock()
+    voice = AsyncMock()
+    quic = AsyncMock()
+    pairs = AsyncMock()
+    with (
+        patch("blockchecks.main.open_full_run_db", new=AsyncMock()),
+        patch("blockchecks.main.load_run_domains", return_value=(["a.com"], None, None)),
+        patch("blockchecks.main.prepare_run_dns", return_value=(MagicMock(), [], None)),
+        patch(
+            "blockchecks.main.run_preflight_filter",
+            new=AsyncMock(return_value=(["a.com"], "a.com", None)),
+        ),
+        patch("blockchecks.main.build_full_run_context", return_value=ctx),
+        patch("blockchecks.main.generate_strategy_items", new=AsyncMock(return_value=None)),
+        patch("blockchecks.main.configure_tcp_execution"),
+        patch("blockchecks.main.resolve_settle_profile", return_value=None),
+        patch("blockchecks.main.print_settle_profile"),
+        patch("blockchecks.main.build_matrix_fingerprint", return_value="fp"),
+        patch("blockchecks.main.build_async_runner", return_value=ctx.runner),
+        patch("blockchecks.main.arm_stop_handlers"),
+        patch("blockchecks.main.arm_run_deadline", new=AsyncMock()),
+        patch("blockchecks.main.run_tcp_coverage_phase", new=AsyncMock()),
+        patch("blockchecks.main.run_http_phase", new=http),
+        patch("blockchecks.main.discover_voice_endpoint", new=voice),
+        patch("blockchecks.main.run_quic_phase", new=quic),
+        patch("blockchecks.main.run_pairs_phase", new=pairs),
+        patch("blockchecks.main.cleanup_runner", new=AsyncMock()),
+        patch("blockchecks.main.export_and_summarize", new=AsyncMock(return_value=0)),
+    ):
+        rc = asyncio.run(_run_full_campaign(args))
+    assert rc == 0
+    http.assert_not_awaited()
+    voice.assert_not_awaited()
+    quic.assert_not_awaited()
+    pairs.assert_not_awaited()
+
+
 # ── build_arg_parser / main ───────────────────────────────────────────
 
 

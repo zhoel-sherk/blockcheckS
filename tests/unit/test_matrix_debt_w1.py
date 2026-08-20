@@ -22,20 +22,22 @@ def test_repeats_four_in_matrix_axes():
 
 
 @pytest.mark.unit
-def test_ttl_overflow_in_all_ttl():
-    assert 256 in ALL_TTL
-    assert 512 in ALL_TTL
-    assert max(x for x in ALL_TTL if isinstance(x, int)) > 255
+def test_ttl_values_within_byte_range():
+    assert 256 not in ALL_TTL
+    assert 512 not in ALL_TTL
+    assert max(ALL_TTL) <= 255
+    assert min(ALL_TTL) >= 1
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_standard_fake_full_emits_repeats4_and_ttl_overflow():
+async def test_standard_fake_full_emits_repeats4_without_ttl_overflow():
     gen = StandardGenerator(strategy_types=["fake"])
     items = await gen.generate("tls12", scan_level="full", max_count=5000)
     strategies = "\n".join(i.strategy for i in items)
     assert "repeats=4" in strategies
-    assert "ip_ttl=256" in strategies or "ip_ttl=512" in strategies
+    assert "ip_ttl=256" not in strategies
+    assert "ip_ttl=512" not in strategies
 
 
 @pytest.mark.unit

@@ -147,3 +147,78 @@ def test_server_http_busy_returns_423(monkeypatch):
         assert resp["active_run"] == "series_B"
 
     asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_server_stop_ok_envelope():
+    svc = ProbeService(pool_size=2)
+    server = ProbeServer(svc, socket_path="/tmp/bs_test_stop.sock")
+
+    async def run():
+        resp = await server.handle_request({"cmd": "stop"})
+        assert resp["ok"] is True
+        assert resp["status"] == "ok"
+        assert resp["action_status"] == "stopping"
+        assert resp.get("error") is None
+        assert server._stop.is_set()
+
+    asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_find_strategy_populates_top_strategies(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import blockchecks.service.probe_service as ps
+    from blockchecks.engine.generators.base import StrategyItem
+    from blockchecks.engine.results import TcpTestResult
+
+    monkeypatch.setattr(ps, "read_active_run", lambda: None)
+    svc = ProbeService(pool_size=2)
+    svc.started = True
+    item = StrategyItem(label="s1", strategy="fake:blob=stun")
+    passed = TcpTestResult(
+        item=item, domain="a.com", success=True, http_code=200, latency_ms=110.0
+    )
+    runner = MagicMock()
+    runner.pool_size = 2
+    runner.test_tcp = AsyncMock(return_value=passed)
+    runner._run_probe_batch = AsyncMock(return_value=[passed])
+    runner.test_tcp_domains = AsyncMock(return_value=[passed])
+    svc.runner = runner
+    server = ProbeServer(svc, socket_path="/tmp/bs_test_find.sock")
+
+    preset = tmp_path / "flowseal-fast.tls"
+    preset.write_text("fake:blob=stun\n")
+
+    async def fake_bridge(r, queue, **_k):
+        await r.test_tcp(item, "a.com")
+        return SimpleNamespace(
+            metrics=SimpleNamespace(jobs_run=1, jobs_passed=1, time_to_first_pass=0.4)
+        )
+
+    async def run():
+        with (
+            patch(
+                "blockchecks.engine.preset_paths.resolve_strategy_preset",
+                return_value=preset,
+            ),
+            patch(
+                "blockchecks.engine.adaptive_runner.build_adaptive_queue",
+                new=AsyncMock(return_value=(MagicMock(), 0)),
+            ),
+            patch(
+                "blockchecks.engine.adaptive_runner.run_adaptive_tcp_bridge",
+                new=fake_bridge,
+            ),
+        ):
+            resp = await server.handle_request(
+                {"cmd": "find_strategy", "domain": "a.com", "time_limit_sec": 5}
+            )
+        assert resp["ok"] is True
+        assert resp["top_strategies"]
+        assert resp["top_strategies"][0]["strategy"] == "fake:blob=stun"
+        assert resp["top_strategies"][0]["success"] is True
+
+    asyncio.run(run())

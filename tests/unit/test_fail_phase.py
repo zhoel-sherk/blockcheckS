@@ -75,6 +75,15 @@ def test_classify_known(error, expected):
 @pytest.mark.unit
 def test_classify_empty_and_http():
     assert classify_fail_phase("", 200).value == "pass"
+    assert classify_fail_phase("", 204).value == "pass"
+    assert classify_fail_phase("", 206).value == "pass"
     assert classify_fail_phase("", 403).value == "http_403"
     assert classify_fail_phase("", 0).value == "unknown"
     assert classify_fail_phase("random gibberish").value == "other"
+
+
+@pytest.mark.unit
+def test_wrong_version_is_handshake_not_rst_at_sni():
+    assert classify_fail_phase("SSL routines: WRONG_VERSION_NUMBER").value == "tls_handshake_error"
+    assert classify_fail_phase("WRONG_VERSION_NUMBER").value == "tls_handshake_error"
+    assert classify_fail_phase("curl: (35) Recv failure: Connection reset").value == "tls_rst_at_sni"
