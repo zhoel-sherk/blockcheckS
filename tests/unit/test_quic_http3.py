@@ -1,4 +1,4 @@
-"""BC2-10: HTTP/3 QUIC generator and checker tests."""
+"""Tests for HTTP/3 strategy generation and the QUIC checker."""
 
 from __future__ import annotations
 

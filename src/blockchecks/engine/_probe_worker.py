@@ -1,8 +1,4 @@
-"""Subprocess entry for UDP voice probe inside netns (proxy to in_ns_workers).
-
-Kept for back-compat (``python -m blockchecks.engine._probe_worker``); the
-implementation now lives in ``blockchecks.engine.in_ns_workers``.
-"""
+"""Subprocess entry for UDP voice probes inside a netns. Forwards to in_ns_workers."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Export best StateDB strategies to nfqws2 configs (keenetic + raw)."""
+"""Export best store strategies to nfqws2 configs (keenetic and raw)."""
 
 from __future__ import annotations
 

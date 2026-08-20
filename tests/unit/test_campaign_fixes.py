@@ -1,4 +1,4 @@
-"""Unit tests for campaign failure fixes (A1–A3 domain/deadline/adaptive)."""
+"""Tests for domain denylist, run deadline, and adaptive scan wiring."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Unit tests for Phase 11 B11 settle profile."""
+"""Tests for settle/curl timeout profiles."""
 
 import json
 from pathlib import Path

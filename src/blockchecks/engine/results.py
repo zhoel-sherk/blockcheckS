@@ -1,8 +1,4 @@
-"""Result models for strategy tests (TcpTestResult / UdpTestResult / PairResult).
-
-Split out of the async_runner god-file (day-5 refactor) so the models can be
-imported without pulling in the whole network/worker machinery.
-"""
+"""TcpTestResult, UdpTestResult, PairResult."""
 
 from __future__ import annotations
 

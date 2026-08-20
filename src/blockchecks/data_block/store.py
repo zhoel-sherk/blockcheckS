@@ -1,9 +1,4 @@
-"""ProviderStore — SQLite dns.db / strategies.db + hosts + best_config in data_block.
-
-All writes go to ``data_block/providers/<provider>/`` (a git submodule).
-Nothing is committed/pushed automatically; call ``ProviderStore.sync_commit()``
-with ``push=True`` only when the ``--data-block-sync`` flag is set.
-"""
+"""SQLite dns.db / strategies.db plus hosts, best_config.conf, and triage.toml for one provider."""
 
 from __future__ import annotations
 
@@ -99,17 +94,17 @@ class ProviderStore:
         try:
             md.write_text(
                 f"# {self._dir.name}\n\n"
-                "Провайдер-специфичные заметки: блоки, юзер-инфо, решения.\n\n"
-                "## Блокировки\n\n"
-                "## Проверенные стратегии\n\n"
-                "## Примечания\n",
+                "Provider notes: blocks, user info, working strategies.\n\n"
+                "## Blocks\n\n"
+                "## Working strategies\n\n"
+                "## Notes\n",
                 encoding="utf-8",
             )
             reclaim_sudo_ownership(md)
         except OSError:
             pass
 
-    # ── dns.db ────────────────────────────────────────────
+    # dns.db
 
     async def _init_dns(self) -> aiosqlite.Connection:
         db = await aiosqlite.connect(self.dns_db)
@@ -212,7 +207,7 @@ class ProviderStore:
             return {}
         return out
 
-    # ── strategies.db ─────────────────────────────────────
+    # strategies.db
 
     async def _init_strategies(self) -> aiosqlite.Connection:
         db = await aiosqlite.connect(self.strategies_db)
@@ -271,7 +266,7 @@ class ProviderStore:
         )
         return [dict(zip(keys, row, strict=False)) for row in rows]
 
-    # ── hosts file (Windows anti-hijack) ──────────────────
+    # hosts file (Windows anti-hijack)
 
     def write_hosts(self, records: dict[str, list[str] | tuple[list[str], str]]) -> Path:
         """Regenerate the anti-hijack hosts file (first IP per domain).
@@ -307,7 +302,7 @@ class ProviderStore:
         reclaim_sudo_ownership(self.hosts_file)
         return self.hosts_file
 
-    # ── best_config.conf ──────────────────────────────────
+    # best_config.conf
 
     def write_best_config(self, content: str) -> Path:
         """Write the best nfqws2 config; skip when content is unchanged."""
@@ -317,7 +312,7 @@ class ProviderStore:
         reclaim_sudo_ownership(self.best_config)
         return self.best_config
 
-    # ── triage.toml ───────────────────────────────────────
+    # triage.toml
 
     @property
     def triage_file(self) -> Path:
@@ -345,7 +340,7 @@ class ProviderStore:
 
         return TriageProfile.from_dict(_flatten_triage_toml(raw))
 
-    # ── sync (opt-in) ─────────────────────────────────────
+    # sync (opt-in)
 
     def sync_commit(self, *, push: bool = False) -> bool:
         """Commit data_block changes locally; push only if requested.

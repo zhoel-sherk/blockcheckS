@@ -56,9 +56,7 @@ async def test_flowseal_generator_covers_techniques_and_protocols():
     assert any("discord_udp" in i.strategy or "game_udp" in i.strategy for i in udp)
 
 
-# ── added: quic / udp / http protocols + full expansion ───────────────
-
-
+# quic / udp / http protocols + full expansion
 async def test_flowseal_quic_protocol():
     gen = FlowsealGenerator()
     items = await gen.generate("quic", scan_level="fast", max_count=20)

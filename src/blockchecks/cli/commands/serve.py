@@ -1,9 +1,5 @@
-"""``bs serve`` — resident probe server command.
-
-Unix-socket core (asyncio.start_unix_server, no deps) + optional authenticated
-HTTP bridge on 127.0.0.1 (Bearer token, see ``--http-token``). Fair exclusion
-with long-term campaigns: while a campaign owns run.lock, every probe request
-returns busy/campaign_active (423-style) instead of blocking.
+"""bs serve: Unix-socket probe daemon and optional HTTP bridge.
+Refuses to start while a campaign holds run.lock; holds the same lock while running.
 """
 
 from __future__ import annotations

@@ -1,7 +1,5 @@
-"""Test a composite nfqws2 config against all its target domains.
-
-Uses ONE netns + ONE nfqws2 for all domains — the config already
-profiles traffic by hostlist, so one instance handles everything.
+"""Run every domain in an nfqws2 config with one netns and one daemon.
+Hostlists already split traffic, so one process covers the full set.
 """
 
 from __future__ import annotations

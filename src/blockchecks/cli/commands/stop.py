@@ -1,4 +1,4 @@
-"""Gracefully stop an active bs full / scan / pair campaign."""
+"""Stop an active full / scan / pair campaign."""
 
 from __future__ import annotations
 

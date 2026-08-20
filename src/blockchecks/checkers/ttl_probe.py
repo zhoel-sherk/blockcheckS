@@ -1,4 +1,4 @@
-"""Hop-distance estimation from observed IP TTL (preflight Tier 1)."""
+"""Estimate hop distance from the observed IP TTL."""
 
 from __future__ import annotations
 

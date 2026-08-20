@@ -1,4 +1,4 @@
-"""Unit tests for Phase 11 A1 domain denylist loader."""
+"""Tests for domain list loading and denylist."""
 
 from pathlib import Path
 

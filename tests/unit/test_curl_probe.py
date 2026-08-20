@@ -1,4 +1,4 @@
-"""GV-3 — curl_probe / hostfakesplit googlevideo checker tests."""
+"""Tests for curl_probe and googlevideo host checks."""
 
 from __future__ import annotations
 

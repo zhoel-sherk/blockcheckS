@@ -1,4 +1,4 @@
-"""Bridge session lifecycle — boot → probe → shutdown for a batch window."""
+"""Lua-bridge session: boot, probe window, shutdown."""
 
 from __future__ import annotations
 

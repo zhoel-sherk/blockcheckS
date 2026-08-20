@@ -1,8 +1,4 @@
-"""YouTube googlevideo.com URL fetcher via yt-dlp.
-
-Fetches fresh, signed googlevideo.com URLs for CDN testing.
-Cache: 3-hour TTL in XDG cache (bs_gv_url_cache.json)
-"""
+"""Fetch signed googlevideo.com URLs via yt-dlp and cache them for a few hours."""
 
 import json
 import os

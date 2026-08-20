@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# setup-standalone.sh — быстрая установка blockcheckS на Raspberry Pi (armv7l)
-# и любой Linux-хост БЕЗ компиляции native-зависимостей.
+# Install blockcheckS on Raspberry Pi (armv7l) or any Linux host without compiling.
+# Required deps ship wheels on PyPI (including armv7l). rss sampling uses /proc, not psutil.
 #
-# Все обязательные зависимости blockcheckS имеют prebuilt wheels на PyPI
-# (включая armv7l: curl-cffi, pydantic-core). psutil (без armv7l wheel) больше
-# НЕ требуется — заменён на stdlib /proc. Поэтому на RPi2 `pip install` не
-# запускает gcc.
-#
-# Использование:
+# Usage:
 #   bash scripts/setup-standalone.sh              # venv + pip install + deps check
-#   bash scripts/setup-standalone.sh --no-venv    # в текущем окружении
-#   bash scripts/setup-standalone.sh --system     # системный pip (не рекомендую)
+#   bash scripts/setup-standalone.sh --no-venv    # current environment
+#   bash scripts/setup-standalone.sh --system     # system pip
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -68,12 +63,11 @@ echo "  [netns] ensure: sudo ip netns / iptables available (nfqws2 tests need ro
 
 cat <<'EOF'
 
-=== Готово ===
+=== Done ===
 
-Проверка стратегии (нужен root + nfqws2):
+Probe a strategy (needs root + nfqws2):
   sudo -E .venv/bin/bs tcp -d discord.com -s "fake:blob=stun:repeats=6:tcp_ts=-1000" --skip-deps-check
 
-RPi2 примечание: обязательные wheels (curl-cffi, pydantic-core) уже на PyPI
-для armv7l — компиляция не требуется. nfqws2 для arm загрузится автоматически
-(system_deps: armv7l → binaries/linux-arm).
+RPi2: curl-cffi and pydantic-core wheels are on PyPI for armv7l; no compile.
+nfqws2 for arm is fetched on first use (system_deps: armv7l → binaries/linux-arm).
 EOF

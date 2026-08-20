@@ -1,8 +1,4 @@
-"""System dependency checks and optional zapret2 vendor install (1.0.1).
-
-Resolves nfqws2 from env / PATH / /opt / XDG DATA_DIR, and can download the
-official bol-van/zapret2 release into ``~/.local/share/blockcheckS/zapret2``.
-"""
+"""Find nfqws2 (env, PATH, /opt, XDG) and optionally unpack zapret2 into XDG data."""
 
 from __future__ import annotations
 

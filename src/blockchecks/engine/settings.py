@@ -1,7 +1,4 @@
-"""Typed BLOCKCHECKS_* / config.toml settings (pydantic-settings).
-
-Argparse CLI remains the front door; this module validates env + user TOML.
-"""
+"""Validate BLOCKCHECKS_* env and user config.toml."""
 
 from __future__ import annotations
 
@@ -92,7 +89,7 @@ def clear_settings_cache() -> None:
 
 
 def apply_settings_env(settings: BlockchecksSettings | None = None) -> BlockchecksSettings:
-    """Push settings into os.environ so legacy config.py readers stay consistent."""
+    """Copy settings into os.environ for config.py readers."""
     s = settings or load_settings()
     os.environ.setdefault("BLOCKCHECKS_NFQWS2", s.nfqws2)
     os.environ.setdefault("BLOCKCHECKS_BLOBS", s.blobs)

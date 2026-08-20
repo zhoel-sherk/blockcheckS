@@ -1,4 +1,4 @@
-"""Strategy matrix types and base generator."""
+"""Strategy matrix types and the generator base class."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -24,7 +24,7 @@ class StrategyPair:
     udp: StrategyItem
 
 
-# ── Base class ──
+# Base class
 
 
 class StrategyGenerator(ABC):

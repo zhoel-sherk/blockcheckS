@@ -1,4 +1,4 @@
-"""Strategy loader — reads strategies from inline strings, files, or config dirs."""
+"""Load strategies from an inline string, a file, or a config directory."""
 
 from pathlib import Path
 

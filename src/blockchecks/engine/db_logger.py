@@ -1,4 +1,4 @@
-"""Deprecated: use blockchecks.engine.store instead."""
+"""Deprecated. Use blockchecks.engine.store."""
 
 from __future__ import annotations
 

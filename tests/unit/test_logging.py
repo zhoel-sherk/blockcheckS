@@ -1,12 +1,4 @@
-"""Logging + XDG state/data layout tests (audit 2026-08-09).
-
-Covers:
-- H2: application logging is configured (FileHandler under state/logs) so
-  ``log.warning`` from paths/presets is not silently dropped in production.
-- H3: reclaim_sudo_ownership also repairs ``.log`` files (nfqws2 debug logs
-  are written by the dropped-privilege daemon and stay root/overflow-owned).
-- H4: run_summary / exported configs get reclaimed when running as root.
-"""
+"""Tests for application logging under XDG state/logs and sudo ownership of log files."""
 
 from __future__ import annotations
 
@@ -22,8 +14,7 @@ from blockchecks.engine.run_finalize import write_run_summary
 
 @pytest.mark.unit
 def test_cliapp_main_configures_python_logging(tmp_path, monkeypatch):
-    """H2: after cliapp.main() the app logger has a handler writing under
-    RUNTIME_LOGS_DIR, so production warnings are not lost."""
+    """After cliapp.main() the app logger writes under RUNTIME_LOGS_DIR."""
     from blockchecks.engine.paths import configure_logging
 
     logs_dir = tmp_path / "state" / "logs"
@@ -48,7 +39,7 @@ def test_cliapp_main_configures_python_logging(tmp_path, monkeypatch):
 
 @pytest.mark.unit
 def test_reclaim_sudo_ownership_repairs_log_file(tmp_path, monkeypatch):
-    """H3: reclaim_sudo_ownership must chown .log files too (nfqws2 debug logs)."""
+    """reclaim_sudo_ownership also chowns .log files (nfqws2 debug logs)."""
     log_file = tmp_path / "nfqws2_bs-p-0_1_2.log"
     log_file.write_text("init ok\n")
     called: list[tuple] = []
@@ -66,7 +57,7 @@ def test_reclaim_sudo_ownership_repairs_log_file(tmp_path, monkeypatch):
 
 @pytest.mark.unit
 def test_reclaim_sudo_ownership_logs_in_directory(tmp_path, monkeypatch):
-    """H3: a directory reclaim repairs .log files alongside sqlite."""
+    """Directory reclaim also repairs .log files next to sqlite."""
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir()
     log_file = logs_dir / "nfqws2_scan_123.log"
@@ -86,7 +77,7 @@ def test_reclaim_sudo_ownership_logs_in_directory(tmp_path, monkeypatch):
 
 @pytest.mark.unit
 def test_write_run_summary_reclaims_file(tmp_path, monkeypatch):
-    """H4: write_run_summary chowns the created JSON when running as root."""
+    """write_run_summary chowns the JSON when running as root."""
     called: list[tuple] = []
     monkeypatch.setattr(paths.os, "geteuid", lambda: 0)
     monkeypatch.setenv("SUDO_UID", "1000")
@@ -109,8 +100,7 @@ def test_write_run_summary_reclaims_file(tmp_path, monkeypatch):
 
 @pytest.mark.unit
 def test_share_logs_dir_not_created_by_default(tmp_path, monkeypatch):
-    """H5: RUNTIME_LOGS_DIR lives under state, not share; share/logs must not be
-    auto-created by ensure_dirs."""
+    """RUNTIME_LOGS_DIR lives under state, not share; share/logs is not created by ensure_dirs."""
     monkeypatch.setattr(paths, "RUNTIME_LOGS_DIR", tmp_path / "state" / "logs")
     monkeypatch.setattr(paths, "STATE_DIR", tmp_path / "state")
     monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "share")

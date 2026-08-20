@@ -1,4 +1,4 @@
-"""Import blockchecks.shortlist/v1 into presets and optional state.db seed (P5-1)."""
+"""Load blockchecks.shortlist/v1 into presets and optional state.db."""
 
 from __future__ import annotations
 

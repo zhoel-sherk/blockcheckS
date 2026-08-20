@@ -7,7 +7,7 @@
 #   3. live progress               (progress line advances, not frozen [0/N])
 #   4. full + export               (nfqws2_*.conf, user.list, run_summary)
 #   5. resume                      (skip already-tested (strategy,domain))
-#   6. googlevideo GV1             (GGC/ytcdn binary probe)
+#   6. googlevideo                 (GGC/ytcdn binary probe)
 #   7. voice UDP                   (host pinned EP PASS + netns pair udp_results)
 #   8. HTTP plaintext              (conservative 200..399 only)
 #   9. HTTP service layer (bs serve) — auth, /api/* routes, SSE (http bridge / API layer)

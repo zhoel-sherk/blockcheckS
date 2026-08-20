@@ -1,4 +1,4 @@
-"""Unit tests for GV-1 googlevideo videoplayback URL helpers."""
+"""Tests for googlevideo videoplayback URL helpers."""
 
 import json
 
@@ -31,9 +31,7 @@ def test_cache_rejects_ipv6_bound_url():
     assert not _cache_entry_valid({"timestamp": time.time(), "url": url})
 
 
-# ── added: cache TTL / expired reuse / fresh fetch paths ──────────────
-
-
+# cache TTL / expired reuse / fresh fetch paths
 def test_cache_valid_ok():
     import time
 

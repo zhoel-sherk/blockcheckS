@@ -1,4 +1,4 @@
-"""Blob-class filtering and custom-Lua activation from a TriageProfile."""
+"""Filter blob classes and enable custom Lua from a TriageProfile."""
 
 from __future__ import annotations
 

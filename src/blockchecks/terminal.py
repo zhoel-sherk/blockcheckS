@@ -1,4 +1,4 @@
-"""Terminal formatting, color support, and user-facing output helpers."""
+"""Terminal colors and user-facing print helpers."""
 
 from __future__ import annotations
 

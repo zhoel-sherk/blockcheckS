@@ -1,7 +1,4 @@
-"""Strategy matrix generator — combinatorial strategy generation.
-
-Facade over engine.generators.*. See docs/architecture.md.
-"""
+"""Combine generator sources into TCP, UDP, HTTP, and QUIC strategy lists."""
 
 from __future__ import annotations
 
@@ -142,7 +139,7 @@ class MatrixGenerator:
         run_set: set = None,
         triage: TriageProfile | None = None,
     ) -> list[StrategyItem]:
-        """Generate HTTP :80 strategies (BC2-9)."""
+        """Generate HTTP :80 strategies."""
         if triage is not None and triage.http_blocked is False:
             return []
         return await self.generate_tcp(
@@ -180,7 +177,7 @@ class MatrixGenerator:
             self.register("user", UserMatrixGenerator(user_matrix))
             sources = ["user"]
 
-        # Map legacy "standard" on UDP path to voice-only source;
+        # Map "standard" on the UDP path to the voice-only source;
         # "game" is the explicit non-Discord UDP pool (not in defaults).
         remap = {"standard": "standard_udp", "game": "standard_udp_game"}
         sources = [remap.get(s, s) for s in sources]
@@ -224,7 +221,7 @@ class MatrixGenerator:
         run_set: set = None,
         triage: TriageProfile | None = None,
     ) -> list[StrategyItem]:
-        """Generate HTTP/3 QUIC strategies (BC2-10)."""
+        """Generate HTTP/3 QUIC strategies."""
         import time as _time
 
         if not sources:

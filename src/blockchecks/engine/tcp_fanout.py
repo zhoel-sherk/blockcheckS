@@ -1,4 +1,4 @@
-"""Phase 11 B2 — multi-domain curl fan-out helpers and risk guards."""
+"""Split curl jobs so domains that need special per-request options are not mixed in one batch."""
 
 from __future__ import annotations
 

@@ -1,8 +1,4 @@
-"""Tamper/header family expansion: syndata, tcpseg, oob, geneva, wssize, http/quic/udp.
-
-Methods follow the ``_fam_<name>(items, seen, family, scan_level, known_working)``
-contract and delegate dedup/append to ``self._add``.
-"""
+"""Header/tamper expanders: syndata, tcpseg, oob, geneva, wssize, http, quic, udp."""
 
 from __future__ import annotations
 

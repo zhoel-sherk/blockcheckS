@@ -1,7 +1,5 @@
-"""Secure DNS — UDP vs DoH audit and DoH pre-resolve for curl tests.
-
-Ported from dpi-tester ``dns_checker.py``; extended for blockcheckS runtime:
-``doh_resolve``, per-run cache, startup audit, and ``pick_working_doh``.
+"""Compare UDP DNS with DoH, then pre-resolve names for curl.
+Builds a per-run cache and can pick a working DoH server.
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ except AttributeError:
 
 
 def _domain_to_dns_ascii(domain: str) -> str:
-    """IDNA/punycode for wire DNS and DoH (unicode labels e.g. .рф)."""
+    """IDNA/punycode for wire DNS and DoH."""
     text = domain.strip().rstrip(".")
     if not text:
         return text
@@ -415,7 +413,7 @@ def audit_domains(
 
 
 def print_audit_table(results: list[DnsAuditResult]) -> None:
-    """Print tamper audit table (SD4)."""
+    """Print the UDP vs DoH comparison table."""
     print("\n  DNS audit (UDP vs DoH)")
     print(f"  {'-' * 72}")
     print(f"  {'Domain':<24}{'UDP':<22}{'DoH':<22}{'Verdict'}")
@@ -439,7 +437,7 @@ def has_dns_hijack(results: list[DnsAuditResult]) -> bool:
 
 @dataclass
 class DnsRunCache:
-    """Per-batch DoH cache (SD6) with optional hosts-analog IP pinning (IP-PIN).
+    """Per-batch DoH cache with optional hosts-file IP pins.
 
     ``_pins`` maps domain -> pinned IP (hosts-analog file or auto-pin). When a
     pin exists it is returned first from ``resolve`` / ``primary_ip``, so the
@@ -465,7 +463,7 @@ class DnsRunCache:
     def set(self, domain: str, ips: list[str]) -> None:
         self._entries[domain] = (ips, time.time())
 
-    # ── IP pinning (hosts-analog, IP-PIN) ──
+    # IP pin file
 
     def set_pins(self, pins: dict[str, str]) -> None:
         """Replace the domain->IP pin map (empty values removed)."""
@@ -507,7 +505,7 @@ class DnsRunCache:
         if ips and not err:
             self.set(domain, ips)
             return self._pinned_first(domain, ips)
-        # H6: rotate DoH server on failure (skip the one that just failed)
+        # Rotate DoH server on failure (skip the one that just failed)
         for alt, _name in DOH_SERVERS:
             if alt == url:
                 continue
@@ -566,7 +564,7 @@ def _data_block_dns_ips(domain: str) -> list[str]:
 
 
 def apply_curl_resolve(session: curl_cffi.Session, domain: str, ip: str, port: int = 443) -> None:
-    """Set CURLOPT_RESOLVE so SNI stays hostname (SD3)."""
+    """Set CURLOPT_RESOLVE so SNI stays the hostname."""
     session.curl.setopt(CURLOPT_RESOLVE, [f"{domain}:{port}:{ip}"])
 
 
@@ -579,7 +577,7 @@ def prepare_dns_for_run(
     doh_server: str | None = None,
     timeout: float = 5.0,
 ) -> tuple[DnsRunCache | None, list[DnsAuditResult], int]:
-    """Startup DNS audit + cache priming (SD4). Returns (cache, results, exit_code)."""
+    """UDP vs DoH check plus cache priming. Returns (cache, results, exit_code)."""
     if not secure_dns:
         return None, [], 0
 

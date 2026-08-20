@@ -1,4 +1,4 @@
-"""Preset path jail — shared by engine and CLI (no cli→engine cycle)."""
+"""Jail preset paths. Shared by engine and CLI."""
 
 from __future__ import annotations
 

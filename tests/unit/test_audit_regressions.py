@@ -1,4 +1,4 @@
-"""Audit closure regression tests (Wave 4) — Windows-safe, no root."""
+"""Regression tests that do not need root: ECH setopt, paths, and store contracts."""
 
 from __future__ import annotations
 

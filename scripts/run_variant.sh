@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Long-term coverage run variants (20h each). Sequential A→F plan; G is
-# Discord-voice UDP (bs pair) and is launched separately — not in A→F.
+# Coverage run variants (default 20h each). A-F are bs full; G is Discord-voice UDP (bs pair).
 # Variant config map:
 #   A  base          coverage.txt, bridge-batch 10, timeout 2, lua-bridge
 #   B  new           coverage.txt, full pool 30000, timeout 2, geneva.lua

@@ -1,4 +1,4 @@
-"""BC2-6 / B4: blockcheck2 need_* gating between standard strategy families."""
+"""Map triage flags to which standard strategy families to run."""
 
 from __future__ import annotations
 
@@ -130,7 +130,7 @@ async def run_tcp_with_family_gates(
     on_progress: ProgressCb | None = None,
     resume_check: ResumeCb | None = None,
 ) -> tuple[list, int, int, int]:
-    """Run TCP tests in family order with need_* gating (BC2-6).
+    """Run TCP tests in family order with need_* gating.
 
     Returns (results, done, skipped, passed).
     """

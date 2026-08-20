@@ -1,4 +1,4 @@
-"""BC2-9: HTTP :80 standard generator and nfqws2 config."""
+"""Tests for HTTP :80 strategy generation and nfqws2 config."""
 
 from __future__ import annotations
 
@@ -53,8 +53,7 @@ def test_build_tls_nfqws_config_unchanged():
 
 
 def test_build_inline_escapes_lt():
-    """S3 audit fix: '<' in a strategy must be escaped in the @conf, else
-    nfqws2's conf splitter fails with 'failed to split command line options'."""
+    """'<' in a strategy must be escaped in the @conf, else nfqws2 fails to split options."""
     lines = _build_inline_nfqws_lines("--out-range=s1<d1 --in-range=-s1", "tls12")
     text = "\n".join(lines)
     assert "--out-range=s1\\<d1" in text

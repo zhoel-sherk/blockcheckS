@@ -1,4 +1,4 @@
-"""Unit tests for startup preflight (BC2-2, BC2-5, BC2-11)."""
+"""Tests for startup preflight probes."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -143,9 +143,7 @@ def test_preflight_force_keeps_domain():
     assert "discord.com" not in r.skip_domains
 
 
-# ── added: options / dns sync / baseline fallback / audit / udp16kb ───
-
-
+# options / dns sync / baseline fallback / DNS check / udp16kb
 def test_preflight_options_from_args():
     from types import SimpleNamespace
 

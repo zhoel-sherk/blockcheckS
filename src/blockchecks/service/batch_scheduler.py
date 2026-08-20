@@ -1,4 +1,4 @@
-"""Batch scheduling — chunk strategies/jobs into bridge-sized batches."""
+"""Chunk strategies into lua-bridge batch windows."""
 
 from __future__ import annotations
 

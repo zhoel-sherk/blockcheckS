@@ -1,11 +1,5 @@
-"""Flowseal strategy generator — full technique coverage for nfqws2.
-
-Covers desync patterns from Flowseal ``general*.bat`` suites
-(https://github.com/Flowseal/zapret-discord-youtube), rewritten as lua-desync
-cores. Not tied to a single bat; axes expand across all techniques + custom
-blobs. Volume may exceed 1000 strategies — callers use ``max_count``.
-
-Fooling map: ts→tcp_ts=-1000, badseq→badsid, md5sig→tcp_md5.
+"""Expand Flowseal desync patterns into nfqws2 lua-desync strategies.
+Callers cap volume with max_count. Fooling map: ts to tcp_ts=-1000, badseq to badsid, md5sig to tcp_md5.
 """
 
 from __future__ import annotations

@@ -1,8 +1,4 @@
-"""CLI run profiles (--profile smoke|fast|20h).
-
-Provides predefined bundles of flags for common execution scenarios
-such as rapid smoke tests, interactive fast scans, or 20-hour mass campaigns.
-"""
+"""Named flag bundles: smoke, fast, 20h."""
 
 from __future__ import annotations
 

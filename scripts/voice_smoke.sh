@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Voice UDP smoke: dns-alive discover + discord_udp nfqws2 probe (V2-3).
+# Voice UDP smoke: dns-alive discover + discord_udp nfqws2 probe.
 # Needs sudo + nfqws2 + blobs/discord_udp.bin. Optional --full-voice if token present.
 set -euo pipefail
 cd "$(dirname "$0")/.."

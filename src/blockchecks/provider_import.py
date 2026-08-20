@@ -1,4 +1,4 @@
-"""Import provider_summary.json into blockcheckS presets / user matrix (A5)."""
+"""Import provider_summary.json into presets / user matrix."""
 
 from __future__ import annotations
 

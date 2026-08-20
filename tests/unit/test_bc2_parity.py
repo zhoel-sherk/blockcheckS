@@ -1,4 +1,4 @@
-"""Unit tests for global BC2 parity expansions."""
+"""Tests for standard-family expansions that match blockcheck2 lists."""
 
 from __future__ import annotations
 

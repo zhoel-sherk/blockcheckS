@@ -1,8 +1,5 @@
-"""blockcheckS MCP package — FastMCP bridge over the resident ``bs serve`` daemon.
-
-Optional extra: ``pip install blockchecks[mcp]``. The module itself stays
-importable without the ``mcp`` package (lazy import inside ``main()``) so the
-base runtime and ``bs --help`` never break on a missing optional dependency.
+"""FastMCP bridge to the bs serve daemon.
+mcp is an optional extra; main() imports it lazily so bs --help works without it.
 """
 
 from __future__ import annotations
@@ -18,10 +15,9 @@ def main() -> int:
         from blockchecks.mcp.server import main as _run
     except ImportError:
         print(
-            "Ошибка: зависимость 'mcp' не найдена.\n"
-            "Для использования MCP-сервера установите пакет с экстра-зависимостями:\n"
-            "    pip install 'blockchecks[mcp]'\n"
-            "или:\n"
+            "Missing optional dependency 'mcp'.\n"
+            "Install: pip install 'blockchecks[mcp]'\n"
+            "or:\n"
             "    pip install -r requirements-mcp.txt",
             file=sys.stderr,
         )

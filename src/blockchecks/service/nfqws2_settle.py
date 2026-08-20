@@ -1,4 +1,4 @@
-"""nfqws2 post-start settle / readiness poll (Phase 11 B1)."""
+"""Wait until nfqws2 is ready after start."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Phase 11 A9 — nfqws2 settle × curl timeout benchmark."""
+"""Measure nfqws2 settle time against curl timeout and pick a working pair."""
 
 from __future__ import annotations
 

@@ -1,8 +1,4 @@
-"""Bridge conf generation — flat nfqws2 conf with scan_pick batch strategies.
-
-CLI arg parsing / ``<`` escaping and filter-line building are shared with the
-engine-side config builders via ``blockchecks.engine.conf_builder``.
-"""
+"""Flat nfqws2 conf for a lua-bridge batch (scan_pick). CLI parse/escape is in conf_builder."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Unit tests for Phase 11 B2 multi-domain curl fan-out."""
+"""Tests for multi-domain curl fan-out."""
 
 from blockchecks.engine.tcp_fanout import (
     curl_profile,

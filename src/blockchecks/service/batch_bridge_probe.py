@@ -1,4 +1,4 @@
-"""Single bridge probe — publish strategy id to shm IPC and curl nfqws2."""
+"""One lua-bridge probe: publish strategy id on shm IPC and curl through nfqws2."""
 
 from __future__ import annotations
 
@@ -82,8 +82,8 @@ def run_tcp_check_bridge(
     probe_req.timeout = timeout
     # Single IP: the bridge applies the strategy by domain (scan_pick via shm),
     # so the destination IP does not affect which desync is used. Retry-on-IP
-    # here only multiplies the per-IP timeout on every FAIL — drop it. IP-PIN
-    # retry lives in the classic path (in_ns_workers), where it matters.
+    # here only multiplies the per-IP timeout on every FAIL. IP retry lives
+    # in the classic path (in_ns_workers).
     ips_to_try = list(resolved_ips or [])
     if resolved_ip and resolved_ip not in ips_to_try:
         ips_to_try.insert(0, resolved_ip)

@@ -1,4 +1,4 @@
-"""Wave A/C regression tests — critical contracts."""
+"""Regression tests for matrix fingerprint, resume, and store contracts."""
 
 from __future__ import annotations
 

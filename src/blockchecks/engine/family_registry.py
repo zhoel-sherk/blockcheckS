@@ -1,8 +1,4 @@
-"""Typed triage → strategy-family mapping and matrix pruning.
-
-Replaces the string-token ``map_triage_to_generators()`` table with expander
-names that actually exist in ``StandardGenerator`` / ``MatrixGenerator.REGISTRY``.
-"""
+"""Map TriageProfile to expander names in StandardGenerator / MatrixGenerator and prune the matrix."""
 
 from __future__ import annotations
 

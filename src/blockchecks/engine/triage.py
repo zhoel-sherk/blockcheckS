@@ -1,8 +1,5 @@
-"""TriageProfile — deterministic DPI/provider interference profile.
-
-Built BEFORE the strategy scan (preflight) so generators can prune provably
-useless branches and the online bandit / S0 ranker get a contextual vector.
-Fields are deliberately coarse flags + per-domain detail, all JSON-safe.
+"""TriageProfile: coarse DPI flags plus per-domain detail. JSON-safe.
+Filled by preflight so generators can drop useless branches.
 """
 
 from __future__ import annotations
@@ -23,28 +20,28 @@ def _fail_phase(value: object) -> FailPhase:
 
 @dataclass
 class TriageProfile:
-    """Interference profile derived from preflight probes (Phase 1-5)."""
+    """Interference profile derived from preflight probes."""
 
-    # Phase 1 — DNS / L3-L4
+    # DNS / L3-L4
     dns_hijacked: bool = False
     dns_sinkhole: bool = False
     unbypassable_l3: bool = False  # L4 SYN drop / ICMP block / IP blackhole
     l3_phase: FailPhase = FailPhase.UNKNOWN
 
-    # Phase 2 — handshake / early DPI
+    # Handshake / early DPI
     handshake_phase: FailPhase = FailPhase.UNKNOWN
     rst_at_sni: bool = False
     silent_drop_after_sni: bool = False
 
-    # Phase 3 — stream stall
+    # Stream stall
     stall_phase: FailPhase = FailPhase.UNKNOWN
     stall_at_bytes: int | None = None
 
-    # Phase 4 — QoS
+    # QoS
     bandwidth_throttled: bool = False
     read_rate_bps: float = 0.0
 
-    # Phase 5 — UDP/QUIC
+    # UDP / QUIC
     quic_drop: bool = False
     udp_blocked: bool = False
     voice_ok: bool = False
@@ -69,7 +66,7 @@ class TriageProfile:
     http_blocked: bool | None = None
     dead_foolings: list[str] = field(default_factory=list)
 
-    # ── convenience flags for generator pruning ──
+    # convenience flags for generator pruning
 
     @property
     def requires_window_clamp(self) -> bool:

@@ -1,9 +1,5 @@
-"""Build nfqws2 config text: keenetic shell-env, raw flat conf, CLI sanitization.
-
-Single source for nfqws2 CLI arg parsing / escaping shared by ``nfqws_config``
-(in-namespace + sync workers) and ``service.lua_conf`` (bridge backend). The two
-formerly kept duplicate ``_split_cli_args`` and only ``lua_conf`` had the ``<``
-escape — that asymmetry is fixed here.
+"""Build nfqws2 config text and sanitize CLI args.
+Shared by in-namespace workers and the lua bridge.
 """
 
 from __future__ import annotations

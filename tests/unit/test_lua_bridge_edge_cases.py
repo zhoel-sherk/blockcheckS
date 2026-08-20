@@ -143,7 +143,7 @@ class TestBridgePaths:
 
 class TestTornReadPublish:
     def test_publish_then_read_is_consistent(self, tmp_path):
-        """H4: after each publish, a fresh reader sees a consistent id/gen pair."""
+        """After each publish, a fresh reader sees a consistent id/gen pair."""
         from blockchecks.service.lua_bridge_ipc import LuaBridge
 
         lb = LuaBridge("torn-ns", shm_base=tmp_path)
@@ -156,7 +156,7 @@ class TestTornReadPublish:
         lb.teardown()
 
     def test_drain_since_last_gen_does_not_lose_events(self, tmp_path):
-        """H4: events filtered by gen >= since_gen survive repeated drains."""
+        """Events filtered by gen >= since_gen survive repeated drains."""
         import json
 
         from blockchecks.service.lua_bridge_ipc import LuaBridge

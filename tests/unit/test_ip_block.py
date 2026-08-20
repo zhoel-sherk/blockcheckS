@@ -1,4 +1,4 @@
-"""Unit tests for IP-block cross-test (BC2-1)."""
+"""Tests for SNI vs IP-block cross-check."""
 
 from unittest.mock import MagicMock, patch
 
@@ -44,9 +44,7 @@ def test_sni_block_detected():
     assert "162.159.1.1" in r.ip_block_on
 
 
-# ── added: baseline skip / sni-block / cdn hint / preflight / report ──
-
-
+# baseline skip / sni-block / cdn hint / preflight / report
 def test_baseline_fail_skips():
     from blockchecks.checkers.ip_block import run_ip_block_cross_test
 

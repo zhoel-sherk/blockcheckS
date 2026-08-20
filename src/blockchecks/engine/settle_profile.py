@@ -1,4 +1,4 @@
-"""Phase 11 B11 — dynamic settle/curl timeouts from A9 bench-settle results."""
+"""Load settle/curl timeouts from a bench-settle result file."""
 
 from __future__ import annotations
 

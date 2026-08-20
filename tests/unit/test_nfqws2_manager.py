@@ -131,7 +131,7 @@ def test_stop_killpg_and_unlinks_temps(tmp_path: Path):
 
 
 def test_stop_handles_dead_pid(tmp_path):
-    """H8: stop() must not raise when getpgid/killpg fail for an already-dead pid."""
+    """Stop() must not raise when getpgid/killpg fail for an already-dead pid."""
     temp = tmp_path / "dead.conf"
     temp.write_text("x", encoding="utf-8")
 
@@ -151,9 +151,7 @@ def test_stop_handles_dead_pid(tmp_path):
     assert not temp.exists()
 
 
-# ── added: inject_debug / start_daemon / launch branches / hostlist / stop ─
-
-
+# inject_debug / start_daemon / launch branches / hostlist / stop
 def test_inject_debug_and_daemon_adds_both(tmp_path):
     from blockchecks.service.nfqws2 import inject_debug_and_daemon
 

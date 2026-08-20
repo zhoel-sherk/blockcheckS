@@ -1,4 +1,4 @@
-"""Wave4: pool default, ELF arch, qnum/bypass hygiene."""
+"""Tests for netns pool default, ELF arch, and NFQUEUE hygiene."""
 
 from __future__ import annotations
 

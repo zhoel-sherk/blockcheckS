@@ -1,8 +1,5 @@
-"""Firewall management — precise iptables rules with tracked cleanup.
-
-Uses iptables -D to remove only the rules we added.
-Always uses --queue-bypass on NFQUEUE rules.
-No destructive -F OUTPUT.
+"""Add and delete the iptables NFQUEUE rules this process created.
+Always --queue-bypass. Never iptables -F OUTPUT.
 """
 
 import subprocess

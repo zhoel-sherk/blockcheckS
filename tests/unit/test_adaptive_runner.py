@@ -1,4 +1,4 @@
-"""Unit tests for adaptive_runner (AQ5–AQ6)."""
+"""Tests for the adaptive TCP scan loop."""
 
 from __future__ import annotations
 

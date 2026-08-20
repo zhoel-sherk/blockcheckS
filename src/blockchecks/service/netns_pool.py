@@ -1,11 +1,5 @@
-"""Network namespace pool for async parallel testing.
-
-Fixed-size pool of pre-created netns. Workers acquire/release instead of
-create/destroy per test — avoids kernel race conditions on veth creation.
-
-Thread safety: create_all() and destroy_all() are synchronous (called via
-asyncio.to_thread). Queue mutations (seed/drain/acquire/release) run only
-on the event loop thread.
+"""Fixed pool of netns plus veth.
+Workers acquire/release. create_all/destroy_all run in a thread; queue ops stay on the event loop.
 """
 
 from __future__ import annotations
@@ -246,7 +240,7 @@ class NetNsPool:
         self._run("ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2", check=False)
         self._run("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT", check=False)
 
-    # ── Public API ──
+    # Public API
 
     def create_all(self) -> None:
         """Synchronous — create namespaces only (no Queue mutations)."""

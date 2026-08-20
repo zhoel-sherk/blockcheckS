@@ -1,4 +1,4 @@
-"""Small helpers for writing sensitive text files (tokens, settings)."""
+"""Write tokens and settings with tight file permissions."""
 
 from __future__ import annotations
 

@@ -120,7 +120,7 @@ def test_scan_bridge_lua_accepts_http_req() -> None:
 
 @pytest.mark.unit
 def test_events_file_world_writable_for_dropped_uid(tmp_path: Path) -> None:
-    """H6-live: nfqws2 drops privileges after init; events.ndjson must be 0666
+    """Nfqws2 drops privileges after init; events.ndjson must be 0666
     so Lua can append APPLIED/STRATEGY_FAIL events (644 root file → silent loss)."""
     bridge = LuaBridge("bs-p-uid", shm_base=tmp_path)
     bridge.setup()

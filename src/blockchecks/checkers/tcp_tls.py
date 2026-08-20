@@ -1,11 +1,5 @@
-"""TCP TLS connectivity checker via curl_cffi (Chrome impersonation).
-
-Addresses blockcheckS concerns:
-  1. SO_MARK: handled by netns isolation (engine/test_runner.py)
-  2. State race: handled by sequential testing (engine/test_runner.py)
-  3. Fake responses: content validation for DPI redirect/stub detection
-  4. TCP Window Clamping: read timeout via separate timing (below)
-  5. DNS Leak: handled by nfqws2 netns DNS (8.8.8.8) + optional pre-resolution
+"""TLS probe via curl_cffi Chrome impersonation.
+Checks status, body size, transfer rate, and DPI stub content.
 """
 
 import socket
@@ -67,7 +61,7 @@ def _hosts_related(host: str, domain: str) -> bool:
 
 
 def is_suspicious_redirect(domain: str, status: int, location: str) -> bool:
-    """Detect DPI blockpage redirects (BC2-12, blockcheck2 curl_test_http).
+    """Detect DPI blockpage redirects (blockcheck2 curl_test_http).
 
     Same-site redirects are OK, including subdomain→apex (``www.youtube.com`` →
     ``https://youtube.com/``) and protocol-relative ``//host/...`` Locations.

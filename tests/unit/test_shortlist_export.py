@@ -1,4 +1,4 @@
-"""Tests for blockchecks.shortlist/v1 export and import (P5-1)."""
+"""Tests for shortlist v1 export and import."""
 
 from __future__ import annotations
 
@@ -105,9 +105,7 @@ async def test_shortlist_seed_db(tmp_path):
     assert "seeded" in working
 
 
-# ── added: common_tcp / udp / quic / fallback / main ──────────────────
-
-
+# common_tcp / udp / quic / fallback / main
 @pytest.mark.asyncio
 async def test_build_shortlist_common_tcp_fallback(temp_db: StateDB):
     from blockchecks.shortlist_export import build_shortlist_entries

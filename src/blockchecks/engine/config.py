@@ -1,14 +1,11 @@
-"""blockcheckS shared configuration — paths, constants, defaults.
-
-Uses BLOCKCHECKS_* env vars for portable paths. Falls back to sensible defaults.
-"""
+"""Paths, BLOCKCHECKS_* env, and numeric defaults."""
 
 import os
 import sys
 import time
 from pathlib import Path
 
-# ── Resolvable paths ─────────────────────────────
+# Resolvable paths
 
 _ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 _PACKAGE_DIR = os.path.dirname(_ENGINE_DIR)  # .../blockchecks
@@ -94,7 +91,7 @@ def _resolve_python() -> str:
 
 PYTHON_BIN = _resolve_python()
 
-# yt-dlp binary (googlevideo URL fetch — GV-1)
+# yt-dlp binary (googlevideo URL fetch)
 YTDLP_BIN = _env_or("BLOCKCHECKS_YTDLP", "")
 
 DPI_TESTER_SETTINGS = _env_or(
@@ -204,9 +201,9 @@ AQ_DOMAIN_ISOLATE = _env_or("BLOCKCHECKS_AQ_DOMAIN_ISOLATE", "1").lower() not in
     "no",
 )
 
-DEFAULT_PROBE_BACKEND = "lua_bridge"  # T-L3: lua_bridge is the standard backend
+DEFAULT_PROBE_BACKEND = "lua_bridge"  # lua_bridge is the default probe backend
 
-# ── Tuning knobs (configurable: env BLOCKCHECKS_* or [run] in config.toml) ──
+# Tuning knobs (configurable: env BLOCKCHECKS_* or [run] in config.toml)
 # Probe / subprocess wall timeouts. Kept here so a throttled ISP run can lower
 # them without code edits.
 
@@ -233,7 +230,7 @@ PROBE_DEFAULT_TIMEOUT = float(_env_or("BLOCKCHECKS_PROBE_TIMEOUT", "5.0"))
 
 
 def resolve_probe_backend(args) -> str:
-    """Resolve probe backend from flags/env (T-L3/T-L4/T-L5).
+    """Resolve probe backend from flags/env.
 
     Precedence: ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` >
     ``BLOCKCHECKS_PROBE_BACKEND`` > default ``lua_bridge``.
@@ -296,7 +293,7 @@ def _warn_mem_low(avail: int, cap: int, base: int) -> None:
 SOCKS5_PROXY = _env_or("BLOCKCHECKS_PROXY", "")
 
 
-# Secure DNS (Phase 9 SD)
+# Secure DNS
 def _env_bool(key: str, default: bool) -> bool:
     v = os.environ.get(key)
     if v is None:
@@ -353,7 +350,7 @@ MIN_READ_RATE_BPS = 500.0  # bytes/sec — below this = TCP window clamp (FAIL)
 THROTTLED_MAX_BPS = 256000.0  # bytes/sec — below this (but >= MIN) = THROTTLED
 MIN_REDIRECT_LENGTH = 10  # bytes — redirects have tiny bodies, don't fail them
 
-# ── googlevideo.com CDN testing ──────────────────
+# googlevideo.com CDN testing
 # Range request size — just above 16KB TSPU buffer threshold
 GOOGLEVIDEO_RANGE_SIZE = 17408  # 17KB, bytes=0-17407
 
@@ -385,17 +382,17 @@ def ggc_enabled(domain: str | None = None) -> bool:
     return False
 
 
-# ── ECH (Encrypted Client Hello) ──────────────────
+# ECH (Encrypted Client Hello)
 # Disable ECH via curl_cffi.CurlOpt.ECH = 10325
 # Forces plaintext SNI in ClientHello — testable by standard DPI strategies
 CURLOPT_ECH = 10325
 
-# ── nfqws2 settle / readiness (Phase 11 B1) ───────
+# nfqws2 settle / readiness
 NFQWS2_SETTLE_MAX = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MAX", "0.5"))
 NFQWS2_SETTLE_POLL = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_POLL", "0.05"))
 NFQWS2_SETTLE_MIN = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MIN", "0"))
 
-# ── memory monitor / daemon recycle (services.metrics) ───────
+# memory monitor / daemon recycle (services.metrics)
 # RSS ceiling for an nfqws2 daemon (MiB); recycle when exceeded.
 MEM_MONITOR_MAX_MIB = float(_env_or("BLOCKCHECKS_MEM_MAX_MIB", "512"))
 # Leak slope threshold (MiB/s over the sampling window); recycle when exceeded.
@@ -409,11 +406,11 @@ MEM_MONITOR_POLL = float(_env_or("BLOCKCHECKS_MEM_POLL", "2.0"))
 # Enable the monitor entirely (0 disables all sampling/recycle).
 MEM_MONITOR_ENABLED = _env_bool("BLOCKCHECKS_MEM_MONITOR", True)
 
-# ── multi-domain curl fan-out (Phase 11 B2) ───────
+# multi-domain curl fan-out
 DEFAULT_CURL_PARALLEL = int(_env_or("BLOCKCHECKS_CURL_PARALLEL", "1"))
 MAX_CURL_PARALLEL = int(_env_or("BLOCKCHECKS_CURL_PARALLEL_MAX", "8"))
 
-# ── nfqws2 debug ─────────────────────────────────
+# nfqws2 debug
 # BLOCKCHECKS_NFQWS2_DEBUG: empty/0=off, 1=file under logs/, syslog, @path, or path
 NFQWS2_DEBUG = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
 

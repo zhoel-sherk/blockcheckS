@@ -1,4 +1,4 @@
-"""nfqws2 Lua bridge — /dev/shm file IPC (strategy.id/gen + events.ndjson)."""
+"""Lua bridge file IPC under /dev/shm: strategy.id/gen and events.ndjson."""
 
 from __future__ import annotations
 

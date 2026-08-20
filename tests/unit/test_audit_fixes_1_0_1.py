@@ -1,4 +1,4 @@
-"""Audit fix regressions: wall timeout, AQ GV solo, family finish, THROTTLED working."""
+"""Tests for wall timeout, googlevideo solo fan-out, family finish, and THROTTLED-as-working."""
 
 from __future__ import annotations
 

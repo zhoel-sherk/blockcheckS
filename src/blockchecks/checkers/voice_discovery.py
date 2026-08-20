@@ -1,13 +1,5 @@
-"""Voice endpoint auto-discovery via sing-box SOCKS5 proxy.
-
-Flow (with token):
-  1. Start sing-box proxy
-  2. Gateway WS → VOICE_SERVER_UPDATE → endpoint
-  3. Voice WS → OP0 Identify → OP2 Ready → IP + UDP port + SSRC
-  4. Stop sing-box
-
-Flow (without token):
-  Returns None → caller uses static IP fallback.
+"""Find a Discord voice UDP endpoint through a sing-box SOCKS5 proxy.
+With a token: Gateway WS then Voice WS OP2 Ready. Without a token: caller uses a static IP.
 """
 
 from __future__ import annotations
@@ -297,9 +289,9 @@ async def discover_multiple(
 ) -> list[dict]:
     """Discover N Discord voice UDP endpoints.
 
-    Layer 1 (DNS): finland{N}.discord.gg bulk resolution (no auth needed)
-    Layer 2 (Gateway): WS → OP2 Ready (needs token)
-    Layer 3 (Cache): previously discovered endpoints
+    DNS: finland{N}.discord.gg bulk resolution (no auth).
+    Gateway: WS then OP2 Ready (needs token).
+    Cache: endpoints already stored.
 
     Returns: [{"ip": str, "port": int, "hostname": str}, ...]
     """

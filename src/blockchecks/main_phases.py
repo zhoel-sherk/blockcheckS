@@ -1,4 +1,4 @@
-"""Phase helpers for ``main.run_full`` (bs full orchestrator)."""
+"""bs full phases: DNS, generate, TCP/UDP scan, adaptive queue, export."""
 
 from __future__ import annotations
 
@@ -405,10 +405,10 @@ def configure_tcp_execution(ctx: FullRunContext) -> None:
         eps = getattr(args, "adaptive_epsilon", 0.1)
         print(
             f"  {GREEN}Adaptive queue:{RESET} ε={eps}"
-            + (f", curl-parallel={curl_parallel} (AQ5+B2)" if curl_parallel > 1 else "")
+            + (f", curl-parallel={curl_parallel}" if curl_parallel > 1 else "")
         )
     if use_family_gates:
-        print(f"  Family gates: {GREEN}on{RESET} (BC2-6 need_* chain)")
+        print(f"  Family gates: {GREEN}on{RESET} (need_* chain)")
 
     ctx.use_adaptive = use_adaptive
     ctx.curl_parallel = curl_parallel
@@ -622,9 +622,8 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
             workers=max(1, int(getattr(args, "parallel", 4) or 4)),
         )
     finally:
-        # Persist adaptive weights even if the run crashed / hit the deadline,
-        # so a later --resume keeps the genetic boost (previously weights were
-        # lost when an early sqlite error aborted the phase before persist).
+        # Persist adaptive weights even if the run crashed or hit the deadline,
+        # so a later --resume keeps them.
         if ctx.aq_result is not None and not getattr(args, "no_adaptive_weights", False):
             try:
                 await persist_adaptive_weights(ctx.db, ctx.aq_result.weights)

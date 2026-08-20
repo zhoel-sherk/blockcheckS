@@ -1,4 +1,4 @@
-"""Export blockchecks.shortlist/v1 JSON for GP orchestrator (P5-1)."""
+"""Write blockchecks.shortlist/v1 JSON."""
 
 from __future__ import annotations
 

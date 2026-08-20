@@ -1,8 +1,4 @@
-"""Phase 12 AQ — adaptive job queue (online scheduler for bs full/scan).
-
-Cross-domain fan-out on PASS + family/cluster weight boosting.
-Integrates with B2 fan-out (AQ5) and CLI ``--adaptive`` (AQ6) via callers.
-"""
+"""Online job queue for full/scan: epsilon-greedy priority, family/cluster weights, sibling expansion."""
 
 from __future__ import annotations
 
@@ -19,7 +15,7 @@ from blockchecks.engine.family_needs import classify_strategy_family
 if TYPE_CHECKING:
     from blockchecks.engine.generators.base import StrategyItem
 
-# ── AQ3: domain clusters ─────────────────────────────────────────────
+# Domain clusters
 
 CLUSTER_DISCORD = "discord"
 CLUSTER_GOOGLE = "google"
@@ -96,7 +92,7 @@ def strategy_traits(strategy: str) -> tuple[str, ...]:
     return tuple(traits)
 
 
-# ── AQ7: runtime metrics ─────────────────────────────────────────────
+# Runtime metrics
 
 
 @dataclass
@@ -136,7 +132,7 @@ class AdaptiveMetrics:
         return self.passes_before_half / max(1, min(self.jobs_run, self.half_mark_jobs))
 
 
-# ── AQ4: weight table ────────────────────────────────────────────────
+# Weight table
 
 _MAX_WEIGHT = 64.0
 
@@ -231,7 +227,7 @@ class ScanWeights:
         return w
 
 
-# ── AQ1: priority queue + ε-random ───────────────────────────────────
+# Priority queue plus epsilon-random
 
 
 @dataclass(slots=True)
@@ -246,7 +242,7 @@ class AdaptiveJob:
     item: StrategyItem
     domain: str
     family: str = ""
-    fanout: bool = False  # enqueued by AQ2 sibling expansion
+    fanout: bool = False  # enqueued by sibling expansion
     _blobs: tuple[str, ...] | None = None
     _traits: tuple[str, ...] | None = None
     _key: tuple[str, str] | None = None

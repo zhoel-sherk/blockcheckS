@@ -1,4 +1,4 @@
-"""Stream triage probe (Phase 3/4) tests — mocked curl streaming."""
+"""Tests for the streaming stall/QoS probe (mocked curl)."""
 
 from __future__ import annotations
 

@@ -263,7 +263,7 @@ async def test_probe_batch_service_recycles_on_memory_flag() -> None:
 
 @pytest.mark.unit
 async def test_run_batch_generic_exception_yields_fail_results() -> None:
-    """H2: any error in the sync probe loop becomes per-item failure results."""
+    """Any error in the sync probe loop becomes per-item failure results."""
     logged: list[str] = []
 
     async def log_tcp_result(item, dom, probe_result, **_k) -> None:
@@ -311,7 +311,7 @@ async def test_run_batch_generic_exception_yields_fail_results() -> None:
 
 @pytest.mark.unit
 async def test_wssize_retry_skips_config_items() -> None:
-    """H3: wssize retry must not fire for config strategies (path, not inline text)."""
+    """wssize retry does not fire for config strategies (path, not inline text)."""
     classic_calls: list[tuple] = []
 
     async def acquire() -> str:
@@ -365,7 +365,7 @@ async def test_wssize_retry_skips_config_items() -> None:
 
 @pytest.mark.unit
 def test_run_tcp_check_bridge_sets_bridge_applied_flag(tmp_path) -> None:
-    """H6/T4: APPLIED event presence is surfaced as bridge_applied."""
+    """APPLIED event presence is surfaced as bridge_applied."""
     import json as _json
 
     from blockchecks.service.batch_bridge_probe import run_tcp_check_bridge
@@ -415,7 +415,7 @@ def test_run_tcp_check_bridge_sets_bridge_applied_flag(tmp_path) -> None:
 
 @pytest.mark.unit
 def test_next_probe_gen_monotonic() -> None:
-    """H7: probe gen strictly increases across bridge probes (incl. wssize retry)."""
+    """Probe gen strictly increases across bridge probes (incl. wssize retry)."""
     from blockchecks.engine.async_runner import AsyncTestRunner
 
     runner = AsyncTestRunner(pool_size=1)
@@ -426,7 +426,7 @@ def test_next_probe_gen_monotonic() -> None:
 
 @pytest.mark.unit
 async def test_recycle_preserves_strategy_idx_and_events() -> None:
-    """H9: after a memory-driven recycle, the next probe still publishes the
+    """After a memory-driven recycle, the next probe still publishes the
     correct strategy id and collects APPLIED events (no torn state)."""
     booted = 0
     published: list[tuple[int, int]] = []

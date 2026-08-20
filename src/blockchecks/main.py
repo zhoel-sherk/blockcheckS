@@ -1,4 +1,4 @@
-"""bs full — mass strategy×coverage orchestrator + conf export."""
+"""bs full: generate strategies, scan coverage, export nfqws2 conf."""
 
 from __future__ import annotations
 

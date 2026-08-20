@@ -1,10 +1,4 @@
-"""nfqws2 process manager — start, stop, load config files.
-
-Two launch modes:
-
-- ``start_daemon`` — ``@config`` + ``--daemon`` inside temp conf (async/pair coexist).
-- ``Nfqws2Manager`` — foreground Popen + killpg (sync test_runner / voice bootstrap).
-"""
+"""Start and stop nfqws2: daemon @config, or foreground Popen plus killpg."""
 
 from __future__ import annotations
 

@@ -1,10 +1,4 @@
-"""Provider name resolution — auto-detect from ipinfo.io once, then config.toml.
-
-The provider slug selects the folder inside ``data_block/providers/``.
-On first start blockcheckS queries https://ipinfo.io/json and writes the
-normalized ``org`` string (e.g. ``AS51369 LLC TRC FIORD`` → ``llc_fiord``)
-into ``[provider] name`` of config.toml.  Once set, the check is skipped.
-"""
+"""Resolve the provider slug from ipinfo.io once, then keep it in config.toml."""
 
 from __future__ import annotations
 

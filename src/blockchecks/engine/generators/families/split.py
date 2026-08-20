@@ -1,8 +1,4 @@
-"""Split-family expansion: multisplit / fakedsplit / disorder / ipfrag + SNI/Host.
-
-Methods follow the ``_fam_<name>(items, seen, family, scan_level, known_working)``
-contract and delegate dedup/append to ``self._add``.
-"""
+"""Split expanders: multisplit, fakedsplit, disorder, ipfrag, plus SNI/Host positions."""
 
 from __future__ import annotations
 

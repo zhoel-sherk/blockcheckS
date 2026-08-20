@@ -1,4 +1,4 @@
-"""Test runner — sequential strategy testing (Phase 1 + UDP voice Phase 3)."""
+"""Sequential strategy tests: one nfqws2, one domain, then optional UDP voice."""
 
 import json
 import os
@@ -67,11 +67,7 @@ def _check_tls_in_ns(domain: str, timeout: float, resolved_ip: str | None = None
 
 
 class TestRunner:
-    """Run DPI bypass strategies against domains.
-
-    Phase 1 (MVP): Sequential — one strategy, one domain, one test.
-    Phase 2: Parallel — multiple strategies via asyncio.
-    """
+    """Run one strategy against one domain in sequence. Parallel runs use AsyncTestRunner."""
 
     def __init__(
         self,
@@ -287,7 +283,7 @@ class TestRunner:
         report.total_time_sec = time.perf_counter() - t0
         return report
 
-    # ── UDP Voice testing (Phase 3) ──────────────────────────
+    # UDP voice
 
     def _run_stun_check(self, ip: str, port: int, timeout: float) -> dict:
         """Run dual voice UDP probe via subprocess (inside namespace if configured)."""

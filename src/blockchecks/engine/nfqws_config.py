@@ -1,11 +1,4 @@
-"""nfqws2 config building helpers (split out of async_runner god-file, day-5).
-
-Pure config-string builders: no network/worker state. Used both by the
-in-namespace workers and by ``bs tcp`` sync path. Shared CLI arg parsing /
-escaping lives in ``blockchecks.engine.conf_builder`` (single source — the
-``<`` escape used to exist only in ``service.lua_conf``, causing sync-mode
-nfqws2 to crash on ``--out-range=s1<d1`` strategies).
-"""
+"""Build nfqws2 config strings. No network. CLI parse/escape is in conf_builder."""
 
 from __future__ import annotations
 
@@ -52,7 +45,7 @@ def _build_inline_nfqws_lines(
 
 
 def _build_quic_nfqws_lines(strategy: str) -> list[str]:
-    """Build nfqws2 config for HTTP/3 QUIC strategies (UDP/443, BC2-10)."""
+    """Build nfqws2 config for HTTP/3 QUIC strategies (UDP/443)."""
     if strategy.strip().startswith("--"):
         config_lines = [
             f"--qnum={NFQUEUE_UDP}",

@@ -1,14 +1,4 @@
-"""Abstract in-namespace probe worker interface.
-
-Defines the lifecycle contract shared by the netns probe workers
-(``in_ns_workers``) and the subprocess entries (``_probe_worker`` /
-``_curl_probe_worker``): a worker runs one probe with a well-defined
-setup → apply → execute → collect → teardown flow.
-
-The concrete implementations are synchronous (run via ``asyncio.to_thread``
-from AsyncTestRunner) but the interface is intentionally backend-agnostic so
-the same probe can run in a netns, in a subprocess, or directly.
-"""
+"""Probe worker lifecycle: setup, apply strategy, execute, collect, teardown."""
 
 from __future__ import annotations
 
@@ -51,7 +41,7 @@ class Worker(abc.ABC):
     def teardown(self, ctx: WorkerContext) -> None:
         """Release netns / processes / fds; must be idempotent + safe on error."""
 
-    # ── Convenience ────────────────────────────────────────────
+    # Convenience
 
     def run(self, ctx: WorkerContext) -> dict:
         """Full lifecycle in one call; teardown always runs (even on error)."""

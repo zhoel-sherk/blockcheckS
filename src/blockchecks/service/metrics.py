@@ -1,10 +1,4 @@
-"""Memory monitor — nfqws2 daemon + Python worker RSS tracking and leak guard.
-
-Samples RSS/VMS of nfqws2 daemons inside netns and the Python worker, keeps a
-sliding window per daemon, and estimates a leak slope via linear regression.
-When a daemon exceeds the RSS ceiling or leak slope it is flagged for recycle
-(the caller rebuilds the bridge via ``BridgeSession.boot()``).
-"""
+"""Sample nfqws2 and worker RSS. Flag a daemon that exceeds the ceiling or leak slope."""
 
 from __future__ import annotations
 

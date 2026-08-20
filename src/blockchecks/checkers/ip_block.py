@@ -1,9 +1,5 @@
-"""IP-block cross-test — blockcheck2 ``check_dpi_ip_block`` parity (BC2-1).
-
-Detects SNI-based vs IP-based blocking by swapping domains and connect IPs:
-  1. Baseline: unblocked domain on its own IP (e.g. iana.org)
-  2. Blocked SNI → unblocked IP
-  3. Unblocked SNI → each blocked-domain IP
+"""Tell SNI blocks from IP blocks by swapping domain and connect-IP:
+baseline host on its own IP, blocked SNI to a clean IP, clean SNI to each blocked IP.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""BC2-12: redirect-to-blockpage detection."""
+"""Tests for redirect-to-blockpage detection."""
 
 from __future__ import annotations
 

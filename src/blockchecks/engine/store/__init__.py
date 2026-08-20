@@ -1,4 +1,4 @@
-"""Run state store public API."""
+"""Run-state store public API."""
 
 from __future__ import annotations
 
@@ -114,4 +114,4 @@ __all__ = [
     "DEFAULT_DB_BATCH",
 ]
 
-StateDB: type[SqliteRunStore] = SqliteRunStore  # backward compat alias
+StateDB: type[SqliteRunStore] = SqliteRunStore  # Alias

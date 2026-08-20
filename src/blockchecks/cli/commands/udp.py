@@ -1,4 +1,4 @@
-"""Synchronous UDP voice strategy test command."""
+"""Synchronous UDP voice strategy test."""
 
 import asyncio
 

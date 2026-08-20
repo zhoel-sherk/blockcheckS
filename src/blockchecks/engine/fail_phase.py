@@ -1,11 +1,5 @@
-"""Structured DPI failure-phase taxonomy (TriageProfile feedback).
-
-Single source of truth for *why* a probe failed. Feeds the online bandit and
-the S0 offline ranker without parsing raw curl/log strings, and drives
-strategy-generator pruning (``TriageProfile``).
-
-Every token is a stable string so it round-trips through SQLite and JSON.
-HTTP status codes map dynamically to ``http_<code>`` members (e.g. ``http_403``).
+"""Named DPI failure reasons as stable strings for SQLite and JSON.
+HTTP codes become http_<code> members (for example http_403).
 """
 
 from __future__ import annotations
@@ -21,7 +15,7 @@ class FailPhase(str, Enum):
     OTHER = "other"
     PASS = "pass"
 
-    # Phase 1 — L3/L4 / DNS
+    # L3 / L4 / DNS
     DNS_RESOLVE = "dns_resolve"
     DNS_TAMPERED = "dns_tampered"
     DNS_SINKHOLE = "dns_sinkhole"
@@ -30,7 +24,7 @@ class FailPhase(str, Enum):
     ICMP_BLOCK = "icmp_block"
     IP_BLOCKED = "ip_blocked"
 
-    # Phase 2 — handshake / early DPI interception
+    # Handshake / early DPI
     TLS_RST_AT_SNI = "tls_rst_at_sni"
     TLS_SILENT_DROP_AFTER_SNI = "tls_silent_drop_after_sni"
     TLS_FAKE_ALERT = "tls_fake_alert"
@@ -38,25 +32,25 @@ class FailPhase(str, Enum):
     CONNECT_TIMEOUT = "connect_timeout"
     CONNECT_REFUSED = "connect_refused"
 
-    # Phase 3 — deep stream / data transfer failure modes
-    DATA_STALL_TLS_CERT = "data_stall_tls_cert"  # Зависание на 2-5 KB (сертификат сервера)
-    DATA_STALL_FIRST_REQ = "data_stall_first_req"  # Зависание после первого Application Data
-    DATA_STALL_7K = "data_stall_7k"  # Ранний стрим-чек
-    DATA_STALL_16K = "data_stall_16k"  # Стандартный буфер ТСПУ
-    DATA_STALL_42K = "data_stall_42k"  # Расширенный буфер
-    DATA_STALL_64K_PLUS = "data_stall_64k_plus"  # Переполнение TCP Reassembly ring-buffer
+    # Stream / data transfer
+    DATA_STALL_TLS_CERT = "data_stall_tls_cert"  # stall at 2-5 KB (server cert)
+    DATA_STALL_FIRST_REQ = "data_stall_first_req"  # stall after first Application Data
+    DATA_STALL_7K = "data_stall_7k"  # stall near 7 KB
+    DATA_STALL_16K = "data_stall_16k"  # stall near 16 KB (common TSPU buffer)
+    DATA_STALL_42K = "data_stall_42k"  # stall near 42 KB
+    DATA_STALL_64K_PLUS = "data_stall_64k_plus"  # stall past 64 KB (TCP reassembly)
 
     # Active DPI injections during stream
-    DELAYED_RST = "delayed_rst"  # RST после начала полезных данных
-    DELAYED_FIN = "delayed_fin"  # Фальшивый FIN/FIN-ACK от middlebox
-    TLS_INJECTED_ALERT = "tls_injected_alert"  # Внедрение Fatal TLS Alert фрейма
-    ZERO_WINDOW_STALL = "zero_window_stall"  # Заморозка через TCP Window Size = 0
-    H2_RST_STREAM = "h2_rst_stream"  # L7 HTTP/2 фрейм сброса потока
+    DELAYED_RST = "delayed_rst"  # RST after payload started
+    DELAYED_FIN = "delayed_fin"  # FIN/FIN-ACK from a middlebox
+    TLS_INJECTED_ALERT = "tls_injected_alert"  # injected Fatal TLS Alert
+    ZERO_WINDOW_STALL = "zero_window_stall"  # TCP window size 0
+    H2_RST_STREAM = "h2_rst_stream"  # HTTP/2 RST_STREAM
 
-    # Phase 4 — QoS throttling
+    # QoS throttling
     BANDWIDTH_THROTTLED = "bandwidth_throttled"
 
-    # Phase 5 — UDP / QUIC
+    # UDP / QUIC
     QUIC_DROP = "quic_drop"
     UDP_BLOCKED = "udp_blocked"
 

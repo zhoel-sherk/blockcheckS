@@ -1,4 +1,4 @@
-"""Graceful run finalization: export, summary JSON, AQ weights."""
+"""End of a run: export conf, write summary JSON, persist adaptive weights."""
 
 from __future__ import annotations
 

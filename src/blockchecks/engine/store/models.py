@@ -1,4 +1,4 @@
-"""Typed models for run state store."""
+"""Typed models for the run-state store."""
 
 from __future__ import annotations
 

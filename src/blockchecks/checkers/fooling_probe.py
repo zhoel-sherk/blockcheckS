@@ -1,7 +1,5 @@
-"""Fooling viability grid + ECH / HTTP:80 differentials (preflight Tier 1).
-
-Live nfqws2 probes are injected via ``probe_fn`` so unit tests stay offline.
-Without a probe the grid is a no-op (empty ``viable_foolings`` = do not prune).
+"""Live nfqws2 fooling grid plus ECH and HTTP:80 differentials.
+probe_fn injects the real probe. Without it the grid is empty and generators do not prune.
 """
 
 from __future__ import annotations

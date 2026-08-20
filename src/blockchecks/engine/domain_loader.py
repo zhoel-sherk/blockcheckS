@@ -1,4 +1,4 @@
-"""Domain list loading with denylist filter (Phase 11 A1)."""
+"""Load domain lists and apply denylist.txt."""
 
 from __future__ import annotations
 

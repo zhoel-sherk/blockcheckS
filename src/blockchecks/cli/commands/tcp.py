@@ -1,4 +1,4 @@
-"""Synchronous TCP strategy test command."""
+"""Synchronous TCP strategy test."""
 
 import asyncio
 

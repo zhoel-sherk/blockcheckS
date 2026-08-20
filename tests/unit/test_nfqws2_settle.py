@@ -1,4 +1,4 @@
-"""Unit tests for nfqws2 settle readiness poll (Phase 11 B1)."""
+"""Tests for nfqws2 settle / readiness poll."""
 
 from unittest.mock import MagicMock, patch
 
@@ -73,7 +73,7 @@ def test_apply_gp_protocol_flags():
 
 
 def test_wait_min_wait_floor():
-    """H10: min_wait dominates the deadline — no busy-loop, returns after min_wait."""
+    """Min_wait dominates the deadline — no busy-loop, returns after min_wait."""
     t = {"now": 0.0}
 
     def fake_perf():

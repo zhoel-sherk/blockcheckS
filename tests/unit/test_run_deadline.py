@@ -65,7 +65,7 @@ def test_expired_sync():
     assert deadline.expired_sync()
 
 
-# ── added coverage: from_args / arm / labels / expired ────────────────
+# from_args / arm / labels / expired
 
 
 def test_from_args_returns_none_without_budget():

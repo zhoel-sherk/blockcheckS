@@ -1,18 +1,5 @@
-"""ByeDPI (ciadpi) strategy matrix generator.
-
-A self-contained strategy source for ``--generate byedpi``. Unlike the
-combinatorial StandardGenerator, this generator emits a curated pool of
-strategies expressed directly in byedpi CLI syntax. Two sub-pools:
-
-* **native** — one-liners that exist in byedpi but have no nfqws2
-  equivalent (OOB/disoob, fake-sni, -A auto chains, mod-http, drop-sack).
-* **translated** — nfqws2 syntax fed through ``byedpi_translator.translate``
-  so both syntaxes share one pipeline.
-
-Every emitted item stores the *byedpi argv* in ``strategy`` (space-joined)
-and keeps the original nfqws2 line (when translated) in ``label`` prefixed
-with ``byedpi:``. The probe front-end (ByedpiManager) re-parses ``strategy``
-with ``shlex.split``.
+"""Emit byedpi (ciadpi) strategies: native one-liners and nfqws2 lines run through byedpi_translator.
+Item.strategy is space-joined argv; a translated nfqws2 line is stored in label.
 """
 
 from __future__ import annotations
@@ -23,9 +10,9 @@ from dataclasses import dataclass
 from blockchecks.engine.byedpi_translator import translate
 from blockchecks.engine.generators import StrategyGenerator, StrategyItem
 
-# ── Native ciadpi one-liners (byedpi-only families, see docs §3) ─────
+# Native ciadpi one-liners
 
-# Curated from ByeByeDPI proxytest_strategies.list patterns and byedpi README.
+# Native ciadpi one-liners (no nfqws2 equivalent).
 NATIVE_BYEDPI = [
     # OOB / disoob — byedpi-only
     "-o1 -a1",
@@ -58,11 +45,9 @@ NATIVE_BYEDPI = [
 NATIVE_HTTP_ONLY = frozenset({"-M h -a1", "-M h,d -a1"})
 
 
-# ── Translated nfqws2 seed lines (confirmed families) ───────
+# Translated nfqws2 seed lines
 
-# NOTE: dual-fake ALT2 (stun+max_ru, BEST 107ms) needs TWO nfqws2
-# rawsends — ciadpi accepts a single -l fake-data, so it is not in this pool.
-# See docs/byedpi_engine.md §3 "dual-fake needs 2 ciadpi processes".
+# Dual-fake needs two nfqws2 rawsends; ciadpi takes one -l fake-data, so it is omitted.
 
 TRANSLATED_SEEDS = [
     "fake:blob=stun:repeats=6:tcp_ts=-1000",

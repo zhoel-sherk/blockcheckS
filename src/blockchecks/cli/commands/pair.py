@@ -1,4 +1,4 @@
-"""Async TCP×UDP pair matrix command."""
+"""Async TCP x UDP pair matrix command."""
 
 import asyncio
 import time

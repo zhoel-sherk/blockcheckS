@@ -1,4 +1,4 @@
-"""SQLite schema DDL and migrations for run state store."""
+"""SQLite DDL and migrations for the run-state store."""
 
 from __future__ import annotations
 
@@ -156,7 +156,7 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         )"""
     )
     await db.commit()
-    # Query indexes (IF NOT EXISTS for upgrades from 1.0.x)
+    # Query indexes (IF NOT EXISTS)
     pair_cols = await db.execute("PRAGMA table_info(pair_results)")
     pair_col_names = {row[1] for row in await pair_cols.fetchall()}
     pair_strat_idx = (

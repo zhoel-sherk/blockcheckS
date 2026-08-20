@@ -1,10 +1,5 @@
-"""UDP voice checker — Discord voice liveness probes.
-
-Two protocols (not interchangeable):
-  - RFC 5389 STUN Binding (20B, magic cookie) — response type 0x0101
-  - Discord IP Discovery (74B official) — response type 0x0002
-
-No Discord token required for basic liveness. Scapy not used.
+"""Discord voice UDP liveness.
+STUN Binding (RFC 5389) and Discord IP Discovery are separate packets. No token required.
 """
 
 import random

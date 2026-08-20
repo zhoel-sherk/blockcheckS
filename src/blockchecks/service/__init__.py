@@ -1,7 +1,4 @@
-"""Runtime services — nfqws2 lifecycle, netns pool, bridge IPC, batch probe, run control.
-
-Single public entry point for process/resource services.
-"""
+"""Runtime services: nfqws2, netns pool, bridge IPC, batch probe, run lock."""
 
 from __future__ import annotations
 

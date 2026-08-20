@@ -1,4 +1,4 @@
-"""Custom lists, config files, and user matrix generators."""
+"""Load strategies from custom lists, config files, and a user matrix file."""
 
 import os
 import sys

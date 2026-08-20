@@ -1,9 +1,4 @@
-"""pydantic CliApp entry — replaces argparse.parse_args at the process boundary.
-
-Flag *definitions* still live in ``cli.parser`` ``add_*`` / ``build_parser``
-(single source for dests). CliApp parses argv into models derived from those
-actions, then dispatches to existing command handlers via Namespace.
-"""
+"""Parse argv with pydantic models built from cli.parser actions, then dispatch handlers."""
 
 from __future__ import annotations
 

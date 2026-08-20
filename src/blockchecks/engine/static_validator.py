@@ -1,10 +1,4 @@
-"""Static, offline validation of nfqws2 strategy strings.
-
-Pure functions — no I/O, no netns, no daemon. Used to reject provably
-dead/unsafe strategies before they ever reach a netns probe, and by the MCP
-``dbg_validate_strategy_syntax`` tool. Guaranteed never to raise on arbitrary
-input (also exercised under Hypothesis fuzzing).
-"""
+"""Offline checks on nfqws2 strategy strings. No I/O. Does not raise on bad input."""
 
 from __future__ import annotations
 
@@ -154,7 +148,7 @@ def _validate_single(
     is_split = _is_split_family(raw)
     blobs = _extract_blobs(raw)
 
-    # ── blob requirements ──
+    # blob requirements
     if is_fake and not blobs:
         result.issues.append(
             ValidationIssue(
@@ -188,7 +182,7 @@ def _validate_single(
             )
         )
 
-    # ── split families need pos= ──
+    # split families need pos=
     if is_split and not _POS_RE.search(raw):
         result.issues.append(
             ValidationIssue(
@@ -198,7 +192,7 @@ def _validate_single(
             )
         )
 
-    # ── numeric parameter ranges ──
+    # numeric parameter ranges
     for param, value in _NUM_PARAM.findall(raw):
         if param in ("ip_ttl", "ttl"):
             try:
@@ -241,7 +235,7 @@ def _validate_single(
                     )
                 )
 
-    # ── repeats (accept negative to flag error) ──
+    # repeats (accept negative to flag error)
     for m in re.finditer(r"repeats=(-?\d+)", raw):
         r = int(m.group(1))
         if not 1 <= r <= 20:
@@ -253,7 +247,7 @@ def _validate_single(
                 )
             )
 
-    # ── informational: unescaped '<' (conf-file hazard) ──
+    # informational: unescaped '<' (conf-file hazard)
     if "<" in raw and not any(t.startswith('"') for t in tokens):
         result.issues.append(
             ValidationIssue(
@@ -263,7 +257,7 @@ def _validate_single(
             )
         )
 
-    # ── custom Lua manifest params (excluded → error, undocumented → warning) ──
+    # custom Lua manifest params (excluded → error, undocumented → warning)
     from blockchecks.engine.conf_builder import validate_custom_lua_params
 
     for msg in validate_custom_lua_params(raw):

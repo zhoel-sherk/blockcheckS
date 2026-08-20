@@ -1,4 +1,4 @@
-"""Wave C unit regressions — UA, DPI helpers, fingerprint API."""
+"""Regression tests for UA, DPI helpers, and fingerprint APIs."""
 
 from __future__ import annotations
 

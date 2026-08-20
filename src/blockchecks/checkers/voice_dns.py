@@ -1,15 +1,5 @@
-"""DNS-based Discord voice server discovery.
-
-Resolves finland{N}.discord.gg to GCP backend IPs (35.217.x.x).
-No Discord token or gateway connection needed.
-
-Also seeds candidates from Maks-gaming discord-servers (daily bot lists)
-and filters with STUN liveness via discover_dns_alive().
-
-Range: N=14000-14147 → ~148 unique IPs, all GCP Hamina.
-Ports: UDP 50000-50006 confirmed open on all GCP backends.
-
-Cache: XDG cache bs_voice_cache.json, rotated after 1-2 hours.
+"""Resolve Discord voice hostnames to GCP IPs and cache them.
+Also reads public discord-servers lists and checks STUN liveness.
 """
 
 import asyncio
@@ -166,7 +156,7 @@ async def discover_voice_endpoints(count: int = 5, use_cache: bool = True) -> li
     endpoints = []
     seen_ips: set[str] = set()
 
-    # ── Check cache ──
+    # Check cache
     if use_cache:
         cached = _load_cache()
         if cached:
@@ -180,7 +170,7 @@ async def discover_voice_endpoints(count: int = 5, use_cache: bool = True) -> li
                     print(f"[voice-dns] Using {len(endpoints[:count])} cached endpoints")
                     return endpoints[:count]
 
-    # ── Layer 1: DNS bulk ──
+    # Layer 1: DNS bulk
     print(
         f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}..."
     )
@@ -200,7 +190,7 @@ async def discover_voice_endpoints(count: int = 5, use_cache: bool = True) -> li
         if len(endpoints) >= count:
             break
 
-    # ── Save cache ──
+    # Save cache
     if endpoints:
         _save_cache(endpoints)
 

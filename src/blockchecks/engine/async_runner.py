@@ -1,7 +1,5 @@
-"""Async parallel test runner — builds on NetNsPool for concurrent DPI tests.
-
-Each test runs in its own pre-created netns from the pool.
-curl_cffi is called via asyncio.to_thread() (libcurl is C, not async).
+"""Parallel strategy tests.
+Each job uses a pooled netns. curl_cffi runs in a worker thread (libcurl is not async).
 """
 
 import asyncio
@@ -24,7 +22,7 @@ from blockchecks.service.netns_pool import NetNsPool
 from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW, status_tag
 
-# Auto-pin (IP-PIN): known-good strategy + short budget for probing candidate
+# Auto-pin: known-good strategy plus a short budget to probe candidate
 # IPs at startup. Pinned IPs override DoH order against per-IP throttling.
 PIN_STRATEGY = "fake:blob=stun:repeats=6:tcp_ts=-1000"
 PIN_SETTLE_MAX = 0.5
@@ -79,7 +77,7 @@ __all__ = [
     "BLOB_DIR",
 ]
 
-# Legacy re-exports (module-private names kept for test/back-compat).
+# Private names kept as aliases.
 _add_blobs_from_strategy = add_blobs_from_strategy
 _split_cli_args = split_cli_args
 
@@ -440,7 +438,7 @@ class AsyncTestRunner:
     async def test_quic(
         self, item: StrategyItem, domain: str, timeout: float = 8.0
     ) -> TcpTestResult:
-        """Test one QUIC/HTTP3 strategy in an isolated netns (BC2-10)."""
+        """Test one QUIC/HTTP3 strategy in an isolated netns."""
         result = TcpTestResult(item=item, domain=domain)
 
         async with self.semaphore:
@@ -986,7 +984,7 @@ class AsyncTestRunner:
                 print(f"  {RED}pair task error: {type(res).__name__}: {res}{RESET}")
         return pairs
 
-    # ── Matrix display ──
+    # Matrix display
 
     @staticmethod
     def print_matrix(pairs: list[PairResult]):

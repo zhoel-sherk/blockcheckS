@@ -1,4 +1,4 @@
-"""HTTP/3 (QUIC) connectivity checker — BC2-10."""
+"""HTTP/3 (QUIC) connectivity probe via curl."""
 
 from __future__ import annotations
 

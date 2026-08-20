@@ -1,4 +1,4 @@
-"""Unit tests for adaptive_queue (Phase 12 AQ)."""
+"""Tests for AdaptiveJobQueue."""
 
 from __future__ import annotations
 
@@ -106,14 +106,14 @@ def test_pop_exclude_domains_isolates():
         epsilon=0.0,
         seed=1,
     )
-    # первый pop — youtube
+    # first pop is youtube
     first = q.pop()
     assert first.domain == "youtube.com"
-    # exclude youtube → должен вернуть другой домен
+    # exclude youtube → another domain
     second = q.pop(exclude_domains={"youtube.com"})
     assert second is not None
     assert second.domain != "youtube.com"
-    # exclude оба занятых → fallback к любому (или None если все заняты)
+    # exclude both busy domains → any leftover, or None if all are busy
     third = q.pop(exclude_domains={"youtube.com", second.domain})
     assert third is None or third.domain in domains
 

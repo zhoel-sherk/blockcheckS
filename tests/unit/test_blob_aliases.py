@@ -1,4 +1,4 @@
-"""Unit tests for blob alias resolution (BLOB-3 / GV-5)."""
+"""Tests for blob alias resolution."""
 
 from __future__ import annotations
 

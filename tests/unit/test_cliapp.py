@@ -171,7 +171,7 @@ def test_cli_main_string_system_exit_prints_and_returns_1():
 
 @pytest.mark.unit
 def test_nfqws2_debug_parsed_by_cliapp_but_env_not_set_yet():
-    """H1: the CliApp path parses --nfqws2-debug into the model but does NOT
+    """The CliApp path parses --nfqws2-debug into the model but does NOT
     propagate it to BLOCKCHECKS_NFQWS2_DEBUG (only parser.dispatch does, and it
     is not reached from cliapp.main). This documents the pre-fix behavior."""
     import os
@@ -189,7 +189,7 @@ def test_nfqws2_debug_parsed_by_cliapp_but_env_not_set_yet():
 
 @pytest.mark.unit
 def test_nfqws2_debug_env_set_by_dispatch_legacy_path():
-    """H1 control: the legacy argparse dispatch() path does set the env var."""
+    """The argparse dispatch() path does set the env var."""
     import os
 
     from blockchecks.cli.parser import dispatch
@@ -206,8 +206,7 @@ def test_nfqws2_debug_env_set_by_dispatch_legacy_path():
 
 @pytest.mark.unit
 def test_nfqws2_debug_bare_requires_value_under_cliapp():
-    """H6: argparse's nargs='?' const='1' bare form is rejected by the CliApp
-    model (the flag demands a value), unlike the argparse path."""
+    """Bare --nfqws2-debug is rejected: the flag requires a value."""
     import os
 
     from blockchecks.cli import cliapp as ca

@@ -1,7 +1,5 @@
-"""In-namespace nfqws2 probe workers (split out of async_runner god-file, day-5).
-
-Synchronous functions called via asyncio.to_thread from AsyncTestRunner:
-start nfqws2 in a netns, run curl/STUN/HTTP3 probe, return result dict.
+"""Start nfqws2 in a netns, run curl/STUN/HTTP3, return a result dict.
+Called from AsyncTestRunner via asyncio.to_thread, or as python -m ... --mode curl|udp.
 """
 
 from __future__ import annotations
@@ -272,12 +270,11 @@ def _is_quic_dropped(error: str) -> bool:
 
 
 def _quic_fallback_variants(strategy: str) -> list[str]:
-    """Fallback chain for a QUIC strategy that was dropped (timeout).
+    """If a QUIC strategy times out, try fake then +badsum then +ip_ttl=1.
 
-    fake-инъекции пробивают ТСПУ (доходят до CDN — диагностика 2026-08),
-    тогда как split/disorder (ipfrag) дропаются. Порядок: базовый fake →
-    +badsum → +ip_ttl=1. Стратегии уже содержащие badsum/ip_ttl не дублируются.
-    ``BLOCKCHECKS_QUIC_FALLBACK=0`` disables the fallback.
+    Split/disorder (ipfrag) often drop; fake often reaches the CDN.
+    Lines that already have badsum or ip_ttl are not duplicated.
+    ``BLOCKCHECKS_QUIC_FALLBACK=0`` disables this.
     """
     if not strategy or strategy.strip().startswith("--"):
         return []
@@ -393,7 +390,7 @@ def _run_tcp_check(
     )
 
     probe_req.timeout = timeout
-    # Retry-on-next-IP (IP-PIN): when the resolved IP fails but nfqws2 is already
+    # Retry-on-next-IP: when the resolved IP fails but nfqws2 is already
     # up, retry the curl worker against the next candidate with a shorter budget.
     ips_to_try = list(resolved_ips or [])
     if resolved_ip and resolved_ip not in ips_to_try:
@@ -591,7 +588,7 @@ def _run_tcp_check_multi(
         raw = _invoke_curl_probe_worker(ns_name, py, payload, wall)
         settle_ms = round(settle_elapsed * 1000, 1)
         out = {d: {**raw.get(d, {}), "settle_ms": settle_ms} for d in domains_active}
-        # Retry-on-next-IP for failed domains (IP-PIN): nfqws2 is already up, so
+        # Retry-on-next-IP for failed domains: nfqws2 is already up, so
         # re-probe each failed domain against its remaining candidate IPs.
         if resolved_ip_lists:
             for d in domains_active:
@@ -699,7 +696,7 @@ print(json.dumps({{"success": ok, "latency_ms": lat,
             pass
 
 
-# ── AsyncTestRunner ─────────────────────────────────
+# AsyncTestRunner
 
 
 async def _save_pass_strategy_data_block(
@@ -727,7 +724,7 @@ async def _save_pass_strategy_data_block(
         pass
 
 
-# ── Subprocess entries (integrated from _curl_probe_worker / _probe_worker) ──
+# Subprocess entries (integrated from _curl_probe_worker / _probe_worker)
 #
 # These run inside a netns as ``python -m blockchecks.engine.in_ns_workers
 # --mode curl|udp`` (see service/probe.py and engine/test_runner.py). They read

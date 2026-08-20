@@ -1,4 +1,4 @@
-"""Netns / iptables helpers for the lua bridge session lifecycle."""
+"""Netns and iptables helpers for a lua-bridge session."""
 
 from __future__ import annotations
 

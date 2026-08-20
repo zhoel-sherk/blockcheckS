@@ -1,4 +1,4 @@
-"""Wave1 matrix debt: repeats=4, TTL overflow, flowseal in full defaults."""
+"""Tests for repeats=4, TTL range, and flowseal in full-scan defaults."""
 
 from __future__ import annotations
 

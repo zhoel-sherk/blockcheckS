@@ -1,4 +1,4 @@
-"""BC2-6 family need_* gating unit tests."""
+"""Tests for need_* family gating."""
 
 from __future__ import annotations
 

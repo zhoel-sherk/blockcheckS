@@ -6,7 +6,7 @@
 #     backend: default | classic | bridge | compare   (default: default)
 #     domain:  host to scan (default discord.com)
 #
-# Backend selection (T-L3/T-L4/T-L5):
+# Backend selection:
 #   default  → no flag (lua_bridge is standard)
 #   classic  → --classic
 #   bridge   → --probe-backend lua_bridge

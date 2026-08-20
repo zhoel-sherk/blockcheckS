@@ -1,4 +1,4 @@
-"""blockcheckS CLI — argparse and command dispatch."""
+"""argparse definitions and command dispatch."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def add_adaptive_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument(
         "--fan-out",
         action="store_true",
-        help="Shorthand: adaptive with curl-parallel>=4 (AQ2+AQ5)",
+        help="Shorthand: adaptive with curl-parallel>=4",
     )
     g.add_argument(
         "--adaptive-epsilon",
@@ -108,7 +108,7 @@ def add_curl_fanout_args(parser: argparse.ArgumentParser) -> None:
 def add_curl_repeats_args(
     parser: argparse.ArgumentParser, *, include_quic_timeout: bool = False
 ) -> None:
-    """BC2-4: blockcheck2-style curl repeats per strategy."""
+    """blockcheck2-style curl repeats per strategy."""
     g = parser.add_argument_group("curl repeats")
     g.add_argument(
         "--repeats",
@@ -133,7 +133,7 @@ def add_curl_repeats_args(
             "--quic-timeout",
             type=float,
             default=8.0,
-            help="HTTP/3 curl timeout (BC2-10, default 8s)",
+            help="HTTP/3 curl timeout (default 8s)",
         )
 
 
@@ -162,10 +162,10 @@ def add_backend_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
-    """nfqws2 Lua bridge: /dev/shm IPC + scan_pick batch (no per-strategy restart).
+    """nfqws2 Lua bridge: /dev/shm IPC and scan_pick batch (no per-strategy restart).
 
-    Backend selection (T-L3/T-L4/T-L5): default is ``lua_bridge``. Precedence:
-    ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` > ``BLOCKCHECKS_PROBE_BACKEND``.
+    Precedence: ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` >
+    ``BLOCKCHECKS_PROBE_BACKEND``. Default backend is lua_bridge.
     """
     add_backend_args(parser)
     g = parser.add_argument_group("lua bridge (scan_pick IPC)")
@@ -196,7 +196,7 @@ def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_domain_filter_args(parser: argparse.ArgumentParser) -> None:
-    """Phase 11 A1: denylist filter for domain presets."""
+    """Denylist filter for domain presets."""
     g = parser.add_argument_group("domain filter")
     g.add_argument(
         "--allow-unsafe-domains",
@@ -206,7 +206,7 @@ def add_domain_filter_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_protocol_phase_args(parser: argparse.ArgumentParser) -> None:
-    """Phase 11 A10 — GP ENABLE_* mirror flags for bs full."""
+    """Skip HTTP / HTTP3 / TLS12 / TLS13 phases (same idea as GP ENABLE_*)."""
     g = parser.add_argument_group("protocol phases (GP mirror)")
     g.add_argument("--http-off", action="store_true", help="Skip HTTP :80 phase (= --no-http)")
     g.add_argument("--http3-off", action="store_true", help="Skip QUIC HTTP/3 phase (= --no-quic)")
@@ -223,7 +223,7 @@ def add_protocol_phase_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_family_gate_args(parser: argparse.ArgumentParser) -> None:
-    """BC2-6: blockcheck2 need_* family gating."""
+    """need_* family gating between standard strategy families."""
     g = parser.add_argument_group("family gates")
     g.add_argument(
         "--no-family-gates",
@@ -233,7 +233,7 @@ def add_family_gate_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_ip_pin_args(parser: argparse.ArgumentParser) -> None:
-    """IP pinning (IP-PIN) flags — scan/pair only (runner-level auto-pin)."""
+    """IP pin file and auto-pin flags (scan/pair)."""
     g = parser.add_argument_group("IP pinning")
     g.add_argument(
         "--fixed-ip",
@@ -254,7 +254,7 @@ def add_ip_pin_args(parser: argparse.ArgumentParser) -> None:
 def add_secure_dns_args(
     parser: argparse.ArgumentParser, *, include_preflight: bool = False
 ) -> None:
-    """CLI flags for Phase 9 secure DNS (SD5); optional preflight group."""
+    """DoH / UDP DNS flags; optional preflight group."""
     g = parser.add_argument_group("secure DNS")
     g.add_argument(
         "--no-secure-dns",
@@ -739,7 +739,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model Context Protocol server (stdio) bridging LLM → bs serve daemon",
     )
 
-    bench = sub.add_parser("bench-settle", help="Benchmark nfqws2 settle × curl timeout (A9)")
+    bench = sub.add_parser("bench-settle", help="Benchmark nfqws2 settle vs curl timeout")
     bench.add_argument("-d", "--domain", default="discord.com")
     bench.add_argument("-s", "--strategy", default=None, help="Single inline strategy")
     bench.add_argument(
@@ -866,7 +866,7 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point — pydantic CliApp (flag defs still from build_parser helpers)."""
     import os
 
-    # Escape hatch for bisect / legacy automation
+    # Skip the system-deps check
     if os.environ.get("BLOCKCHECKS_ARGPARSE", "").strip() in ("1", "true", "yes"):
         return _main_argparse(argv)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sequential long-term run orchestrator: A → B → C → D → E → F.
+# Run variants A through F one after another.
 # Each variant runs up to HOURS (default 20h) via run_variant.sh; the next
 # starts only after the previous tmux session finishes (END marker).
 #

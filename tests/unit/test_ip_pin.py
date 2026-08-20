@@ -1,4 +1,4 @@
-"""Unit tests for hosts-analog IP pinning (IP-PIN)."""
+"""Tests for hosts-like IP pin files."""
 
 import os
 import time

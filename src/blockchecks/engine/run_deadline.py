@@ -1,4 +1,4 @@
-"""Wall-clock run deadline for bs full / scan / tcp."""
+"""Wall-clock deadline for full / scan / tcp runs."""
 
 from __future__ import annotations
 

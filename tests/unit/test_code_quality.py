@@ -1,21 +1,7 @@
-"""AST code-quality gate — readability & flat control flow (dpi-stack).
+"""AST checks for nesting, elif chains, any/all, mutable defaults, and bare except.
 
-Focus (horizontality):
-- Guard clauses / early return — avoid deep arrow code (CQ001).
-- Short if/elif trees — prefer ``match`` / mapping dispatch (CQ002).
-- Collapse nested ``if`` without else into ``if a and b`` (CQ004).
-- Prefer ``any``/``all`` over flag loops (CQ007 / CQ011).
-- No mutable defaults, bare ``except``, needless bool returns.
-
-Softened / not checked (too many false positives on this codebase):
-- Function/collection naming (former CQ013/CQ014).
-- ``[]`` + ``.append`` loops (combinators, early-return builders).
-- Operator-lambda / nested-try nags.
-- ``generators/`` combinatorial expanders — nest/elif exempt.
-
-Escape hatch: ``# noqa: CQ001`` or ``# noqa: CQ`` on the line / previous line.
-
-Opt-in: ``pytest -m quality`` (excluded from default ``addopts``).
+Skip with ``# noqa: CQ001`` or ``# noqa: CQ`` on the line (or the previous line).
+generators/ expanders skip nest/elif. Run: ``pytest -m quality``.
 """
 
 from __future__ import annotations
@@ -104,7 +90,7 @@ class CodeQualityVisitor(ast.NodeVisitor):
             self._emit(
                 CQ_NEST,
                 node,
-                f"глубина вложенности {self._depth}/{MAX_NESTING} — Guard Clauses / вынеси функцию",
+                f"nesting depth {self._depth}/{MAX_NESTING} — use guard clauses or extract a function",
             )
 
     def _leave_block(self) -> None:
@@ -224,7 +210,7 @@ class CodeQualityVisitor(ast.NodeVisitor):
             self._emit(
                 CQ_ELIF,
                 node,
-                f"цепочка if/elif из {elif_count + 1} веток — match/case или Mapping-диспетчер",
+                f"if/elif chain of {elif_count + 1} branches — use match/case or a mapping",
             )
 
     def _check_collapsible_if(self, node: ast.If) -> None:
@@ -238,7 +224,7 @@ class CodeQualityVisitor(ast.NodeVisitor):
         self._emit(
             CQ_COLLAPSE,
             node,
-            "вложенный if без else — схлопни в `if a and b` (Guard Clause / SIM102)",
+            "nested if without else — collapse to `if a and b`",
         )
 
     def _check_needless_bool(self, node: ast.If) -> None:
@@ -251,7 +237,7 @@ class CodeQualityVisitor(ast.NodeVisitor):
             return
         if {body.value.value, orelse.value.value} != {True, False}:
             return
-        self._emit(CQ_NEEDLESS_BOOL, node, "верни условие напрямую: `return <cond>` (SIM103)")
+        self._emit(CQ_NEEDLESS_BOOL, node, "return the condition directly: `return <cond>`")
 
     def _check_any_all_loop(self, node: ast.For | ast.While) -> None:
         if len(node.body) != 1 or not isinstance(node.body[0], ast.If):
@@ -261,9 +247,9 @@ class CodeQualityVisitor(ast.NodeVisitor):
             return
         ret = inner.body[0].value
         if isinstance(ret, ast.Constant) and ret.value is True:
-            self._emit(CQ_ANYALL, node, "замени цикл на `return any(...)` (SIM110)")
+            self._emit(CQ_ANYALL, node, "replace the loop with `return any(...)`")
         elif isinstance(ret, ast.Constant) and ret.value is False:
-            self._emit(CQ_ANYALL, node, "замени цикл на `all(...)` / inverted any (SIM111)")
+            self._emit(CQ_ANYALL, node, "replace the loop with `all(...)` / inverted any")
 
     def _check_flag_loop(self, node: ast.For | ast.While) -> None:
         if not self._func_flags:
@@ -275,14 +261,14 @@ class CodeQualityVisitor(ast.NodeVisitor):
                     self._emit(
                         CQ_FLAG_LOOP,
                         node,
-                        f"флаг `{t.id}` + цикл — используй `any()`/`all()`",
+                        f"flag `{t.id}` plus a loop — use `any()`/`all()`",
                     )
                     return
 
     def _check_bare_except(self, node: ast.Try) -> None:
         for handler in node.handlers:
             if handler.type is None:
-                self._emit(CQ_BARE_EXC, handler, "голый `except:` — укажи тип исключения")
+                self._emit(CQ_BARE_EXC, handler, "bare `except:` — name the exception type")
 
     def _check_mutable_defaults(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         for default in (*node.args.defaults, *node.args.kw_defaults):

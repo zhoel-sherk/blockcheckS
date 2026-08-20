@@ -1,13 +1,5 @@
-"""Resident probe service — on-the-fly domain/strategy testing.
-
-Holds one warm NetNsPool + AsyncTestRunner so external apps (e.g.
-gp-control-plane) can request a domain/strategy probe without paying the
-netns/bridge boot cost per call. Fair exclusion via run_control: while a
-long-term campaign owns run.lock, every probe request is rejected with
-``busy/campaign_active`` instead of blocking forever.
-
-Transport (service/daemon layer): Unix socket core (asyncio.start_unix_server)
-with a thin HTTP bridge. This module is the probe *core* — no server code.
+"""Warm NetNsPool plus AsyncTestRunner for on-demand probes.
+Rejects work while a campaign holds run.lock. No server sockets here.
 """
 
 from __future__ import annotations
@@ -28,7 +20,7 @@ if TYPE_CHECKING:
     from blockchecks.checkers.dns_secure import DnsRunCache
     from blockchecks.engine.store import RunStateStore
 
-# ── fail_phase classifier imported from engine.fail_phase (single source) ──
+# fail_phase classifier imported from engine.fail_phase (single source)
 
 
 @dataclass

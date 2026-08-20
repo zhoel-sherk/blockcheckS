@@ -1,4 +1,4 @@
-"""Batch probe data models — config, context, result and runner deps."""
+"""Batch probe config, context, result, and runner deps."""
 
 from __future__ import annotations
 

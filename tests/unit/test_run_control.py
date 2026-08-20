@@ -96,9 +96,7 @@ def test_normalize_cli_args_stop_alias():
     assert normalize_cli_args(["--stop", "--force"]) == ["stop", "--force"]
 
 
-# ── added: is_pid_alive / stale lock / stop branches ──────────────────
-
-
+# is_pid_alive / stale lock / stop branches
 def test_is_pid_alive_current():
     import os
 

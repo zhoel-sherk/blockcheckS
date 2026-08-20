@@ -1,9 +1,6 @@
-"""TCP/HTTP curl_cffi probe for strategy tests (GV-3).
-
-Centralizes curl session setup: ECH disable via ``Session.curl.setopt`` only —
-never ``options=`` on ``curl_cffi.get()`` / ``Session.request()`` (broken in
-curl_cffi >= 0.15). Used by async_runner, test_runner, and hostfakesplit /
-googlevideo videoplayback checks.
+"""HTTPS/HTTP probes via curl_cffi.
+Session setup (ECH, impersonate, proxy, Range) is shared by all runners.
+Do not pass options= to get()/request() on curl_cffi >= 0.15; use Session.curl.setopt.
 """
 
 from __future__ import annotations
@@ -683,7 +680,7 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     )
 
 
-MAX_CURL_REPEATS = 10  # GP DiscoveryOptions cap
+MAX_CURL_REPEATS = 10  # Discovery cap
 
 
 def clamp_repeats(n: int) -> int:
@@ -813,7 +810,7 @@ def repeats_from_args(args) -> tuple[int, bool, str, bool]:
     return repeats, parallel, mode, quick_break
 
 
-# ── Stream triage probe (Phase 3/4) — NOT in the hot path ─────────────
+# Stream stall / QoS probe (not on the hot path)
 
 # Stall windows: bytes-read thresholds that a TSPU stream buffer may stall at.
 # Order matters — first threshold reached without further progress wins.
@@ -825,7 +822,7 @@ STALL_MIN_TOTAL = 2 * 1024  # ignore stall before at least this much arrived
 
 @dataclass
 class StreamTriageResult:
-    """Result of the streaming stall/QoS probe (Phase 3/4)."""
+    """Result of the streaming stall/QoS probe."""
 
     phase: str = "unknown"
     http_code: int = 0
@@ -952,7 +949,7 @@ def run_stream_triage_probe(
     return res
 
 
-# ── Multi-profile TLS fingerprint probe (Triage: post-quantum/impersonation) ─
+# TLS fingerprint probe (several impersonation profiles)
 
 TLS_PROFILES = ("chrome124", "firefox_120", "safari_17", None)
 PQ_CLIENTHELLO_MTU = 1400  # ClientHello larger than this → 2 TCP segments

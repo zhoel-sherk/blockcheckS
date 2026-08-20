@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""blockcheckS — lightspeed DPI strategy tester.
-
-Thin entry point. Implementation lives in blockchecks.cli.
-"""
+"""CLI entry. Implementation is in blockchecks.cli."""
 
 import sys
 

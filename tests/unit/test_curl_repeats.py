@@ -1,4 +1,4 @@
-"""Unit tests for curl repeats (BC2-4 / GP parity)."""
+"""Tests for curl repeats per strategy."""
 
 from unittest.mock import patch
 

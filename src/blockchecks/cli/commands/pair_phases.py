@@ -1,4 +1,4 @@
-"""Pair command phase helpers — extracted from cmd_pair for C901."""
+"""Pair-command helpers: DNS, preflight, matrix load, resume checkpoint, runner."""
 
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ class DnsPreflightResult:
 
 
 def _default_pin_path() -> str:
-    """data_block provider hosts file — default IP-PIN source.
+    """data_block provider hosts file — default IP pin source.
 
     Auto-pin probes cached domains with the known-good fake strategy and
     writes back only changed IPs, so this hosts file stays the single
@@ -178,8 +178,8 @@ async def prepare_dns_and_preflight(
     if dns_rc:
         return DnsPreflightResult(dns_cache, dns_audits, exit_code=dns_rc)
 
-    # IP-PIN: load hosts-analog file (--fixed-ip, else provider hosts) into the
-    # cache; pinned IPs override DoH order so per-IP throttling can't
+    # Load hosts file (--fixed-ip, else provider hosts) into the
+    # cache; pinned IPs override DoH order so per-IP throttling cannot
     # flip the result.
     pins = {}
     pin_path = _resolve_pin_path(args)

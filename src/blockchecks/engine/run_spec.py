@@ -1,8 +1,4 @@
-"""RunSpec and CampaignContext — typed execution specifications for CLI runs.
-
-Replaces untyped argparse.Namespace propagation and deeply nested getattr(args, ...)
-with a clean, validated configuration dataclass.
-"""
+"""RunSpec and CampaignContext dataclasses for a CLI run."""
 
 from __future__ import annotations
 

@@ -3,10 +3,10 @@
 #
 # Runs the same tiny user matrix through every backend mode and asserts the
 # correct backend appears in the batch line:
-#   default → backend=lua_bridge      (T-L3 flip)
-#   classic → backend=classic          (T-L4 --classic)
-#   probe   → backend=classic          (T-L4 --probe-backend)
-#   env     → backend=lua_bridge/classic (T-L5 BLOCKCHECKS_PROBE_BACKEND)
+#   default → backend=lua_bridge
+#   classic → backend=classic          (--classic)
+#   probe   → backend=classic          (--probe-backend)
+#   env     → lua_bridge or classic    (BLOCKCHECKS_PROBE_BACKEND)
 #   compare → two batches (classic + lua_bridge), no BRIDGE_DRIFT
 #
 # Fails (exit 1) if any backend line is missing or wrong.

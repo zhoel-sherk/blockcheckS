@@ -1,1 +1,1 @@
-"""blockcheckS CLI package."""
+"""blockcheckS command-line interface."""

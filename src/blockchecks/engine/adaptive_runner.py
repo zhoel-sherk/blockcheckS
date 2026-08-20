@@ -1,4 +1,4 @@
-"""AQ5–AQ6: adaptive TCP scan loop (integrates AdaptiveJobQueue + B2 fan-out)."""
+"""TCP scan loop driven by AdaptiveJobQueue."""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-"""Startup preflight — blockcheck2 parity (BC2-2, BC2-3, BC2-5, BC2-11)."""
+"""Startup probes that fill TriageProfile before the strategy scan:
+DNS, baseline reachability, fooling grid, L3/L4, stall, QUIC drop, UDP voice burst.
+"""
 
 from __future__ import annotations
 
@@ -69,7 +71,7 @@ class PreflightOptions:
     skip_nfqws2_check: bool = False
     abort_on_nfqws2: bool = False
     skip_dns_audit: bool = False
-    skip_diagnostics: bool = True  # unit-safe default; from_args enables on campaigns
+    skip_diagnostics: bool = True  # default off; from_args enables it on campaigns
     force: bool = False
     verify_content: bool = False
     dns_cache: DnsRunCache | None = None
@@ -118,7 +120,7 @@ class PreflightReport:
 
 
 def find_host_nfqws2_pids() -> list[int]:
-    """Return PIDs of nfqws2 running on host (BC2-11)."""
+    """Return PIDs of nfqws2 running on the host."""
     try:
         r = subprocess.run(
             ["pgrep", "-f", "nfqws2"],
@@ -148,7 +150,7 @@ def run_unblocked_baseline(
     timeout: float = 5.0,
     dns_cache: DnsRunCache | None = None,
 ) -> tuple[bool, str]:
-    """Verify reference domain is reachable (BC2-2).
+    """Verify the reference domain is reachable.
 
     Tries the primary UNBLOCKED_DOM first, then fallbacks from UNBLOCKED_DOMS.
     When live DNS is unavailable for a candidate, falls back to a cached IP
@@ -211,7 +213,7 @@ def run_prolog(
     *,
     verify_content: bool = False,
 ) -> bool:
-    """Curl domain without nfqws2 — works without DPI bypass? (BC2-5)."""
+    """Curl the domain without nfqws2: does it work without a bypass?"""
     return run_prolog_tls(
         domain, timeout=timeout, dns_cache=dns_cache, verify_content=verify_content
     ).success
@@ -316,12 +318,12 @@ async def run_preflight_async(
         if detail and detail in _baseline_candidates(o.unblocked_dom):
             report.baseline_domain = detail
 
-    # ── One-time parallel DNS audit (UDP vs DoH) ──
+    # Parallel UDP vs DoH DNS check
     dns_rows: list[dict] = []
     if not o.skip_dns_audit and cache:
         dns_rows = await _audit_domains_parallel(domains, cache, o.timeout, store=o.store)
 
-    # ── UDP voice-traffic >16KB check (dpi-detector analogue) ──
+    # UDP voice burst >16KB
     # Simulate a voice stream to a Discord voice endpoint; a sustained >16KB
     # burst tells us whether the TSPU "voice" heuristic applies (endpoint
     # answers) or the transfer is dropped (blocked). Feeds strategy selection.
@@ -378,7 +380,7 @@ async def run_preflight_async(
             print_ip_block_report(ip_r)
             _apply_ip_block(triage, domain, ip_r, is_primary=is_primary)
 
-        # ── Triage: L3/L4 + stream stall + per-domain phase ──
+        # L3/L4, stream stall, per-domain phase
         if domain not in report.skip_domains:
             _triage_domain(triage, domain, ips, o, cache, is_primary=is_primary)
 

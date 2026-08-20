@@ -1,10 +1,4 @@
-"""data_block integration — per-provider DNS cache, pass strategies, configs.
-
-``data_block/`` is a git submodule (https://github.com/zhoel-sherk/data_block)
-mounted inside the blockcheckS repo.  Files are written to
-``data_block/providers/<provider>/``; a git commit/push happens only when the
-``--data-block-sync`` flag is passed (no automatic GitHub writes at runtime).
-"""
+"""Per-provider DNS cache, pass strategies, and configs under data_block/providers/<name>/."""
 
 from __future__ import annotations
 

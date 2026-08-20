@@ -1,9 +1,4 @@
-"""Probe-backend selection (T-L3/T-L4/T-L5) — lua_bridge standard, --classic opt-out.
-
-Covers precedence: ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` >
-``BLOCKCHECKS_PROBE_BACKEND`` > default ``lua_bridge``, plus the paths that are
-always classic (pair UDP bootstrap, fan-out).
-"""
+"""Tests for probe-backend selection: lua_bridge default, --classic, env override."""
 
 from __future__ import annotations
 

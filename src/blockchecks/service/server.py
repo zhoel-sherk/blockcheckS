@@ -1,12 +1,4 @@
-"""blockcheckS probe server — Unix socket core + authenticated HTTP bridge.
-
-Core is strictly ``asyncio.start_unix_server`` (no deps). Clients send a
-single-line JSON request (``{"cmd": "probe"|"status"|"stop", ...}``) and get a
-single-line JSON response. An authenticated HTTP layer (Bearer token) can sit
-in front of the socket (or call the same ``handle_request`` directly) and
-expose the same actions for external orchestrators (e.g. gp-control-plane),
-plus an SSE stream for on-the-fly operation progress.
-"""
+"""Unix-socket JSON API plus optional Bearer HTTP/SSE. Both call handle_request."""
 
 from __future__ import annotations
 
@@ -180,12 +172,11 @@ class ProbeServer:
         self._stop = asyncio.Event()
         self._event_subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
 
-    # ── envelope ──
+    # envelope
 
     @staticmethod
     def _envelope(resp: dict) -> dict:
-        """Hybrid envelope: keep legacy ``status``/``results`` (back-compat with
-        test_probe_service, HTTP bridge, gp-control-plane) and add ``ok``/``data``/``error``."""
+        """JSON envelope: ``status``/``results`` plus ``ok``/``data``/``error``."""
         status = resp.get("status")
         ok = status == "ok"
         error = (
@@ -196,7 +187,7 @@ class ProbeServer:
         data = {k: v for k, v in resp.items() if k not in ("status", "error", "ok", "data")}
         return {"ok": ok, "data": data, "error": error, **resp}
 
-    # ── request handlers ──
+    # request handlers
 
     async def handle_request(self, req: dict) -> dict:
         cmd = req.get("cmd") or req.get("action")
@@ -261,7 +252,7 @@ class ProbeServer:
             "uptime_s": round(self.service.uptime, 1) if self.service.started else 0.0,
         }
 
-    # ── extended actions (MCP) ──
+    # extended actions (MCP)
 
     async def _handle_triage(self, req: dict) -> dict:
         domain = str(req.get("domain") or "").strip()
@@ -562,7 +553,7 @@ class ProbeServer:
         except Exception as err:
             return self._envelope({"status": "error", "error": f"results failed: {err}"})
 
-    # ── event bus (SSE) ──
+    # event bus (SSE)
 
     def publish_event(self, event: dict[str, Any]) -> None:
         """Fan out an event dict to all SSE subscribers (non-blocking)."""
@@ -630,7 +621,7 @@ class ProbeServer:
             except (ConnectionError, OSError):
                 pass
 
-    # ── socket lifecycle ──
+    # socket lifecycle
 
     async def serve(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -759,7 +750,7 @@ class ProbeServer:
             req.setdefault("cmd", action_paths[path])
             resp = await self.handle_request(req)
             return resp, self._busy_status_code(resp)
-        # Legacy routes (still require token).
+        # Routes that still require a token.
         if method == "GET" and path.startswith("/status"):
             resp = self._envelope(await self._handle_status())
             return resp, self._busy_status_code(resp)

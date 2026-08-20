@@ -1,4 +1,4 @@
-"""Tests for provider_summary import (A5)."""
+"""Tests for provider_summary.json import."""
 
 from __future__ import annotations
 
@@ -70,9 +70,7 @@ def test_shortlist_v1_import_presets(tmp_path):
     assert "tls12" in result["presets"]
 
 
-# ── added: extract / merge / to_shortlist / report / main ─────────────
-
-
+# extract / merge / to_shortlist / report / main
 def test_extract_strategies():
     from blockchecks.provider_import import extract_strategies
 

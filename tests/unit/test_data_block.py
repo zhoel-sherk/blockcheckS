@@ -104,7 +104,7 @@ async def test_hosts_file_generation(store: ProviderStore):
 
 @pytest.mark.asyncio
 async def test_hosts_write_merges_existing_entries(store: ProviderStore):
-    """A run auditing only some domains must not wipe unrelated hosts entries."""
+    """A run that checks only some domains must not wipe unrelated hosts entries."""
     # Seed the hosts file with a pinned domain not in the new records.
     store.hosts_file.write_text(
         "162.159.137.232\tdiscord.com\n142.251.38.100\tgoogleapis.com\n",

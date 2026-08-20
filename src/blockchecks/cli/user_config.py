@@ -1,4 +1,4 @@
-"""User config.toml loader for blockcheckS CLI defaults."""
+"""Load CLI defaults from the user config.toml."""
 
 from __future__ import annotations
 

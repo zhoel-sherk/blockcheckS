@@ -1,8 +1,5 @@
-"""Canonical blob alias → file map (BLOB-3).
-
-Strategy strings use short names (`google`, `quic_gv_kyber_1`, …). Resolution
-checks ``BLOCKCHECKS_BLOBS``, then in-repo ``blobs/``, then ``/opt/zapret2/blobs``
-and ``/opt/zapret2/files/fake``.
+"""Short blob names to filenames.
+Search order: BLOCKCHECKS_BLOBS, repo blobs/, /opt/zapret2/blobs, /opt/zapret2/files/fake.
 """
 
 from __future__ import annotations

@@ -1,18 +1,5 @@
-"""XDG Base Directory paths for blockcheckS runtime data.
-
-Implements XDG Base Directory Specification v0.8 (May 2021):
-    https://specifications.freedesktop.org/basedir-spec/latest/
-
-Per-spec requirements:
-- All env-var paths must be absolute; relative paths are ignored.
-- Empty string env-var values fall back to the spec default.
-- ``$XDG_STATE_HOME`` (default ``~/.local/state``) holds state databases.
-- ``$XDG_DATA_HOME`` (default ``~/.local/share``) holds data files.
-- ``$XDG_CONFIG_HOME`` (default ``~/.config``) holds config.
-- ``$XDG_CACHE_HOME`` (default ``~/.cache``) holds cache.
-
-Project-specific overrides (``BLOCKCHECKS_*_HOME``) take priority
-over the standard XDG vars when present and non-empty.
+"""XDG and BLOCKCHECKS_*_HOME directories for state, data, config, cache, and logs.
+Relative or empty env values are ignored. BLOCKCHECKS_*_HOME wins over XDG_* when set.
 """
 
 from __future__ import annotations
@@ -60,7 +47,7 @@ def _xdg_cache_home() -> Path:
     return _resolve_xdg("BLOCKCHECKS_CACHE_HOME", "XDG_CACHE_HOME", Path.home() / ".cache")
 
 
-# ── module-level constants ────────────────────────────────────────────
+# module-level constants
 
 CONFIG_DIR = _xdg_config_home() / "blockcheckS"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
@@ -71,7 +58,7 @@ DATA_DIR = _xdg_data_home() / "blockcheckS"
 CACHE_DIR = _xdg_cache_home() / "blockcheckS"
 
 DEFAULT_DB_PATH = STATE_DIR / "state.db"
-# User-facing outputs live under DATA (XDG data files). Legacy 1.0.x used STATE.
+# User-facing outputs live under DATA (XDG data files).
 _LEGACY_OUT_DIR = STATE_DIR / "export"
 _LEGACY_SHORTLIST_DIR = STATE_DIR / "shortlists"
 DEFAULT_OUT_DIR = DATA_DIR / "export"

@@ -1,4 +1,4 @@
-"""Active campaign lock + graceful stop (``bs stop``)."""
+"""Campaign run.lock and bs stop."""
 
 from __future__ import annotations
 

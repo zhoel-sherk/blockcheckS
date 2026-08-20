@@ -1,10 +1,4 @@
-"""
-src/blockchecks/mcp/server.py
-Model Context Protocol (MCP) Server for blockcheckS.
-
-Exposes high-level orchestration tools, deep diagnostic/triage procedures,
-and live interactive network debugging utilities over FastMCP.
-"""
+"""FastMCP tools over the bs serve Unix socket, plus read-only zapret2 host status."""
 
 from __future__ import annotations
 
@@ -20,14 +14,10 @@ from pydantic import BaseModel, Field
 from blockchecks.engine.config import PROJECT_DIR
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR, STATE_DIR
 
-# ---------------------------------------------------------------------------
-# FastMCP Server Initialization & Constants
-# ---------------------------------------------------------------------------
-
 mcp = FastMCP("blockcheckS Network Orchestrator & Debugger")
 
 # Real daemon socket: STATE_DIR/blockchecks.sock (~/.local/state/blockcheckS).
-# Env override preserved for tests / non-default installs.
+# BLOCKCHECKS_SOCKET_PATH overrides the default socket.
 DEFAULT_SOCKET_PATH = Path(
     os.getenv("BLOCKCHECKS_SOCKET_PATH", str(STATE_DIR / "blockchecks.sock"))
 )
@@ -47,9 +37,6 @@ def get_manifest_path() -> Path:
     return Path(__file__).resolve().parents[2] / "presets" / "manifest.toml"
 
 
-# ---------------------------------------------------------------------------
-# Pydantic Schemas for Tools
-# ---------------------------------------------------------------------------
 
 
 class TriageResult(BaseModel):
@@ -112,9 +99,6 @@ class StrategySyntaxCheck(BaseModel):
     detected_conflicts: list[str] = Field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
-# IPC Helpers (Client for `bs serve` Unix Socket)
-# ---------------------------------------------------------------------------
 
 
 async def _send_daemon_request(
@@ -162,9 +146,6 @@ async def _send_daemon_request(
         await writer.wait_closed()
 
 
-# ---------------------------------------------------------------------------
-# LAYER A: Orchestration & Configuration Tools
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -428,9 +409,6 @@ def _latest_run_logpath(info) -> Path | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# LAYER A2: Campaign Data & Control (read-only local + daemon stop)
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -550,7 +528,7 @@ async def stop_campaign(wait: float = 30.0) -> dict[str, Any]:
     response = await _send_daemon_request("stop", {}, timeout=min(wait + 5.0, 90.0))
     data = dict(response.get("data") or {})
     status = data.get("action_status") or data.get("status") or response.get("status")
-    # Legacy envelope used status="stopping" which mapped to ok=False.
+    # Older clients sent status="stopping" (ok=False).
     if response.get("ok") or status == "stopping":
         resolved = status or "stopping"
         return {**data, "ok": True, "status": resolved, "action_status": resolved}
@@ -580,9 +558,6 @@ def _resolve_db_path(db_path: str | None) -> Path | None:
     return DEFAULT_DB_PATH
 
 
-# ---------------------------------------------------------------------------
-# LAYER B: Deep Interactive Debug Tools
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -727,9 +702,6 @@ async def dbg_dump_pool_state() -> dict[str, Any]:
     return response.get("data", {})
 
 
-# ---------------------------------------------------------------------------
-# LAYER C: zapret2 Host Status (read-only, no daemon / no nfqws2 launch)
-# ---------------------------------------------------------------------------
 
 _ZAPRET2_DIR = Path("/opt/zapret2")
 
@@ -900,9 +872,6 @@ async def probe_strategy(domain: str, strategy: str, fake_blob: str | None = Non
     return await dbg_probe_raw(domain, strategy, fake_blob, dry_run_db=True)
 
 
-# ---------------------------------------------------------------------------
-# MCP Resources (Direct contextual data access for LLM)
-# ---------------------------------------------------------------------------
 
 
 @mcp.resource("blockchecks://presets/manifest")
@@ -924,20 +893,17 @@ async def get_active_run_telemetry() -> str:
         return json.dumps({"error": str(err), "status": "daemon_unreachable"}, indent=2)
 
 
-# ---------------------------------------------------------------------------
-# Server Entrypoint
-# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     """Runs the FastMCP server over standard I/O (STDIN/STDOUT)."""
     try:
-        from mcp.server.fastmcp import FastMCP  # noqa: F401  (re-verified at runtime)
+        from mcp.server.fastmcp import FastMCP  # noqa: F401
     except ImportError:
         import sys
 
         print(
-            "Ошибка: зависимость 'mcp' не найдена.\nУстановите: pip install 'blockchecks[mcp]'",
+            "Missing optional dependency 'mcp'.\nInstall: pip install 'blockchecks[mcp]'",
             file=sys.stderr,
         )
         sys.exit(1)

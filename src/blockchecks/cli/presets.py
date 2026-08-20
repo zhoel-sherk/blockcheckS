@@ -1,4 +1,4 @@
-"""Domain and strategy preset listing + path jail (CLI façade)."""
+"""List domain/strategy presets and jail preset paths."""
 
 from __future__ import annotations
 

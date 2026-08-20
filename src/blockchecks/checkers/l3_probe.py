@@ -1,15 +1,5 @@
-"""L3/L4 blackhole & ICMP probe (Phase 1 triage).
-
-Distinguishes infrastructure-level blocking that strategy desync cannot fix:
-
-- ``L4_SYN_DROP``: SYN sent, no SYN-ACK, no RST, no ICMP (silent blackhole /
-  BGP null-route).
-- ``L4_RST_AT_SYN``: SYN answered with RST (L4 filter by ip:port).
-- ``ICMP_BLOCK``: ICMP Destination Unreachable (Type 3, codes 1/9/10/13) or
-  Admin Prohibited (Type 3 Code 13 / Type 11) received.
-
-Uses a raw ICMP receiver (best-effort; falls back to TCP-connect classification
-when raw sockets are unavailable).
+"""Classify L3/L4 blackholes: silent SYN drop, RST-at-SYN, ICMP unreachable.
+Uses a raw ICMP receiver when possible; otherwise TCP connect.
 """
 
 from __future__ import annotations

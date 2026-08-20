@@ -1,4 +1,4 @@
-"""SQLite implementation of run state store (DAO)."""
+"""SQLite DAO for the run-state store."""
 
 from __future__ import annotations
 
@@ -687,7 +687,7 @@ class SqliteRunStore:
             ]
 
     async def get_common_tcp(self, domains: list[str], *, limit: int = 5) -> list[dict]:
-        """TCP strategies whose latest result is PASS on every domain (BC2-7)."""
+        """TCP strategies whose latest result is PASS on every domain."""
         if len(domains) < 2:
             return []
         placeholders = ",".join("?" * len(domains))

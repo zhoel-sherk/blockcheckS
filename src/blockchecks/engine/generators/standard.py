@@ -1,8 +1,4 @@
-"""Standard hardcoded generators (blockcheck2.d/standard replicas).
-
-Facade over the family-expansion modules in ``families/`` (split/fake/tamper).
-Keeps the public generator classes + constants for back-compat.
-"""
+"""Standard nfqws2 strategy families. Facade over families/split, fake, and tamper."""
 
 from typing import TYPE_CHECKING
 
@@ -13,7 +9,7 @@ from blockchecks.engine.generators.families import (
     TamperFamiliesMixin,
 )
 from blockchecks.engine.generators.families._helpers import (
-    _blob_abs,  # noqa: F401  (re-exported for back-compat)
+    _blob_abs,  # noqa: F401
     _blob_file,  # noqa: F401
     _fooling_clause,
     _ttl_clause,
@@ -316,7 +312,7 @@ class FakeSplitComboGenerator(StrategyGenerator):
         return prune_items_by_triage(items[:max_count], triage, scan_level=scan_level)
 
 
-# ── Extended parameters (from blockcheck.sh def.inc + standard scripts) ──
+# Extended parameters (from blockcheck.sh def.inc + standard scripts)
 
 # Full foolings matching blockcheck2.sh def.inc FOOLINGS46_TCP
 ALL_FOOLINGS_TCP = [
@@ -375,7 +371,7 @@ TLS_MODS = [
     "rnd,dupsid,sni=ya.ru",
 ]
 
-# All TCP blobs (extended from Flowseal) + null TLS blob from BC2 25-fake.sh
+# TCP blobs plus a null TLS blob (first, so a capped --max still hits it)
 # Null blob first so capped --max scans still exercise it
 ALL_BLOBS_TCP = ["0x00000000", "stun", "max_ru", "google", "4pda"]
 
@@ -436,7 +432,7 @@ def _resolve_family_name(name: str) -> str:
     return FAMILY_ALIASES.get(name, name)
 
 
-# ── Standard Generator (parameterized strategy families) ──
+# Standard Generator (parameterized strategy families)
 
 
 class StandardGenerator(
@@ -452,10 +448,10 @@ class StandardGenerator(
       # or: gen = StandardGenerator(strategy_types=["all"])
     """
 
-    # ── Strategy families ────────────────────────────────
+    # Strategy families
 
     STRATEGY_FAMILIES = {
-        # 25-fake.sh: fake + blob + fooling + TTL + TLS mod
+        # fake + blob + fooling + TTL + TLS mod
         "fake": {
             "blobs": ALL_BLOBS_TCP,
             "repeats": FAST_REPEATS,
@@ -484,7 +480,7 @@ class StandardGenerator(
             "ttl_auto": ALL_AUTOTTL,
             "padencap": True,
         },
-        # M3: multidisorder (sonicdpi tier-1, blockcheck2 20-multi.sh)
+        # multidisorder
         "multidisorder": {
             "positions": ["1", "2", "midsld", "method+2", "1,midsld"],
             "foolings": FAST_FOOLINGS_TCP[:4],
@@ -521,7 +517,7 @@ class StandardGenerator(
             "repeat_pairs": [(6, 6), (6, 3), (8, 6), (3, 6)],
             "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
         },
-        # M5: three-blob order subset (stun, max_ru, google permutations)
+        # Three-blob orders: stun, max_ru, google
         "triple_fake": {
             "triples": [
                 ("stun", "max_ru", "google"),
@@ -532,7 +528,7 @@ class StandardGenerator(
             "repeats": [6, 3],
             "foolings": ["tcp_ts=-1000", "badsum", ""],
         },
-        # M1: fake + multisplit seqovl_pattern (blockcheck2 50-fake-multi / 55-fake-faked)
+        # fake + multisplit seqovl_pattern
         "fake_multisplit": {
             "blob_pairs": [
                 ("stun", "max_ru"),
@@ -548,7 +544,7 @@ class StandardGenerator(
             "repeats": [6, 3, 8],
             "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
         },
-        # M2: fake + multisplit + hostfakesplit triple chain (ALT12)
+        # fake + multisplit + hostfakesplit
         "fake_multisplit_hostfake": {
             "blob_pairs": [
                 ("google", "max_ru"),
@@ -562,14 +558,14 @@ class StandardGenerator(
             "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum"],
             "hf_hosts": ["www.google.com", "fonts.google.com"],
         },
-        # M3: fake + multidisorder combo (blockcheck2 50-fake-multi.sh)
+        # fake + multidisorder
         "fake_multidisorder": {
             "blobs": ALL_BLOBS_TCP,
             "positions": ["1", "2", "midsld", "method+2"],
             "repeats": [6, 3, 8, 11],
             "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
         },
-        # M3: fakedsplit / fakeddisorder (blockcheck2 30-faked.sh)
+        # fakedsplit / fakeddisorder
         "fakedsplit": {
             "positions": ["1", "midsld", "sniext+1", "method+2"],
             "pattern_blobs": ALL_BLOBS_TCP,
@@ -593,7 +589,7 @@ class StandardGenerator(
             "repeats": [6, 3, 8],
             "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
         },
-        # Phase 7: TCP ipfrag (complement to quic_ipfrag)
+        # TCP ipfrag (beside quic_ipfrag)
         "tcp_ipfrag": {
             "positions": [8, 16, 24, 32, 40, 48, 64],
             "repeats": [6, 11, 4],
@@ -609,7 +605,7 @@ class StandardGenerator(
             "ack_drop": True,
             "send_md5": True,
         },
-        # Geneva 10-15: ACK → RST / RA duplicate (China 80-95%) on empty ACK
+        # Duplicate empty ACK as RST or RST+ACK
         "rst_fake": {
             "mods": [
                 "rst:badsum",
@@ -621,7 +617,7 @@ class StandardGenerator(
                 "rst:rstack:ip_ttl=1",
                 "rst:badsum:tcp_md5",
             ],
-            # Geneva 16-18: exotic flag-fakes on the duplicated packet (send)
+            # Flag combinations on a duplicated packet (send)
             "flag_fakes": [
                 "send:tcp_flags_set=FIN,RST,ACK,PSH,URG,ECE:badsum",  # ≈ FRAPUEN
                 "send:tcp_flags_set=FIN,RST,ECE,ACK,CWR:ip_ttl=10",  # ≈ FREACN
@@ -629,7 +625,7 @@ class StandardGenerator(
                 "send:tcp_flags_set=FIN:tcp_md5",  # F + md5 (Geneva 22-part)
             ],
         },
-        # Geneva 23: SYN → SYN+ACK split handshake (KZ/IN 100%)
+        # SYN then SYN+ACK split handshake
         # note: syn|synack (two-packet) omitted — '|' breaks nfqws2 conf splitter
         "synack": {
             "modes": ["synack", "synack", "acksyn"],
@@ -640,8 +636,7 @@ class StandardGenerator(
             "sizes": ["wssize:wsize=1:scale=6"],
             "combos": [False, True],  # True = paired with multisplit
         },
-        # Geneva 1-9/22/24 escape-hatch: requires lua/blockchecks/geneva.lua
-        # staged via BLOCKCHECKS_LUA_EXTRA=geneva.lua (custom fool= functions).
+        # Custom fool= hooks from lua/blockchecks/geneva.lua (BLOCKCHECKS_LUA_EXTRA).
         "geneva_fool": {
             "fools": [
                 "fool=bs_dataofs:badsum",
@@ -679,7 +674,7 @@ class StandardGenerator(
             "repeats": [10, 12, 14],
             "out_range": [None, "n1-<n3", "n1-<n4", "n1-<n5"],
         },
-        # M7: dual L7 UDP profile (stun + discord voice blob)
+        # UDP stun + discord voice blob
         "udp_multiblob": {
             "profiles": [
                 ("stun", "discord_udp"),
@@ -688,7 +683,7 @@ class StandardGenerator(
             ],
             "repeats": [6, 10, 12],
         },
-        # 25-fake.sh pktws_check_http — port 80, payload=http_req
+        # HTTP :80, payload=http_req
         "http_simple": {
             "variants": [
                 "http_hostcase",
@@ -703,20 +698,20 @@ class StandardGenerator(
             "repeats": FAST_REPEATS[:4],
             "foolings": FAST_FOOLINGS_TCP[:4],
         },
-        # M6: HTTP :80 fake (TLS side in composite preset / pair)
+        # HTTP :80 fake
         "http_tls_dual": {
             "http_blobs": ["fake_default_http"],
             "repeats": [6, 3],
             "foolings": ["tcp_ts=-1000", "badsum", ""],
         },
-        # 90-quic.sh — HTTP/3 over UDP/443
+        # HTTP/3 over UDP/443
         "quic_fake": {
             "blobs": ["fake_default_quic", "quic_initial", "quic_google", "quic_vk"],
             "repeats": [1, 2, 5, 6, 10, 11, 20],
             "foolings": ["", "badsum"],
             "ip6_send_drop": True,
         },
-        # GV-5: googlevideo CDN QUIC kyber blobs (HTTP/3 probe)
+        # googlevideo CDN QUIC kyber blobs (HTTP/3)
         "quic_gv": {
             "blobs": ["quic_gv_kyber_1", "quic_gv_kyber_2", "quic_google"],
             "repeats": [1, 2, 5, 6, 11],
@@ -897,7 +892,7 @@ class StandardGenerator(
 
         return _prune(items[:max_count])
 
-    # Aliases for todo / CLI naming (ipfrag_tcp / ipfrag_udp)
+    # CLI aliases (ipfrag_tcp / ipfrag_udp)
     _FAMILY_EXPANDERS = {
         "fake": "_fam_fake",
         "hostfake": "_fam_hostfake",

@@ -1,4 +1,4 @@
-"""L3/L4 + DNS sinkhole triage tests (Phase 1)."""
+"""Tests for L3/L4 blackhole and DNS sinkhole classification."""
 
 from __future__ import annotations
 

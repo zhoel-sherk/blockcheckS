@@ -1,8 +1,4 @@
-"""Shared helpers + StrategyParams for strategy-family expansion (standard.py).
-
-Pure string/validation utilities — no generator state. Kept here so the
-``families.*`` modules (split/fake/tamper) stay free of cross-imports.
-"""
+"""Shared string helpers and StrategyParams for family expanders. No generator state."""
 
 from __future__ import annotations
 

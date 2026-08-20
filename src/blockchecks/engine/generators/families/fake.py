@@ -1,8 +1,4 @@
-"""Fake-packet family expansion: fake/multi-fake/triple-fake + TTL/fooling.
-
-Methods follow the ``_fam_<name>(items, seen, family, scan_level, known_working)``
-contract and delegate dedup/append to ``self._add``.
-"""
+"""Fake-packet expanders: fake, multi-fake, triple-fake, plus TTL and fooling."""
 
 from __future__ import annotations
 

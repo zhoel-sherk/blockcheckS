@@ -1,4 +1,4 @@
-"""Wave3 audit regressions: H2/H3/H4/H6/H8/migrate."""
+"""Regression tests for hosts migrate, DoH fallback, and pin-file reclaim."""
 
 from __future__ import annotations
 

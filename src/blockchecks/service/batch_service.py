@@ -1,4 +1,4 @@
-"""ProbeBatchService — boot batch → probe ×N → shutdown (classic | lua_bridge)."""
+"""Boot a batch, probe each item, shut down. Backends: classic or lua_bridge."""
 
 from __future__ import annotations
 

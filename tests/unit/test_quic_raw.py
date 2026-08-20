@@ -1,4 +1,4 @@
-"""Raw QUIC Initial probe tests (Phase 5) — mocked sockets."""
+"""Tests for the raw QUIC Initial probe (mocked sockets)."""
 
 from __future__ import annotations
 

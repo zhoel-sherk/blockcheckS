@@ -1,4 +1,4 @@
-"""Unit tests for port block probe (BC2-3)."""
+"""Tests for TCP port reachability."""
 
 from unittest.mock import patch
 

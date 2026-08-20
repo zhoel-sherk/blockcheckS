@@ -1,23 +1,6 @@
-"""ByeDPI (ciadpi) strategy translator.
-
-Isolated engine module: converts blockcheckS / nfqws2 strategy syntax into
-byedpi (ciadpi) CLI argv. It is deliberately decoupled from the netns /
-nfqws2 execution machinery (async_runner, in_ns_workers, nfqws_config) so it
-can be unit-tested in isolation and reused by any probe front-end.
-
-Design notes
-------------
-* One ciadpi process per strategy (see docs/byedpi_engine.md §2). byedpi has
-  no "change strategy on the fly" mechanism: options are parsed once at
-  startup (SIGHUP only dumps the IP cache). Translation therefore always
-  yields a fresh argv for a fresh process.
-* Multiple ciadpi daemons may run concurrently on different ports and PIDs
-  (``-p <port>`` + optional ``-D --daemon`` / ``-w --pidfile``). This module
-  only builds argv; process orchestration lives in ByedpiManager.
-* ``repeats=N`` in nfqws2 means N rawsend of the same packet. byedpi
-  ``offset:repeats:skip`` means N *split positions*, not repeat-sends. These
-  are NOT equivalent — see _TRANSLATION table.
-* Unsupported foolings/families translate to ``None`` (caller must SKIP).
+"""Map nfqws2 lua-desync strings to ciadpi argv.
+One ciadpi process per strategy. Untranslatable families return None.
+nfqws2 repeats=N is N rawsends; byedpi offset:repeats:skip is split positions — not the same.
 """
 
 from __future__ import annotations
@@ -28,7 +11,7 @@ from dataclasses import dataclass, field
 
 from blockchecks.engine.blob_aliases import resolve_blob_path
 
-# ── Translation quality ───────────────────────────────────────────────
+# Translation quality
 
 #: FULL — 1:1 semantic match with byedpi argv.
 #: PARTIAL — close but not bit-identical (repeats, ttl-vs-tcp_ts, etc.).
@@ -47,7 +30,7 @@ class Translation:
     notes: list[str] = field(default_factory=list)
 
 
-# ── Unsupported nfqws2 features (byedpi has no equivalent) ────────────
+# Unsupported nfqws2 features (byedpi has no equivalent)
 
 _UNMAPPED_FOOLINGS = frozenset(
     {
@@ -90,7 +73,7 @@ _SUPPORTED_FAMILIES = frozenset(
     }
 )
 
-# ── nfqws2 pos → byedpi pos_t mapping ────────────────────────────────
+# nfqws2 pos → byedpi pos_t mapping
 
 # byedpi pos_t: offset[:repeats:skip][+flag1[flag2]]
 #   flags: +s SNI, +h Host, +n zero, +e end, +m mid, +r rand, +s start
@@ -170,7 +153,7 @@ def _fooling_argv(line: str) -> tuple[list[str], list[str]]:
     return argv, notes
 
 
-# ── Family translators ───────────────────────────────────────────────
+# Family translators
 
 
 def _translate_fake(line: str) -> Translation:
@@ -280,7 +263,7 @@ def _family_of(line: str) -> str | None:
     return None
 
 
-# ── Public API ───────────────────────────────────────────────────────
+# Public API
 
 
 def translate(strategy: str) -> Translation | None:

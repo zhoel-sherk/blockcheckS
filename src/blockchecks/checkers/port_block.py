@@ -1,4 +1,4 @@
-"""TCP port reachability probe (blockcheck2 ``check_domain_port_block``)."""
+"""TCP port reachability on resolved IPs."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def run_port_block_probe(
     port: int = 443,
     timeout: float = 3.0,
 ) -> PortBlockReport:
-    """Probe all resolved IPs for TCP port reachability (BC2-3)."""
+    """Probe all resolved IPs for TCP port reachability."""
     report = PortBlockReport(domain=domain, port=port)
     for ip in ips[:10]:
         report.probes.append(probe_tcp_port(ip, port, timeout=timeout))

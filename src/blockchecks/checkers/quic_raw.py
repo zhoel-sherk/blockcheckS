@@ -1,13 +1,5 @@
-"""Raw QUIC Initial drop probe (Triage Phase 5).
-
-Sends a real QUIC Initial packet (from the baked ``quic_initial*.bin`` blob, or
-a synthetic RFC 9000 Initial as fallback) over UDP :443 and classifies:
-- ``PASS`` — server replied (Initial/Handshake/Retry packet) → QUIC path open.
-- ``QUIC_DROP`` — no response (TSPU drops QUIC Initial by SNI).
-- ``UDP_BLOCKED`` — ICMP Port Unreachable / admin-prohibited.
-
-Distinct from ``check_http3`` (full HTTP/3 via curl) — this is a raw one-shot
-probe used by preflight to build the ``TriageProfile.quic_drop`` flag.
+"""Send a QUIC Initial on UDP/443 and classify: server reply, silent drop, or ICMP block.
+Uses a baked quic_initial blob, or a synthetic RFC 9000 Initial.
 """
 
 from __future__ import annotations

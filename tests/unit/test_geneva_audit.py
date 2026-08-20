@@ -1,5 +1,4 @@
-"""Geneva/Flowseal audit coverage: rst_fake, synack, wssize, geneva_fool,
-Flowseal badseq/tls_mod=none/altorder gaps, repeats=14 in TCP pool."""
+"""Tests for rst_fake, synack, wssize, and geneva_fool expansion."""
 
 from __future__ import annotations
 
@@ -17,7 +16,7 @@ from blockchecks.engine.generators.standard import (
     StandardGenerator,
 )
 
-# New-family label prefixes (audit additions)
+# rst_fake / synack / wssize / geneva_fool label prefixes
 _NEW_FAM_PREFIXES = ("std_rst_", "std_synack", "std_wssize", "std_gva_")
 
 
