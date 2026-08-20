@@ -66,33 +66,39 @@ def load_quic_initial() -> tuple[bytes, str]:
     return _synthetic_rfc9000_initial(), "synthetic_rfc9000"
 
 
+def _quic_varint(n: int) -> bytes:
+    """RFC 9000 variable-length integer (1/2/4/8 bytes)."""
+    if n < 64:
+        return bytes([n])
+    if n < 16384:
+        return (0x4000 | n).to_bytes(2, "big")
+    if n < 1_073_741_824:
+        return (0x8000_0000 | n).to_bytes(4, "big")
+    return (0xC000_0000_0000_0000 | n).to_bytes(8, "big")
+
+
 def _synthetic_rfc9000_initial() -> bytes:
     """Build a minimal RFC 9000 QUIC Initial packet (1200B) with no crypto."""
-    # Header byte: 0xC0 | form=long(1) | fixed(1) | long_packet_type(Initial=0)
-    # Bits 0x40 (fixed bit) + 0x30 (type 0) → 0xC0. Add random reserved bits.
-    first = 0xC0 | (os.urandom(1)[0] & 0x03)  # low 2 bits = unused/reserved
-    version = (1).to_bytes(4, "big")  # QUIC v1
-    dcid_len = 8
-    dcid = os.urandom(dcid_len)
-    scid_len = 0
-    # Token Length (0) + Length (2B) + Payload
-    token_len = (0).to_bytes(1, "big")
-    # Length = packet_number(1) + payload, must fit 1200 total.
-    payload_len = 1200 - 1 - 1 - 4 - 1 - dcid_len - 1 - 0 - 1 - 2
-    pkt_len = (1 + payload_len).to_bytes(2, "big")
-    pkt_num = os.urandom(1)
-    payload = os.urandom(payload_len)
-    return (
+    # Long header: form=1, fixed=1, type=Initial(00), reserved=00, PN length=1 → 0xC0
+    pn_len = 1
+    first = 0xC0 | (pn_len - 1)
+    dcid = os.urandom(8)
+    scid = b""
+    token = b""
+    prefix = (
         bytes([first])
-        + version
-        + bytes([dcid_len])
+        + (1).to_bytes(4, "big")
+        + bytes([len(dcid)])
         + dcid
-        + bytes([scid_len])
-        + token_len
-        + pkt_len
-        + pkt_num
-        + payload
+        + bytes([len(scid)])
+        + scid
+        + _quic_varint(len(token))
+        + token
     )
+    length_field_size = 2  # 2-byte varint for Length in 64..16383
+    payload_len = 1200 - len(prefix) - length_field_size - pn_len
+    length_field = _quic_varint(pn_len + payload_len)
+    return prefix + length_field + os.urandom(pn_len) + os.urandom(payload_len)
 
 
 def _parse_icmp(pkt: bytes) -> tuple[int | None, int | None]:

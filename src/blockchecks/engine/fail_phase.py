@@ -109,25 +109,33 @@ _PHASE_PATTERNS: tuple[tuple[FailPhase, re.Pattern], ...] = (
     (FailPhase.CONNECT_REFUSED, re.compile(r"Connection refused|ECONNREFUSED", re.I)),
     (
         FailPhase.TLS_RST_AT_SNI,
-        re.compile(r"Recv failure|Connection reset|RST|WRONG_VERSION", re.I),
+        re.compile(r"Recv failure|Connection reset|ECONNRESET|\bTCP RST\b", re.I),
     ),
     (FailPhase.TLS_SILENT_DROP_AFTER_SNI, re.compile(r"no data|silent|frozen|stalled", re.I)),
-    (FailPhase.TLS_HANDSHAKE_ERROR, re.compile(r"SSL routines|TLS|handshake", re.I)),
+    (
+        FailPhase.TLS_HANDSHAKE_ERROR,
+        re.compile(r"SSL routines|WRONG_VERSION|TLS|handshake", re.I),
+    ),
     (FailPhase.HTTP_REDIRECT, re.compile(r"suspicious redirect", re.I)),
     (FailPhase.HTTP_BLOCKED, re.compile(r"403|451|captcha|blocked", re.I)),
     (FailPhase.IP_BLOCKED, re.compile(r"IP.*block|blacklist|110\b", re.I)),
 )
 
 
+_PASS_HTTP = frozenset({200, 204, 206})
+
+
 def classify_fail_phase(error: str, http_code: int = 0) -> FailPhase:
     """Map a probe error string to a structured failure phase.
 
-    Empty error with non-200 HTTP → ``http_<code>``; empty with 200 → PASS.
+    Empty error with 200/204/206 → PASS; other HTTP → ``http_<code>``.
     """
     if not error:
-        if http_code and http_code != 200:
+        if http_code in _PASS_HTTP:
+            return FailPhase.PASS
+        if http_code:
             return http_phase(http_code)
-        return FailPhase.PASS if http_code in (200, 204) else FailPhase.UNKNOWN
+        return FailPhase.UNKNOWN
     for phase, pat in _PHASE_PATTERNS:
         if pat.search(error):
             return phase

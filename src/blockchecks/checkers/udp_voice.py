@@ -42,7 +42,7 @@ def parse_ip_discovery_response(data: bytes) -> dict | None:
     if len(data) >= 74:
         addr_raw = data[8:72]
         mapped_ip = addr_raw.split(b"\x00", 1)[0].decode("ascii", errors="replace")
-        mapped_port = struct.unpack(">H", data[72:74])[0]
+        mapped_port = struct.unpack("<H", data[72:74])[0]
     return {
         "ssrc": ssrc,
         "mapped_ip": mapped_ip,
@@ -166,13 +166,29 @@ def voice_burst_probe(
             sock.sendto(chunk, (ip, port))
             sent += len(chunk)
         # Receive loop — wait for any reply while the burst settles.
-        data, addr = sock.recvfrom(512)
-        elapsed = (time.perf_counter() - start) * 1000
-        return (
-            True,
-            elapsed,
-            f"{len(data)}B UDP reply to {burst_bytes}B burst from {addr[0]}:{addr[1]}",
-        )
+        try:
+            data, addr = sock.recvfrom(512)
+            elapsed = (time.perf_counter() - start) * 1000
+            return (
+                True,
+                elapsed,
+                f"{len(data)}B UDP reply to {burst_bytes}B burst from {addr[0]}:{addr[1]}",
+            )
+        except TimeoutError:
+            # Discord voice gateways drop unauthenticated RTP even when UDP is
+            # open. Confirm the path with RFC 5389 STUN before calling it a block.
+            tid = bytes(random.randint(0, 255) for _ in range(12))
+            stun = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442) + tid
+            sock.settimeout(min(timeout, 1.5))
+            sock.sendto(stun, (ip, port))
+            data, addr = sock.recvfrom(512)
+            elapsed = (time.perf_counter() - start) * 1000
+            return (
+                True,
+                elapsed,
+                f"{len(data)}B STUN after RTP burst (unauthenticated RTP dropped, UDP open) "
+                f"from {addr[0]}:{addr[1]}",
+            )
     except TimeoutError:
         elapsed = (time.perf_counter() - start) * 1000
         return False, elapsed, f"timeout after {burst_bytes}B burst"

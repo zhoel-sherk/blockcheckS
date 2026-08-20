@@ -49,18 +49,37 @@ def _apply_read_timeout(session: curl_cffi.Session, read_timeout: float) -> None
     session.curl.setopt(curl_cffi.CurlOpt.LOW_SPEED_TIME, int(max(1, read_timeout)))
 
 
+def _redirect_hostname(location: str) -> str:
+    """Hostname from an absolute or protocol-relative Location (empty if relative)."""
+    from urllib.parse import urlparse
+
+    loc = location.strip()
+    if not loc:
+        return ""
+    parsed = urlparse(loc if "://" in loc or loc.startswith("//") else "")
+    return (parsed.hostname or "").lower().rstrip(".")
+
+
+def _hosts_related(host: str, domain: str) -> bool:
+    """True if *host* is the same site as *domain* (subdomain ↔ apex included)."""
+    h, d = host.rstrip("."), domain.rstrip(".")
+    return bool(h and d) and (h == d or h.endswith("." + d) or d.endswith("." + h))
+
+
 def is_suspicious_redirect(domain: str, status: int, location: str) -> bool:
-    """Detect DPI blockpage redirects (BC2-12, blockcheck2 curl_test_http)."""
-    if status not in REDIRECT_BLOCK_STATUSES:
+    """Detect DPI blockpage redirects (BC2-12, blockcheck2 curl_test_http).
+
+    Same-site redirects are OK, including subdomain→apex (``www.youtube.com`` →
+    ``https://youtube.com/``) and protocol-relative ``//host/...`` Locations.
+    Relative paths have no host and are treated as same-site.
+    """
+    if status not in REDIRECT_BLOCK_STATUSES or not location:
         return False
-    if not location:
+    loc_host = _redirect_hostname(location)
+    if not loc_host:
         return False
-    loc = location.strip().lower()
-    dom = domain.lower().split("/")[0]
-    if loc.startswith("http://") or loc.startswith("https://"):
-        loc_host = loc.split("/")[2].split(":")[0]
-        return not (loc_host == dom or loc_host.endswith("." + dom))
-    return False
+    dom = domain.lower().split("/")[0].split(":")[0].rstrip(".")
+    return not _hosts_related(loc_host, dom)
 
 
 def classify_http_status(domain: str, status: int, location: str = "") -> str | None:

@@ -35,9 +35,11 @@ _CURL_IPRESOLVE_V4 = 1
 
 _SMALL_BODY_STATUSES = frozenset({101, 204, 206, 301, 302, 303, 307, 308})
 
-#: A same-host redirect to a block/error path is still a provider stub, not a
-#: working bypass. Blocking pages commonly redirect /block, /blocked, /stop, ...
-_BLOCK_REDIRECT_HINTS = ("/block", "blocked", "blockpage", "forbidden", "/stop", "error")
+#: Path-segment tokens of a same-host redirect that is still a provider stub.
+#: Matched as whole path segments (not substrings) so ``/login?error=...`` is OK.
+_BLOCK_PATH_TOKENS = frozenset({"block", "blocked", "blockpage", "forbidden", "stop", "error"})
+_HANDSHAKE_BUDGET_SEC = 2.0  # TLS/TCP setup; small bodies cannot yield a transfer rate
+_THROTTLE_MIN_BODY = 16 * 1024  # below this, whole-connection rate is handshake-dominated
 
 
 @dataclass
@@ -383,7 +385,7 @@ def _googlevideo_follow_request(req: CurlProbeRequest, location: str) -> CurlPro
     return CurlProbeRequest(
         domain=req.domain,
         timeout=req.timeout,
-        resolved_ip=None,
+        resolved_ip=req.resolved_ip,
         resolve_name=host,
         curl_url=target,
         disable_ech=req.disable_ech,
@@ -392,19 +394,53 @@ def _googlevideo_follow_request(req: CurlProbeRequest, location: str) -> CurlPro
     )
 
 
+def _location_is_blockpage(location: str) -> bool:
+    """True if Location path has a block/error *segment* (not a query substring)."""
+    from urllib.parse import urlparse
+
+    raw = (location or "").strip()
+    if not raw:
+        return False
+    if "://" not in raw and not raw.startswith("//"):
+        raw = "https://x" + (raw if raw.startswith("/") else f"/{raw}")
+    path = (urlparse(raw).path or "").lower()
+    return "blockpage" in path or any(seg in _BLOCK_PATH_TOKENS for seg in path.split("/") if seg)
+
+
 def _block_redirect_err(status: int, location: str) -> str | None:
     """Same-host redirect to an obvious block/error path — provider stub.
 
     ``is_suspicious_redirect`` only flags foreign-host Location values, so a
     stub answering ``302 Location: https://<same-host>/block`` would otherwise
-    be classified as a working bypass.
+    be classified as a working bypass. Query strings like ``/login?error=``
+    are not blockpages.
     """
     if status not in {301, 302, 303, 307, 308}:
         return None
-    low = (location or "").lower()
-    if any(h in low for h in _BLOCK_REDIRECT_HINTS):
+    if _location_is_blockpage(location):
         return f"blockpage redirect {status} to {location[:80]}"
     return None
+
+
+def _classify_throughput(
+    clen: int, elapsed: float, *, small_body_ok: bool
+) -> tuple[bool, bool, float]:
+    """Return (rate_ok, throttled, rate) from body size and wall-clock elapsed.
+
+    Whole-connection elapsed includes TLS handshake. Dividing a small body by
+    that time falsely yields THROTTLED/FAIL; skip rate verdicts unless the
+    wait is a clear stall or the body is large enough that transfer dominates.
+    """
+    rate = clen / max(elapsed, 0.001)
+    if small_body_ok:
+        return True, False, rate
+    if rate < MIN_READ_RATE_BPS and elapsed >= _HANDSHAKE_BUDGET_SEC:
+        return False, False, rate
+    if clen < _THROTTLE_MIN_BODY:
+        return True, False, rate
+    if rate < MIN_READ_RATE_BPS:
+        return False, False, rate
+    return True, rate < THROTTLED_MAX_BPS, rate
 
 
 def _stub_body_err(req: CurlProbeRequest, resp, clen: int) -> str | None:
@@ -446,7 +482,7 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     try:
         with curl_cffi.Session(
             impersonate="chrome124",
-            http_version=2,
+            http_version="v1" if is_http else 2,
             headers=headers,
             allow_redirects=False,
         ) as session:
@@ -517,13 +553,14 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
                 read_rate_bps=rate,
                 error=f"non-google server header: {server_hdr[:40]!r}",
             )
+        _, throttled, rate = _classify_throughput(clen, elapsed, small_body_ok=clen < 300)
         return CurlProbeResult(
             success=True,
             http_code=status,
             latency_ms=elapsed * 1000,
             content_len=clen,
             content_ok=clen >= 300,
-            throttled=rate < THROTTLED_MAX_BPS and clen >= 300,
+            throttled=throttled,
             read_rate_bps=rate,
             error=None,
         )
@@ -543,13 +580,14 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
                 read_rate_bps=rate,
                 error=f"non-google server header: {server_hdr[:40]!r}",
             )
+        _, throttled, rate = _classify_throughput(clen, elapsed, small_body_ok=clen < 300)
         return CurlProbeResult(
             success=True,
             http_code=resp.status_code,
             latency_ms=elapsed * 1000,
             content_len=clen,
             content_ok=clen >= 300,
-            throttled=rate < THROTTLED_MAX_BPS and clen >= 300,
+            throttled=throttled,
             read_rate_bps=rate,
             error=None,
         )
@@ -628,13 +666,10 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
     throttled = False
     success = False
     if status_ok and (content_ok or small_body_ok) and not dpi_fake:
-        if rate < MIN_READ_RATE_BPS and not small_body_ok:
-            success = False
-        elif rate < THROTTLED_MAX_BPS and not small_body_ok and clen >= 300:
-            success = True
-            throttled = True
-        else:
-            success = True
+        rate_ok, throttled, rate = _classify_throughput(
+            clen, elapsed, small_body_ok=small_body_ok
+        )
+        success = rate_ok
 
     return CurlProbeResult(
         success=success,

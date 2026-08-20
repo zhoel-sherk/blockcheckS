@@ -11,6 +11,7 @@ import socket
 import struct
 import time
 from dataclasses import dataclass, field
+from itertools import product
 
 import curl_cffi
 from curl_cffi.requests import RequestsError
@@ -54,38 +55,44 @@ def _build_dns_query(domain: str, qtype: int = 1) -> bytes:
     return header + question
 
 
+def _skip_dns_name(data: bytes, offset: int) -> int:
+    """Advance past a DNS name (RFC 1035), including compression pointers.
+
+    A pointer (top two bits set) terminates the name at those two bytes — do
+    not keep walking as if a length prefix followed. Uncompressed labels end
+    at a zero octet.
+    """
+    for _ in range(128):
+        if offset >= len(data):
+            return offset
+        label = data[offset]
+        if label == 0:
+            return offset + 1
+        if label & 0xC0 == 0xC0:
+            return offset + 2
+        offset += 1 + (label & 0x3F)
+    return offset
+
+
 def _parse_dns_response(data: bytes) -> list[str]:
     """Parse DNS response, extract A record IPs."""
     if len(data) < 12:
         return []
-    ancount = struct.unpack("!H", data[6:8])[0]
+    qdcount, ancount = struct.unpack("!HH", data[4:8])
     if ancount == 0:
         return []
-    ips: list[str] = []
     offset = 12
-    while offset < len(data) and data[offset] != 0:
-        if data[offset] & 0xC0 == 0xC0:
-            offset += 2
-            break
-        offset += data[offset] + 1
-    offset += 5  # null + type + class
+    for _ in range(qdcount):
+        offset = _skip_dns_name(data, offset)
+        offset += 4  # QTYPE + QCLASS
+    ips: list[str] = []
     for _ in range(min(ancount, 20)):
-        if offset + 12 > len(data):
-            break
-        if data[offset] & 0xC0 == 0xC0:
-            offset += 2
-        else:
-            while offset < len(data) and data[offset] != 0:
-                if data[offset] & 0xC0 == 0xC0:
-                    offset += 2
-                    break
-                offset += data[offset] + 1
-            offset += 1
+        offset = _skip_dns_name(data, offset)
         if offset + 10 > len(data):
             break
         rtype, _, _, rdlength = struct.unpack("!HHIH", data[offset : offset + 10])
         offset += 10
-        if rtype == 1 and rdlength == 4:
+        if rtype == 1 and rdlength == 4 and offset + 4 <= len(data):
             ips.append(".".join(str(b) for b in data[offset : offset + 4]))
         offset += rdlength
     return ips
@@ -240,6 +247,101 @@ def _sinkhole_ip(ips: list[str]) -> list[str]:
     return bad
 
 
+# Published unicast prefixes of major CDNs. Disjoint UDP vs DoH answers inside
+# the same family are anycast/geo-DNS, not hijacking.
+_CDN_NETS: tuple[tuple[str, tuple[ipaddress.IPv4Network, ...]], ...] = tuple(
+    (name, tuple(ipaddress.ip_network(n) for n in cidrs))
+    for name, cidrs in (
+        (
+            "cloudflare",
+            (
+                "1.0.0.0/24",
+                "1.1.1.0/24",
+                "104.16.0.0/12",
+                "108.162.192.0/18",
+                "141.101.64.0/18",
+                "162.158.0.0/15",
+                "172.64.0.0/13",
+                "173.245.48.0/20",
+                "188.114.0.0/16",
+                "190.93.240.0/20",
+                "197.234.240.0/22",
+                "198.41.128.0/17",
+            ),
+        ),
+        (
+            "google",
+            (
+                "8.8.4.0/24",
+                "8.8.8.0/24",
+                "64.233.160.0/19",
+                "66.102.0.0/20",
+                "72.14.192.0/18",
+                "74.125.0.0/16",
+                "108.177.0.0/17",
+                "142.250.0.0/15",
+                "172.217.0.0/16",
+                "209.85.128.0/17",
+                "216.58.192.0/19",
+            ),
+        ),
+        ("fastly", ("151.101.0.0/16", "199.232.0.0/16")),
+        (
+            "akamai",
+            ("2.16.0.0/13", "23.32.0.0/11", "23.192.0.0/11", "104.64.0.0/10", "184.24.0.0/13"),
+        ),
+        (
+            "amazon",
+            (
+                "13.32.0.0/15",
+                "13.224.0.0/12",
+                "52.84.0.0/15",
+                "54.230.0.0/16",
+                "99.84.0.0/16",
+                "143.204.0.0/16",
+            ),
+        ),
+        (
+            "discord",
+            (
+                "35.207.0.0/16",
+                "35.212.0.0/16",
+                "35.213.0.0/16",
+                "35.215.0.0/16",
+                "35.217.0.0/16",
+            ),
+        ),
+    )
+)
+
+
+def _cdn_family(ip: str) -> str | None:
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        return None
+    return next((name for name, nets in _CDN_NETS if any(addr in net for net in nets)), None)
+
+
+def _same_slash16(a: str, b: str) -> bool:
+    try:
+        ia, ib = ipaddress.ip_address(a.strip()), ipaddress.ip_address(b.strip())
+    except ValueError:
+        return False
+    return ia.version == ib.version == 4 and (int(ia) >> 16) == (int(ib) >> 16)
+
+
+def _anycast_equivalent(udp_ips: list[str], doh_ips: list[str]) -> bool:
+    """True when disjoint public answers still look like CDN/anycast, not hijack."""
+    if not udp_ips or not doh_ips:
+        return False
+    udp_fam = {f for ip in udp_ips if (f := _cdn_family(ip))}
+    doh_fam = {f for ip in doh_ips if (f := _cdn_family(ip))}
+    if udp_fam & doh_fam:
+        return True
+    return any(_same_slash16(u, d) for u, d in product(udp_ips, doh_ips))
+
+
 def audit_domain(
     domain: str,
     doh_url: str | None = None,
@@ -290,6 +392,9 @@ def audit_domain(
             if udp_set & doh_set:
                 result.verdict = "ok"
                 result.description = "UDP and DoH overlap — no hijack"
+            elif _anycast_equivalent(result.udp_ips, result.doh_ips):
+                result.verdict = "ok"
+                result.description = "UDP and DoH differ (CDN/anycast)"
             else:
                 result.tampering_detected = True
                 result.verdict = "tampered"
