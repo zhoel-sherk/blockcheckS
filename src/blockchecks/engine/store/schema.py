@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 );
 CREATE INDEX IF NOT EXISTS idx_tcp_status ON tcp_results(status);
 CREATE INDEX IF NOT EXISTS idx_tcp_strat_domain ON tcp_results(strategy_id, domain);
+CREATE INDEX IF NOT EXISTS idx_tcp_strat_dom_id ON tcp_results(strategy_id, domain, id DESC);
 CREATE INDEX IF NOT EXISTS idx_udp_status ON udp_results(status);
 CREATE INDEX IF NOT EXISTS idx_udp_strat ON udp_results(strategy_id);
 CREATE INDEX IF NOT EXISTS idx_pair_overall ON pair_results(overall);
@@ -134,7 +135,7 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
             await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")
     await db.commit()
     await db.execute("PRAGMA journal_mode=WAL")
-    await db.execute("PRAGMA synchronous=OFF")
+    await db.execute("PRAGMA synchronous=NORMAL")
     await db.execute("PRAGMA mmap_size=268435456")
     await db.execute("PRAGMA cache_size=-64000")
     await db.execute("PRAGMA temp_store=MEMORY")
@@ -156,9 +157,18 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
     )
     await db.commit()
     # Query indexes (IF NOT EXISTS for upgrades from 1.0.x)
+    pair_cols = await db.execute("PRAGMA table_info(pair_results)")
+    pair_col_names = {row[1] for row in await pair_cols.fetchall()}
+    pair_strat_idx = (
+        "CREATE INDEX IF NOT EXISTS idx_pair_strat_dom_id ON pair_results(tcp_strategy, udp_strategy, domain, id DESC);"
+        if "tcp_strategy" in pair_col_names
+        else ""
+    )
     await db.executescript(
-        """
+        f"""
         CREATE INDEX IF NOT EXISTS idx_tcp_strat_domain ON tcp_results(strategy_id, domain);
+        CREATE INDEX IF NOT EXISTS idx_tcp_strat_dom_id ON tcp_results(strategy_id, domain, id DESC);
+        {pair_strat_idx}
         CREATE INDEX IF NOT EXISTS idx_udp_strat ON udp_results(strategy_id);
         CREATE INDEX IF NOT EXISTS idx_pair_domain ON pair_results(domain);
         """

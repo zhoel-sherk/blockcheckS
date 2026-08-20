@@ -142,12 +142,20 @@ async def run_tcp_with_family_gates(
     done = skipped = passed = 0
     idx = 0
 
+    working_tcp: set[str] | None = None
+    if resume_check is not None:
+        db = getattr(runner, "db", None)
+        get_working = getattr(db, "get_working_tcp", None) if db is not None else None
+        if asyncio.iscoroutinefunction(get_working):
+            working_tcp = set(await get_working(domain))
+
     while idx < len(sorted_items):
         if stop_event and stop_event.is_set():
             break
 
         fam = classify_strategy_family(sorted_items[idx])
         family_items: list[StrategyItem] = []
+        family_skipped_labels: list[str] = []
 
         if tracker.skip_family(fam, scan_level):
             while idx < len(sorted_items) and classify_strategy_family(sorted_items[idx]) == fam:
@@ -163,6 +171,7 @@ async def run_tcp_with_family_gates(
             item = sorted_items[idx]
             idx += 1
             if resume_check and await resume_check(item.label, domain):
+                family_skipped_labels.append(item.label)
                 skipped += 1
                 done += 1
                 continue
@@ -173,7 +182,10 @@ async def run_tcp_with_family_gates(
             family_items.append(item)
 
         if not family_items:
-            tracker.finish_family(fam, False)
+            had_pass = bool(
+                working_tcp and any(label in working_tcp for label in family_skipped_labels)
+            )
+            tracker.finish_family(fam, had_pass)
             if on_progress:
                 on_progress(done, skipped, passed)
             continue

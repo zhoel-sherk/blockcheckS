@@ -690,7 +690,7 @@ def check_udp_16kb(timeout: float = 5.0) -> tuple[bool, str]:
         ok, _ms, detail = voice_burst_probe(ip, port, timeout=min(timeout, 3.0))
         if ok:
             ok_count += 1
-        elif "timeout" in detail:
+        elif "timeout" in detail and "unauthenticated" not in detail:
             return True, f"burst dropped (blocked) at {ip}:{port}"
     if ok_count:
         return False, f"{ok_count}/{len(endpoints[:3])} endpoints answered burst (>16KB)"

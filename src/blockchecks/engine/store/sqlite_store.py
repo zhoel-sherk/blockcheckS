@@ -76,7 +76,7 @@ class SqliteRunStore:
         # stays as backstop for WAL checkpoint contention.
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA busy_timeout = 30000")
-        await db.execute("PRAGMA synchronous = OFF")
+        await db.execute("PRAGMA synchronous = NORMAL")
         await db.execute("PRAGMA mmap_size = 268435456")
         await db.execute("PRAGMA cache_size = -64000")
         await db.execute("PRAGMA temp_store = MEMORY")
@@ -119,9 +119,9 @@ class SqliteRunStore:
     async def flush(self) -> None:
         """Flush buffered log_tcp/log_udp rows (B8 batch mode).
 
-        The buffered rows are drained atomically under ``_flush_lock`` before
-        any await, so a concurrent ``log_tcp``/``log_udp`` from another worker
-        can never be cleared away mid-commit. On failure rows are re-queued.
+        Drains pending rows and commits under ``_flush_lock`` for the entire
+        write transaction so parallel flushes never race on BEGIN IMMEDIATE.
+        On failure rows are re-queued before the lock is released.
         """
         # Drain atomically: snapshot current buffered rows and clear them in the
         # same synchronous block, so parallel writers appending after this point
@@ -134,92 +134,86 @@ class SqliteRunStore:
             self._tcp_pending.clear()
             self._udp_pending.clear()
 
-        # Retry on transient "database is locked" (WAL checkpoint contention
-        # under 4 parallel worker flushes at end of long runs). Any failure
-        # re-queues the drained rows so results are never silently dropped.
-        last_err: Exception | None = None
-        try:
-            for attempt in range(5):
-                try:
-                    async with aiosqlite.connect(self._path) as db:
-                        await SqliteRunStore._apply_pragmas(db)
-                        await db.execute("BEGIN IMMEDIATE")
-                        try:
-                            ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-                            for entry in tcp_batch:
-                                sid = await self.ensure_strategy(
-                                    entry["strategy"],
-                                    entry["proto"],
-                                    entry["config_path"],
-                                    db=db,
-                                )
-                                await db.execute(
-                                    """INSERT INTO tcp_results
-                                       (strategy_id,domain,status,http_code,latency_ms,
-                                        gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
-                                        resolved_ip,dns_verdict,doh_server,fail_phase)
-                                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                    (
-                                        sid,
-                                        entry["domain"],
-                                        entry["status"],
-                                        entry["http_code"],
-                                        entry["latency_ms"],
-                                        entry["gateway_ms"],
-                                        entry["content_valid"],
-                                        entry["error"],
-                                        ts,
-                                        entry["read_rate_bps"],
-                                        entry["resolved_ip"],
-                                        entry["dns_verdict"],
-                                        entry["doh_server"],
-                                        entry.get("fail_phase", ""),
-                                    ),
-                                )
-                            for entry in udp_batch:
-                                sid = await self.ensure_strategy(
-                                    entry["strategy"],
-                                    "udp",
-                                    entry["config_path"],
-                                    db=db,
-                                )
-                                await db.execute(
-                                    """INSERT INTO udp_results
-                                       (strategy_id,target,status,latency_ms,error,timestamp)
-                                       VALUES(?,?,?,?,?,?)""",
-                                    (
-                                        sid,
-                                        entry["target"],
-                                        entry["status"],
-                                        entry["latency_ms"],
-                                        entry["error"],
-                                        ts,
-                                    ),
-                                )
-                            await db.commit()
-                        except Exception:
-                            await db.rollback()
+            # Hold the lock for the whole write transaction so parallel flushes
+            # never contend on BEGIN IMMEDIATE / redundant locked retries.
+            last_err: Exception | None = None
+            try:
+                for attempt in range(5):
+                    try:
+                        async with aiosqlite.connect(self._path) as db:
+                            await SqliteRunStore._apply_pragmas(db)
+                            await db.execute("BEGIN IMMEDIATE")
+                            try:
+                                ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+                                for entry in tcp_batch:
+                                    sid = await self.ensure_strategy(
+                                        entry["strategy"],
+                                        entry["proto"],
+                                        entry["config_path"],
+                                        db=db,
+                                    )
+                                    await db.execute(
+                                        """INSERT INTO tcp_results
+                                           (strategy_id,domain,status,http_code,latency_ms,
+                                            gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
+                                            resolved_ip,dns_verdict,doh_server,fail_phase)
+                                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                        (
+                                            sid,
+                                            entry["domain"],
+                                            entry["status"],
+                                            entry["http_code"],
+                                            entry["latency_ms"],
+                                            entry["gateway_ms"],
+                                            entry["content_valid"],
+                                            entry["error"],
+                                            ts,
+                                            entry["read_rate_bps"],
+                                            entry["resolved_ip"],
+                                            entry["dns_verdict"],
+                                            entry["doh_server"],
+                                            entry.get("fail_phase", ""),
+                                        ),
+                                    )
+                                for entry in udp_batch:
+                                    sid = await self.ensure_strategy(
+                                        entry["strategy"],
+                                        "udp",
+                                        entry["config_path"],
+                                        db=db,
+                                    )
+                                    await db.execute(
+                                        """INSERT INTO udp_results
+                                           (strategy_id,target,status,latency_ms,error,timestamp)
+                                           VALUES(?,?,?,?,?,?)""",
+                                        (
+                                            sid,
+                                            entry["target"],
+                                            entry["status"],
+                                            entry["latency_ms"],
+                                            entry["error"],
+                                            ts,
+                                        ),
+                                    )
+                                await db.commit()
+                            except Exception:
+                                await db.rollback()
+                                raise
+                        last_err = None
+                        break
+                    except aiosqlite.OperationalError as e:
+                        if "locked" not in str(e).lower() or attempt >= 4:
                             raise
-                    last_err = None
-                    break
-                except aiosqlite.OperationalError as e:
-                    if "locked" not in str(e).lower() or attempt >= 4:
-                        raise
-                    last_err = e
-                    await asyncio.sleep(0.5 * (attempt + 1))
-        except Exception:
-            # Non-locked failure (or retries exhausted) — re-queue the drained
-            # rows so a failed flush never loses results.
-            async with self._flush_lock:
+                        last_err = e
+                        await asyncio.sleep(0.5 * (attempt + 1))
+            except Exception:
                 self._tcp_pending[:0] = tcp_batch
                 self._udp_pending[:0] = udp_batch
-            raise
-        if last_err is not None:
-            # Only reached when every retry failed to commit.
-            async with self._flush_lock:
+                raise
+            if last_err is not None:
                 self._tcp_pending[:0] = tcp_batch
                 self._udp_pending[:0] = udp_batch
-            raise last_err
+                raise last_err
         reclaim_sudo_ownership(self._path)
 
     async def log_tcp(
@@ -664,52 +658,69 @@ class SqliteRunStore:
         """TCP strategies ranked by domains_passed DESC, then avg latency ASC."""
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
-            # Distinct strategy names that have at least one PASS
             rows = await db.execute(
-                f"""SELECT DISTINCT s.name FROM strategies s
-                   JOIN tcp_results t ON t.strategy_id = s.id
-                   WHERE s.proto='tcp' AND t.status IN {_WORKING_STATUSES}"""
+                f"""SELECT s.name,
+                           COUNT(DISTINCT t.domain) AS domains_passed,
+                           ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
+                    FROM tcp_results t
+                    JOIN strategies s ON t.strategy_id = s.id
+                    WHERE s.proto='tcp' AND t.status IN {_WORKING_STATUSES}
+                      AND t.id = (
+                        SELECT t2.id FROM tcp_results t2
+                        WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+                        ORDER BY t2.id DESC LIMIT 1
+                      )
+                    GROUP BY s.name
+                    HAVING domains_passed > 0
+                    ORDER BY domains_passed DESC, avg_latency_ms ASC
+                    LIMIT ?""",
+                (limit,),
             )
-            names = [r[0] for r in await rows.fetchall()]
-
-        scored = []
-        for name in names:
-            sc = await self.coverage_score(name)
-            if sc["domains_passed"] > 0:
-                scored.append(sc)
-        scored.sort(key=lambda x: (-x["domains_passed"], x["avg_latency_ms"]))
-        return scored[:limit]
+            return [
+                {
+                    "strategy": r[0],
+                    "domains_passed": int(r[1]),
+                    "avg_latency_ms": float(r[2]),
+                    "domains": [],
+                }
+                for r in await rows.fetchall()
+            ]
 
     async def get_common_tcp(self, domains: list[str], *, limit: int = 5) -> list[dict]:
         """TCP strategies whose latest result is PASS on every domain (BC2-7)."""
         if len(domains) < 2:
             return []
-        common: set[str] | None = None
-        for domain in domains:
-            working = set(await self.get_working_tcp(domain))
-            common = working if common is None else common & working
-        if not common:
-            return []
-        scored: list[dict] = []
-        for name in common:
-            total_ms = 0.0
-            found = 0
-            for domain in domains:
-                for row in await self.get_best_tcp(domain, limit=200):
-                    if row["strategy"] == name:
-                        total_ms += row["latency_ms"]
-                        found += 1
-                        break
-            if found == len(domains):
-                scored.append(
-                    {
-                        "strategy": name,
-                        "avg_latency_ms": round(total_ms / found, 1),
-                        "domains_passed": len(domains),
-                    }
-                )
-        scored.sort(key=lambda x: x["avg_latency_ms"])
-        return scored[:limit]
+        placeholders = ",".join("?" * len(domains))
+        need = len(domains)
+        async with aiosqlite.connect(self._path) as db:
+            await SqliteRunStore._apply_pragmas(db)
+            rows = await db.execute(
+                f"""SELECT s.name,
+                           COUNT(DISTINCT t.domain) AS domains_passed,
+                           ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
+                    FROM tcp_results t
+                    JOIN strategies s ON t.strategy_id = s.id
+                    WHERE s.proto='tcp' AND t.domain IN ({placeholders})
+                      AND t.status IN {_WORKING_STATUSES}
+                      AND t.id = (
+                        SELECT t2.id FROM tcp_results t2
+                        WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+                        ORDER BY t2.id DESC LIMIT 1
+                      )
+                    GROUP BY s.name
+                    HAVING domains_passed = ?
+                    ORDER BY avg_latency_ms ASC
+                    LIMIT ?""",
+                (*domains, need, limit),
+            )
+            return [
+                {
+                    "strategy": r[0],
+                    "domains_passed": int(r[1]),
+                    "avg_latency_ms": float(r[2]),
+                }
+                for r in await rows.fetchall()
+            ]
 
     async def get_strategy_config(self, name: str, proto: str = "tcp") -> str | None:
         """Return stored config_path/strategy string for name."""

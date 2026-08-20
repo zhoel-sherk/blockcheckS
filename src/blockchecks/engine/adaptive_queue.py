@@ -138,6 +138,8 @@ class AdaptiveMetrics:
 
 # ── AQ4: weight table ────────────────────────────────────────────────
 
+_MAX_WEIGHT = 64.0
+
 _SPLIT_POS_TRAITS = {
     "first_byte": "pos:1",
     "sni_marker": "pos:sniext+1",
@@ -200,11 +202,11 @@ class ScanWeights:
         blobs: list[str],
         traits: list[str],
     ) -> None:
-        self.family[family] = self.family.get(family, 1.0) + self.family_boost
+        self.family[family] = min(self.family.get(family, 1.0) + self.family_boost, _MAX_WEIGHT)
         for b in blobs:
-            self.blob[b] = self.blob.get(b, 0.0) + self.blob_boost
+            self.blob[b] = min(self.blob.get(b, 0.0) + self.blob_boost, _MAX_WEIGHT)
         for t in traits:
-            self.trait[t] = self.trait.get(t, 0.0) + self.trait_boost
+            self.trait[t] = min(self.trait.get(t, 0.0) + self.trait_boost, _MAX_WEIGHT)
 
     def to_rows(self) -> list[tuple[str, float]]:
         rows: list[tuple[str, float]] = []
@@ -340,30 +342,24 @@ class AdaptiveJobQueue:
         exclude = exclude_domains or set()
 
         if self.epsilon > 0 and self._rng.random() < self.epsilon and len(self._pending) > 1:
-            keys = list(self._pending.keys())
-            for key in keys:
-                if self._pending[key].domain not in exclude:
-                    job = self._pending.pop(key)
-                    self._rebuild_heap()
-                    return job
-            key = self._rng.choice(keys)
-            job = self._pending.pop(key)
-            self._rebuild_heap()
-            return job
+            eligible = [k for k in self._pending if self._pending[k].domain not in exclude]
+            key = self._rng.choice(eligible or list(self._pending.keys()))
+            return self._pending.pop(key)
 
         skipped: list[_HeapEntry] = []
         while self._heap:
             entry = heapq.heappop(self._heap)
             job = self._pending.get(entry.key)
-            if job is not None:
-                if job.domain in exclude:
-                    skipped.append(entry)
-                    continue
-                self._pending.pop(entry.key)
-                if skipped:
-                    for e in skipped:
-                        heapq.heappush(self._heap, e)
-                return job
+            if job is None:
+                continue
+            if job.domain in exclude:
+                skipped.append(entry)
+                continue
+            self._pending.pop(entry.key)
+            if skipped:
+                for e in skipped:
+                    heapq.heappush(self._heap, e)
+            return job
         # everything excluded — allow any pending job
         if skipped:
             entry = heapq.heappop(skipped)

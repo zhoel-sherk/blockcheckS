@@ -116,7 +116,7 @@ class TriageProfile:
             "stall_phase": self.stall_phase.value if self.stall_phase else None,
             "stall_at_bytes": self.stall_at_bytes,
             "bandwidth_throttled": self.bandwidth_throttled,
-            "read_rate_bps": round(self.read_rate_bps, 1),
+            "read_rate_bps": round(self.read_rate_bps or 0.0, 1),
             "quic_drop": self.quic_drop,
             "udp_blocked": self.udp_blocked,
             "voice_ok": self.voice_ok,
