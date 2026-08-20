@@ -32,12 +32,40 @@ def probe_request_dict(req: CurlProbeRequest) -> dict:
     }
 
 
+_FAIL = {
+    "success": False,
+    "http_code": 0,
+    "latency_ms": 0,
+    "content_len": 0,
+    "content_ok": False,
+    "throttled": False,
+    "read_rate_bps": 0,
+}
+
+
+def _loads_probe_json(out: str | None) -> dict:
+    """Parse worker JSON; tolerate leading/trailing warning text on stdout."""
+    text = (out or "").strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+    return {**_FAIL, "error": f"parse: {text[:100]}"}
+
+
 def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: float) -> dict:
     """Run curl probe subprocess in netns; return parsed result dict.
 
     On malformed stdout, returns a failure-shaped dict (never raises JSONDecodeError).
     On subprocess timeout, returns a timeout-shaped failure dict (never raises
     TimeoutExpired) — a hung worker must not lose the whole batch.
+    Stderr is kept separate so Python/dependency warnings cannot pollute JSON.
     """
     try:
         proc = sp.Popen(
@@ -56,12 +84,12 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
             ],
             stdin=sp.PIPE,
             stdout=sp.PIPE,
-            stderr=sp.STDOUT,
+            stderr=sp.PIPE,
             text=True,
             start_new_session=True,
         )
         try:
-            out, _ = proc.communicate(input=json.dumps(payload), timeout=timeout)
+            out, _err = proc.communicate(input=json.dumps(payload), timeout=timeout)
         except sp.TimeoutExpired:
             # killpg the whole tree: subprocess timeout only kills sudo; the
             # netns child (python worker + curl) would otherwise leak and block
@@ -78,37 +106,7 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
                 # timeout result and let the caller's teardown deal with the
                 # hung netns (the daemon will be pkilled/destroyed separately).
                 pass
-            return {
-                "success": False,
-                "http_code": 0,
-                "latency_ms": 0,
-                "content_len": 0,
-                "content_ok": False,
-                "throttled": False,
-                "read_rate_bps": 0,
-                "error": f"timeout after {timeout:.0f}s",
-            }
+            return {**_FAIL, "error": f"timeout after {timeout:.0f}s"}
     except Exception as e:
-        return {
-            "success": False,
-            "http_code": 0,
-            "latency_ms": 0,
-            "content_len": 0,
-            "content_ok": False,
-            "throttled": False,
-            "read_rate_bps": 0,
-            "error": str(e)[:120],
-        }
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError:
-        return {
-            "success": False,
-            "http_code": 0,
-            "latency_ms": 0,
-            "content_len": 0,
-            "content_ok": False,
-            "throttled": False,
-            "read_rate_bps": 0,
-            "error": f"parse: {out[:100]}",
-        }
+        return {**_FAIL, "error": str(e)[:120]}
+    return _loads_probe_json(out)

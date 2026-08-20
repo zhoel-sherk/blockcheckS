@@ -109,23 +109,49 @@ class LuaBridge:
         shutil.rmtree(self.paths.base, ignore_errors=True)
 
     def publish(self, strategy_id: int, gen: int, cmd: str | None = None) -> None:
-        """Atomically publish strategy index + generation (os.replace)."""
+        """Atomically publish strategy index + generation (os.replace).
+
+        Writes all payload files in a staging dir, chmods for the dropped-uid
+        nfqws2 process (nobody), then replaces id/gen/cmd before strategy.ready
+        so Lua never observes a new id with a stale gen.
+        """
+        os.chmod(self.paths.base, 0o777)
+        if self.paths.events.is_file():
+            os.chmod(self.paths.events, 0o666)
+
         staging = self.paths.base / f".staging.{gen}"
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir(parents=True, exist_ok=True)
+        os.chmod(staging, 0o777)
 
-        (staging / "strategy.id").write_text(f"{strategy_id}\n", encoding="utf-8")
-        (staging / "strategy.gen").write_text(f"{gen}\n", encoding="utf-8")
+        staged_files: dict[str, Path] = {
+            "strategy.id": staging / "strategy.id",
+            "strategy.gen": staging / "strategy.gen",
+            "strategy.ready": staging / "strategy.ready",
+        }
+        staged_files["strategy.id"].write_text(f"{strategy_id}\n", encoding="utf-8")
+        staged_files["strategy.gen"].write_text(f"{gen}\n", encoding="utf-8")
         if cmd:
-            (staging / "strategy.cmd").write_text(cmd.rstrip() + "\n", encoding="utf-8")
-        (staging / "strategy.ready").write_text(f"{gen}\n", encoding="utf-8")
+            staged_files["strategy.cmd"] = staging / "strategy.cmd"
+            staged_files["strategy.cmd"].write_text(cmd.rstrip() + "\n", encoding="utf-8")
+        staged_files["strategy.ready"].write_text(f"{gen}\n", encoding="utf-8")
 
-        for name in ("strategy.id", "strategy.gen", "strategy.cmd", "strategy.ready"):
-            src = staging / name
-            if src.is_file():
-                os.replace(src, self.paths.base / name)
-                os.chmod(self.paths.base / name, 0o666)
+        for src in staged_files.values():
+            os.chmod(src, 0o666)
+
+        # Commit payload first; strategy.ready is the publish fence for Lua.
+        for name in ("strategy.id", "strategy.gen", "strategy.cmd"):
+            src = staged_files.get(name)
+            if src is not None and src.is_file():
+                dst = self.paths.base / name
+                os.replace(src, dst)
+                os.chmod(dst, 0o666)
+
+        ready_src = staged_files["strategy.ready"]
+        ready_dst = self.paths.base / "strategy.ready"
+        os.replace(ready_src, ready_dst)
+        os.chmod(ready_dst, 0o666)
 
         shutil.rmtree(staging, ignore_errors=True)
 

@@ -74,16 +74,28 @@ class ProbeBatchService:
             if stop_event is not None and stop_event.is_set():
                 return self._empty_stopped_result(ctx)
             wall_start = time.monotonic()
+            sync_task: asyncio.Task | None = None
             try:
-                result = await asyncio.to_thread(
-                    self._run_batch_sync,
-                    ctx,
-                    timeout,
-                    ns,
-                    resolved_by_domain,
-                    ip_lists_by_domain,
-                    stop_event,
+                sync_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        self._run_batch_sync,
+                        ctx,
+                        timeout,
+                        ns,
+                        resolved_by_domain,
+                        ip_lists_by_domain,
+                        stop_event,
+                    )
                 )
+                result = await sync_task
+            except asyncio.CancelledError:
+                # to_thread keeps running after cancel — wait before releasing ns.
+                if sync_task is not None and not sync_task.done():
+                    try:
+                        await sync_task
+                    except Exception:
+                        pass
+                raise
             except Exception as e:
                 # Never lose the batch: any error in the sync probe loop must
                 # still produce per-item failure results + DB logging.

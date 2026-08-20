@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess as sp
 import time
 
 from blockchecks.engine.config import (
@@ -13,19 +12,18 @@ from blockchecks.engine.config import (
 
 
 def nfqws2_count_in_ns(ns_name: str) -> int:
-    """How many nfqws2 processes are visible inside the netns."""
+    """How many nfqws2 processes are running inside *ns_name*.
+
+    Uses stdlib ``/proc`` inode matching (``metrics.find_nfqws2_pids``) instead
+    of ``ip netns exec pgrep``, which scans the host ``/proc`` and causes
+    cross-worker settle timeout loops in multi-worker pools.
+    """
+    from blockchecks.service.metrics import find_nfqws2_pids
+
     try:
-        r = sp.run(
-            ["sudo", "ip", "netns", "exec", ns_name, "pgrep", "-x", "nfqws2"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (sp.TimeoutExpired, OSError):
+        return len(find_nfqws2_pids(ns_name))
+    except OSError:
         return 0
-    if r.returncode != 0:
-        return 0
-    return sum(1 for ln in r.stdout.splitlines() if ln.strip())
 
 
 def nfqws2_running_in_ns(ns_name: str) -> bool:

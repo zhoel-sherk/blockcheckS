@@ -8,14 +8,24 @@ asyncio.to_thread). Queue mutations (seed/drain/acquire/release) run only
 on the event loop thread.
 """
 
+from __future__ import annotations
+
 import asyncio
+import atexit
+import hashlib
+import os
 import re
+import signal
 import subprocess
 import threading
 import time
+import weakref
 
 BASE_CIDR = 20  # networks: 10.200.<n>.0/30 for pool member n
 _NETNS_BASE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_IFNAMSIZ = 15
+_ACTIVE_POOLS: weakref.WeakSet[NetNsPool] = weakref.WeakSet()
+_CLEANUP_HOOKS_INSTALLED = False
 
 
 class NetNsPool:
@@ -29,6 +39,54 @@ class NetNsPool:
         self._names: list[str] = []
         self._iface: str = ""  # cached interface name
         self._lock = threading.Lock()
+        _ACTIVE_POOLS.add(self)
+
+    @staticmethod
+    def _veth_names(name: str) -> tuple[str, str]:
+        """Deterministic veth pair names (IFNAMSIZ=15) with stable vh-/vn- prefix.
+
+        A blind ``f"vh-{name}"[-15:]`` drops the ``vh-`` prefix on long names,
+        so leftover interfaces no longer match ``_get_iface()``'s skip rules.
+        """
+        digest = hashlib.blake2s(name.encode(), digest_size=4).hexdigest()
+        host = f"vh-{digest}"
+        peer = f"vn-{digest}"
+        if len(host) > _IFNAMSIZ or len(peer) > _IFNAMSIZ:
+            raise ValueError(f"veth name too long for {name!r}")
+        return host, peer
+
+    @staticmethod
+    def _nat_subnet(idx: int) -> str:
+        """Network CIDR for iptables -s (kernel stores .0/30, not host .1/30)."""
+        subnet = BASE_CIDR + idx
+        return f"10.200.{subnet}.0/30"
+
+    @classmethod
+    def _install_cleanup_hooks(cls) -> None:
+        global _CLEANUP_HOOKS_INSTALLED
+        if _CLEANUP_HOOKS_INSTALLED:
+            return
+        _CLEANUP_HOOKS_INSTALLED = True
+        atexit.register(cls._destroy_active_pools)
+
+        def _on_signal(signum: int, _frame) -> None:
+            cls._destroy_active_pools()
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(sig, _on_signal)
+            except (ValueError, OSError):
+                pass
+
+    @classmethod
+    def _destroy_active_pools(cls) -> None:
+        for pool in list(_ACTIVE_POOLS):
+            try:
+                pool.destroy_all()
+            except Exception:
+                pass
 
     def _ensure_queue(self) -> asyncio.Queue:
         if self._queue is None:
@@ -86,10 +144,10 @@ class NetNsPool:
         subnet = BASE_CIDR + idx
         host_ip = f"10.200.{subnet}.1"
         ns_ip = f"10.200.{subnet}.2"
-        veth_h = f"vh-{name}"[-15:]
-        veth_n = f"vn-{name}"[-15:]
+        veth_h, veth_n = self._veth_names(name)
         out_iface = self._get_iface()
         cidr_mask = 30
+        nat_subnet = self._nat_subnet(idx)
 
         # Cleanup any leftovers from previous runs
         self._run("ip", "netns", "delete", name, check=False)
@@ -126,7 +184,7 @@ class NetNsPool:
             "POSTROUTING",
             "1",
             "-s",
-            f"{host_ip}/{cidr_mask}",
+            nat_subnet,
             "-o",
             out_iface,
             "-j",
@@ -153,11 +211,9 @@ class NetNsPool:
     def _destroy_one(self, name: str) -> None:
         """Destroy one netns."""
         idx = int(name.rsplit("-", 1)[-1]) if "-" in name else 0
-        subnet = BASE_CIDR + idx
-        host_ip = f"10.200.{subnet}.1"
-        veth_h = f"vh-{name}"[-15:]
+        veth_h, _veth_n = self._veth_names(name)
         out_iface = self._get_iface()
-        cidr_mask = 30
+        nat_subnet = self._nat_subnet(idx)
 
         self._run("ip", "netns", "exec", name, "pkill", "-9", "nfqws2", check=False)
         self._run("ip", "netns", "exec", name, "iptables", "-F", "OUTPUT", check=False)
@@ -172,7 +228,7 @@ class NetNsPool:
             "-D",
             "POSTROUTING",
             "-s",
-            f"{host_ip}/{cidr_mask}",
+            nat_subnet,
             "-o",
             out_iface,
             "-j",
@@ -194,12 +250,23 @@ class NetNsPool:
 
     def create_all(self) -> None:
         """Synchronous — create namespaces only (no Queue mutations)."""
+        self._install_cleanup_hooks()
         with self._lock:
             if self._created:
                 return
-            for i in range(self.size):
-                self._create_one(i)
-            self._created = True
+            created: list[str] = []
+            try:
+                for i in range(self.size):
+                    created.append(self._create_one(i))
+                self._created = True
+            except Exception:
+                for name in created:
+                    try:
+                        self._destroy_one(name)
+                    except Exception:
+                        pass
+                self._names.clear()
+                raise
         print(f"[netns] Pool created: {self.size} namespaces")
 
     async def seed(self) -> None:
@@ -221,14 +288,15 @@ class NetNsPool:
     def destroy_all(self) -> None:
         """Synchronous — destroy namespaces. Call drain() on loop first."""
         with self._lock:
-            if not self._created:
+            if not self._created and not self._names:
                 return
             self._created = False
-        names_to_destroy = list(self._names)
+            names_to_destroy = list(self._names)
+            self._names.clear()
         for name in names_to_destroy:
             self._destroy_one(name)
-        self._names.clear()
-        print("[netns] Pool destroyed")
+        if names_to_destroy:
+            print("[netns] Pool destroyed")
 
     async def acquire(self) -> str:
         """Get a free netns from the pool. Blocks if all busy."""

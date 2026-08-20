@@ -40,6 +40,120 @@ def _triage_fail_phase(t) -> str:
     return "pass"
 
 
+async def _top_from_store(store: Any, domain: str) -> list[dict[str, Any]]:
+    if store is None:
+        return []
+    try:
+        details = await store.get_working_tcp_details(domain)
+    except Exception:
+        return []
+    return _merge_top_strategies(
+        [
+            {
+                "strategy": d.get("name") or d.get("strategy") or "",
+                "success": True,
+                "http_code": d.get("http_code"),
+                "latency_ms": float(d.get("latency_ms") or 0.0),
+                "bytes_read": 0,
+                "fail_phase": None,
+                "rst_in_ttl": None,
+            }
+            for d in details
+        ]
+    )
+
+
+def _tcp_pass_row(r: Any) -> dict[str, Any]:
+    item = getattr(r, "item", None)
+    return {
+        "strategy": getattr(item, "strategy", None) or getattr(r, "strategy", "") or "",
+        "success": True,
+        "http_code": getattr(r, "http_code", None),
+        "latency_ms": float(getattr(r, "latency_ms", 0.0) or 0.0),
+        "bytes_read": int(getattr(r, "content_length", 0) or getattr(r, "bytes_read", 0) or 0),
+        "fail_phase": getattr(r, "fail_phase", None) or None,
+        "rst_in_ttl": getattr(r, "rst_in_ttl", None),
+    }
+
+
+def _merge_top_strategies(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
+    best: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = str(row.get("strategy") or "")
+        if not key:
+            continue
+        prev = best.get(key)
+        if prev is None or (row.get("http_code") and not prev.get("http_code")):
+            best[key] = row
+            continue
+        if float(row.get("latency_ms") or 0) < float(prev.get("latency_ms") or 0):
+            best[key] = row
+    return sorted(best.values(), key=lambda r: float(r.get("latency_ms") or 0))[:limit]
+
+
+def _tap_runner_passes(runner: Any, sink: list[dict[str, Any]]):
+    """Record PASS probe results from runner methods; return a restore callable."""
+    orig_tcp = runner.test_tcp
+    orig_batch = getattr(runner, "_run_probe_batch", None)
+    orig_domains = getattr(runner, "test_tcp_domains", None)
+
+    async def test_tcp(*a, **k):
+        r = await orig_tcp(*a, **k)
+        if getattr(r, "success", False):
+            sink.append(_tcp_pass_row(r))
+        return r
+
+    runner.test_tcp = test_tcp
+    if orig_batch is not None:
+
+        async def _run_probe_batch(*a, **k):
+            results = await orig_batch(*a, **k)
+            sink.extend(_tcp_pass_row(r) for r in results if getattr(r, "success", False))
+            return results
+
+        runner._run_probe_batch = _run_probe_batch
+    if orig_domains is not None:
+
+        async def test_tcp_domains(*a, **k):
+            results = await orig_domains(*a, **k)
+            sink.extend(_tcp_pass_row(r) for r in results if getattr(r, "success", False))
+            return results
+
+        runner.test_tcp_domains = test_tcp_domains
+
+    def restore() -> None:
+        runner.test_tcp = orig_tcp
+        if orig_batch is not None:
+            runner._run_probe_batch = orig_batch
+        if orig_domains is not None:
+            runner.test_tcp_domains = orig_domains
+
+    return restore
+
+
+def _tap_queue_passes(queue: Any, sink: list[dict[str, Any]]):
+    orig = queue.mark_done
+
+    def mark_done(job, *, passed: bool = False, **k):
+        if passed:
+            item = getattr(job, "item", None)
+            sink.append(
+                {
+                    "strategy": getattr(item, "strategy", "") if item is not None else "",
+                    "success": True,
+                    "http_code": None,
+                    "latency_ms": 0.0,
+                    "bytes_read": 0,
+                    "fail_phase": None,
+                    "rst_in_ttl": None,
+                }
+            )
+        return orig(job, passed=passed, **k)
+
+    queue.mark_done = mark_done
+    return lambda: setattr(queue, "mark_done", orig)
+
+
 def _authorization_token(authorization: str | None) -> str | None:
     """Parse ``Authorization: Bearer <token>`` -> token or None."""
     if not isinstance(authorization, str):
@@ -107,9 +221,12 @@ class ProbeServer:
         if cmd == "results":
             return self._envelope(await self._handle_results(req))
         if cmd == "stop":
-            self._stop.set()
-            return self._envelope({"status": "stopping"})
+            return self._envelope(await self._handle_stop())
         return self._envelope({"status": "error", "error": f"unknown cmd: {cmd}"})
+
+    async def _handle_stop(self) -> dict:
+        self._stop.set()
+        return {"status": "ok", "action_status": "stopping"}
 
     async def _handle_probe(self, req: dict) -> dict:
         domains = [d for d in (req.get("domains") or []) if isinstance(d, str)]
@@ -162,11 +279,13 @@ class ProbeServer:
 
                 async def probe(strategy: str) -> tuple[bool, str, int]:
                     item = StrategyItem(label="preflight_diag", strategy=strategy)
-                    r = await runner.test_tcp(item, domain, timeout=min(opts.timeout, 5.0))
+                    async with self.service._lock:
+                        r = await runner.test_tcp(item, domain, timeout=min(opts.timeout, 5.0))
                     return bool(r.success), r.error or "", int(r.http_code or 0)
 
                 opts.fooling_probe_fn = probe
-            report = await run_preflight_async([domain], opts)
+            async with self.service._lock:
+                report = await run_preflight_async([domain], opts)
             t = report.triage
             data = {
                 "domain": domain,
@@ -236,29 +355,38 @@ class ProbeServer:
 
             runner = self.service.runner
             tick = asyncio.create_task(_tick())
+            sink: list[dict[str, Any]] = []
+            restore_runner = _tap_runner_passes(runner, sink) if runner is not None else lambda: None
+            restore_queue = _tap_queue_passes(queue, sink)
             try:
-                result = await asyncio.wait_for(
-                    run_adaptive_tcp_bridge(
-                        runner,
-                        queue,
-                        timeout=float(req.get("timeout") or 3.0),
-                        bridge_batch=self.service.bridge_batch,
-                        stop_event=stop,
-                        workers=int(getattr(runner, "pool_size", 4) or 4),
-                    ),
-                    timeout=time_limit + 2.0,
-                )
+                async with self.service._lock:
+                    result = await asyncio.wait_for(
+                        run_adaptive_tcp_bridge(
+                            runner,
+                            queue,
+                            timeout=float(req.get("timeout") or 3.0),
+                            bridge_batch=self.service.bridge_batch,
+                            stop_event=stop,
+                            workers=int(getattr(runner, "pool_size", 4) or 4),
+                        ),
+                        timeout=time_limit + 2.0,
+                    )
             except asyncio.TimeoutError:
                 stop.set()
                 await asyncio.sleep(0.2)
                 result = None
             finally:
+                restore_queue()
+                restore_runner()
                 tick.cancel()
+            top = _merge_top_strategies(sink)
+            if not top:
+                top = await _top_from_store(self.service.db, domain)
             data = {
                 "domain": domain,
                 "profile": profile,
                 "time_limit_sec": time_limit,
-                "top_strategies": [],
+                "top_strategies": top,
                 "done": 0,
                 "passed": 0,
                 "timed_out": False,
@@ -460,6 +588,15 @@ class ProbeServer:
 
     async def _stream_events(self, writer: asyncio.StreamWriter) -> None:
         """Write SSE frames until the client disconnects or the server stops."""
+        writer.write(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Cache-Control: no-cache\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+        )
+        await writer.drain()
+
         queue = self.subscribe_events()
         last_heartbeat = time.monotonic()
         try:
@@ -607,8 +744,7 @@ class ProbeServer:
             req = self._parse_query_params(path)
             return self._envelope(await self._handle_results(req)), 200
         if path == "/api/stop" and method == "POST":
-            self._stop.set()
-            return self._envelope({"status": "stopping"}), 200
+            return self._envelope(await self._handle_stop()), 200
         action_paths = {
             "/api/probe": "probe",
             "/api/triage": "triage",
@@ -628,8 +764,7 @@ class ProbeServer:
             resp = self._envelope(await self._handle_status())
             return resp, self._busy_status_code(resp)
         if method == "POST" and path.startswith("/stop"):
-            self._stop.set()
-            return self._envelope({"status": "stopping"}), 200
+            return self._envelope(await self._handle_stop()), 200
         if method == "POST" and (path.startswith("/probe") or path == "/"):
             req = self._parse_http_body(body)
             if req is None:
@@ -681,6 +816,7 @@ class ProbeServer:
             await writer.drain()
 
         async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            sse_stream = False
             try:
                 request = await self._read_http_request(reader)
                 if request is None:
@@ -699,6 +835,7 @@ class ProbeServer:
 
                 routed = await self._route_http_request(method, path, body)
                 if routed is None:
+                    sse_stream = True
                     await self._stream_events(writer)
                     return
                 resp, status_code = routed
@@ -706,11 +843,12 @@ class ProbeServer:
             except (asyncio.TimeoutError, ConnectionError, OSError, ValueError):
                 pass
             finally:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except (ConnectionError, OSError):
-                    pass
+                if not sse_stream:
+                    writer.close()
+                    try:
+                        await writer.wait_closed()
+                    except (ConnectionError, OSError):
+                        pass
 
         self._http = await asyncio.start_server(_handle, host, port)
         print(f"  [serve] authenticated HTTP bridge on http://{host}:{port}")
