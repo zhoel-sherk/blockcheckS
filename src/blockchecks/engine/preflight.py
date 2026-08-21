@@ -14,6 +14,7 @@ from typing import Any
 from blockchecks.checkers.dns_secure import DnsRunCache, doh_query, pick_working_doh
 from blockchecks.checkers.ip_block import (
     IpBlockReport,
+    _cdn_hint,
     print_ip_block_report,
     run_ip_block_cross_test,
 )
@@ -447,7 +448,8 @@ def _apply_ip_block(
     if not probed or not ip_block_on or len(ip_block_on) < len(probed):
         return
     triage.domain_phases[domain] = FailPhase.IP_BLOCKED.value
-    if is_primary:
+    # CDN SNI-enforcement looks like IP-block; desync can still help.
+    if is_primary and not _cdn_hint(probed):
         triage.unbypassable_l3 = True
         triage.l3_phase = FailPhase.IP_BLOCKED
 
@@ -607,7 +609,8 @@ def _triage_domain(
         r = probe_l3(ips[0], 443, timeout=min(opts.timeout, 3.0), use_raw=False)
         if r.phase in (FailPhase.L4_SYN_DROP, FailPhase.ICMP_BLOCK, FailPhase.L4_RST_AT_SYN):
             triage.domain_phases[domain] = r.phase.value
-            if is_primary:
+            # CDN SNI-enforcement looks like SYN drop; desync can still help.
+            if is_primary and not _cdn_hint(ips):
                 triage.unbypassable_l3 = True
                 triage.l3_phase = r.phase
             log.info("%s", f"  Triage {domain}: {r.phase.value} ({r.ip}:{r.port})")

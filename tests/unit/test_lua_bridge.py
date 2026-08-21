@@ -160,11 +160,12 @@ def test_lua_scripts_exist_in_repo() -> None:
     from blockchecks.engine.config import get_blockchecks_lua_scripts
 
     paths = get_blockchecks_lua_scripts()
-    assert len(paths) >= 3
+    assert len(paths) >= 4
     names = {p.name for p in paths}
     assert "write_ipc.lua" in names
     assert "scan_bridge.lua" in names
     assert "init.lua" in names
+    assert "geneva.lua" in names
 
 
 def test_build_bridge_conf_escapes_lt(tmp_path: Path) -> None:

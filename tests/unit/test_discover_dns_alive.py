@@ -222,3 +222,53 @@ def test_fetch_maks_soft_fail_on_http_error():
         side_effect=OSError("network down"),
     ):
         assert fetch_maks_voice_ips() == []
+
+
+@pytest.mark.asyncio
+async def test_seed_voice_candidates_cache_short_circuits():
+    from blockchecks.checkers.voice_dns import _seed_voice_candidates
+
+    cached = {
+        "endpoints": [
+            {"ip": "35.217.9.9", "hostname": "finland14000.discord.gg", "port": 50000},
+        ]
+    }
+    with (
+        patch("blockchecks.checkers.voice_dns._load_cache", return_value=cached),
+        patch(
+            "blockchecks.checkers.voice_dns.resolve_finland_range",
+            side_effect=AssertionError("dns must not run on cache hit"),
+        ),
+    ):
+        ordered, dns_seed, maks_seed = await _seed_voice_candidates(
+            use_cache=True, use_maks=True, region="finland", candidates=64
+        )
+    assert dns_seed == 0 and maks_seed == 0
+    assert ordered[0]["ip"] == "35.217.9.9"
+    assert ordered[0]["source"] == "cache-alive"
+
+
+@pytest.mark.asyncio
+async def test_seed_voice_candidates_maks_fallback_when_region_empty():
+    from blockchecks.checkers.voice_dns import _seed_voice_candidates
+
+    with (
+        patch("blockchecks.checkers.voice_dns._load_cache", return_value=None),
+        patch(
+            "blockchecks.checkers.voice_dns.resolve_finland_range",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch("blockchecks.checkers.voice_dns.fetch_maks_region_ips", return_value=[]),
+        patch(
+            "blockchecks.checkers.voice_dns.fetch_maks_voice_ips",
+            return_value=["35.217.2.2"],
+        ),
+    ):
+        ordered, dns_seed, maks_seed = await _seed_voice_candidates(
+            use_cache=False, use_maks=True, region="finland", candidates=64
+        )
+    assert dns_seed == 0
+    assert maks_seed == 1
+    assert ordered[0]["source"] == "maks-alive"
+    assert ordered[0]["hostname"] == "maks:finland"

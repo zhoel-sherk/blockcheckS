@@ -100,7 +100,9 @@ def test_udp_resolve_timeout():
 def test_audit_tampered_when_sets_disjoint():
     with (
         patch("blockchecks.checkers.dns_secure.udp_resolve", return_value=(["81.88.1.1"], "", 1.0)),
-        patch("blockchecks.checkers.dns_secure.doh_query", return_value=(["93.184.216.34"], "", 2.0)),
+        patch(
+            "blockchecks.checkers.dns_secure.doh_query", return_value=(["93.184.216.34"], "", 2.0)
+        ),
     ):
         r = audit_domain("example.com", doh_url="https://example/dns-query")
     assert r.tampering_detected

@@ -167,10 +167,20 @@ def test_request_stop_force_immediate_exit(run_lock_file, monkeypatch):
     def _kill(pid, sig):
         if sig == signal.SIGTERM:
             raise ProcessLookupError  # already gone before kill
-        return None
 
     monkeypatch.setattr("blockchecks.service.run_control.os.kill", _kill)
     monkeypatch.setattr("blockchecks.service.run_control.time.sleep", lambda s: None)
     code, msg = request_graceful_stop(force=True, wait_sec=1.0)
     assert code == 2
     assert "Stale run lock" in msg
+
+
+def test_cleanup_env_targets_xdg_run_lock():
+    from pathlib import Path
+
+    from blockchecks.engine.config import PROJECT_DIR
+
+    text = (Path(PROJECT_DIR) / "scripts" / "cleanup_env.sh").read_text(encoding="utf-8")
+    assert '"$STATE/run.lock"' in text
+    assert "sudo pkill -9 -f" in text
+    assert "sudo pkill -9 nfqws2" in text

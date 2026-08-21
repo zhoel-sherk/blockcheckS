@@ -25,6 +25,7 @@ class _FakeResult:
 class _FakeRunner:
     def __init__(self):
         self.calls: list[tuple[str, list[str]]] = []
+        self.batch_backends: list[str] = []
 
     async def test_tcp(self, item, domain, timeout=5.0):
         self.calls.append((item.label, [domain]))
@@ -33,6 +34,17 @@ class _FakeRunner:
     async def test_tcp_domains(self, item, domains, timeout=5.0, curl_parallel=4):
         self.calls.append((item.label, list(domains)))
         return [_FakeResult(success=True, item=item, domain=d) for d in domains]
+
+    async def _run_probe_batch(
+        self, items, domain, timeout, backend, domains=None, stop_event=None
+    ):
+        self.batch_backends.append(backend)
+        results = []
+        for i, item in enumerate(items):
+            d = domains[i] if domains and i < len(domains) else domain
+            self.calls.append((item.label, [d]))
+            results.append(_FakeResult(success=True, item=item, domain=d))
+        return results
 
 
 @pytest.mark.asyncio
@@ -47,6 +59,7 @@ async def test_run_adaptive_tcp_single():
     assert result.done == 2
     assert result.passed == 2
     assert len(runner.calls) == 2
+    assert runner.batch_backends == ["classic", "classic"]
 
 
 @pytest.mark.asyncio
@@ -108,11 +121,13 @@ async def test_run_adaptive_tcp_stops_on_stop_event():
     runner = _FakeRunner()
     stop = asyncio.Event()
 
-    async def test_tcp(item, domain, timeout=5.0):
+    async def _run_probe_batch(items, domain, timeout, backend, domains=None, stop_event=None):
         stop.set()
-        return _FakeResult(success=True, item=item, domain=domain)
+        item = items[0]
+        runner.calls.append((item.label, [domain]))
+        return [_FakeResult(success=True, item=item, domain=domain)]
 
-    runner.test_tcp = test_tcp
+    runner._run_probe_batch = _run_probe_batch
     result = await run_adaptive_tcp(runner, queue, curl_parallel=1, stop_event=stop)
     assert result.done == 1
     assert result.passed == 1
@@ -408,3 +423,84 @@ async def test_bridge_worker_progress_before_batch_flush():
     reported = [d for d, _ in progress]
     assert 1 in reported and 2 in reported
     assert stats.done == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_classic_aq_logs_backend(caplog):
+    items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
+    queue = AdaptiveJobQueue.build(items, ["discord.com"], epsilon=0.0)
+    runner = _FakeRunner()
+    with caplog.at_level("INFO"):
+        await run_adaptive_tcp(runner, queue, curl_parallel=1)
+    assert "backend=classic" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_classic_aq_b2_logs_backend(caplog):
+    items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
+    domains = ["discord.com", "discord.gg"]
+    queue = AdaptiveJobQueue.build(items, domains, epsilon=0.0)
+    runner = _FakeRunner()
+    with caplog.at_level("INFO"):
+        await run_adaptive_tcp(runner, queue, curl_parallel=4)
+    assert "backend=classic" in caplog.text
+    assert runner.batch_backends == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_bridge_worker_stop_empty_and_fanout():
+    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+
+    stats = _RunStats()
+    runner = MagicMock()
+    runner._run_probe_batch = AsyncMock(return_value=[])
+    runner.test_tcp = AsyncMock(return_value=MagicMock(success=True))
+    queue = MagicMock()
+    queue.pop = MagicMock(return_value=None)
+
+    stop = asyncio.Event()
+    stop.set()
+    await _bridge_worker(
+        runner,
+        queue,
+        stats,
+        timeout=5.0,
+        bridge_batch=50,
+        stop_event=stop,
+        on_progress=None,
+        active_domains=set(),
+        domain_lock=asyncio.Lock(),
+    )
+    runner.test_tcp.assert_not_called()
+
+    await _bridge_worker(
+        runner,
+        queue,
+        _RunStats(),
+        timeout=5.0,
+        bridge_batch=50,
+        stop_event=None,
+        on_progress=None,
+        active_domains=set(),
+        domain_lock=asyncio.Lock(),
+    )
+    runner.test_tcp.assert_not_called()
+
+    job = await _make_job(fanout=True)
+    pops = iter([job, None])
+    queue.pop = MagicMock(side_effect=lambda **kw: next(pops))
+    await _bridge_worker(
+        runner,
+        queue,
+        _RunStats(),
+        timeout=5.0,
+        bridge_batch=50,
+        stop_event=None,
+        on_progress=None,
+        active_domains=set(),
+        domain_lock=asyncio.Lock(),
+    )
+    runner.test_tcp.assert_awaited_once()

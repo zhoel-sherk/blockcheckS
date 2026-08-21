@@ -181,6 +181,8 @@ def model_from_subparser(name: str, parser: argparse.ArgumentParser) -> type[Bas
             continue
         if action.dest in ("help", "command") or not action.dest:
             continue
+        if action.dest in fields and isinstance(action, argparse._StoreFalseAction):
+            continue
         ann = _annotation_for_action(action)
         default = _field_default(action)
         if action.required:

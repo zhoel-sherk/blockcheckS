@@ -56,7 +56,7 @@ echo "--- bs scan --classic ---" | tee -a "$LOG"
 MATRIX=$(mktemp); trap 'rm -f "$MATRIX"' EXIT
 printf 'fake:blob=stun:repeats=6:tcp_ts=-1000\nfake:blob=max_ru:repeats=6:tcp_ts=-1000\n' >"$MATRIX"
 OUT=$(timeout 90 sudo -n "$BS" scan -d discord.com --user-matrix "$MATRIX" --max 2 --parallel 1 \
-  --scan-level fast --classic --skip-deps-check --skip-dns-audit --skip-prolog \
+  --scan-level fast --classic --quick --skip-deps-check --skip-dns-audit --skip-prolog \
   --skip-ip-block --skip-port-block --skip-baseline --no-wssize --timeout 8 2>&1 || true)
 if echo "$OUT" | grep -q "backend=classic" && echo "$OUT" | grep -q "passed"; then
   report "bs scan --classic" 1
@@ -67,7 +67,7 @@ fi
 # ── bs scan: default lua_bridge ──────────────────────────────
 echo "--- bs scan default (lua_bridge) ---" | tee -a "$LOG"
 OUT=$(timeout 90 sudo -n "$BS" scan -d discord.com --user-matrix "$MATRIX" --max 2 --parallel 1 \
-  --scan-level fast --skip-deps-check --skip-dns-audit --skip-prolog \
+  --scan-level fast --quick --skip-deps-check --skip-dns-audit --skip-prolog \
   --skip-ip-block --skip-port-block --skip-baseline --no-wssize --timeout 8 2>&1 || true)
 if echo "$OUT" | grep -q "backend=lua_bridge" && echo "$OUT" | grep -q "passed"; then
   report "bs scan default (lua_bridge)" 1
@@ -78,7 +78,7 @@ fi
 # ── bs pair (tcp-only) ───────────────────────────────────────
 echo "--- bs pair --tcp-only ---" | tee -a "$LOG"
 OUT=$(timeout 90 sudo -n "$BS" pair -d discord.com --user-matrix "$MATRIX" --tcp-only --max 2 \
-  --parallel 1 --scan-level fast --skip-deps-check --skip-dns-audit --skip-prolog \
+  --parallel 1 --scan-level fast --quick --skip-deps-check --skip-dns-audit --skip-prolog \
   --skip-ip-block --skip-port-block --skip-baseline --no-wssize --timeout 8 --db "/tmp/fs_pair_$TS.db" 2>&1 || true)
 if echo "$OUT" | grep -q "passed\|TCP discord.com"; then report "bs pair tcp-only" 1; else report "bs pair tcp-only" 0; fi
 
@@ -91,7 +91,7 @@ if echo "$OUT" | grep -q "PASS\|OK\|settle"; then report "bs bench-settle" 1; el
 # ── bs full (quick, deadline) ────────────────────────────────
 echo "--- bs full quick ---" | tee -a "$LOG"
 OUT=$(timeout 120 sudo -n "$BS" full -d discord.com --tcp-sources flowseal --max 2 --parallel 1 \
-  --timeout 3 --allow-dns-hijack --max-timem 1 --scan-level fast --no-http \
+  --timeout 3 --allow-dns-hijack --max-timem 1 --scan-level fast --quick --no-http \
   --skip-deps-check --skip-baseline --skip-port-block --skip-prolog --skip-ip-block \
   --db "/tmp/fs_full_$TS.db" --out-dir "/tmp/fs_full_$TS" 2>&1 || true)
 if echo "$OUT" | grep -q "Export configs\|Run summary\|TCP done"; then report "bs full quick" 1; else report "bs full quick" 0; fi

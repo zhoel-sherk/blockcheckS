@@ -112,6 +112,7 @@ select = [
     "SIM", # simplify
     "C90", # mccabe complexity
     "ARG", # unused arguments
+    "RET", # flake8-return (guard clauses; 0 hits on src at add time)
 ]
 ignore = [
     "E501",   # line length — formatter / long CLI strings
@@ -125,8 +126,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.mccabe]
-# Soft cap for new code; known hotspots ignored per-file below (ratchet later).
-max-complexity = 25
+# Live cap 20 (src is green). Quoted C901=7 is 93 hits with current per-file
+# ignores. Ratchet 18 → 5 leftover, 15 → 12, 12 → 26.
+# Do not enable whole PLR/TRY: quoted 5/8/4/25 + C901=7 = 639 on src.
+# Noisy if ever added: PLR2004 (97), PLR0913 (72), TRY003 (50). RET vs PLR0911.
+max-complexity = 20
 
 [tool.ruff.lint.flake8-unused-arguments]
 ignore-variadic-names = true
@@ -149,7 +153,7 @@ line-ending = "auto"
 # ── Quality policy (pytest -m quality reads these) ───────────────────
 
 [tool.blockchecks.ruff_quality]
-select = ["SIM", "C90", "ARG", "B006", "B007", "UP006", "UP007", "UP045"]
+select = ["SIM", "C90", "ARG", "RET", "B006", "B007", "UP006", "UP007", "UP045"]
 # Must restate ignores: CLI --select re-enables codes listed in [tool.ruff.lint].ignore
 ignore = ["SIM105", "SIM102", "SIM108", "SIM117", "UP007"]
 

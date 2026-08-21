@@ -86,4 +86,6 @@ def test_classify_empty_and_http():
 def test_wrong_version_is_handshake_not_rst_at_sni():
     assert classify_fail_phase("SSL routines: WRONG_VERSION_NUMBER").value == "tls_handshake_error"
     assert classify_fail_phase("WRONG_VERSION_NUMBER").value == "tls_handshake_error"
-    assert classify_fail_phase("curl: (35) Recv failure: Connection reset").value == "tls_rst_at_sni"
+    assert (
+        classify_fail_phase("curl: (35) Recv failure: Connection reset").value == "tls_rst_at_sni"
+    )

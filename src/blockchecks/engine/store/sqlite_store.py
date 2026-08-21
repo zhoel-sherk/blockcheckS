@@ -486,6 +486,7 @@ class SqliteRunStore:
         return await self.get_working_proto_details(domain, "tcp")
 
     async def get_working_proto_details(self, domain: str, proto: str) -> list[dict]:
+        await self.flush()
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
@@ -656,6 +657,7 @@ class SqliteRunStore:
 
     async def get_best_by_coverage(self, *, limit: int = 5) -> list[dict]:
         """TCP strategies ranked by domains_passed DESC, then avg latency ASC."""
+        await self.flush()
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(

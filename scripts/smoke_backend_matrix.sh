@@ -29,7 +29,7 @@ COMMON=(
   --max 2 --parallel 1 --scan-level fast
   --skip-deps-check --skip-dns-audit --skip-prolog
   --skip-ip-block --skip-port-block --skip-baseline
-  --no-wssize --timeout 8
+  --no-wssize --quick --timeout 8
 )
 
 run_and_check() {

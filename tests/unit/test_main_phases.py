@@ -160,6 +160,31 @@ def test_load_run_domains_ok():
     assert domains == ["a.com", "b.com"]
 
 
+def test_load_run_domains_dash_d_skips_default_file():
+    args = _args(domain="discord.com", domains_file=None)
+    with patch("blockchecks.main_phases.load_domains") as load:
+        domains, fname, rc = load_run_domains(args)
+    load.assert_not_called()
+    assert rc is None
+    assert domains == ["discord.com"]
+    assert fname == "discord.com"
+
+
+def test_load_run_domains_file_wins_over_dash_d():
+    args = _args(domain="discord.com", domains_file="x.txt")
+    loaded = MagicMock()
+    loaded.domains = ["a.com"]
+    loaded.skipped = []
+    with (
+        patch("blockchecks.main_phases.load_domains", return_value=loaded),
+        patch("blockchecks.main_phases.auto_enable_gv_ggc"),
+    ):
+        domains, fname, rc = load_run_domains(args)
+    assert rc is None
+    assert domains == ["a.com"]
+    assert fname == "x.txt"
+
+
 # ── prepare_run_dns ───────────────────────────────────────────────────
 
 

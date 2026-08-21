@@ -126,8 +126,9 @@ async def test_build_shortlist_udp_quic_rows(temp_db: StateDB):
 def test_shortlist_export_main(tmp_path):
     from unittest.mock import AsyncMock, patch
 
-    from blockchecks.shortlist_export import main
+    from blockchecks.shortlist_export import log, main
 
+    assert log.name.startswith("blockchecks.")
     with patch(
         "blockchecks.shortlist_export.export_shortlist_json",
         new=AsyncMock(return_value={"schema": "blockchecks.shortlist/v1", "tcp": []}),

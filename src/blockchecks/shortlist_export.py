@@ -15,7 +15,7 @@ from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_SHORTLIST_DIR, exp
 from blockchecks.engine.store import RunStateStore, open_run_store
 from blockchecks.nfconf import collect_export_strategies
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("blockchecks.shortlist_export")
 
 
 SCHEMA = "blockchecks.shortlist/v1"
@@ -169,6 +169,10 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Output JSON (default: {DEFAULT_SHORTLIST_DIR}/shortlist.json)",
     )
     args = p.parse_args(argv)
+
+    from blockchecks.engine.log import configure_logging
+
+    configure_logging()
 
     import asyncio
 

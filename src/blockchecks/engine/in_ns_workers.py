@@ -455,6 +455,57 @@ def _clone_request_with_ip(
     return None
 
 
+def _multi_probe_one(
+    domain: str,
+    protocol: str,
+    resolved_ips: dict[str, str | None],
+    *,
+    disable_ech: bool,
+    timeout: float,
+) -> tuple[CurlProbeRequest, dict | None]:
+    is_http = protocol == "http"
+    ip = resolved_ips.get(domain)
+    dispatch = (
+        (is_googlevideo_domain, prepare_googlevideo_probe),
+        (is_ytcdn_domain, prepare_ytcdn_probe),
+    )
+    for pred, prep in dispatch:
+        if not is_http and pred(domain):
+            return prep(domain, resolved_ip=ip)
+    return (
+        CurlProbeRequest(
+            domain=domain,
+            timeout=timeout,
+            resolved_ip=ip,
+            resolve_name=domain.split("/")[0],
+            disable_ech=disable_ech,
+            protocol=protocol,
+        ),
+        None,
+    )
+
+
+def _multi_probe_requests(
+    domains: list[str],
+    protocol: str,
+    resolved_ips: dict[str, str | None],
+    *,
+    disable_ech: bool,
+    timeout: float,
+) -> tuple[list[CurlProbeRequest], dict[str, dict], dict[str, str | None]]:
+    built = [
+        _multi_probe_one(d, protocol, resolved_ips, disable_ech=disable_ech, timeout=timeout)
+        for d in domains
+    ]
+    gv_fail = {d: err for d, (_req, err) in zip(domains, built, strict=True) if err}
+    probe_requests = [req for req, err in built if not err]
+    ips = dict(resolved_ips)
+    for req in probe_requests:
+        if req.resolved_ip:
+            ips[req.domain] = req.resolved_ip
+    return probe_requests, gv_fail, ips
+
+
 def _run_tcp_check_multi(
     ns_name: str,
     strategy: str,
@@ -484,37 +535,13 @@ def _run_tcp_check_multi(
     dport = "80" if is_http else "443"
     tmp_conf = None
     resolved_ips = dict(resolved_ips or {})
-    gv_fail: dict[str, dict] = {}
-    probe_requests: list[CurlProbeRequest] = []
-
-    for d in domains:
-        if not is_http and is_googlevideo_domain(d):
-            req, err = prepare_googlevideo_probe(d, resolved_ip=resolved_ips.get(d))
-            if err:
-                gv_fail[d] = err
-                continue
-            if req.resolved_ip:
-                resolved_ips[d] = req.resolved_ip
-            probe_requests.append(req)
-        elif not is_http and is_ytcdn_domain(d):
-            req, err = prepare_ytcdn_probe(d, resolved_ip=resolved_ips.get(d))
-            if err:
-                gv_fail[d] = err
-                continue
-            if req.resolved_ip:
-                resolved_ips[d] = req.resolved_ip
-            probe_requests.append(req)
-        else:
-            probe_requests.append(
-                CurlProbeRequest(
-                    domain=d,
-                    timeout=timeout,
-                    resolved_ip=resolved_ips.get(d),
-                    resolve_name=d.split("/")[0],
-                    disable_ech=disable_ech,
-                    protocol=protocol,
-                )
-            )
+    probe_requests, gv_fail, resolved_ips = _multi_probe_requests(
+        domains,
+        protocol,
+        resolved_ips,
+        disable_ech=disable_ech,
+        timeout=timeout,
+    )
 
     domains_active = [r.domain for r in probe_requests]
     if not domains_active:

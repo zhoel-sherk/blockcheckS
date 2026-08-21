@@ -456,17 +456,28 @@ def _stub_body_err(req: CurlProbeRequest, resp, clen: int) -> str | None:
     return None
 
 
-def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResult:
-    """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
-    import time
+def _resp_fail(resp, elapsed: float, clen: int, rate: float, error: str) -> CurlProbeResult:
+    return CurlProbeResult(
+        success=False,
+        http_code=resp.status_code,
+        latency_ms=elapsed * 1000,
+        content_len=clen,
+        read_rate_bps=rate,
+        error=error,
+    )
 
+
+def _curl_proxy_kwargs(req: CurlProbeRequest) -> dict:
+    if (req.googlevideo or req.ytcdn_proxy) and SOCKS5_PROXY:
+        return {"proxy": SOCKS5_PROXY.replace("socks5://", "socks5h://")}
+    return {}
+
+
+def _open_curl_session(req: CurlProbeRequest) -> curl_cffi.Session | CurlProbeResult:
+    """Build a configured Session, or a CurlProbeResult on ECH/setopt failure."""
     is_http = req.protocol == "http"
-    url_scheme = "http" if is_http else "https"
     resolve_port = 80 if is_http else 443
     resolve_name = (req.resolve_name or req.domain).split("/")[0]
-    dom = resolve_name.lower().split("/")[0]
-    use_ech_off = req.disable_ech or req.googlevideo
-
     headers: dict[str, str] = {"Accept": "text/html"}
     if req.googlevideo:
         headers["Range"] = (
@@ -474,200 +485,94 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
         )
         headers["Referer"] = "https://www.youtube.com/"
         headers["Origin"] = "https://www.youtube.com"
-
-    start = time.perf_counter()
-    try:
-        with curl_cffi.Session(
-            impersonate="chrome124",
-            http_version="v1" if is_http else 2,
-            headers=headers,
-            allow_redirects=False,
-        ) as session:
-            if req.googlevideo:
-                session.curl.setopt(CURLOPT_IPRESOLVE, _CURL_IPRESOLVE_V4)
-            if req.resolved_ip:
-                session.curl.setopt(
-                    CURLOPT_RESOLVE,
-                    [f"{resolve_name}:{resolve_port}:{req.resolved_ip}"],
-                )
-            if use_ech_off:
-                ech_err = _apply_ech_off(session)
-                if ech_err:
-                    return CurlProbeResult(
-                        latency_ms=(time.perf_counter() - start) * 1000,
-                        error=ech_err,
-                    )
-            url = req.curl_url if req.curl_url else f"{url_scheme}://{req.domain}"
-            curl_timeout = min(req.timeout, 8.0) if req.googlevideo else req.timeout
-            # googlevideo CDN is often only reachable via the SOCKS proxy
-            # (direct egress blocked by DPI on some ISPs). Pass it per-request via
-            # the proxy= kw (socks5h = DNS through proxy); CurlOpt.PROXY setopt
-            # does not map socks5h correctly and yields 403.
-            get_kwargs: dict = {}
-            if (req.googlevideo or req.ytcdn_proxy) and SOCKS5_PROXY:
-                get_kwargs["proxy"] = SOCKS5_PROXY.replace("socks5://", "socks5h://")
-            resp = session.get(url, timeout=curl_timeout, **get_kwargs)
-    except RequestsError as e:
-        msg = str(e)
-        return CurlProbeResult(
-            latency_ms=(time.perf_counter() - start) * 1000,
-            error="timeout" if "Timeout" in msg else msg[:120],
+    session = curl_cffi.Session(
+        impersonate="chrome124",
+        http_version="v1" if is_http else 2,
+        headers=headers,
+        allow_redirects=False,
+    )
+    if req.googlevideo:
+        session.curl.setopt(CURLOPT_IPRESOLVE, _CURL_IPRESOLVE_V4)
+    if req.resolved_ip:
+        session.curl.setopt(
+            CURLOPT_RESOLVE,
+            [f"{resolve_name}:{resolve_port}:{req.resolved_ip}"],
         )
-    except Exception as e:
-        return CurlProbeResult(error=str(e)[:120])
+    if not (req.disable_ech or req.googlevideo):
+        return session
+    if ech_err := _apply_ech_off(session):
+        session.close()
+        return CurlProbeResult(error=ech_err)
+    return session
 
-    elapsed = max(time.perf_counter() - start, 0.001)
-    body = resp.content[:4096]
-    clen = len(resp.content)
+
+def _classify_google_cdn(
+    req: CurlProbeRequest,
+    resp,
+    clen: int,
+    elapsed: float,
+    loc: str,
+    server_hdr: str,
+) -> CurlProbeResult | None:
+    if not (req.ggc or req.ytcdn):
+        return None
     rate = clen / elapsed
-    loc = resp.headers.get("Location") or resp.headers.get("location") or ""
-    server_hdr = resp.headers.get("Server") or resp.headers.get("server") or ""
-
-    # GGC probe (deterministic, no signature): a genuine Google CDN answer is
-    # recognized by the unique Server header (gws / scone / gvs) and, on 302/307,
-    # by a Location that stays inside *.googlevideo.com / *.google.com. The TSPU
-    # stub replies with Server: nginx/nts (or none) and redirects to regional
-    # Russian IPs/domains. timeout/RST (handled in except) == blocked.
-    if req.ggc:
-        server = server_hdr.lower()
-        google_server = any(t in server for t in _GOOGLE_SERVER_HINTS)
-        status = resp.status_code
-        if status in {301, 302, 303, 307, 308} and not _ggc_redirect_is_google(loc):
-            return CurlProbeResult(
-                success=False,
-                http_code=status,
-                latency_ms=elapsed * 1000,
-                content_len=clen,
-                read_rate_bps=rate,
-                error=f"tspu redirect to {loc[:80]}",
-            )
-        if not google_server:
-            return CurlProbeResult(
-                success=False,
-                http_code=status,
-                latency_ms=elapsed * 1000,
-                content_len=clen,
-                read_rate_bps=rate,
-                error=f"non-google server header: {server_hdr[:40]!r}",
-            )
-        _, throttled, rate = _classify_throughput(clen, elapsed, small_body_ok=clen < 300)
-        return CurlProbeResult(
-            success=True,
-            http_code=status,
-            latency_ms=elapsed * 1000,
-            content_len=clen,
-            content_ok=clen >= 300,
-            throttled=throttled,
-            read_rate_bps=rate,
-            error=None,
-        )
-
-    # YouTube static CDN probe (ytimg/ggpht/gvt1/usercontent): like GGC, a
-    # genuine Google answer (gws/scone/gvs Server header, any status) proves the
-    # bypass reached the real CDN. A TSPU stub replies with nginx/nts or nothing.
-    if req.ytcdn:
-        server = server_hdr.lower()
-        google_server = any(t in server for t in _GOOGLE_SERVER_HINTS)
-        if not google_server:
-            return CurlProbeResult(
-                success=False,
-                http_code=resp.status_code,
-                latency_ms=elapsed * 1000,
-                content_len=clen,
-                read_rate_bps=rate,
-                error=f"non-google server header: {server_hdr[:40]!r}",
-            )
-        _, throttled, rate = _classify_throughput(clen, elapsed, small_body_ok=clen < 300)
-        return CurlProbeResult(
-            success=True,
-            http_code=resp.status_code,
-            latency_ms=elapsed * 1000,
-            content_len=clen,
-            content_ok=clen >= 300,
-            throttled=throttled,
-            read_rate_bps=rate,
-            error=None,
-        )
-
-    redirect_domain = "googlevideo.com" if req.googlevideo else dom
-    redirect_err = classify_http_status(redirect_domain, resp.status_code, loc)
+    google_server = any(t in server_hdr.lower() for t in _GOOGLE_SERVER_HINTS)
     if (
-        req.googlevideo
-        and _gv_hop == 0
+        req.ggc
         and resp.status_code in {301, 302, 303, 307, 308}
-        and not redirect_err
+        and not _ggc_redirect_is_google(loc)
     ):
-        follow = _googlevideo_follow_request(req, loc)
-        if follow:
-            return run_curl_probe(follow, _gv_hop=1)
+        return _resp_fail(resp, elapsed, clen, rate, f"tspu redirect to {loc[:80]}")
+    if not google_server:
+        return _resp_fail(
+            resp, elapsed, clen, rate, f"non-google server header: {server_hdr[:40]!r}"
+        )
+    _, throttled, rate = _classify_throughput(clen, elapsed, small_body_ok=clen < 300)
+    return CurlProbeResult(
+        success=True,
+        http_code=resp.status_code,
+        latency_ms=elapsed * 1000,
+        content_len=clen,
+        content_ok=clen >= 300,
+        throttled=throttled,
+        read_rate_bps=rate,
+        error=None,
+    )
+
+
+def _classify_generic(
+    req: CurlProbeRequest,
+    resp,
+    elapsed: float,
+    clen: int,
+    loc: str,
+    redirect_err: str | None,
+) -> CurlProbeResult:
+    rate = clen / elapsed
     if redirect_err:
-        return CurlProbeResult(
-            success=False,
-            http_code=resp.status_code,
-            latency_ms=elapsed * 1000,
-            content_len=clen,
-            read_rate_bps=rate,
-            error=redirect_err,
-        )
-    block_redirect_err = _block_redirect_err(resp.status_code, loc)
-    if block_redirect_err:
-        return CurlProbeResult(
-            success=False,
-            http_code=resp.status_code,
-            latency_ms=elapsed * 1000,
-            content_len=clen,
-            read_rate_bps=rate,
-            error=block_redirect_err,
-        )
+        return _resp_fail(resp, elapsed, clen, rate, redirect_err)
+    if block_err := _block_redirect_err(resp.status_code, loc):
+        return _resp_fail(resp, elapsed, clen, rate, block_err)
     if resp.status_code == 400:
-        return CurlProbeResult(
-            success=False,
-            http_code=400,
-            latency_ms=elapsed * 1000,
-            content_len=clen,
-            read_rate_bps=rate,
-            error="http 400 (likely fake packets received)",
-        )
-
-    content_ok = clen >= 300
+        return _resp_fail(resp, elapsed, clen, rate, "http 400 (likely fake packets received)")
+    body = resp.content[:4096]
     dpi_fake = any(p in body.lower() for p in DPI_FAKE_PATTERNS)
-    if dpi_fake:
-        content_ok = False
-
-    stub_err = _stub_body_err(req, resp, clen)
-    if stub_err:
-        return CurlProbeResult(
-            success=False,
-            http_code=resp.status_code,
-            latency_ms=elapsed * 1000,
-            content_len=clen,
-            read_rate_bps=rate,
-            error=stub_err,
-        )
-
-    # Tiny 206 is OK for ordinary sites; googlevideo Range must meet size budget
+    content_ok = clen >= 300 and not dpi_fake
+    if stub_err := _stub_body_err(req, resp, clen):
+        return _resp_fail(resp, elapsed, clen, rate, stub_err)
     small_206 = resp.status_code == 206 and clen < 300 and not req.googlevideo
     small_body_ok = (not dpi_fake) and (resp.status_code in _SMALL_BODY_STATUSES or small_206)
-
-    # PASS classification depends on the probe type (TLS vs plaintext HTTP):
-    #   - HTTPS/TLS: a real HTTP answer (200..399, 401, 403, 404) proves the TLS
-    #     handshake succeeded and DPI did NOT drop/replace it → bypass works.
-    #     400 is a sign the desync corrupted the payload (fake packets) → FAIL.
-    #   - Plaintext HTTP: conservative — only 200..399 with validated body.
-    # DPI stub patterns (rkn/roskomnadzor/blockpage) and block-redirects are
-    # always FAIL regardless of status code.
-    if is_http:
-        status_ok = 200 <= resp.status_code < 400
-    else:
-        status_ok = 200 <= resp.status_code < 400 or resp.status_code in {401, 403, 404}
+    status_ok = (
+        200 <= resp.status_code < 400
+        if req.protocol == "http"
+        else (200 <= resp.status_code < 400 or resp.status_code in {401, 403, 404})
+    )
     throttled = False
     success = False
     if status_ok and (content_ok or small_body_ok) and not dpi_fake:
-        rate_ok, throttled, rate = _classify_throughput(
-            clen, elapsed, small_body_ok=small_body_ok
-        )
+        rate_ok, throttled, rate = _classify_throughput(clen, elapsed, small_body_ok=small_body_ok)
         success = rate_ok
-
     return CurlProbeResult(
         success=success,
         http_code=resp.status_code,
@@ -678,6 +583,54 @@ def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResul
         read_rate_bps=rate,
         error=None,
     )
+
+
+def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResult:
+    """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
+    import time
+
+    start = time.perf_counter()
+    session = _open_curl_session(req)
+    if isinstance(session, CurlProbeResult):
+        session.latency_ms = (time.perf_counter() - start) * 1000
+        return session
+    url_scheme = "http" if req.protocol == "http" else "https"
+    try:
+        with session:
+            url = req.curl_url if req.curl_url else f"{url_scheme}://{req.domain}"
+            curl_timeout = min(req.timeout, 8.0) if req.googlevideo else req.timeout
+            resp = session.get(url, timeout=curl_timeout, **_curl_proxy_kwargs(req))
+    except RequestsError as e:
+        msg = str(e)
+        return CurlProbeResult(
+            latency_ms=(time.perf_counter() - start) * 1000,
+            error="timeout" if "Timeout" in msg else msg[:120],
+        )
+    except Exception as e:
+        return CurlProbeResult(error=str(e)[:120])
+
+    elapsed = max(time.perf_counter() - start, 0.001)
+    clen = len(resp.content)
+    loc = resp.headers.get("Location") or resp.headers.get("location") or ""
+    server_hdr = resp.headers.get("Server") or resp.headers.get("server") or ""
+    if cdn := _classify_google_cdn(req, resp, clen, elapsed, loc, server_hdr):
+        return cdn
+    resolve_name = (req.resolve_name or req.domain).split("/")[0]
+    redirect_domain = "googlevideo.com" if req.googlevideo else resolve_name.lower()
+    redirect_err = classify_http_status(redirect_domain, resp.status_code, loc)
+    follow = (
+        _googlevideo_follow_request(req, loc)
+        if (
+            req.googlevideo
+            and _gv_hop == 0
+            and resp.status_code in {301, 302, 303, 307, 308}
+            and not redirect_err
+        )
+        else None
+    )
+    if follow:
+        return run_curl_probe(follow, _gv_hop=1)
+    return _classify_generic(req, resp, elapsed, clen, loc, redirect_err)
 
 
 MAX_CURL_REPEATS = 10  # Discovery cap

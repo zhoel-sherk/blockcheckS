@@ -178,9 +178,7 @@ def test_find_strategy_populates_top_strategies(tmp_path, monkeypatch):
     svc = ProbeService(pool_size=2)
     svc.started = True
     item = StrategyItem(label="s1", strategy="fake:blob=stun")
-    passed = TcpTestResult(
-        item=item, domain="a.com", success=True, http_code=200, latency_ms=110.0
-    )
+    passed = TcpTestResult(item=item, domain="a.com", success=True, http_code=200, latency_ms=110.0)
     runner = MagicMock()
     runner.pool_size = 2
     runner.test_tcp = AsyncMock(return_value=passed)

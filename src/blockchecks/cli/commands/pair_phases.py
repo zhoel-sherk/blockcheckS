@@ -452,10 +452,12 @@ async def _resume_generate_triage(args, db):
     if not getattr(args, "resume", False) or db is None:
         return getattr(args, "triage", None)
     latest = getattr(db, "latest_checkpoint", None)
-    if not callable(latest):
-        return getattr(args, "triage", None)
-    checkpoint = await latest()
-    return None if checkpoint else getattr(args, "triage", None)
+    if callable(latest) and await latest():
+        return None
+    keys_fn = getattr(db, "get_completed_tcp_keys", None)
+    if callable(keys_fn) and await keys_fn():
+        return None
+    return getattr(args, "triage", None)
 
 
 async def load_strategy_items(args, db) -> StrategyLoadResult:
@@ -683,9 +685,10 @@ async def run_adaptive_pair_phase(
 ) -> PhaseResult:
     """Adaptive TCP queue phase with optional UDP pair matrix."""
     eps = getattr(args, "adaptive_epsilon", 0.1)
+    backend = resolve_probe_backend(args)
     log.info(
         "%s",
-        f"  {GREEN}Adaptive queue:{RESET} ε={eps}"
+        f"  {GREEN}Adaptive queue:{RESET} ε={eps}, backend={backend}"
         + (f", curl-parallel={curl_parallel}" if curl_parallel > 1 else ""),
     )
 
@@ -718,6 +721,11 @@ async def run_adaptive_pair_phase(
         workers=max(1, int(getattr(args, "parallel", 4) or 4)),
     )
     tcp_passed = aq_result.passed
+    primary = domains_to_test[0]
+    log.info(
+        "%s",
+        f"\n  TCP {primary}: {GREEN}{tcp_passed}{RESET}/{aq_result.done} passed",
+    )
     if not getattr(args, "no_adaptive_weights", False):
         await persist_adaptive_weights(db, aq_result.weights)
     m = aq_result.metrics
@@ -729,7 +737,6 @@ async def run_adaptive_pair_phase(
 
     pairs: list = []
     if not args.tcp_only and udp_items and not stop_event.is_set():
-        primary = domains_to_test[0]
         details = await db.get_working_tcp_details(primary)
         by_label = {i.label: i for i in tcp_items}
         tcp_results = tcp_results_from_details(by_label, details, primary)

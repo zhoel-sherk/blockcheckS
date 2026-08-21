@@ -48,7 +48,7 @@ sudo -n env BLOCKCHECKS_PROBE_BACKEND= "$BS" scan \
   --scan-level fast \
   --skip-deps-check --skip-dns-audit --skip-prolog \
   --skip-ip-block --skip-port-block --skip-baseline \
-  --no-wssize --timeout 8 \
+  --no-wssize --quick --timeout 8 \
   "${BACKEND_ARGS[@]}" 2>&1 | tee -a "$LOG"
 
 echo "=== log: $LOG ==="

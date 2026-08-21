@@ -17,13 +17,19 @@ OUT="logs/smoke_full_${TS}_export"
 DB="logs/smoke_full_${TS}.db"
 mkdir -p logs "$OUT"
 
+cleanup_run() {
+  sudo -n "$BS" stop --wait 2 >/dev/null 2>&1 || true
+  bash "$ROOT/scripts/cleanup_env.sh" >/dev/null 2>&1 || true
+}
+trap cleanup_run EXIT
+
 echo "=== smoke_full_quick domain=$DOMAIN max=$MAX $(date -Is) ===" | tee "$LOG"
 sudo -n "$BS" full \
   -d "$DOMAIN" \
   --tcp-sources flowseal \
   --max "$MAX" --parallel 2 --timeout 4 \
   --allow-dns-hijack --max-timem 1 \
-  --scan-level fast \
+  --scan-level fast --quick \
   --skip-deps-check --skip-baseline --skip-port-block \
   --skip-prolog --skip-ip-block \
   --no-http \

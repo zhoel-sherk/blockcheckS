@@ -174,10 +174,14 @@ def test_from_args_skip_diagnostics_quick_and_no_preflight():
 
     campaign = SimpleNamespace(timeout=5.0)
     assert PreflightOptions.from_args(campaign).skip_diagnostics is False
-    assert PreflightOptions.from_args(SimpleNamespace(quick=True, timeout=5.0)).skip_diagnostics is True
-    assert PreflightOptions.from_args(
-        SimpleNamespace(no_preflight=True, timeout=5.0)
-    ).skip_diagnostics is True
+    assert (
+        PreflightOptions.from_args(SimpleNamespace(quick=True, timeout=5.0)).skip_diagnostics
+        is True
+    )
+    assert (
+        PreflightOptions.from_args(SimpleNamespace(no_preflight=True, timeout=5.0)).skip_diagnostics
+        is True
+    )
 
 
 def test_sync_dns_to_data_block(tmp_path):
@@ -398,8 +402,13 @@ def test_preflight_wires_dns_prolog_voice_into_triage():
         }
     ]
     with (
-        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")),
-        patch("blockchecks.engine.preflight._audit_domains_parallel", new=AsyncMock(return_value=dns_rows)),
+        patch(
+            "blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")
+        ),
+        patch(
+            "blockchecks.engine.preflight._audit_domains_parallel",
+            new=AsyncMock(return_value=dns_rows),
+        ),
         patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(True, "burst dropped")),
         patch("blockchecks.engine.preflight.run_prolog_tls", return_value=tls),
         patch("blockchecks.engine.preflight.run_port_block_probe"),
@@ -441,10 +450,14 @@ def test_preflight_diagnostics_fooling_grid():
         return True, "", 200
 
     with (
-        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")),
+        patch(
+            "blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")
+        ),
         patch(
             "blockchecks.engine.preflight.run_prolog_tls",
-            return_value=TlsResult(domain="youtube.com", success=False, error="timeout", http_status=0),
+            return_value=TlsResult(
+                domain="youtube.com", success=False, error="timeout", http_status=0
+            ),
         ),
         patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
         patch("blockchecks.engine.preflight._triage_domain"),
@@ -497,7 +510,9 @@ def test_dns_audit_without_store_sets_hijacked():
         }
     ]
     with (
-        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")),
+        patch(
+            "blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "iana.org")
+        ),
         patch(
             "blockchecks.engine.preflight._audit_domains_parallel",
             new=AsyncMock(return_value=dns_rows),
@@ -565,9 +580,7 @@ def test_handle_triage_reuses_started_runner():
     from blockchecks.service.server import ProbeServer
 
     runner = MagicMock()
-    runner.test_tcp = AsyncMock(
-        return_value=MagicMock(success=True, error="", http_code=200)
-    )
+    runner.test_tcp = AsyncMock(return_value=MagicMock(success=True, error="", http_code=200))
     service = MagicMock()
     service.started = True
     service.runner = runner
@@ -584,3 +597,67 @@ def test_handle_triage_reuses_started_runner():
     ctor.assert_not_called()
     opts = pf.await_args.args[1]
     assert callable(opts.fooling_probe_fn)
+
+
+@pytest.mark.unit
+def test_apply_ip_block_cdn_keeps_bypassable():
+    from blockchecks.checkers.ip_block import IpBlockReport
+    from blockchecks.engine.preflight import _apply_ip_block
+    from blockchecks.engine.triage import TriageProfile
+
+    report = IpBlockReport("discord.com", "iana.org")
+    report.blocked_ips = ["162.159.1.1"]
+    report.ip_block_on = ["162.159.1.1"]
+    triage = TriageProfile()
+    _apply_ip_block(triage, "discord.com", report, is_primary=True)
+    assert triage.domain_phases["discord.com"] == "ip_blocked"
+    assert triage.bypassable is True
+    assert triage.unbypassable_l3 is False
+
+
+@pytest.mark.unit
+def test_apply_ip_block_origin_sets_unbypassable():
+    from blockchecks.checkers.ip_block import IpBlockReport
+    from blockchecks.engine.preflight import _apply_ip_block
+    from blockchecks.engine.triage import TriageProfile
+
+    report = IpBlockReport("example.com", "iana.org")
+    report.blocked_ips = ["93.184.216.34"]
+    report.ip_block_on = ["93.184.216.34"]
+    triage = TriageProfile()
+    _apply_ip_block(triage, "example.com", report, is_primary=True)
+    assert triage.unbypassable_l3 is True
+    assert triage.bypassable is False
+
+
+@pytest.mark.unit
+def test_triage_domain_cdn_syn_drop_keeps_bypassable():
+    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.engine.preflight import PreflightOptions, _triage_domain
+    from blockchecks.engine.triage import TriageProfile
+
+    report = MagicMock(phase=FailPhase.L4_SYN_DROP, ip="162.159.1.1", port=443)
+    triage = TriageProfile()
+    with patch("blockchecks.checkers.l3_probe.probe_l3", return_value=report):
+        _triage_domain(
+            triage, "discord.com", ["162.159.1.1"], PreflightOptions(), None, is_primary=True
+        )
+    assert triage.domain_phases["discord.com"] == FailPhase.L4_SYN_DROP.value
+    assert triage.unbypassable_l3 is False
+    assert triage.bypassable is True
+
+
+@pytest.mark.unit
+def test_triage_domain_origin_syn_drop_unbypassable():
+    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.engine.preflight import PreflightOptions, _triage_domain
+    from blockchecks.engine.triage import TriageProfile
+
+    report = MagicMock(phase=FailPhase.L4_SYN_DROP, ip="93.184.216.34", port=443)
+    triage = TriageProfile()
+    with patch("blockchecks.checkers.l3_probe.probe_l3", return_value=report):
+        _triage_domain(
+            triage, "example.com", ["93.184.216.34"], PreflightOptions(), None, is_primary=True
+        )
+    assert triage.unbypassable_l3 is True
+    assert triage.l3_phase == FailPhase.L4_SYN_DROP

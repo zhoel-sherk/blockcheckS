@@ -183,6 +183,11 @@ async def open_full_run_db(args) -> Any:
 
 
 def load_run_domains(args) -> tuple[list[str], str, int | None]:
+    explicit = (getattr(args, "domain", None) or "").strip()
+    if explicit and not getattr(args, "domains_file", None):
+        domains = [explicit]
+        auto_enable_gv_ggc(domains)
+        return domains, explicit, None
     domains_file = args.domains_file or DEFAULT_DOMAINS_FILE
     try:
         loaded = load_domains(
@@ -321,6 +326,9 @@ def print_full_run_banner(ctx: FullRunContext) -> None:
 
 async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> int | None:
     args = ctx.args
+    from blockchecks.cli.commands.pair_phases import _resume_generate_triage
+
+    gen_triage = await _resume_generate_triage(args, ctx.db)
     log.info("%s", f"\n  {CYAN}[1/{ctx.steps}] Generating strategies...{RESET}")
     if not ctx.skip_tcp_tls:
         ctx.tcp_items = await gen.generate_tcp(
@@ -330,7 +338,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             max_count=ctx.max_n,
             state_db=ctx.db,
             protocol=args.protocol,
-            triage=ctx.triage,
+            triage=gen_triage,
         )
     if not args.tcp_only:
         ctx.udp_items = await gen.generate_udp(
@@ -339,7 +347,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             scan_level=ctx.scan_level,
             max_count=max(50, ctx.max_n // 20),
             state_db=ctx.db,
-            triage=ctx.triage,
+            triage=gen_triage,
         )
     if not args.no_quic and not args.tcp_only:
         ctx.quic_items = await gen.generate_quic(
@@ -348,7 +356,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             scan_level=ctx.scan_level,
             max_count=max(30, ctx.max_n // 50) if ctx.max_n else 50,
             state_db=ctx.db,
-            triage=ctx.triage,
+            triage=gen_triage,
         )
     if not getattr(args, "no_http", False):
         ctx.http_items = await gen.generate_http(
@@ -357,7 +365,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             scan_level=ctx.scan_level,
             max_count=max(30, ctx.max_n // 20) if ctx.max_n else 50,
             state_db=ctx.db,
-            triage=ctx.triage,
+            triage=gen_triage,
         )
 
     log.info(

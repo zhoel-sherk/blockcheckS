@@ -20,12 +20,11 @@ from blockchecks.service.lua_session import (
 def session():
     bridge = MagicMock()
     bridge.paths.base = Path("/tmp/shm/bs-p0")
-    s = BridgeSession(
+    return BridgeSession(
         ns_name="bs-p0",
         strategies=["fake:blob=stun:repeats=6:tcp_ts=-1000"],
         bridge=bridge,
     )
-    return s
 
 
 @pytest.mark.unit

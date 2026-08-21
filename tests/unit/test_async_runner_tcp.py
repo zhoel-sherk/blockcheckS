@@ -23,7 +23,6 @@ def test_run_tcp_check_success_path():
 
     def fake_sudo(*args):
         sudo_cmds.append(args)
-        return None
 
     with (
         patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05) as daemon,
@@ -241,6 +240,35 @@ def test_run_tcp_check_multi_success():
             "bs-p0", "fake:blob=stun:repeats=6:tcp_ts=-1000", ["discord.com"], 5.0
         )
     assert out["discord.com"]["success"] is True
+
+
+def test_multi_probe_requests_gv_fail_vs_normal():
+    from blockchecks.checkers.curl_probe import CurlProbeRequest
+    from blockchecks.engine.in_ns_workers import _multi_probe_requests
+
+    gv = "r1---sn-x.googlevideo.com"
+    err = {"success": False, "error": "no signed url"}
+    dummy = CurlProbeRequest(domain=gv, timeout=5.0)
+    with (
+        patch(
+            "blockchecks.engine.in_ns_workers.is_googlevideo_domain",
+            side_effect=lambda d: "googlevideo" in d,
+        ),
+        patch("blockchecks.engine.in_ns_workers.is_ytcdn_domain", return_value=False),
+        patch(
+            "blockchecks.engine.in_ns_workers.prepare_googlevideo_probe",
+            return_value=(dummy, err),
+        ),
+    ):
+        probes, gv_fail, _ips = _multi_probe_requests(
+            [gv, "discord.com"],
+            "tls12",
+            {},
+            disable_ech=False,
+            timeout=5.0,
+        )
+    assert gv_fail[gv] == err
+    assert [p.domain for p in probes] == ["discord.com"]
 
 
 def test_run_udp_check_success():

@@ -220,6 +220,18 @@ async def test_flush_requeues_on_failure(tmp_path, monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_get_working_tcp_flushes_pending_batch(tmp_path):
+    store = open_run_store(tmp_path / "batch.db", batch_size=500)
+    await store.init()
+    await store.log_tcp("s1", "discord.com", "PASS", 42.0, 200, config_path="fake:blob=stun")
+    assert len(store._tcp_pending) == 1
+    details = await store.get_working_tcp_details("discord.com")
+    assert [d["name"] for d in details] == ["s1"]
+    assert store._tcp_pending == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_save_triage_snapshot(tmp_path):
     store = open_run_store(tmp_path / "triage.db")
     await store.init()

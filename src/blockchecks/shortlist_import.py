@@ -12,7 +12,7 @@ from typing import Any
 from blockchecks.engine.store import open_run_store
 from blockchecks.provider_import import DEFAULT_PRESETS_DIR, write_shortlist_presets
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("blockchecks.shortlist_import")
 
 
 SCHEMA = "blockchecks.shortlist/v1"
@@ -190,6 +190,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", default=None, help="Seed state.db with PASS rows")
     p.add_argument("--seed-db", action="store_true")
     args = p.parse_args(argv)
+
+    from blockchecks.engine.log import configure_logging
+
+    configure_logging()
 
     result = import_shortlist(
         args.input,

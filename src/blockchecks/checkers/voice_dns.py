@@ -430,6 +430,72 @@ def udp_discover_bootstrap(
             log.info("[voice-dns] Bootstrap nfqws2 stopped")
 
 
+def _candidate(ip: str, *, hostname: str, source: str, port: int | None = None) -> dict:
+    return {
+        "ip": ip,
+        "port": port if port is not None else random.choice(VOICE_PORTS),
+        "hostname": hostname,
+        "source": source,
+    }
+
+
+async def _seed_voice_candidates(
+    *,
+    use_cache: bool = True,
+    use_maks: bool = True,
+    region: str = "finland",
+    candidates: int = 64,
+) -> tuple[list[dict], int, int]:
+    """Ordered voice candidates. Cache hit skips DNS/Maks (dns_seed=maks_seed=0)."""
+    meta: dict[str, dict] = {}
+
+    def _add(ip: str, *, hostname: str, source: str, port: int | None = None) -> None:
+        if ip and ip not in meta:
+            meta[ip] = _candidate(ip, hostname=hostname, source=source, port=port)
+
+    if use_cache:
+        cached = _load_cache()
+        if cached:
+            for ep in cached.get("endpoints", []) or []:
+                _add(
+                    ep.get("ip", ""),
+                    hostname=ep.get("hostname", ""),
+                    source="cache-alive",
+                    port=ep.get("port"),
+                )
+            if meta:
+                return list(meta.values())[:candidates], 0, 0
+
+    log.info(
+        "%s",
+        f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg "
+        f"range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}...",
+    )
+    ip_map = await resolve_finland_range()
+    dns_ips = list(ip_map)
+    random.shuffle(dns_ips)
+    dns_seed = 0
+    for ip in dns_ips:
+        before = len(meta)
+        _add(ip, hostname=ip_map[ip][0], source="dns-alive")
+        dns_seed += len(meta) - before
+
+    maks_seed = 0
+    if use_maks:
+        region_ips = await asyncio.to_thread(fetch_maks_region_ips, region)
+        if region_ips:
+            source, ips = "maks-region", region_ips
+        else:
+            source, ips = "maks-alive", await asyncio.to_thread(fetch_maks_voice_ips, region)
+        random.shuffle(ips)
+        for ip in ips:
+            before = len(meta)
+            _add(ip, hostname=f"maks:{region}", source=source)
+            maks_seed += len(meta) - before
+
+    return list(meta.values())[:candidates], dns_seed, maks_seed
+
+
 async def discover_dns_alive(  # noqa: C901
     count: int = 5,
     *,
@@ -452,69 +518,9 @@ async def discover_dns_alive(  # noqa: C901
     """
     from blockchecks.checkers.udp_voice import voice_udp_probe
 
-    meta: dict[str, dict] = {}
-    dns_seed = 0
-    maks_seed = 0
-
-    def _add(ip: str, *, hostname: str, source: str, port: int | None = None) -> None:
-        if not ip or ip in meta:
-            return
-        meta[ip] = {
-            "ip": ip,
-            "port": port if port is not None else random.choice(VOICE_PORTS),
-            "hostname": hostname,
-            "source": source,
-        }
-
-    if use_cache:
-        cached = _load_cache()
-        if cached:
-            for ep in cached.get("endpoints", []):
-                ip = ep.get("ip", "")
-                if not ip:
-                    continue
-                _add(
-                    ip,
-                    hostname=ep.get("hostname", ""),
-                    source="cache-alive",
-                    port=ep.get("port"),
-                )
-
-    log.info(
-        "%s",
-        f"[voice-dns] Resolving finland{{{DNS_RANGE[0]}}}...discord.gg "
-        f"range {DNS_RANGE[0]}-{DNS_RANGE[1] - 1}...",
+    ordered, dns_seed, maks_seed = await _seed_voice_candidates(
+        use_cache=use_cache, use_maks=use_maks, region=region, candidates=candidates
     )
-    ip_map = await resolve_finland_range()
-    dns_ips = list(ip_map.keys())
-    random.shuffle(dns_ips)
-    for ip in dns_ips:
-        before = len(meta)
-        _add(ip, hostname=ip_map[ip][0], source="dns-alive")
-        if len(meta) > before:
-            dns_seed += 1
-
-    if use_maks:
-        # Region-specific endpoints (russia/frankfurt via domain list) first;
-        # fall back to the region IP list (or its global fallback).
-        region_ips = await asyncio.to_thread(fetch_maks_region_ips, region)
-        if region_ips:
-            random.shuffle(region_ips)
-            for ip in region_ips:
-                before = len(meta)
-                _add(ip, hostname=f"maks:{region}", source="maks-region")
-                if len(meta) > before:
-                    maks_seed += 1
-        else:
-            maks_ips = await asyncio.to_thread(fetch_maks_voice_ips, region)
-            random.shuffle(maks_ips)
-            for ip in maks_ips:
-                before = len(meta)
-                _add(ip, hostname=f"maks:{region}", source="maks-alive")
-                if len(meta) > before:
-                    maks_seed += 1
-
-    ordered = list(meta.values())[:candidates]
     if not ordered:
         log.info("[voice-dns] No DNS/Maks candidates to probe")
         return []

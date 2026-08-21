@@ -7,6 +7,7 @@ Covers the pure / DB-independent functions with mocked external deps
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -373,6 +374,21 @@ def test_resume_checkpoint_generate_skips_triage():
     assert gen.generate_udp.await_args.kwargs["triage"] is None
 
 
+def test_resume_tcp_results_generate_skips_triage():
+    triage = object()
+    args = _args(generate=True, config=None, user_matrix="", resume=True, triage=triage)
+    db = MagicMock()
+    db.latest_checkpoint = AsyncMock(return_value=None)
+    db.get_completed_tcp_keys = AsyncMock(return_value={("s", "d")})
+    gen = MagicMock()
+    gen.generate_tcp = AsyncMock(return_value=[MagicMock()])
+    gen.generate_udp = AsyncMock(return_value=[MagicMock()])
+    with patch("blockchecks.cli.commands.pair_phases.MatrixGenerator", return_value=gen):
+        res = asyncio.run(load_strategy_items(args, db))
+    assert res.error_code is None
+    assert gen.generate_tcp.await_args.kwargs["triage"] is None
+
+
 def test_load_strategy_items_tcp_only_skips_udp():
     args = _args(generate=True, config=None, user_matrix="", tcp_only=True)
     gen = MagicMock()
@@ -551,7 +567,7 @@ def test_run_standard_pair_phase_stop_event_breaks():
     runner.test_batch_tcp.assert_not_called()
 
 
-def test_run_adaptive_pair_phase():
+def test_run_adaptive_pair_phase(caplog):
     args = _args()
     runner = AsyncMock()
     aq_result = MagicMock()
@@ -563,6 +579,7 @@ def test_run_adaptive_pair_phase():
     m.fanout_enqueued = 2
     aq_result.metrics = m
     with (
+        caplog.at_level(logging.INFO),
         patch(
             "blockchecks.cli.commands.pair_phases.build_adaptive_queue",
             new=AsyncMock(return_value=([MagicMock()], 0)),
@@ -600,6 +617,8 @@ def test_run_adaptive_pair_phase():
             )
         )
     assert phase.tcp_passed == 3
+    assert "passed" in caplog.text
+    assert "backend=classic" in caplog.text
 
 
 # ── discover_voice_endpoints / register_stop_handlers / configs_dir ──

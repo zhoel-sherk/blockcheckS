@@ -292,6 +292,8 @@ async def run_adaptive_tcp(
     workers: int = 4,
 ) -> AdaptiveRunResult:
     """Run TCP jobs from *queue* until empty or stopped (AQ5)."""
+    backend = "lua_bridge" if lua_bridge else "classic"
+    log.info("%s", f"  AQ backend={backend}")
     if lua_bridge:
         return await run_adaptive_tcp_bridge(
             runner,
@@ -321,16 +323,7 @@ async def run_adaptive_tcp(
 
         item = batch[0].item
         doms = [j.domain for j in batch]
-
-        if len(doms) == 1:
-            results = [await runner.test_tcp(item, doms[0], timeout=timeout)]
-        else:
-            results = await runner.test_tcp_domains(
-                item,
-                doms,
-                timeout=timeout,
-                curl_parallel=len(doms),
-            )
+        results = await _classic_aq_probe(runner, item, doms, timeout)
 
         for job, result in zip(batch, results):
             ok = bool(result.success)
@@ -352,6 +345,16 @@ async def run_adaptive_tcp(
         passed=passed,
         metrics=queue.metrics,
         weights=queue.weights,
+    )
+
+
+async def _classic_aq_probe(runner, item, doms: list[str], timeout: float):
+    """One classic AQ pop: ProbeBatchService for a single domain, B2 otherwise."""
+    if len(doms) == 1:
+        return await runner._run_probe_batch([item], doms[0], timeout, "classic")
+    log.info("%s", f"  [AQ] backend=classic n={len(doms)}")
+    return await runner.test_tcp_domains(
+        item, doms, timeout=timeout, curl_parallel=len(doms)
     )
 
 

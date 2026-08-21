@@ -667,6 +667,7 @@ def test_tls_200_with_rtru_stub_fails():
 
 def test_small_fast_body_not_throttled_or_failed():
     """Handshake-dominated elapsed must not FAIL/THROTTLE a small 200."""
+
     class FakeCurl:
         def setopt(self, opt, value):
             pass

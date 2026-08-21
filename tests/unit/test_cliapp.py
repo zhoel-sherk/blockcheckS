@@ -126,6 +126,14 @@ def test_subcommand_models_have_no_cli_cmd():
 
 
 @pytest.mark.unit
+def test_scan_cliapp_adaptive_on_by_default():
+    Root = build_cli_root()
+    model = Root(_cli_parse_args=["scan", "--max", "1"])
+    sub = get_subcommand(model, is_required=True)
+    assert sub.no_adaptive is False
+
+
+@pytest.mark.unit
 def test_cli_dispatches_scan_handler_once():
     """VPS-2: CliApp.run must invoke scan handler exactly once."""
     from blockchecks.cli import cliapp as ca

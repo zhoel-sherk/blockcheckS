@@ -367,6 +367,9 @@ def main(argv: list[str] | None = None) -> int:
         help="With --ipset: use only the current host provider's dns.db",
     )
     args = p.parse_args(argv)
+    from blockchecks.engine.log import configure_logging
+
+    configure_logging()
 
     result = asyncio.run(
         export_configs(
