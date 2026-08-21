@@ -8,7 +8,7 @@ import logging
 import os
 import sys
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 import pydantic_core
 from pydantic import BaseModel, Field, create_model
@@ -69,6 +69,9 @@ _NO_PREFIX_FIELDS = frozenset(
 def _annotation_for_action(action: argparse.Action) -> Any:
     if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
         return bool
+    if (chs := action.choices) and all(isinstance(c, str) for c in chs):
+        lit = Literal.__getitem__(tuple(chs))
+        return lit | None if action.default is None and not action.required else lit
     if action.type is int:
         return int if action.required else (int | None if action.default is None else int)
     if action.type is float:

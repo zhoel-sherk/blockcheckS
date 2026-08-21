@@ -430,3 +430,21 @@ def test_print_validation_error_returns_2():
         rc = ca._print_validation_error(err)
     assert rc == 2
     assert "invalid arguments" in out.getvalue()
+
+
+@pytest.mark.unit
+def test_invalid_scan_level_rejected():
+    from pydantic import ValidationError
+
+    Root = build_cli_root()
+    with pytest.raises((SystemExit, ValidationError)):
+        Root(_cli_parse_args=["scan", "--scan-level", "nope", "-d", "x.com"])
+
+
+@pytest.mark.unit
+def test_invalid_profile_rejected():
+    from pydantic import ValidationError
+
+    Root = build_cli_root()
+    with pytest.raises((SystemExit, ValidationError)):
+        Root(_cli_parse_args=["scan", "--profile", "nope", "-d", "x.com"])
