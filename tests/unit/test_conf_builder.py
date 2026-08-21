@@ -9,8 +9,10 @@ import pytest
 from blockchecks.engine.conf_builder import (
     _ensure_strategy_n,
     _quote_multiline,
+    build_filter_lines,
     build_keenetic_conf,
     build_raw_conf,
+    filter_export_strategies,
     write_export_bundle,
     write_user_list,
 )
@@ -36,6 +38,18 @@ def _desync_values(conf: str) -> list[str]:
 def test_ensure_strategy_n():
     assert _ensure_strategy_n("fake:a", 1) == "fake:a:strategy=1"
     assert _ensure_strategy_n("fake:a:strategy=2", 1) == "fake:a:strategy=2"
+
+
+def test_build_filter_lines_udp_voice_and_game():
+    voice = "\n".join(build_filter_lines("udp_voice"))
+    assert "--filter-udp=50000-50100" in voice
+    assert "--filter-l7=discord,stun" in voice
+    assert "--qnum=201" in voice
+    game = "\n".join(build_filter_lines("udp_game"))
+    assert "--filter-udp=1024-65535" in game
+    tls = "\n".join(build_filter_lines("tls12"))
+    assert "--filter-tcp=443" in tls
+    assert "--filter-udp=" not in tls
 
 
 def test_quote_multiline():
@@ -392,6 +406,15 @@ def test_keenetic_skips_digit_blob_alias():
     )
     assert "blob=4pda" not in _working(conf)
     assert "blob=stun" in _working(conf)
+
+
+def test_filter_export_keeps_inline_hex_blobs():
+    assert filter_export_strategies(["syndata:blob=0x1603"]) == ["syndata:blob=0x1603"]
+    assert filter_export_strategies(["dupfake:blob=stun+max_ru:repeats=6"]) == [
+        "dupfake:blob=stun+max_ru:repeats=6"
+    ]
+    assert filter_export_strategies(["fake:blob=4pda"]) == []
+    assert filter_export_strategies(["fake:blob=bad-name"]) == []
 
 
 def test_raw_blobs_only_from_cores():

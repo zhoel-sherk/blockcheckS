@@ -97,6 +97,16 @@ class ConfigFileGenerator(StrategyGenerator):
         return items[:max_count]
 
 
+_UDP_SKIP_TCP_CLI = ("--filter-tcp", "--qnum=200")
+_UDP_SKIP_ON_TCP = (
+    "--filter-udp",
+    "--qnum=201",
+    "filter-udp",
+    "blob=discord_udp",
+    "discord_ip_discovery",
+)
+
+
 class UserMatrixGenerator(StrategyGenerator):
     """Load strategies from user-provided file (one per line).
 
@@ -132,24 +142,10 @@ class UserMatrixGenerator(StrategyGenerator):
             if not line or line.startswith("#") or line == "---":
                 continue
             strategy = line.replace("\\n", "\n")
-            if protocol != "udp_voice":
-                low = strategy.lower()
-                if any(
-                    kw in low
-                    for kw in (
-                        "--filter-udp",
-                        "--qnum=201",
-                        "filter-udp",
-                        "blob=discord_udp",
-                        "discord_ip_discovery",
-                    )
-                ):
-                    continue
-            if (
-                protocol == "udp_voice"
-                and "tcp" in strategy.lower()
-                and "udp" not in strategy.lower()
-            ):
+            low = strategy.lower()
+            if protocol != "udp_voice" and any(kw in low for kw in _UDP_SKIP_ON_TCP):
+                continue
+            if protocol == "udp_voice" and any(tok in low for tok in _UDP_SKIP_TCP_CLI):
                 continue
             label = strategy.split("\n", 1)[0].replace(" ", "_").replace(":", "_")
             items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))

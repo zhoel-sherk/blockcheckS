@@ -2,15 +2,50 @@
 
 from __future__ import annotations
 
-from blockchecks.engine.generators.families._helpers import _with_ack_drop, _with_send_md5
+from itertools import product
+
+from blockchecks.engine.generators.families._helpers import (
+    StrategyParams,
+    _fooling_clause,
+    _with_ack_drop,
+    _with_send_md5,
+    emit_rows,
+    expand_axes,
+    required_foolings,
+    ttl_companion_rows,
+)
 
 
 def _disorder_seqovl_ok(pos: str, seqovl: int) -> bool:
-    """Zapret2 cancels disorder seqovl when seqovl >= (numeric_pos - 1)."""
+    """Zapret2 cancels disorder seqovl when seqovl >= numeric_pos (1-based)."""
     head = pos.split(",", 1)[0].strip()
     if not head.isdigit():
         return True
-    return seqovl < int(head) - 1
+    return seqovl < int(head)
+
+
+def _ipfrag_opts(kind: str, pos: str, disorder: bool, nxt) -> str:
+    return "".join(
+        (
+            f"ipfrag_pos_{kind}={pos}",
+            ":ipfrag_disorder" if disorder else "",
+            f":ipfrag_next={nxt}" if nxt is not None else "",
+        )
+    )
+
+
+def _ipfrag_label(prefix: str, pos: str, disorder: bool, nxt) -> str:
+    return "".join(
+        (
+            f"{prefix}{pos}",
+            "_disorder" if disorder else "",
+            f"_next{nxt}" if nxt is not None else "",
+        )
+    )
+
+
+def _skip_null(blobs: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(b for b in blobs if b != "0x00000000")
 
 
 class SplitFamiliesMixin:
@@ -18,247 +53,273 @@ class SplitFamiliesMixin:
 
     def _fam_multisplit(self, items, seen, family, scan_level, _known_working):
         """Expand multisplit family."""
-        base_items: list[tuple[str, str, str]] = []
-        for pos in family["positions"]:
-            for seqovl in family["seqovl"]:
-                for fool in family["foolings"]:
-                    fool_str = f":{fool}" if fool else ""
-                    for blob_name in family["seqovl_blobs"]:
-                        if blob_name == "0x00000000":
-                            continue
-                        strat = (
-                            f"multisplit:pos={pos}:seqovl={seqovl}"
-                            f":seqovl_pattern={blob_name}{fool_str}"
-                        )
-                        label = f"std_split_{pos}_s{seqovl}_{blob_name}_{fool or 'nofool'}"
-                        self._add(items, seen, label, strat)
-                        if scan_level == "single":
-                            return items
-                        base_items.append((label, strat, fool))
+        p = StrategyParams.from_family(family, scan_level=scan_level)
+        blobs = _skip_null(p.seqovl_blobs)
 
-        if scan_level != "single":
-            for label, strat, _fool in base_items:
-                for ttl in family["ttl_static"]:
-                    self._add(items, seen, f"{label}_ttl{ttl}", f"{strat}:ip_ttl={ttl}")
-                for ttl in family["ttl_auto"]:
-                    self._add(
-                        items,
-                        seen,
-                        f"{label}_autottl{ttl}",
-                        f"{strat}:ip_autottl={ttl}",
-                    )
+        def _core(a: dict) -> tuple[str, str]:
+            pos, seqovl, fool, blob = a["pos"], a["seqovl"], a["fool"], a["blob"]
+            return (
+                f"std_split_{pos}_s{seqovl}_{blob}_{fool or 'nofool'}",
+                f"multisplit:pos={pos}:seqovl={seqovl}:seqovl_pattern={blob}{_fooling_clause(fool)}",
+            )
 
-        if family.get("padencap") and scan_level != "single":
-            for tmod in ("rnd,dupsid,padencap", "rnd,dupsid"):
-                strat = (
-                    f"fake:blob=google:repeats=6:tls_mod={tmod}\n"
-                    f"multisplit:pos=10,sniext+1:seqovl=1"
-                )
-                self._add(items, seen, f"std_seqovl_pad_{tmod[:12]}", strat)
+        cores = expand_axes(
+            {"pos": p.positions, "seqovl": p.seqovl, "fool": p.foolings, "blob": blobs},
+            _core,
+        )
+        if emit_rows(self._add, items, seen, scan_level, cores):
+            return items
+        ttl = [
+            row
+            for lab, st in cores
+            for row in ttl_companion_rows(lab, st, p.ttl_static, p.ttl_auto)
+        ]
+        emit_rows(self._add, items, seen, scan_level, ttl)
+        if family.get("padencap"):
+            emit_rows(
+                self._add,
+                items,
+                seen,
+                scan_level,
+                expand_axes(
+                    {"tmod": ("rnd,dupsid,padencap", "rnd,dupsid")},
+                    lambda a: (
+                        f"std_seqovl_pad_{a['tmod'][:12]}",
+                        (
+                            f"fake:blob=google:repeats=6:tls_mod={a['tmod']}\n"
+                            f"multisplit:pos=10,sniext+1:seqovl=1"
+                        ),
+                    ),
+                ),
+            )
         return items
 
     def _fam_multidisorder(self, items, seen, family, scan_level, _known_working):
         """Expand multidisorder family."""
-        for pos in family["positions"]:
-            for fool in family["foolings"]:
-                f = f":{fool}" if fool else ""
-                for blob_name in family["seqovl_blobs"]:
-                    strat = f"multidisorder:pos={pos}:seqovl_pattern={blob_name}{f}"
-                    label = f"std_mdis_{pos}_{blob_name}_{fool or 'nofool'}"
-                    self._add(items, seen, label, strat)
-                    if scan_level == "single":
-                        return items
-                    for seqovl in family["seqovl"]:
-                        if not _disorder_seqovl_ok(pos, seqovl):
-                            continue
-                        strat = (
-                            f"multidisorder:pos={pos}:seqovl={seqovl}:seqovl_pattern={blob_name}{f}"
-                        )
-                        label = f"std_mdis_{pos}_s{seqovl}_{blob_name}_{fool or 'nofool'}"
-                        self._add(items, seen, label, strat)
-                        if scan_level == "single":
-                            return items
+        p = StrategyParams.from_family(family, scan_level=scan_level)
+
+        def _bare(a: dict) -> tuple[str, str]:
+            pos, fool, blob = a["pos"], a["fool"], a["blob"]
+            return (
+                f"std_mdis_{pos}_{blob}_{fool or 'nofool'}",
+                f"multidisorder:pos={pos}:seqovl_pattern={blob}{_fooling_clause(fool)}",
+            )
+
+        if emit_rows(
+            self._add,
+            items,
+            seen,
+            scan_level,
+            expand_axes({"pos": p.positions, "fool": p.foolings, "blob": p.seqovl_blobs}, _bare),
+        ):
+            return items
+        seqovl_rows = [
+            (
+                f"std_mdis_{pos}_s{seqovl}_{blob}_{fool or 'nofool'}",
+                (
+                    f"multidisorder:pos={pos}:seqovl={seqovl}"
+                    f":seqovl_pattern={blob}{_fooling_clause(fool)}"
+                ),
+            )
+            for pos, fool, blob, seqovl in product(
+                p.positions, p.foolings, p.seqovl_blobs, p.seqovl
+            )
+            if _disorder_seqovl_ok(pos, seqovl)
+        ]
+        emit_rows(self._add, items, seen, scan_level, seqovl_rows)
         return items
 
     def _fam_fakedsplit(self, items, seen, family, scan_level, _known_working):
         """Expand fakedsplit family."""
-        for pos in family["positions"]:
-            for blob_name in family["pattern_blobs"]:
-                if blob_name == "0x00000000":
-                    continue
-                for fool in family["foolings"]:
-                    f = f":{fool}" if fool else ""
-                    for r in family["repeats"]:
-                        strat = f"fakedsplit:pos={pos}:pattern={blob_name}{f}:repeats={r}"
-                        label = f"std_fds_p{pos}_{blob_name}_r{r}_{fool or 'nofool'}"
-                        self._add(items, seen, label, strat)
-                        if scan_level == "single":
-                            return items
-                        if family.get("ack_drop") and fool in ("", "tcp_ts=-1000") and r == 6:
-                            self._add(items, seen, f"{label}_ackdrop", _with_ack_drop(strat))
-                        if family.get("send_md5") and "tcp_md5" in (fool or "") and r == 6:
-                            self._add(items, seen, f"{label}_sendmd5", _with_send_md5(strat))
-        return items
+        return self._fam_faked_core(items, seen, family, scan_level, "fakedsplit", "std_fds")
 
     def _fam_fakeddisorder(self, items, seen, family, scan_level, _known_working):
         """Expand fakeddisorder family."""
-        for pos in family["positions"]:
-            for blob_name in family["pattern_blobs"]:
-                if blob_name == "0x00000000":
-                    continue
-                for fool in family["foolings"]:
-                    f = f":{fool}" if fool else ""
-                    for r in family["repeats"]:
-                        strat = f"fakeddisorder:pos={pos}:pattern={blob_name}{f}:repeats={r}"
-                        label = f"std_fdd_p{pos}_{blob_name}_r{r}_{fool or 'nofool'}"
-                        self._add(items, seen, label, strat)
-                        if scan_level == "single":
-                            return items
-                        if family.get("ack_drop") and fool in ("", "tcp_ts=-1000") and r == 6:
-                            self._add(items, seen, f"{label}_ackdrop", _with_ack_drop(strat))
-                        if family.get("send_md5") and "tcp_md5" in (fool or "") and r == 6:
-                            self._add(items, seen, f"{label}_sendmd5", _with_send_md5(strat))
+        return self._fam_faked_core(items, seen, family, scan_level, "fakeddisorder", "std_fdd")
+
+    def _fam_faked_core(self, items, seen, family, scan_level, fn: str, prefix: str):
+        p = StrategyParams.from_family(
+            family,
+            scan_level=scan_level,
+            foolings=required_foolings(family.get("foolings", ())),
+        )
+        blobs = _skip_null(p.pattern_blobs)
+
+        def _core(a: dict) -> tuple[str, str]:
+            pos, blob, fool, r = a["pos"], a["blob"], a["fool"], a["r"]
+            return (
+                f"{prefix}_p{pos}_{blob}_r{r}_{fool or 'nofool'}",
+                f"{fn}:pos={pos}:pattern={blob}{_fooling_clause(fool)}:repeats={r}",
+            )
+
+        cores = expand_axes(
+            {"pos": p.positions, "blob": blobs, "fool": p.foolings, "r": p.repeats},
+            _core,
+        )
+        if emit_rows(self._add, items, seen, scan_level, cores):
+            return items
+        combos = list(product(p.positions, blobs, p.foolings, p.repeats))
+        ack = [
+            (f"{lab}_ackdrop", _with_ack_drop(st))
+            for (lab, st), (_pos, _blob, fool, r) in zip(cores, combos, strict=True)
+            if p.ack_drop and fool == "tcp_ts=-1000" and r == 6
+        ]
+        md5 = [
+            (f"{lab}_sendmd5", _with_send_md5(st))
+            for (lab, st), (_pos, _blob, fool, r) in zip(cores, combos, strict=True)
+            if p.send_md5 and "tcp_md5" in fool and r == 6
+        ]
+        emit_rows(self._add, items, seen, scan_level, ack + md5)
         return items
 
     def _fam_fake_multisplit(self, items, seen, family, scan_level, _known_working):
         """Expand fake_multisplit family."""
-        for fake_blob, pattern_blob in family["blob_pairs"]:
-            if fake_blob == pattern_blob:
-                continue
-            for pos in family["positions"]:
-                for seqovl in family["seqovl"]:
-                    for r in family["repeats"]:
-                        for fool in family["foolings"]:
-                            f = f":{fool}" if fool else ""
-                            fake_line = f"fake:blob={fake_blob}:repeats={r}{f}"
-                            split_line = (
-                                f"multisplit:pos={pos}:seqovl={seqovl}"
-                                f":seqovl_pattern={pattern_blob}{f}"
-                            )
-                            strat = f"{fake_line}\n{split_line}"
-                            label = (
-                                f"std_fms_{fake_blob}+{pattern_blob}_p{pos}_"
-                                f"s{seqovl}_r{r}_{fool or 'nofool'}"
-                            )
-                            self._add(items, seen, label, strat)
-                            if scan_level == "single":
-                                return items
+        p = StrategyParams.from_family(family, scan_level=scan_level)
+        pairs = tuple(pair for pair in p.blob_pairs if pair[0] != pair[1])
+        rows = expand_axes(
+            {
+                "pair": pairs,
+                "pos": p.positions,
+                "seqovl": p.seqovl,
+                "r": p.repeats,
+                "fool": p.foolings,
+            },
+            lambda a: (
+                (
+                    f"std_fms_{a['pair'][0]}+{a['pair'][1]}_p{a['pos']}_"
+                    f"s{a['seqovl']}_r{a['r']}_{a['fool'] or 'nofool'}"
+                ),
+                (
+                    f"fake:blob={a['pair'][0]}:repeats={a['r']}{_fooling_clause(a['fool'])}\n"
+                    f"multisplit:pos={a['pos']}:seqovl={a['seqovl']}"
+                    f":seqovl_pattern={a['pair'][1]}{_fooling_clause(a['fool'])}"
+                ),
+            ),
+        )
+        emit_rows(self._add, items, seen, scan_level, rows)
         return items
 
     def _fam_fake_multisplit_hostfake(self, items, seen, family, scan_level, _known_working):
         """Expand fake_multisplit_hostfake family."""
-        for fake_blob, pattern_blob in family["blob_pairs"]:
-            if fake_blob == pattern_blob:
-                continue
-            for pos in family["positions"]:
-                for seqovl in family["seqovl"]:
-                    for r in family["repeats"]:
-                        for fool in family["foolings"]:
-                            f = f":{fool}" if fool else ""
-                            for host in family["hf_hosts"]:
-                                strat = (
-                                    f"fake:blob={fake_blob}:repeats={r}{f}\n"
-                                    f"multisplit:pos={pos}:seqovl={seqovl}"
-                                    f":seqovl_pattern={pattern_blob}{f}\n"
-                                    f"hostfakesplit:host={host}:nofake2{f}:repeats=1"
-                                )
-                                label = (
-                                    f"std_fmsh_{fake_blob}+{pattern_blob}_p{pos}_"
-                                    f"s{seqovl}_h{host.split('.')[0]}_r{r}_{fool or 'nofool'}"
-                                )
-                                self._add(items, seen, label, strat)
-                                if scan_level == "single":
-                                    return items
+        p = StrategyParams.from_family(
+            family,
+            scan_level=scan_level,
+            foolings=required_foolings(family.get("foolings", ())),
+        )
+        pairs = tuple(pair for pair in p.blob_pairs if pair[0] != pair[1])
+        rows = expand_axes(
+            {
+                "pair": pairs,
+                "pos": p.positions,
+                "seqovl": p.seqovl,
+                "r": p.repeats,
+                "fool": p.foolings,
+                "host": p.hf_hosts,
+            },
+            lambda a: (
+                (
+                    f"std_fmsh_{a['pair'][0]}+{a['pair'][1]}_p{a['pos']}_"
+                    f"s{a['seqovl']}_h{a['host'].split('.')[0]}_r{a['r']}_{a['fool'] or 'nofool'}"
+                ),
+                (
+                    f"fake:blob={a['pair'][0]}:repeats={a['r']}{_fooling_clause(a['fool'])}\n"
+                    f"multisplit:pos={a['pos']}:seqovl={a['seqovl']}"
+                    f":seqovl_pattern={a['pair'][1]}{_fooling_clause(a['fool'])}\n"
+                    f"hostfakesplit:host={a['host']}:nofake2{_fooling_clause(a['fool'])}:repeats=1"
+                ),
+            ),
+        )
+        emit_rows(self._add, items, seen, scan_level, rows)
         return items
 
     def _fam_fake_fakedsplit(self, items, seen, family, scan_level, _known_working):
         """Expand fake_fakedsplit family."""
-        for blob_name in family["blobs"]:
-            for pattern_blob in family["pattern_blobs"]:
-                for pos in family["positions"]:
-                    for r in family["repeats"]:
-                        for fool in family["foolings"]:
-                            f = f":{fool}" if fool else ""
-                            strat = (
-                                f"fake:blob={blob_name}:repeats={r}{f}\n"
-                                f"fakedsplit:pos={pos}:pattern={pattern_blob}{f}"
-                            )
-                            label = (
-                                f"std_ffds_{blob_name}+{pattern_blob}_p{pos}_"
-                                f"r{r}_{fool or 'nofool'}"
-                            )
-                            self._add(items, seen, label, strat)
-                            if scan_level == "single":
-                                return items
+        p = StrategyParams.from_family(
+            family,
+            scan_level=scan_level,
+            foolings=required_foolings(family.get("foolings", ())),
+        )
+        rows = expand_axes(
+            {
+                "blob": p.blobs,
+                "pattern": p.pattern_blobs,
+                "pos": p.positions,
+                "r": p.repeats,
+                "fool": p.foolings,
+            },
+            lambda a: (
+                (
+                    f"std_ffds_{a['blob']}+{a['pattern']}_p{a['pos']}_"
+                    f"r{a['r']}_{a['fool'] or 'nofool'}"
+                ),
+                (
+                    f"fake:blob={a['blob']}:repeats={a['r']}{_fooling_clause(a['fool'])}\n"
+                    f"fakedsplit:pos={a['pos']}:pattern={a['pattern']}{_fooling_clause(a['fool'])}"
+                ),
+            ),
+        )
+        emit_rows(self._add, items, seen, scan_level, rows)
         return items
 
     def _fam_tcp_ipfrag(self, items, seen, family, scan_level, _known_working):
         """Expand tcp_ipfrag family."""
-        for pos in family["positions"]:
-            for disorder in family.get("disorder", [False]):
-                for nxt in family.get("ipfrag_next", [None]):
-                    opts = f"ipfrag_pos_tcp={pos}"
-                    if disorder:
-                        opts += ":ipfrag_disorder"
-                    if nxt is not None:
-                        opts += f":ipfrag_next={nxt}"
-                    strat = f"send:ipfrag:{opts}\ndrop"
-                    label = f"std_tcp_ipfrag_pos{pos}"
-                    if disorder:
-                        label += "_disorder"
-                    if nxt is not None:
-                        label += f"_next{nxt}"
-                    self._add(items, seen, label, strat)
-                    if scan_level == "single":
-                        return items
-        for pos in family["positions"]:
-            for blob_name in family.get("combo_blobs", [""]):
-                if not blob_name:
-                    continue
-                for r in family["repeats"]:
-                    for disorder in family.get("disorder", [False])[:1]:
-                        opts = f"ipfrag_pos_tcp={pos}"
-                        if disorder:
-                            opts += ":ipfrag_disorder"
-                        strat = f"fake:blob={blob_name}:repeats={r}\nsend:ipfrag:{opts}\ndrop"
-                        label = f"std_tcp_fake_ipfrag_{blob_name}_r{r}_pos{pos}"
-                        if disorder:
-                            label += "_disorder"
-                        self._add(items, seen, label, strat)
-                        if scan_level == "single":
-                            return items
-        return items
+        return self._fam_ipfrag(items, seen, family, scan_level, kind="tcp", proto="tls12")
 
     def _fam_quic_ipfrag(self, items, seen, family, scan_level, _known_working):
         """Expand quic_ipfrag family."""
-        for pos in family["positions"]:
-            for disorder in family.get("disorder", [False]):
-                for nxt in family.get("ipfrag_next", [None]):
-                    opts = f"ipfrag_pos_udp={pos}"
-                    if disorder:
-                        opts += ":ipfrag_disorder"
-                    if nxt is not None:
-                        opts += f":ipfrag_next={nxt}"
-                    strat = f"send:ipfrag:{opts}\ndrop"
-                    label = f"std_quic_ipfrag_pos{pos}"
-                    if disorder:
-                        label += "_disorder"
-                    if nxt is not None:
-                        label += f"_next{nxt}"
-                    self._add(items, seen, label, strat, protocol="quic")
-                    if scan_level == "single":
-                        return items
-        for pos in family["positions"]:
-            for r in family["repeats"]:
-                for disorder in family.get("disorder", [False])[:1]:
-                    opts = f"ipfrag_pos_udp={pos}"
-                    if disorder:
-                        opts += ":ipfrag_disorder"
-                    strat = f"fake:blob=fake_default_quic:repeats={r}\nsend:ipfrag:{opts}\ndrop"
-                    label = f"std_quic_fake_ipfrag_r{r}_pos{pos}"
-                    if disorder:
-                        label += "_disorder"
-                    self._add(items, seen, label, strat, protocol="quic")
-                    if scan_level == "single":
-                        return items
+        return self._fam_ipfrag(items, seen, family, scan_level, kind="udp", proto="quic")
+
+    def _fam_ipfrag(self, items, seen, family, scan_level, *, kind: str, proto: str):
+        p = StrategyParams.from_family(family, scan_level=scan_level)
+        disorder = tuple(family.get("disorder", [False]))
+        nxts = tuple(family.get("ipfrag_next", [None]))
+        prefix = f"std_{'tcp' if kind == 'tcp' else 'quic'}_ipfrag_pos"
+        combo_blobs = tuple(b for b in family.get("combo_blobs", ("",)) if b)
+        if kind == "udp":
+            combo_blobs = combo_blobs or ("fake_default_quic",)
+
+        def _bare(a: dict) -> tuple[str, str]:
+            pos, dis, nxt = a["pos"], a["disorder"], a["nxt"]
+            opts = _ipfrag_opts(kind, pos, dis, nxt)
+            return (
+                _ipfrag_label(prefix, pos, dis, nxt),
+                f"send:ipfrag:{opts}\ndrop",
+            )
+
+        if emit_rows(
+            self._add,
+            items,
+            seen,
+            scan_level,
+            expand_axes({"pos": p.positions, "disorder": disorder, "nxt": nxts}, _bare),
+            protocol=proto,
+        ):
+            return items
+
+        def _combo(a: dict) -> tuple[str, str]:
+            pos, blob, r, dis = a["pos"], a["blob"], a["r"], a["disorder"]
+            opts = _ipfrag_opts(kind, pos, dis, None)
+            tag = f"std_{'tcp' if kind == 'tcp' else 'quic'}_fake_ipfrag"
+            mid = f"_{blob}" if kind == "tcp" else ""
+            return (
+                _ipfrag_label(f"{tag}{mid}_r{r}_pos", pos, dis, None),
+                f"fake:blob={blob}:repeats={r}\nsend:ipfrag:{opts}\ndrop",
+            )
+
+        emit_rows(
+            self._add,
+            items,
+            seen,
+            scan_level,
+            expand_axes(
+                {
+                    "pos": p.positions,
+                    "blob": combo_blobs,
+                    "r": p.repeats,
+                    "disorder": disorder[:1],
+                },
+                _combo,
+            ),
+            protocol=proto,
+        )
         return items

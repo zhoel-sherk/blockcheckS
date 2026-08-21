@@ -163,7 +163,7 @@ ON by default — explicit `--adaptive` is only needed to cancel a prior
 
 Цель Discord-voice: `finland*.discord.gg` → GCP `35.217.*` UDP `50000–50100` (листы Maks-gaming). Проба — RFC5389 STUN, затем Discord IP Discovery 74B. `finland*.discord.media` — это TLS voice WS (Cloudflare), не этот пул.
 
-`udp_quic` / `udp_multiblob` живут в фазе HTTP/3 (`standard_quic`). Игровой UDP: `--udp-sources game` (`standard_udp_game`), не в Discord-дефолте.
+`udp_multiblob` живёт в Discord/UDP voice пуле (`standard_udp` / `udp_voice`). `udp_quic` остаётся в HTTP/3 (`standard_quic`). Игровой UDP: `--udp-sources game` (`standard_udp_game`), не в Discord-дефолте.
 
 `bs udp` на хосте и `bs pair` в netns — разные стеки (один nfqws2 vs TCP q200 + UDP q201 coexist). PASS на хосте не гарантирует PASS в паре.
 

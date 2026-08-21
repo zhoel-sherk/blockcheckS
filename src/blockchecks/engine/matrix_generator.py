@@ -55,6 +55,20 @@ def _dedupe(items: list[StrategyItem], max_count: int) -> list[StrategyItem]:
     return out[:max_count]
 
 
+def _finalize_generated(
+    items: list[StrategyItem],
+    max_count: int,
+    triage: TriageProfile | None,
+    scan_level: str,
+    *,
+    user_matrix: str = "",
+) -> list[StrategyItem]:
+    deduped = _dedupe(items, max_count)
+    if user_matrix:
+        return deduped
+    return prune_items_by_triage(deduped, triage, scan_level=scan_level)
+
+
 class MatrixGenerator:
     """Orchestrates multiple strategy sources with SCANLEVEL + state.db."""
 
@@ -129,7 +143,9 @@ class MatrixGenerator:
             log.info("%s", f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
-        return prune_items_by_triage(_dedupe(all_items, max_count), triage, scan_level=scan_level)
+        return _finalize_generated(
+            all_items, max_count, triage, scan_level, user_matrix=user_matrix
+        )
 
     async def generate_http(
         self,
@@ -211,7 +227,9 @@ class MatrixGenerator:
         for item in all_items:
             if item.protocol != "udp_voice":
                 item.protocol = "udp_voice"
-        return prune_items_by_triage(_dedupe(all_items, max_count), triage, scan_level=scan_level)
+        return _finalize_generated(
+            all_items, max_count, triage, scan_level, user_matrix=user_matrix
+        )
 
     async def generate_quic(
         self,
@@ -258,7 +276,9 @@ class MatrixGenerator:
         for item in all_items:
             if item.protocol != "quic":
                 item.protocol = "quic"
-        return prune_items_by_triage(_dedupe(all_items, max_count), triage, scan_level=scan_level)
+        return _finalize_generated(
+            all_items, max_count, triage, scan_level, user_matrix=user_matrix
+        )
 
     async def generate_pairs(
         self,

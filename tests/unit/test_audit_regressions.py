@@ -270,7 +270,6 @@ def test_nfqws2_daemon_unlinks_temp_conf(tmp_path, monkeypatch):
         for part in cmd:
             if isinstance(part, str) and part.startswith("@") and "bs_nfq_" in part:
                 seen.append(part[1:])
-        return None
 
     monkeypatch.setattr(nfq.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(nfq.subprocess, "run", lambda *a, **k: None)
@@ -340,7 +339,8 @@ async def test_standard_udp_excludes_tcp_fakes():
     )
     assert items
     for it in items:
-        assert "quic_initial" not in it.strategy
+        assert it.protocol == "udp_voice"
+        assert "hostfakesplit" not in it.strategy
         assert "discord_udp" in it.strategy or "blob=stun" in it.strategy
 
 
@@ -484,10 +484,12 @@ async def test_http_tls_dual_m6():
 @pytest.mark.asyncio
 async def test_udp_multiblob_m7():
     gen = StandardGenerator(strategy_types=["udp_multiblob"])
-    items = await gen.generate("quic", scan_level="single", max_count=10)
+    items = await gen.generate("udp_voice", scan_level="single", max_count=10)
     assert items
-    assert "--filter-udp=" in items[0].strategy
+    assert items[0].protocol == "udp_voice"
+    assert items[0].strategy.count("fake:blob=") == 2
     assert "discord" in items[0].strategy.lower()
+    assert "--filter-udp=" not in items[0].strategy
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,7 @@ from blockchecks.engine.config import (
     LUA_CUSTOM_DIR,
     NFQUEUE_TCP,
     NFQUEUE_UDP,
+    VOICE_UDP_FILTER,
     get_lua_init_scripts,
 )
 
@@ -43,6 +44,8 @@ DEFAULT_UDP_PORTS = "443,590:600,1400,3478:3481,5349,19294:19344,49152:65535"
 STOCK_LUA_NAMES = ("zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua")
 _STRATEGY_N_RE = re.compile(r":strategy=\d+\s*$")
 _LUA_FN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_HEX_BLOB_RE = re.compile(r"^0x[0-9a-fA-F]+$")
+_BLOB_EXPORT_RE = re.compile(r"(?:blob|pattern|seqovl_pattern)=([^\s:]+)")
 DEFAULT_UDP_L7 = "wireguard,stun,discord,mtproto,unknown"
 DEFAULT_UDP_PAYLOAD = (
     "wireguard_initiation,wireguard_response,wireguard_cookie,"
@@ -199,6 +202,11 @@ def core_ttl_ok(core: str) -> bool:
     return all(0 <= int(m.group(1)) <= 255 for m in _TTL_PARAM_RE.finditer(core))
 
 
+def _blob_export_ok(n: str) -> bool:
+    """Lua identifier, inline hex (`0x1603`), or `+`-joined compounds (`stun+max_ru`)."""
+    return all(_LUA_FN_RE.match(p) or _HEX_BLOB_RE.match(p) for p in n.split("+") if p)
+
+
 def filter_export_strategies(strategies: list[str]) -> list[str]:
     """Drop unreadable / path-only rows and cores with TTL outside 0–255."""
     return [s for s in strategies if _keep_export_strategy(s)]
@@ -212,8 +220,8 @@ def _keep_export_strategy(strat: str) -> bool:
     if any(not core_ttl_ok(c) for c in cores):
         log.warning("export: skip strategy with ip_ttl/ip6_ttl outside 0-255: %r", strat[:80])
         return False
-    blobs = extract_blob_names(*cores)
-    bad = [n for n in blobs if not _LUA_FN_RE.match(n)]
+    blobs = [m.group(1) for c in cores for m in _BLOB_EXPORT_RE.finditer(c)]
+    bad = [n for n in blobs if not _blob_export_ok(n)]
     if bad:
         log.warning("export: skip strategy with non-lua blob name %s: %r", bad, strat[:80])
         return False
@@ -335,9 +343,9 @@ def add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
 
 
 def build_filter_lines(protocol: str) -> list[str]:
-    """Shared nfqws2 filter/payload lines for a protocol (tls|http|quic)."""
-    if protocol == "http":
-        return [
+    """Shared nfqws2 filter/payload lines for a protocol (tls|http|quic|udp)."""
+    by_proto = {
+        "http": [
             f"--qnum={NFQUEUE_TCP}",
             "--filter-tcp=80",
             "--filter-l3=ipv4",
@@ -345,9 +353,8 @@ def build_filter_lines(protocol: str) -> list[str]:
             "--ipcache-lifetime=0",
             "--bind-fix4",
             "--payload=http_req",
-        ]
-    if protocol == "quic":
-        return [
+        ],
+        "quic": [
             f"--qnum={NFQUEUE_UDP}",
             "--filter-udp=443",
             "--filter-l3=ipv4",
@@ -355,16 +362,40 @@ def build_filter_lines(protocol: str) -> list[str]:
             "--ipcache-lifetime=0",
             "--bind-fix4",
             "--payload=quic_initial",
-        ]
-    return [
-        f"--qnum={NFQUEUE_TCP}",
-        "--filter-tcp=443",
-        "--filter-l3=ipv4",
-        "--filter-l7=tls",
-        "--ipcache-lifetime=0",
-        "--bind-fix4",
-        "--payload=tls_client_hello",
-    ]
+        ],
+        "udp_voice": [
+            f"--qnum={NFQUEUE_UDP}",
+            f"--filter-udp={VOICE_UDP_FILTER}",
+            "--filter-l3=ipv4",
+            "--filter-l7=discord,stun",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+            "--payload=discord_ip_discovery,stun,unknown",
+        ],
+        "udp_game": [
+            f"--qnum={NFQUEUE_UDP}",
+            "--filter-udp=1024-65535",
+            "--filter-l3=ipv4",
+            f"--filter-l7={DEFAULT_UDP_L7}",
+            "--ipcache-lifetime=0",
+            "--bind-fix4",
+            "--payload=unknown",
+        ],
+    }
+    return list(
+        by_proto.get(
+            protocol,
+            [
+                f"--qnum={NFQUEUE_TCP}",
+                "--filter-tcp=443",
+                "--filter-l3=ipv4",
+                "--filter-l7=tls",
+                "--ipcache-lifetime=0",
+                "--bind-fix4",
+                "--payload=tls_client_hello",
+            ],
+        )
+    )
 
 
 def _ensure_strategy_n(strategy: str, n: int) -> str:

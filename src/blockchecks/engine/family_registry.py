@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -12,6 +13,8 @@ from blockchecks.engine.generators.families._helpers import _static_numeric_spli
 
 if TYPE_CHECKING:
     from blockchecks.engine.triage import TriageProfile
+
+log = logging.getLogger(__name__)
 
 DEFAULT_FAMILIES: tuple[str, ...] = ("fake", "hostfake", "fakedsplit", "multisplit")
 
@@ -88,7 +91,9 @@ def strategy_fooling_keys(strategy: str) -> set[str]:
     return set(_FOOL_TOKEN_RE.findall(strategy))
 
 
-def filter_fooling_values(fools: list[str] | tuple[str, ...], profile: TriageProfile | None) -> list[str]:
+def filter_fooling_values(
+    fools: list[str] | tuple[str, ...], profile: TriageProfile | None
+) -> list[str]:
     """Drop fooling axis values the viability grid proved dead."""
     dead = set(dead_fooling_tokens(profile))
     if not dead:
@@ -152,6 +157,8 @@ def prune_items_by_triage(
     if profile is None:
         return items
     if not profile.bypassable:
+        if items:
+            log.info("  pruned %s→0 (reason=unbypassable_l3)", len(items))
         return []
     dead = set(dead_fooling_tokens(profile))
     full = scan_level == "full"
@@ -159,7 +166,12 @@ def prune_items_by_triage(
     server = None if full else profile.server_hops
     contextual = profile.prefer_contextual_split
     split_mode = "" if full else profile.split_mode
-    return [it for it in items if _item_survives(it, profile, dead, dpi, server, contextual, split_mode)]
+    kept = [
+        it for it in items if _item_survives(it, profile, dead, dpi, server, contextual, split_mode)
+    ]
+    if len(kept) != len(items):
+        log.info("  pruned %s→%s (reason=fooling|blob)", len(items), len(kept))
+    return kept
 
 
 def _item_survives(

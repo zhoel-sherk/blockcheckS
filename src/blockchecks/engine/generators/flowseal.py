@@ -1,5 +1,5 @@
 """Expand Flowseal desync patterns into nfqws2 lua-desync strategies.
-Callers cap volume with max_count. Fooling map: ts to tcp_ts=-1000, badseq to badsid, md5sig to tcp_md5.
+Callers cap volume with max_count. Fooling map: ts to tcp_ts=-1000, badseq to tcp_seq, md5sig to tcp_md5.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
 from blockchecks.engine.store import RunStateStore
 
 REPEATS = [3, 4, 6, 8, 11, 12]
-FOOLINGS = ["tcp_ts=-1000", "tcp_md5", "badsid"]
+FOOLINGS = ["tcp_ts=-1000", "tcp_md5", "tcp_seq"]
 FOOLINGS_TS_MD5 = ["tcp_ts=-1000", "tcp_md5", "tcp_ts=-1000:tcp_md5"]
 SPLIT_POS = [1, 2, "midsld", "sniext+1", "1,midsld", "2,sniext+1"]
 SEQOVL = [480, 568, 652, 664, 679, 681]
@@ -197,7 +197,7 @@ class FlowsealGenerator(StrategyGenerator):
                         continue
                     for b3 in blobs[j + 1 :]:
                         for r in (6, 4, 8):
-                            for fool in self._fools(["tcp_ts=-1000", "badsid"]):
+                            for fool in self._fools(["tcp_ts=-1000", "tcp_seq"]):
                                 yield (
                                     f"flw_triple_{b1}+{b2}+{b3}_r{r}_{fool}",
                                     (
@@ -217,7 +217,7 @@ class FlowsealGenerator(StrategyGenerator):
                     )
                     for blob in blobs[:4]:
                         for r in (6, 8, 4):
-                            for fool in self._fools(["tcp_ts=-1000", "badsid"]):
+                            for fool in self._fools(["tcp_ts=-1000", "tcp_seq"]):
                                 yield (
                                     f"flw_fake_split_{blob}_r{r}_p{pos}_s{seqovl}_{pat}_{fool}",
                                     (
@@ -269,7 +269,7 @@ class FlowsealGenerator(StrategyGenerator):
 
     def _expand_multidisorder(self, blobs: list[str]) -> Iterator[tuple[str, str]]:
         for pos in ("1", "midsld", "1,midsld"):
-            for fool in self._fools(["badsid", "tcp_ts=-1000"]):
+            for fool in self._fools(["tcp_seq", "tcp_ts=-1000"]):
                 for sni in SNI_LIST:
                     for r in (11, 8, 6):
                         for blob in ("0x00000000", *blobs[:2]):

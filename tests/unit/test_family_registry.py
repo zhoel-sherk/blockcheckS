@@ -81,6 +81,12 @@ def test_prune_unbypassable_empties():
     assert prune_items_by_triage(items, TriageProfile(unbypassable_l3=True)) == []
 
 
+def test_prune_partial_blobs_drops_stun():
+    items = [StrategyItem(label="stun", strategy="fake:blob=stun:repeats=6:tcp_ts=-1000")]
+    profile = TriageProfile(viable_foolings=["tcp_ts=-1000"], viable_blobs=["tls_clienthello"])
+    assert prune_items_by_triage(items, profile) == []
+
+
 def test_filter_fooling_values_drops_badsum():
     from blockchecks.engine.family_registry import filter_fooling_values
 

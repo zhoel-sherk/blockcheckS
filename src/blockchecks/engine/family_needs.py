@@ -13,9 +13,9 @@ FAMILY_RANK = {name: idx for idx, name in enumerate(TCP_FAMILIES)}
 
 LABEL_PREFIXES: dict[str, tuple[str, ...]] = {
     "fake": ("std_fake_", "fake_"),
-    "hostfake": ("std_hostfake_", "hostfake_"),
-    "multisplit": ("std_multisplit_", "multisplit_"),
-    "syndata": ("std_syndata_",),
+    "hostfake": ("std_hf_", "std_hostfake_", "hostfake_"),
+    "multisplit": ("std_split_", "std_multisplit_", "multisplit_"),
+    "syndata": ("std_syn_", "std_syndata_"),
     "tcpseg": ("std_tcpseg_",),
     "oob": ("std_oob_",),
     "multi_fake": ("std_multi_fake_", "std_multi_", "fake_multi_"),
@@ -27,6 +27,11 @@ LABEL_PREFIXES: dict[str, tuple[str, ...]] = {
     "fakeddisorder": ("std_fdd_", "fakeddisorder_"),
     "fake_fakedsplit": ("std_ffds_", "fake_fakedsplit_"),
     "fake_hostfake": ("std_fake_hostfake_", "std_fh_", "fake_hostfake_"),
+    "tcp_ipfrag": ("std_tcp_fake_ipfrag_", "std_tcp_ipfrag_"),
+    "rst_fake": ("std_rst_",),
+    "synack": ("std_synack",),
+    "wssize": ("std_wssize",),
+    "geneva_fool": ("std_gva_",),
 }
 
 
@@ -44,13 +49,18 @@ def map_triage_to_generators(profile) -> list[str]:
 def classify_strategy_family(item: StrategyItem) -> str:
     """Map a strategy item to a standard family name (or 'other')."""
     label = item.label.lower()
-    for family in sorted(
-        LABEL_PREFIXES.keys(),
-        key=lambda name: max(len(p) for p in LABEL_PREFIXES[name]),
+    hits = sorted(
+        (
+            (prefix, family)
+            for family, prefixes in LABEL_PREFIXES.items()
+            for prefix in prefixes
+            if label.startswith(prefix)
+        ),
+        key=lambda pair: len(pair[0]),
         reverse=True,
-    ):
-        if any(label.startswith(p) for p in LABEL_PREFIXES[family]):
-            return family
+    )
+    if hits:
+        return hits[0][1]
 
     strat = item.strategy.lower()
     if "hostfakesplit" in strat:

@@ -23,10 +23,8 @@ lua/
 - `write_ipc.lua` — атомарная запись событий + чтение `strategy.id` / `strategy.gen`.
 - `init.lua` — таймерный фолбэк для случаев, когда ClientHello не проходит
   через nfqws2 (порт/протокол вне фильтра).
-- `geneva.lua` — custom `fool=bs_*` функции (Geneva-атаки). **Не** входит в
-  дефолтную `--lua-init` цепочку; подключается только через
-  `BLOCKCHECKS_LUA_EXTRA=.../geneva.lua` (variant B long-term, standalone
-  `run_coverage_new.sh`).
+- `geneva.lua` — custom `fool=bs_*` функции (Geneva-атаки). Входит в
+  дефолтную blockchecks `--lua-init` цепочку (`get_blockchecks_lua_scripts`).
 
 `lua/custom/` — кастомные nfqws2 Lua-скрипты, которые выносите на
 роутер/внешний хост (например `dupfake.lua`). Экспорт конфигов

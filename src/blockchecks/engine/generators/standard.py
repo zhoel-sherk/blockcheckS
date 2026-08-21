@@ -1,5 +1,6 @@
 """Standard nfqws2 strategy families. Facade over families/split, fake, and tamper."""
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
@@ -8,309 +9,10 @@ from blockchecks.engine.generators.families import (
     SplitFamiliesMixin,
     TamperFamiliesMixin,
 )
-from blockchecks.engine.generators.families._helpers import (
-    _blob_abs,  # noqa: F401
-    _blob_file,  # noqa: F401
-    _fooling_clause,
-    _ttl_clause,
-    _with_ack_drop,  # noqa: F401
-    _with_ip6_send_drop,  # noqa: F401
-    _with_send_md5,  # noqa: F401
-)
 from blockchecks.engine.store import RunStateStore
 
 if TYPE_CHECKING:
     from blockchecks.engine.triage import TriageProfile
-
-# Fooling options mapped from def.inc
-FOOLINGS_TCP = [
-    "tcp_ts=-1000",
-    "",
-    "tcp_md5",
-    "tcp_ack=-66000:tcp_ts_up",
-]
-REPEATS_VALUES = [6, 3, 1, 8, 10, 11, 12, 2, 4]  # 6,8; 2,11 Flowseal; 4 matrix gap
-TTL_VALUES = [1, 5, 7, 12, 63, 64, 127, 128, 255]
-AUTOTTL_RANGES = ["-1,3-20", "-2,5-15", "-3,7-12"]
-
-# Common blobs
-# Common blobs (empty = auto-generated, not recommended)
-BLOBS_TCP = ["stun", "max_ru", "google"]  # skipping empty — doesn't work on some ISPs
-BLOBS_UDP = ["discord_udp"]
-
-
-class FakeTcpGenerator(StrategyGenerator):
-    """fake + blob + fooling + TTL + repeats combinations."""
-
-    async def generate(
-        self,
-        protocol: str = "tls12",
-        state_db: RunStateStore = None,
-        domain: str = "",
-        scan_level: str = "fast",
-        max_count: int = 100,
-        run_set: set = None,
-        triage: "TriageProfile | None" = None,
-    ) -> list[StrategyItem]:
-        from blockchecks.engine.blob_filter import filter_blob_aliases
-        from blockchecks.engine.family_registry import (
-            filter_fooling_values,
-            filter_ttl_values,
-            prune_items_by_triage,
-        )
-
-        def finish(pool: list[StrategyItem]) -> list[StrategyItem]:
-            return prune_items_by_triage(pool[:max_count], triage, scan_level=scan_level)
-
-        items = []
-        known_working = list(run_set or [])
-
-        if state_db and domain and not known_working:
-            known_working = await state_db.get_working_tcp(domain)
-
-        blobs = filter_blob_aliases(BLOBS_TCP, triage)
-        fools = filter_fooling_values(FOOLINGS_TCP, triage)
-        ttls = filter_ttl_values(TTL_VALUES + AUTOTTL_RANGES, triage, scan_level=scan_level)
-
-        # In-run set: gets updated with PASS labels during the scan
-        for blob in blobs:
-            blob_part = f":blob={blob}" if blob else ""
-            for repeats in REPEATS_VALUES:
-                for fool in fools:
-                    fool_part = _fooling_clause(fool)
-                    # Base strategy (no TTL) — test first
-                    strat = f"fake{blob_part}:repeats={repeats}{fool_part}"
-                    label = f"fake_{blob or 'none'}_r{repeats}_{fool or 'nofool'}"
-                    items.append(StrategyItem(label=label, strategy=strat))
-                    if scan_level == "single" or len(items) >= max_count:
-                        return finish(items)
-
-                    # fast: skip TTL only if base already PASSES (in-run or DB)
-                    if scan_level == "fast":
-                        skip = label in known_working
-                        if not skip and state_db and domain:
-                            # Check DB as fallback
-                            skip = label in await state_db.get_working_tcp(domain)
-                        if skip:
-                            continue
-                    if scan_level == "single":
-                        continue
-
-                    for ttl in ttls:
-                        ttl_part = _ttl_clause(str(ttl))
-                        if not ttl_part:
-                            continue
-                        strat_ttl = f"fake{blob_part}:repeats={repeats}{fool_part}{ttl_part}"
-                        label_ttl = f"{label}_ttl{ttl}"
-                        items.append(StrategyItem(label=label_ttl, strategy=strat_ttl))
-                        if len(items) >= max_count:
-                            return finish(items)
-
-        return finish(items)
-
-
-class HostfakeTcpGenerator(StrategyGenerator):
-    """hostfakesplit + fooling + TTL + repeats."""
-
-    async def generate(
-        self,
-        protocol: str = "tls12",
-        state_db: RunStateStore = None,
-        domain: str = "",
-        scan_level: str = "fast",
-        max_count: int = 100,
-        run_set: set = None,
-        triage: "TriageProfile | None" = None,
-    ) -> list[StrategyItem]:
-        from blockchecks.engine.family_registry import (
-            filter_fooling_values,
-            filter_ttl_values,
-            prune_items_by_triage,
-        )
-
-        def finish(pool: list[StrategyItem]) -> list[StrategyItem]:
-            return prune_items_by_triage(pool[:max_count], triage, scan_level=scan_level)
-
-        items = []
-        known_working = list(run_set or [])
-        if state_db and domain:
-            known_working = await state_db.get_working_tcp(domain)
-
-        fools = filter_fooling_values(
-            ["", "tcp_md5", "tcp_ts=-1000", "tcp_ack=-66000:tcp_ts_up"], triage
-        )
-        ttls = filter_ttl_values(TTL_VALUES + AUTOTTL_RANGES, triage, scan_level=scan_level)
-
-        for fool in fools:
-            fool_part = _fooling_clause(fool)
-            # Base
-            strat = f"hostfakesplit:nofake2{fool_part}:repeats=1"
-            label = f"hf_nofake2_{fool or 'nofool'}"
-            items.append(StrategyItem(label=label, strategy=strat))
-            if scan_level == "single":
-                return finish(items)
-
-            # fast: skip expansions only if base PASSES
-            if scan_level == "fast":
-                skip = label in known_working
-                if not skip and state_db and domain:
-                    skip = label in await state_db.get_working_tcp(domain)
-                if skip:
-                    continue
-            if scan_level == "single":
-                continue
-
-            # With disorder_after
-            strat2 = f"hostfakesplit:disorder_after:nofake2{fool_part}:repeats=1"
-            label2 = f"hf_disorder_{fool or 'nofool'}"
-            items.append(StrategyItem(label=label2, strategy=strat2))
-
-            for ttl in ttls:
-                ttl_part = _ttl_clause(str(ttl))
-                if not ttl_part:
-                    continue
-                strat_ttl = f"hostfakesplit:nofake2{fool_part}:repeats=1{ttl_part}"
-                label_ttl = f"{label}_ttl{ttl}"
-                items.append(StrategyItem(label=label_ttl, strategy=strat_ttl))
-                if len(items) >= max_count:
-                    return finish(items)
-
-        return finish(items)
-
-
-class FakedTcpGenerator(StrategyGenerator):
-    """fakedsplit / fakeddisorder — blockcheck2 30-faked.sh (M9)."""
-
-    _SPLIT_FNS = ("fakedsplit", "fakeddisorder")
-    _POSITIONS = [1, "midsld", "sniext+1", "method+2"]
-    _PATTERNS = ["stun", "max_ru", "google", "4pda"]
-
-    async def generate(
-        self,
-        protocol: str = "tls12",
-        state_db: RunStateStore = None,
-        domain: str = "",
-        scan_level: str = "fast",
-        max_count: int = 100,
-        run_set: set = None,
-        triage: "TriageProfile | None" = None,
-    ) -> list[StrategyItem]:
-        from blockchecks.engine.family_registry import (
-            filter_fooling_values,
-            filter_split_positions,
-            prune_items_by_triage,
-        )
-
-        items = []
-        fools = filter_fooling_values(["", "tcp_md5", "tcp_ts=-1000"], triage)
-        positions = filter_split_positions(self._POSITIONS, triage, scan_level=scan_level)
-        for splitfn in self._SPLIT_FNS:
-            for pos in positions:
-                for pattern in self._PATTERNS:
-                    for fool in fools:
-                        fool_part = _fooling_clause(fool)
-                        strat = f"{splitfn}:pos={pos}:pattern={pattern}{fool_part}"
-                        label = f"{splitfn}_p{pos}_{pattern}_{fool or 'nofool'}"
-                        items.append(StrategyItem(label=label, strategy=strat))
-                        if scan_level == "single":
-                            return items[:max_count]
-                        if len(items) >= max_count:
-                            return prune_items_by_triage(items[:max_count], triage, scan_level=scan_level)
-        return prune_items_by_triage(items[:max_count], triage, scan_level=scan_level)
-
-
-class FakeMultiGenerator(StrategyGenerator):
-    """Multi-blob fake (2-3 blobs simultaneously)."""
-
-    async def generate(
-        self,
-        protocol: str = "tls12",
-        state_db: RunStateStore = None,
-        domain: str = "",
-        scan_level: str = "fast",
-        max_count: int = 100,
-        run_set: set = None,
-        triage: "TriageProfile | None" = None,
-    ) -> list[StrategyItem]:
-        from blockchecks.engine.blob_filter import filter_blob_aliases
-        from blockchecks.engine.family_registry import filter_fooling_values, prune_items_by_triage
-
-        items = []
-        allowed = set(filter_blob_aliases(["stun", "max_ru", "google"], triage))
-        blob_pairs = [
-            pair
-            for pair in (
-                ("stun", "max_ru"),
-                ("max_ru", "stun"),
-                ("stun", "google"),
-                ("google", "stun"),
-                ("max_ru", "google"),
-                ("google", "max_ru"),
-            )
-            if pair[0] in allowed and pair[1] in allowed
-        ]
-        fools = filter_fooling_values(["tcp_ts=-1000", ""], triage)
-        for r1, r2 in [(6, 6), (6, 3), (3, 6)]:
-            for fool in fools:
-                fool_part = _fooling_clause(fool)
-                for b1, b2 in blob_pairs:
-                    strat = (
-                        f"fake:blob={b1}:repeats={r1}{fool_part}\n"
-                        f"fake:blob={b2}:repeats={r2}{fool_part}"
-                    )
-                    label = f"fake_multi_{b1}+{b2}_r{r1}+{r2}_{fool or 'nofool'}"
-                    items.append(StrategyItem(label=label, strategy=strat))
-                    if scan_level == "single":
-                        return items[:max_count]
-                    if len(items) >= max_count:
-                        return prune_items_by_triage(items[:max_count], triage, scan_level=scan_level)
-        return prune_items_by_triage(items[:max_count], triage, scan_level=scan_level)
-
-
-class FakeSplitComboGenerator(StrategyGenerator):
-    """fake + fakedsplit combined (blockcheck2 55-fake-faked.sh, M9)."""
-
-    _POSITIONS = ["1", "midsld", "method+2"]
-    _PATTERNS = ["stun", "max_ru", "google"]
-
-    async def generate(
-        self,
-        protocol: str = "tls12",
-        state_db: RunStateStore = None,
-        domain: str = "",
-        scan_level: str = "fast",
-        max_count: int = 100,
-        run_set: set = None,
-        triage: "TriageProfile | None" = None,
-    ) -> list[StrategyItem]:
-        from blockchecks.engine.blob_filter import filter_blob_aliases
-        from blockchecks.engine.family_registry import filter_fooling_values, prune_items_by_triage
-
-        items = []
-        fools = filter_fooling_values(["", "tcp_ts=-1000", "tcp_md5"], triage)
-        blobs = filter_blob_aliases(["stun", "max_ru", "google", ""], triage)
-        for r in [6, 3, 8]:
-            for fool in fools:
-                fool_part = _fooling_clause(fool)
-                for blob in blobs:
-                    blob_part = f":blob={blob}" if blob else ""
-                    for pos in self._POSITIONS:
-                        for pattern in self._PATTERNS:
-                            strat = (
-                                f"fake{blob_part}:repeats={r}{fool_part}\n"
-                                f"fakedsplit:pos={pos}:pattern={pattern}{fool_part}"
-                            )
-                            label = (
-                                f"fake+fakedsplit_{blob or 'none'}+{pattern}_"
-                                f"p{pos}_r{r}_{fool or 'nofool'}"
-                            )
-                            items.append(StrategyItem(label=label, strategy=strat))
-                            if scan_level == "single":
-                                return prune_items_by_triage(items[:max_count], triage, scan_level=scan_level)
-                            if len(items) >= max_count:
-                                return prune_items_by_triage(items[:max_count], triage, scan_level=scan_level)
-        return prune_items_by_triage(items[:max_count], triage, scan_level=scan_level)
-
 
 # Extended parameters (from blockcheck.sh def.inc + standard scripts)
 
@@ -416,9 +118,9 @@ TCP_FAMILIES = [
     "tcp_ipfrag",
 ]
 HTTP_FAMILIES = ["http_simple", "http_fake", "http_tls_dual"]
-UDP_VOICE_FAMILIES = ["udp_discord"]
-QUIC_HTTP3_FAMILIES = ["quic_fake", "quic_gv", "quic_ipfrag", "udp_quic", "udp_multiblob"]
-UDP_QUIC_FAMILIES = ["udp_quic", "udp_game", "udp_multiblob"]
+UDP_VOICE_FAMILIES = ["udp_discord", "udp_multiblob"]
+QUIC_HTTP3_FAMILIES = ["quic_fake", "quic_gv", "quic_ipfrag", "udp_quic"]
+UDP_QUIC_FAMILIES = ["udp_quic", "udp_game"]
 FAMILY_ALIASES = {"ipfrag_tcp": "tcp_ipfrag", "ipfrag_udp": "quic_ipfrag"}
 _FAMILIES_BY_PROTOCOL = {
     "udp_voice": UDP_VOICE_FAMILIES,
@@ -430,6 +132,89 @@ _FAMILIES_BY_PROTOCOL = {
 
 def _resolve_family_name(name: str) -> str:
     return FAMILY_ALIASES.get(name, name)
+
+
+def _round_robin(groups: dict[str, list[StrategyItem]], cap: int) -> list[StrategyItem]:
+    """Interleave one item per family so a cap cannot starve later families."""
+    out, seen_out, idx = [], set(), 0
+    order = list(groups)
+    while len(out) < cap:
+        advanced = False
+        for t in order:
+            lst = groups[t]
+            if idx >= len(lst):
+                continue
+            it = lst[idx]
+            if it.strategy not in seen_out:
+                seen_out.add(it.strategy)
+                out.append(it)
+            advanced = True
+            if len(out) >= cap:
+                break
+        if not advanced:
+            break
+        idx += 1
+    return out
+
+
+def _mut_full_fake(fam: dict) -> None:
+    fam["repeats"] = [r for r in ALL_REPEATS if r not in (100, 260)]
+    fam["foolings"] = ALL_FOOLINGS_TCP + ALL_FOOLINGS_IPV6
+    fam["tls_mods"] = TLS_MODS
+
+
+def _mut_full_tcp_fools(fam: dict) -> None:
+    fam["foolings"] = list(dict.fromkeys([*fam.get("foolings", []), *ALL_FOOLINGS_TCP]))
+
+
+def _mut_full_quic_fake(fam: dict) -> None:
+    fam["foolings"] = list(dict.fromkeys([*fam.get("foolings", [""]), *ALL_FOOLINGS_UDP]))
+    fam["ip6_fools"] = ALL_FOOLINGS_IPV6
+
+
+def _mut_full_udp_discord(fam: dict) -> None:
+    fam["repeats"] = [2, 3, 4, 6, 8, 10, 12, 14]
+    fam["ttl_static"] = [5, 8]
+    fam["ttl_auto"] = ["-2,3-20", "-1,2-10"]
+
+
+def _mut_fast_fake(fam: dict) -> None:
+    fam["ipv6_extra"] = FAST_FOOLINGS_IPV6
+
+
+_SCAN_MUTATORS: dict[str, dict[str, Callable[[dict], None]]] = {
+    "full": {
+        "fake": _mut_full_fake,
+        "hostfake": _mut_full_tcp_fools,
+        "fakedsplit": _mut_full_tcp_fools,
+        "fakeddisorder": _mut_full_tcp_fools,
+        "fake_hostfake": _mut_full_tcp_fools,
+        "http_fake": _mut_full_tcp_fools,
+        "quic_fake": _mut_full_quic_fake,
+        "udp_discord": _mut_full_udp_discord,
+    },
+    "fast": {"fake": _mut_fast_fake},
+}
+
+
+def _apply_triage_axes(fam: dict, triage, scan_level: str) -> None:
+    from blockchecks.engine.blob_filter import filter_blob_aliases
+    from blockchecks.engine.family_registry import (
+        filter_fooling_values,
+        filter_split_positions,
+        filter_ttl_values,
+    )
+
+    if fam.get("foolings") is not None:
+        fam["foolings"] = filter_fooling_values(fam["foolings"], triage)
+    if fam.get("blobs") is not None:
+        fam["blobs"] = filter_blob_aliases(fam["blobs"], triage)
+    if fam.get("ttl_static") is not None:
+        fam["ttl_static"] = filter_ttl_values(fam["ttl_static"], triage, scan_level=scan_level)
+    if fam.get("positions") is not None:
+        fam["positions"] = filter_split_positions(fam["positions"], triage, scan_level=scan_level)
+    if fam.get("ttl_auto") is not None and triage.autottl_delta is not None:
+        fam["ttl_auto"] = list(dict.fromkeys([str(triage.autottl_delta), *fam["ttl_auto"]]))
 
 
 # Standard Generator (parameterized strategy families)
@@ -463,7 +248,7 @@ class StandardGenerator(
             "send_md5": True,
         },
         "hostfake": {
-            "foolings": FAST_FOOLINGS_TCP[:5],
+            "foolings": [f for f in FAST_FOOLINGS_TCP[:5] if f],
             "variants": ["base", "disorder", "nofake1", "midhost=midsld", "nodrop"],
             "ttl_static": ALL_TTL,
             "ttl_auto": ALL_AUTOTTL,
@@ -569,15 +354,15 @@ class StandardGenerator(
         "fakedsplit": {
             "positions": ["1", "midsld", "sniext+1", "method+2"],
             "pattern_blobs": ALL_BLOBS_TCP,
-            "foolings": FAST_FOOLINGS_TCP[:4],
+            "foolings": [f for f in FAST_FOOLINGS_TCP[:4] if f],
             "repeats": [6, 11],
             "ack_drop": True,
             "send_md5": True,
         },
         "fakeddisorder": {
-            "positions": ["1", "midsld", "method+2", "1,midsld"],
+            "positions": ["1", "midsld", "method+2"],
             "pattern_blobs": ALL_BLOBS_TCP,
-            "foolings": FAST_FOOLINGS_TCP[:4],
+            "foolings": [f for f in FAST_FOOLINGS_TCP[:4] if f],
             "repeats": [6, 11],
             "ack_drop": True,
             "send_md5": True,
@@ -587,7 +372,7 @@ class StandardGenerator(
             "positions": ["1", "midsld", "method+2"],
             "pattern_blobs": ALL_BLOBS_TCP,
             "repeats": [6, 3, 8],
-            "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum", ""],
+            "foolings": ["tcp_ts=-1000", "tcp_md5", "badsum"],
         },
         # TCP ipfrag (beside quic_ipfrag)
         "tcp_ipfrag": {
@@ -636,7 +421,7 @@ class StandardGenerator(
             "sizes": ["wssize:wsize=1:scale=6"],
             "combos": [False, True],  # True = paired with multisplit
         },
-        # Custom fool= hooks from lua/blockchecks/geneva.lua (BLOCKCHECKS_LUA_EXTRA).
+        # Custom fool= hooks from lua/blockchecks/geneva.lua (default lua chain).
         "geneva_fool": {
             "fools": [
                 "fool=bs_dataofs:badsum",
@@ -661,8 +446,8 @@ class StandardGenerator(
         "udp_quic": {
             "port_ranges": ["443"],
             "blobs": [
-                "quic_initial_www_google_com",
-                "quic_initial_dbankcloud_ru",
+                "quic_google",
+                "quic_dbank",
                 "quic_gv_kyber_1",
                 "quic_gv_kyber_2",
             ],
@@ -757,142 +542,47 @@ class StandardGenerator(
 
             return prune_items_by_triage(items_in, triage, scan_level=scan_level)
 
-        # (build happens below; both return paths apply _prune)
-        items = []
-        seen: set[str] = set()
-        known_working = list(run_set or [])
+        known_working = set(run_set or [])
         if state_db and domain and not known_working:
-            known_working = await state_db.get_working_tcp(domain)
+            known_working = set(await state_db.get_working_tcp(domain))
 
-        types = list(self.strategy_types)
-        if "all" in types:
-            types = list(self.STRATEGY_FAMILIES.keys())
-
-        # Protocol gate — empty intersection means nothing for this protocol
-        allowed = _FAMILIES_BY_PROTOCOL.get(protocol, TCP_FAMILIES)
-        types = [t for t in types if _resolve_family_name(t) in allowed]
+        raw = (
+            list(self.STRATEGY_FAMILIES)
+            if "all" in self.strategy_types
+            else list(self.strategy_types)
+        )
+        allowed = set(_FAMILIES_BY_PROTOCOL.get(protocol, TCP_FAMILIES))
+        types = list(dict.fromkeys(r for t in raw if (r := _resolve_family_name(t)) in allowed))
 
         if triage is not None and scan_level != "full":
             from blockchecks.engine.family_registry import families_for_profile
 
             rec = set(families_for_profile(triage))
-            narrowed = [t for t in types if _resolve_family_name(t) in rec]
-            if narrowed:
+            if narrowed := [t for t in types if t in rec]:
                 types = narrowed
-
-        # Expand axes for full scan
-        full = scan_level == "full"
-        n_types = max(1, len(types))
 
         prepared: dict[str, dict] = {}
         for stype in types:
-            resolved = _resolve_family_name(stype)
-            family = self.STRATEGY_FAMILIES.get(resolved)
+            family = self.STRATEGY_FAMILIES.get(stype)
             if not family:
                 continue
             fam = dict(family)
-            if full and resolved == "fake":
-                fam["repeats"] = [r for r in ALL_REPEATS if r not in (100, 260)]
-                fam["foolings"] = ALL_FOOLINGS_TCP + ALL_FOOLINGS_IPV6
-                fam["tls_mods"] = TLS_MODS
-            elif full and resolved in (
-                "hostfake",
-                "fakedsplit",
-                "fakeddisorder",
-                "fake_hostfake",
-                "http_fake",
-            ):
-                fam["foolings"] = list(
-                    dict.fromkeys(list(fam.get("foolings", [])) + ALL_FOOLINGS_TCP)
-                )
-            elif full and resolved == "quic_fake":
-                fam["foolings"] = list(
-                    dict.fromkeys(list(fam.get("foolings", [""])) + ALL_FOOLINGS_UDP)
-                )
-                fam["ip6_fools"] = ALL_FOOLINGS_IPV6
-            elif full and resolved == "udp_discord":
-                fam["repeats"] = [2, 3, 4, 6, 8, 10, 12, 14]
-                fam["ttl_static"] = [5, 8]
-                fam["ttl_auto"] = ["-2,3-20", "-1,2-10"]
-            elif scan_level == "fast" and resolved == "fake":
-                # Limited IPv6 fooling axis on fast
-                fam["ipv6_extra"] = FAST_FOOLINGS_IPV6
+            if mut := _SCAN_MUTATORS.get(scan_level, {}).get(stype):
+                mut(fam)
             if triage is not None:
-                from blockchecks.engine.blob_filter import filter_blob_aliases
-                from blockchecks.engine.family_registry import (
-                    filter_fooling_values,
-                    filter_split_positions,
-                    filter_ttl_values,
-                )
+                _apply_triage_axes(fam, triage, scan_level)
+            prepared[stype] = fam
 
-                if fam.get("foolings") is not None:
-                    fam["foolings"] = filter_fooling_values(fam["foolings"], triage)
-                if fam.get("blobs") is not None:
-                    fam["blobs"] = filter_blob_aliases(fam["blobs"], triage)
-                if fam.get("ttl_static") is not None:
-                    fam["ttl_static"] = filter_ttl_values(
-                        fam["ttl_static"], triage, scan_level=scan_level
-                    )
-                if fam.get("positions") is not None:
-                    fam["positions"] = filter_split_positions(
-                        fam["positions"], triage, scan_level=scan_level
-                    )
-                if fam.get("ttl_auto") is not None and triage.autottl_delta is not None:
-                    fam["ttl_auto"] = list(
-                        dict.fromkeys([str(triage.autottl_delta), *fam["ttl_auto"]])
-                    )
-            prepared[resolved] = fam
-
-        for idx, stype in enumerate(types):
-            resolved = _resolve_family_name(stype)
-            fam = prepared.get(resolved)
-            if not fam:
-                continue
-            room = max_count - len(items)
-            if room <= 0:
-                break
-            remaining_types = n_types - idx
-            if full:
-                # Full scan: no per-type budget sharing — emit everything, then
-                # truncate by max_count. Equal shares would starve large
-                # families (fake 18k) when small ones (synack 6) join the pool.
-                share = room
-            else:
-                share = max(1, room // remaining_types)
-            new = self._expand_family(resolved, fam, scan_level, seen, known_working)
-            items.extend(new[:share])
-
-        # Capped scan (any scan_level): interleave one strategy per family
-        # round-robin so every technique (incl. new rst_fake/synack/
-        # geneva_fool/wssize) is represented instead of letting the first
-        # family eat the budget. Full pool is emitted when max_count allows.
         expanded = {
-            t: self._expand_family(t, dict(prepared[t]), scan_level, set(), known_working)
+            t: self._expand_family(t, prepared[t], scan_level, known_working)
             for t in types
             if t in prepared
         }
-        if sum(len(v) for v in expanded.values()) > max_count:
-            out: list[StrategyItem] = []
-            seen_out: set[str] = set()
-            idx = 0
-            while len(out) < max_count:
-                advanced = False
-                for t in types:
-                    lst = expanded.get(t, [])
-                    if idx < len(lst):
-                        it = lst[idx]
-                        if it.strategy not in seen_out:
-                            seen_out.add(it.strategy)
-                            out.append(it)
-                        advanced = True
-                if not advanced:
-                    break
-                idx += 1
-            return _prune(out[:max_count])
+        flat = [it for t in types if t in expanded for it in expanded[t]]
+        if len(flat) > max_count:
+            return _prune(_round_robin(expanded, max_count))
+        return _prune(flat[:max_count])
 
-        return _prune(items[:max_count])
-
-    # CLI aliases (ipfrag_tcp / ipfrag_udp)
     _FAMILY_EXPANDERS = {
         "fake": "_fam_fake",
         "hostfake": "_fam_hostfake",
@@ -910,7 +600,6 @@ class StandardGenerator(
         "fakeddisorder": "_fam_fakeddisorder",
         "fake_fakedsplit": "_fam_fake_fakedsplit",
         "tcp_ipfrag": "_fam_tcp_ipfrag",
-        "ipfrag_tcp": "_fam_tcp_ipfrag",
         "fake_hostfake": "_fam_fake_hostfake",
         "rst_fake": "_fam_rst_fake",
         "synack": "_fam_synack",
@@ -926,20 +615,16 @@ class StandardGenerator(
         "quic_fake": "_fam_quic_fake",
         "quic_gv": "_fam_quic_gv",
         "quic_ipfrag": "_fam_quic_ipfrag",
-        "ipfrag_udp": "_fam_quic_ipfrag",
     }
 
     def _expand_family(
-        self, stype: str, family: dict, scan_level: str, seen: set, known_working: list
+        self, stype: str, family: dict, scan_level: str, known_working: set
     ) -> list[StrategyItem]:
         """Expand one strategy family into items."""
-        items: list[StrategyItem] = []
-        seen_local: set[str] = set()
-
-        expander_name = self._FAMILY_EXPANDERS.get(stype)
+        expander_name = self._FAMILY_EXPANDERS.get(_resolve_family_name(stype))
         if expander_name is None:
-            return items
-        return getattr(self, expander_name)(items, seen_local, family, scan_level, known_working)
+            return []
+        return getattr(self, expander_name)([], set(), family, scan_level, known_working)
 
     @staticmethod
     def _add(
@@ -954,3 +639,43 @@ class StandardGenerator(
         if key not in seen:
             seen.add(key)
             items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
+
+
+async def _std_families(types: list[str], protocol: str = "tls12", **kwargs) -> list[StrategyItem]:
+    kwargs.setdefault("protocol", protocol)
+    return await StandardGenerator(strategy_types=types).generate(**kwargs)
+
+
+class FakeTcpGenerator(StrategyGenerator):
+    """Delegate to StandardGenerator family ``fake``."""
+
+    async def generate(self, protocol: str = "tls12", **kwargs):
+        return await _std_families(["fake"], protocol, **kwargs)
+
+
+class HostfakeTcpGenerator(StrategyGenerator):
+    """Delegate to StandardGenerator family ``hostfake``."""
+
+    async def generate(self, protocol: str = "tls12", **kwargs):
+        return await _std_families(["hostfake"], protocol, **kwargs)
+
+
+class FakedTcpGenerator(StrategyGenerator):
+    """Delegate to StandardGenerator families ``fakedsplit`` + ``fakeddisorder``."""
+
+    async def generate(self, protocol: str = "tls12", **kwargs):
+        return await _std_families(["fakedsplit", "fakeddisorder"], protocol, **kwargs)
+
+
+class FakeMultiGenerator(StrategyGenerator):
+    """Delegate to StandardGenerator family ``multi_fake``."""
+
+    async def generate(self, protocol: str = "tls12", **kwargs):
+        return await _std_families(["multi_fake"], protocol, **kwargs)
+
+
+class FakeSplitComboGenerator(StrategyGenerator):
+    """Delegate to StandardGenerator family ``fake_fakedsplit``."""
+
+    async def generate(self, protocol: str = "tls12", **kwargs):
+        return await _std_families(["fake_fakedsplit"], protocol, **kwargs)

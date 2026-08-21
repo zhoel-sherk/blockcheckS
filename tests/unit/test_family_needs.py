@@ -27,6 +27,40 @@ def test_classify_standard_labels():
         == "fake_hostfake"
     )
     assert classify_strategy_family(StrategyItem("simple_fake_alt2", "fake:blob=stun")) == "other"
+    assert (
+        classify_strategy_family(StrategyItem("std_split_1_s1_stun_nofool", "multisplit:pos=1"))
+        == "multisplit"
+    )
+    assert (
+        classify_strategy_family(
+            StrategyItem("std_hf_base_tcp_ts=-1000", "hostfakesplit:nofake2:tcp_ts=-1000")
+        )
+        == "hostfake"
+    )
+    assert (
+        classify_strategy_family(
+            StrategyItem("std_syn_bare_hf_ts", "syndata\nhostfakesplit:nofake2:tcp_ts=-1000")
+        )
+        == "syndata"
+    )
+    assert (
+        classify_strategy_family(StrategyItem("std_tcp_ipfrag_pos8", "send:ipfrag:ipfrag_pos_tcp=8"))
+        == "tcp_ipfrag"
+    )
+    assert (
+        classify_strategy_family(
+            StrategyItem("std_wssize_multisplit", "wssize:wsize=1:scale=6\nmultisplit:pos=1")
+        )
+        == "wssize"
+    )
+    assert classify_strategy_family(StrategyItem("std_rst_rst_badsum", "rst:badsum")) == "rst_fake"
+    assert (
+        classify_strategy_family(
+            StrategyItem("std_gva_fool_bs_dataofs_r1", "send:fool=bs_dataofs:repeats=1")
+        )
+        == "geneva_fool"
+    )
+    assert classify_strategy_family(StrategyItem("std_synack_bare", "synack")) == "synack"
 
 
 def test_sort_by_family_order():

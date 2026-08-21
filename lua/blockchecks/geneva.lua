@@ -2,8 +2,10 @@
 -- manipulations that nfqws2 core cannot express (Geneva CCS'19 items 1-9,
 -- 22, 24: TCP dataofs / options-wscale / IP total length / UTO, load corrupt).
 --
--- Loaded only when BLOCKCHECKS_LUA_EXTRA contains "geneva.lua" (or staged via
--- --lua-init=@<path>). Each function registers a Geneva-style tamper:
+-- Loaded by default in the blockchecks lua-init chain (write_ipc.lua,
+-- scan_bridge.lua, init.lua, geneva.lua). Can still be staged via
+-- --lua-init=@<path> or BLOCKCHECKS_LUA_EXTRA. Each function registers a
+-- Geneva-style tamper:
 --
 --   --lua-desync=send:fool=bs_dataofs:badsum            # dup + dataofs:10 + chksum
 --   --lua-desync=send:fool=bs_iplen:len=64              # dup + IP:len:replace:64
@@ -41,8 +43,13 @@ function bs_corrupt_load(dis, fooling_options)
 	local pl = dis.payload
 	if pl and #pl > 0 and off < #pl then
 		local b = pl:byte(off + 1)
-		pl = pl:sub(1, off) .. string.char(b + 1) .. pl:sub(off + 2)
+		pl = pl:sub(1, off) .. string.char((b + 1) % 256) .. pl:sub(off + 2)
 		dis.payload = pl
+		return
+	end
+	-- empty payload: bump seq via zapret-lib u32add when present
+	if u32add and dis.tcp.th_seq then
+		dis.tcp.th_seq = u32add(dis.tcp.th_seq, 1)
 	end
 end
 

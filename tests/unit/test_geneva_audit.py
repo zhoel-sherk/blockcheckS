@@ -119,7 +119,7 @@ def test_fast_foolings_now_include_seq_flags():
 def test_geneva_lua_hooks_file_present():
     from pathlib import Path
 
-    from blockchecks.engine.config import REPO_LUA_DIR
+    from blockchecks.engine.config import REPO_LUA_DIR, get_blockchecks_lua_scripts
 
     p = Path(REPO_LUA_DIR) / "geneva.lua"
     assert p.is_file(), "lua/blockchecks/geneva.lua missing"
@@ -128,6 +128,7 @@ def test_geneva_lua_hooks_file_present():
         assert f"function {fn}" in text, fn
     # no bit32 (not available in zapret lua runtime)
     assert "bit32" not in text
+    assert "geneva.lua" in {s.name for s in get_blockchecks_lua_scripts()}
 
 
 @pytest.mark.unit
@@ -157,7 +158,7 @@ async def test_pool_sizes_stable():
     """Pool size guards against regression (full tls12 standard, flowseal)."""
     gen = StandardGenerator(strategy_types=["all"])
     items = await gen.generate(protocol="tls12", scan_level="full", max_count=100000)
-    assert len(items) == 37545, f"standard full pool changed: {len(items)}"
+    assert len(items) == 37026, f"standard full pool changed: {len(items)}"
     fg = FlowsealGenerator()
     fitems = await fg.generate(protocol="tls12", scan_level="full", max_count=100000)
     assert len(fitems) == 10183, f"flowseal full pool changed: {len(fitems)}"

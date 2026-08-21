@@ -37,7 +37,7 @@ async def test_flowseal_generator_covers_techniques_and_protocols():
         "hostfakesplit",
         "multidisorder",
         "syndata",
-        "badsid",
+        "tcp_seq",
         "tls_mod=",
         "ip_id=zero",
     ):
@@ -92,7 +92,8 @@ async def test_flowseal_prunes_dead_before_cap():
     from blockchecks.engine.triage import TriageProfile
 
     gen = FlowsealGenerator()
-    triage = TriageProfile(viable_foolings=["tcp_ts=-1000"], dead_foolings=["badsid"])
+    triage = TriageProfile(viable_foolings=["tcp_ts=-1000"], dead_foolings=["tcp_seq"])
     items = await gen.generate("tls12", scan_level="fast", max_count=20, triage=triage)
     assert len(items) == 20
     assert not any("badsid" in i.strategy for i in items)
+    assert not any("tcp_seq" in i.strategy for i in items)

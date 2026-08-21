@@ -8,7 +8,6 @@ from blockchecks.engine.generators.standard import (
     ALL_REPEATS,
     ALL_TTL,
     FAST_REPEATS,
-    REPEATS_VALUES,
     StandardGenerator,
 )
 from blockchecks.main import build_arg_parser
@@ -16,7 +15,6 @@ from blockchecks.main import build_arg_parser
 
 @pytest.mark.unit
 def test_repeats_four_in_matrix_axes():
-    assert 4 in REPEATS_VALUES
     assert 4 in ALL_REPEATS
     assert 4 in FAST_REPEATS
 

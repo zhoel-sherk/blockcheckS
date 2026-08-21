@@ -99,7 +99,6 @@ _._fam_udp_quic  # unused method (src/blockchecks/engine/generators/families/tam
 _._fam_udp_game  # unused method (src/blockchecks/engine/generators/families/tamper.py:207)
 _._fam_udp_multiblob  # unused method (src/blockchecks/engine/generators/families/tamper.py:226)
 TLS_MOD_NONE  # unused variable (src/blockchecks/engine/generators/flowseal.py:28)
-BLOBS_UDP  # unused variable (src/blockchecks/engine/generators/standard.py:44)
 _.generate_pairs  # unused method (src/blockchecks/engine/matrix_generator.py:232)
 subprocess_env  # unused function (src/blockchecks/engine/paths.py:311)
 baseline_ok  # unused variable (src/blockchecks/engine/preflight.py:101)

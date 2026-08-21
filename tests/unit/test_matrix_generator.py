@@ -22,8 +22,9 @@ async def test_single_one_per_generator():
     gen = FakeTcpGenerator()
     items = await gen.generate("tls12", scan_level="single", max_count=10)
     assert len(items) == 1
-    assert items[0].label == "fake_stun_r6_tcp_ts=-1000"
-    assert items[0].strategy == "fake:blob=stun:repeats=6:tcp_ts=-1000"
+    assert items[0].label.startswith("std_fake_")
+    assert items[0].strategy.startswith("fake:blob=")
+    assert ":repeats=" in items[0].strategy
 
 
 @pytest.mark.asyncio
@@ -31,8 +32,10 @@ async def test_single_hostfake():
     gen = HostfakeTcpGenerator()
     items = await gen.generate("tls12", scan_level="single", max_count=10)
     assert len(items) == 1
-    assert items[0].label == "hf_nofake2_nofool"
-    assert items[0].strategy == "hostfakesplit:nofake2:repeats=1"
+    assert items[0].label.startswith("std_hf_")
+    assert "hostfakesplit" in items[0].strategy
+    assert "nofool" not in items[0].label
+    assert any(tok in items[0].strategy for tok in ("tcp_ts=-1000", "tcp_md5", "badsum"))
 
 
 @pytest.mark.asyncio
@@ -50,8 +53,11 @@ async def test_fast_skip_with_run_set():
     gen = FakeTcpGenerator()
     items_full = await gen.generate("tls12", scan_level="fast", max_count=10_000)
     assert items_full
-    skip_label = items_full[0].label
-    assert any(i.label.startswith(f"{skip_label}_ttl") for i in items_full)
+    skip_label = next(
+        it.label
+        for it in items_full
+        if any(other.label.startswith(f"{it.label}_ttl") for other in items_full)
+    )
     items_slim = await gen.generate(
         "tls12",
         scan_level="fast",
@@ -121,7 +127,13 @@ async def test_generate_udp_voice_protocol_and_filter():
     )
     assert fast and full
     assert all(i.protocol == "udp_voice" for i in fast + full)
-    assert all("50000-50100" in i.strategy for i in fast)
+    from blockchecks.engine.conf_builder import build_filter_lines
+
+    voice_filters = "\n".join(build_filter_lines("udp_voice"))
+    assert "50000-50100" in voice_filters
+    assert any("discord" in i.strategy.lower() for i in fast)
+    assert all("fake:blob=" in i.strategy for i in fast)
+    assert all("--filter-udp=" not in i.strategy for i in fast)
     assert len(full) > len(fast)
 
 
@@ -134,7 +146,8 @@ async def test_generate_udp_game_not_in_default():
     game = await MatrixGenerator().generate_udp(sources=["game"], scan_level="single", max_count=20)
     assert game
     assert all(i.protocol == "udp_voice" for i in game)
-    assert any("std_udp_game" in i.label or "filter-udp=" in i.strategy for i in game)
+    assert any("std_udp_game" in i.label for i in game)
+    assert all("fake:blob=" in i.strategy for i in game)
 
 
 @pytest.mark.asyncio
@@ -153,3 +166,37 @@ async def test_generate_udp_skips_when_voice_ok():
         triage=TriageProfile(voice_ok=True, udp_blocked=True),
     )
     assert still
+
+
+@pytest.mark.asyncio
+async def test_user_matrix_skips_triage_prune(tmp_path):
+    from blockchecks.engine.triage import TriageProfile
+
+    matrix = tmp_path / "m.txt"
+    matrix.write_text("fake:blob=stun:repeats=6:tcp_ts=-1000\n")
+    profile = TriageProfile(viable_foolings=["tcp_md5"], viable_blobs=["tls_clienthello"])
+    items = await MatrixGenerator().generate_tcp(
+        sources=["custom"],
+        user_matrix=str(matrix),
+        triage=profile,
+        max_count=10,
+        scan_level="fast",
+    )
+    assert len(items) == 1
+    assert "stun" in items[0].strategy
+
+
+@pytest.mark.asyncio
+async def test_user_matrix_udp_keeps_tcp_ts(tmp_path):
+    """UDP matrix must keep ``tcp_ts`` fooling and still drop TCP-profile CLI."""
+    matrix = tmp_path / "m.txt"
+    matrix.write_text(
+        "fake:blob=stun:repeats=6:tcp_ts=-1000\n"
+        "--filter-tcp=443\\nfake:blob=stun:repeats=6\n"
+        "--qnum=200\\nfake:blob=stun:repeats=1\n",
+        encoding="utf-8",
+    )
+    items = await UserMatrixGenerator(str(matrix)).generate("udp_voice", max_count=50)
+    assert any("tcp_ts=-1000" in i.strategy for i in items)
+    assert not any("--filter-tcp" in i.strategy.lower() for i in items)
+    assert not any("--qnum=200" in i.strategy.lower() for i in items)
