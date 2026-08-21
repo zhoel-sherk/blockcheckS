@@ -222,6 +222,18 @@ def apply_pycache_prefix() -> None:
     if hasattr(sys, "pycache_prefix") and not sys.pycache_prefix:
         sys.pycache_prefix = prefix
     os.environ.setdefault("PYTHONPYCACHEPREFIX", prefix)
+    _reclaim_pycache_tree()
+
+
+def _reclaim_pycache_tree() -> None:
+    """sudo bs writes .pyc as root; chown the tree back so the user can wipe it."""
+    ids = _sudo_reclaim_ids()
+    if ids is None or not PYCACHE_DIR.is_dir():
+        return
+    uid, gid = ids
+    _chown_path(PYCACHE_DIR, uid, gid)
+    for p in PYCACHE_DIR.rglob("*"):
+        _chown_path(p, uid, gid)
 
 
 def configure_logging(*, level: str | int | None = None, console: str = "stdout") -> None:

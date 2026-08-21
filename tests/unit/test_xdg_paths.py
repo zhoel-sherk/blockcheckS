@@ -164,3 +164,21 @@ def test_reclaim_sudo_ownership_warns_on_oserror(tmp_path, monkeypatch, caplog):
     with caplog.at_level("WARNING", logger="blockchecks.engine.paths"):
         paths.reclaim_sudo_ownership(target)
     assert any("chown failed" in r.message and str(target) in r.message for r in caplog.records)
+
+
+@pytest.mark.unit
+def test_apply_pycache_prefix_reclaims_tree_when_root(tmp_path, monkeypatch):
+    pyc = tmp_path / "pycache"
+    nested = pyc / "home" / "mod.cpython-312.pyc"
+    nested.parent.mkdir(parents=True)
+    nested.write_bytes(b"x")
+    called: list[str] = []
+    monkeypatch.setattr(paths, "PYCACHE_DIR", pyc)
+    monkeypatch.setattr(paths, "ensure_dirs", lambda: None)
+    monkeypatch.setattr(paths.os, "geteuid", lambda: 0)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1000")
+    monkeypatch.setattr(paths.os, "chown", lambda path, uid, gid: called.append(str(path)))
+    paths.apply_pycache_prefix()
+    assert str(pyc) in called
+    assert str(nested) in called
