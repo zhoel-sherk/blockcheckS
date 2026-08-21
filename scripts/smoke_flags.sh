@@ -23,6 +23,7 @@ printf 'fake:blob=stun:repeats=6:tcp_ts=-1000\n' >"$MATRIX"
 trap 'rm -f "$MATRIX"' EXIT
 SKIP=(--skip-deps-check --skip-dns-audit --skip-prolog --skip-ip-block --skip-port-block
       --skip-baseline --no-preflight --no-wssize --timeout 6 --max 1 --parallel 1 --scan-level fast)
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
 
 # ── A. CLI surface (no sudo) ──────────────────────────────────
 log A "CLI help / presets / invalid flags"
@@ -65,10 +66,14 @@ log B "live flags"
 live() { # live <label> <timeout> <cmd...>
   local label="$1" t="$2"; shift 2
   local out="$DIR/live_${label//[^A-Za-z0-9_]/-}.log"
-  if timeout --kill-after=10s "$t" sudo -n env -u BLOCKCHECKS_PROBE_BACKEND "$@" >"$out" 2>&1; then
+  sudo -n "$BS" stop --force >/dev/null 2>&1 || true
+  # timeout as root so SIGKILL reaches bs (timeout+sudo leaves grandchildren).
+  if sudo -n timeout --kill-after=10s "$t" env -u BLOCKCHECKS_PROBE_BACKEND "$@" >"$out" 2>&1; then
     ok "$label"
+    sudo -n "$BS" stop --force >/dev/null 2>&1 || true
     return 0
   fi
+  sudo -n "$BS" stop --force >/dev/null 2>&1 || true
   # non-zero can still be a functional success if the tool ran
   if grep -qE "\[OK\]|PASS|passed|backend=|TCP done|QUIC done|HTTP |settle|Export|Run summary|profile=" "$out"; then
     ok "$label (rc non-zero, ran)"
@@ -100,7 +105,8 @@ live "full quic tiny" 90 "$BS" full -d discord.com --no-http --no-voice --tls12-
 # --fan-out is known to overshoot --max-timem; hard-kill.
 log B "fan-out (hard timeout 90s)"
 FAN="$DIR/live_fan-out.log"
-if timeout --kill-after=15s 90s sudo -n "$BS" scan -d discord.com --user-matrix "$MATRIX" --fan-out --adaptive-epsilon 0.2 \
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
+if sudo -n timeout --kill-after=15s 90s "$BS" scan -d discord.com --user-matrix "$MATRIX" --fan-out --adaptive-epsilon 0.2 \
   "${SKIP[@]}" --allow-dns-hijack --max 4 --max-timem 1 >"$FAN" 2>&1; then
   ok "scan --fan-out exited"
 elif grep -qE "backend=|pass=" "$FAN"; then
@@ -108,12 +114,14 @@ elif grep -qE "backend=|pass=" "$FAN"; then
 else
   bad "scan --fan-out"; tail -8 "$FAN"
 fi
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
 
 # ── C. serve log API (1.3.7 logging overhaul) ────────────────
 log C "bs serve /api/logs + /api/set-debug"
 PORT=18111
 TOKEN="flags-token-$TS"
 LOGC="$DIR/serve.log"
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
 sudo -n "$BS" serve --pool 1 --http-port "$PORT" --http-token "$TOKEN" --debug >"$LOGC" 2>&1 &
 SPID=$!
 sleep 4
