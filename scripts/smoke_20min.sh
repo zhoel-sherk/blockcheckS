@@ -18,7 +18,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 BS="${BS:-$ROOT/.venv/bin/bs}"
-"$BS" stop >/dev/null 2>&1 || true
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
 PY="${PY:-$ROOT/.venv/bin/python3}"
 TS="$(date +%Y%m%d_%H%M%S)"
 DIR="logs/smoke_20min_${TS}"
@@ -45,7 +45,7 @@ COMMON=(-d discord.com --user-matrix "$MATRIX" --max 2 --parallel 1 --scan-level
 check_backend() {
   local label="$1" expected="$2"; shift 2
   local out
-  "$BS" stop >/dev/null 2>&1 || true
+  sudo -n "$BS" stop --force >/dev/null 2>&1 || true
   out=$(sudo -n env -u BLOCKCHECKS_PROBE_BACKEND "$BS" scan "${COMMON[@]}" "$@" 2>&1 || true)
   if echo "$out" | grep -q "backend=$expected"; then ok "backend '$label' → $expected"
   else bad "backend '$label' expected=$expected"; echo "$out" | tail -4; fi
@@ -53,7 +53,7 @@ check_backend() {
 check_backend "default" "lua_bridge"
 check_backend "--classic" "classic" --classic
 check_backend "--probe-backend classic" "classic" --probe-backend classic
-"$BS" stop >/dev/null 2>&1 || true
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
 OUT_ENV=$(sudo -n env BLOCKCHECKS_PROBE_BACKEND=classic "$BS" scan "${COMMON[@]}" 2>&1 || true)
 if echo "$OUT_ENV" | grep -q "backend=classic"; then ok "env BLOCKCHECKS_PROBE_BACKEND=classic"
 else bad "env BLOCKCHECKS_PROBE_BACKEND=classic"; echo "$OUT_ENV" | tail -4; fi
