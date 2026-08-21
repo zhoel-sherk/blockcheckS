@@ -100,9 +100,10 @@ def filter_fooling_values(
 ) -> list[str]:
     """Drop fooling axis values the viability grid proved dead."""
     dead = set(dead_fooling_tokens(profile))
-    if not dead:
-        return list(fools)
-    return [f for f in fools if not (strategy_fooling_keys(f":{f}") & dead)]
+    kept = [f for f in fools if not (dead and strategy_fooling_keys(f":{f}") & dead)]
+    if profile is not None and profile.viable_foolings:
+        kept = [f for f in kept if f]
+    return kept
 
 
 def filter_ttl_values(

@@ -105,7 +105,8 @@ def test_filter_fooling_values_drops_badsum():
     kept = filter_fooling_values(["tcp_ts=-1000", "badsum", "tcp_md5", ""], profile)
     assert "badsum" not in kept
     assert "tcp_ts=-1000" in kept
-    assert "" in kept
+    assert "tcp_md5" in kept
+    assert "" not in kept
 
 
 def test_filter_ttl_values_keeps_autottl_and_window():

@@ -151,6 +151,20 @@ async def test_fake_max_one_starts_with_tcp_ts_not_ipv6_extra():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_fake_max_one_follows_viable_fooling_grid():
+    from blockchecks.engine.triage import TriageProfile
+
+    triage = TriageProfile(viable_foolings=["tcp_md5"], viable_blobs=["stun"])
+    items = await StandardGenerator(strategy_types=["fake"]).generate(
+        protocol="tls12", scan_level="fast", max_count=1, triage=triage
+    )
+    assert items
+    assert "tcp_md5" in items[0].strategy
+    assert "tcp_ts" not in items[0].strategy
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_generate_keeps_ipfrag_tcp_alias_on_capped_round_robin():
     """Resolved alias must survive the capped round-robin path (not dropped as missing key)."""
     gen = StandardGenerator(strategy_types=["fake", "ipfrag_tcp"])
