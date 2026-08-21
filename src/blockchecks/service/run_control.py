@@ -53,6 +53,18 @@ def is_pid_alive(pid: int) -> bool:
         return True
 
 
+def _cmdline_looks_like_campaign(pid: int) -> bool:
+    """False when /proc cmdline exists but is not a bs/blockchecks process (PID reuse)."""
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return True
+    if not raw:
+        return True
+    text = raw.replace(b"\0", b" ").decode(errors="replace")
+    return any(m in text for m in ("blockchecks", "bin/bs"))
+
+
 def read_active_run() -> ActiveRunInfo | None:
     if not RUN_LOCK_FILE.is_file():
         return None
@@ -61,7 +73,9 @@ def read_active_run() -> ActiveRunInfo | None:
         info = ActiveRunInfo.from_dict(data)
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return None
-    if not is_pid_alive(info.pid):
+    if info.pid != os.getpid() and (
+        not is_pid_alive(info.pid) or not _cmdline_looks_like_campaign(info.pid)
+    ):
         clear_active_run()
         return None
     return info

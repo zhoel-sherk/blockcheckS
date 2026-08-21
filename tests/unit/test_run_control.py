@@ -184,3 +184,21 @@ def test_cleanup_env_targets_xdg_run_lock():
     assert '"$STATE/run.lock"' in text
     assert "sudo pkill -9 -f" in text
     assert "sudo pkill -9 nfqws2" in text
+
+
+def test_read_active_run_foreign_cmdline_clears(run_lock_file, monkeypatch):
+    import json
+
+    run_lock_file.write_text(json.dumps({"pid": 4242, "command": "scan"}))
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(
+        "blockchecks.service.run_control._cmdline_looks_like_campaign", lambda pid: False
+    )
+    assert read_active_run() is None
+    assert not run_lock_file.exists()
+
+
+def test_cmdline_looks_like_campaign_missing_proc():
+    from blockchecks.service.run_control import _cmdline_looks_like_campaign
+
+    assert _cmdline_looks_like_campaign(99999999) is True
