@@ -39,20 +39,6 @@ class FakeFamiliesMixin:
     def _fam_fake(self, items, seen, family, scan_level, known_working):
         """Expand fake family."""
         p = StrategyParams.from_family(family, scan_level=scan_level)
-        if scan_level != "single":
-            emit_rows(
-                self._add,
-                items,
-                seen,
-                "fast",
-                expand_axes(
-                    {"ip6": family.get("ipv6_extra", ()), "blob": ("stun", "google")},
-                    lambda a: (
-                        f"std_fake_{a['blob']}_r6_{a['ip6']}",
-                        f"fake:blob={a['blob']}:repeats=6:{a['ip6']}",
-                    ),
-                ),
-            )
 
         def _core(a: dict) -> tuple[str, str]:
             fool, blob, r = a["fool"], a["blob"], a["r"]
@@ -65,6 +51,23 @@ class FakeFamiliesMixin:
         cores = expand_axes(axes, _core)
         if emit_rows(self._add, items, seen, scan_level, cores):
             return items
+
+        ip6 = family.get("ipv6_extra", ())
+        fool = next(iter(required_foolings(p.foolings)), "tcp_ts=-1000")
+        if ip6 and scan_level != "single":
+            emit_rows(
+                self._add,
+                items,
+                seen,
+                "fast",
+                expand_axes(
+                    {"ip6": ip6, "blob": ("stun", "google")},
+                    lambda a: (
+                        f"std_fake_{a['blob']}_r6_{a['ip6']}",
+                        f"fake:blob={a['blob']}:repeats=6:{a['ip6']}:{fool}",
+                    ),
+                ),
+            )
 
         combos = list(product(p.blobs, p.repeats, p.foolings))
         ack = [

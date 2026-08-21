@@ -67,6 +67,14 @@ def families_for_profile(profile: TriageProfile | None) -> list[str]:
     return list(dict.fromkeys(families)) or list(DEFAULT_FAMILIES)
 
 
+def _viable_fooling_keys(profile: TriageProfile) -> set[str]:
+    return {
+        tok
+        for fool in profile.viable_foolings
+        for tok in _FOOLING_EQUIV.get(_fooling_key(fool), (_fooling_key(fool),))
+    }
+
+
 def dead_fooling_tokens(profile: TriageProfile | None) -> tuple[str, ...]:
     """Grid foolings proven non-viable (empty when the grid was not run)."""
     if profile is None:
@@ -74,11 +82,7 @@ def dead_fooling_tokens(profile: TriageProfile | None) -> tuple[str, ...]:
     extra = tuple(_fooling_key(x) for x in profile.dead_foolings)
     if not profile.viable_foolings:
         return extra
-    viable = {
-        tok
-        for fool in profile.viable_foolings
-        for tok in _FOOLING_EQUIV.get(_fooling_key(fool), (_fooling_key(fool),))
-    }
+    viable = _viable_fooling_keys(profile)
     return tuple(dict.fromkeys([*(tok for tok in _GRID_FOOLINGS if tok not in viable), *extra]))
 
 
@@ -184,7 +188,14 @@ def _item_survives(
     split_mode: str,
 ) -> bool:
     strat = item.strategy
-    if dead and strategy_fooling_keys(strat) & dead:
+    keys = strategy_fooling_keys(strat)
+    if dead and keys & dead:
+        return False
+    if (
+        profile.viable_foolings
+        and item.protocol in ("tls12", "tls13")
+        and not (keys & _viable_fooling_keys(profile))
+    ):
         return False
     if not _ttl_ok(strat, dpi, server):
         return False

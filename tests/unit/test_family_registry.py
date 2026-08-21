@@ -62,7 +62,18 @@ def test_prune_drops_dead_badsum():
     ]
     profile = TriageProfile(viable_foolings=["tcp_ts=-1000"])
     kept = prune_items_by_triage(items, profile)
-    assert [i.label for i in kept] == ["ok", "plain"]
+    assert [i.label for i in kept] == ["ok"]
+
+
+def test_prune_drops_ipv6_extra_without_viable_fooling():
+    items = [
+        StrategyItem(label="hop", strategy="fake:blob=stun:repeats=6:ip6_hopbyhop"),
+        StrategyItem(
+            label="hop_ts", strategy="fake:blob=stun:repeats=6:ip6_hopbyhop:tcp_ts=-1000"
+        ),
+    ]
+    profile = TriageProfile(viable_foolings=["tcp_ts=-1000"])
+    assert [i.label for i in prune_items_by_triage(items, profile)] == ["hop_ts"]
 
 
 def test_prune_drops_ttl_before_dpi():

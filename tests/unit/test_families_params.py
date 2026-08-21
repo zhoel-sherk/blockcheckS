@@ -140,6 +140,17 @@ def test_hidden_fake_families_require_fooling(fam):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_fake_max_one_starts_with_tcp_ts_not_ipv6_extra():
+    items = await StandardGenerator(strategy_types=["fake"]).generate(
+        protocol="tls12", scan_level="fast", max_count=1
+    )
+    assert items
+    assert "tcp_ts=-1000" in items[0].strategy
+    assert "ip6_hopbyhop" not in items[0].strategy
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_generate_keeps_ipfrag_tcp_alias_on_capped_round_robin():
     """Resolved alias must survive the capped round-robin path (not dropped as missing key)."""
     gen = StandardGenerator(strategy_types=["fake", "ipfrag_tcp"])
