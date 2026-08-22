@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=zhoel
+User=@USER@
 Environment=HOME=@HOME@
 ExecStart=@ROOT@/.venv/bin/bs serve --http-port 8089
 Restart=on-failure

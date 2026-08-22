@@ -3,7 +3,7 @@
 [![version](https://img.shields.io/badge/version-1.3.7-green)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1507%20unit-success)](#)
+[![tests](https://img.shields.io/badge/tests-1528%20unit-success)](#)
 
 Программа на Linux перебирает стратегии **nfqws2 / zapret2** и показывает,
 какие из них реально открывают заблокированный сайт у твоего провайдера.

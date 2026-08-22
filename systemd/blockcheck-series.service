@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=zhoel
+User=@USER@
 Environment=HOME=@HOME@
 Environment=BS_SERIES_HOURS=20
 Environment=BS_SERIES_START=A

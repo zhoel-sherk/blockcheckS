@@ -888,12 +888,16 @@ class ProbeServer:
 
                 # Public liveness probe — no token required.
                 if method in {"GET", "HEAD"} and path == "/api/health":
-                    await _send_json(writer, {"status": "ok"}, 200)
+                    await _send_json(writer, {"status": "ok", "ok": True}, 200)
                     return
 
                 # Everything else requires a Bearer token.
                 if _authorization_token(authorization) != token:
-                    await _send_json(writer, {"status": "error", "error": "unauthorized"}, 401)
+                    await _send_json(
+                        writer,
+                        {"status": "error", "ok": False, "error": "unauthorized"},
+                        401,
+                    )
                     return
 
                 routed = await self._route_http_request(method, path, body)

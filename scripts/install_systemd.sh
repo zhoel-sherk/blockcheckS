@@ -8,8 +8,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Prefer the invoking user's real home; when run via sudo $HOME is /root.
 _HOME="$HOME"
+_USER="${USER:-root}"
 if [ "$HOME" = "/root" ] && [ -n "${SUDO_USER:-}" ]; then
   _HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+  _USER="$SUDO_USER"
 fi
 
 install_unit() {
@@ -18,7 +20,7 @@ install_unit() {
     echo "missing $src" >&2
     exit 1
   fi
-  sed -e "s|@ROOT@|$ROOT|g" -e "s|@HOME@|$_HOME|g" "$src" > "$dst"
+  sed -e "s|@ROOT@|$ROOT|g" -e "s|@HOME@|$_HOME|g" -e "s|@USER@|$_USER|g" "$src" > "$dst"
   chmod 644 "$dst"
   echo "installed $(basename "$dst")"
 }
