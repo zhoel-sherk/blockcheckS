@@ -1,4 +1,4 @@
-# GP DISCORD_DOMAINS — 22 Discord domains
+# --- Базовые и служебные зоны ---
 discord.com
 discord.gg
 discordapp.com
@@ -20,4 +20,18 @@ discordactivities.com
 discordsays.com
 discordstatus.com
 dis.gd
+
+# --- Прямые FQDN инфраструктуры (Voice, Gateways, CDN, Updates) ---
+gateway.discord.gg
+latency.discord.media
+router.discord.media
+cdn.discordapp.com
+media.discordapp.net
+images-ext-1.discordapp.net
+images-ext-2.discordapp.net
+updates.discord.com
+dl.discordapp.net
+url-protection.discord.com
+
+# --- Внешний CDN-сторадж ---
 discord-attachments-uploads-prd.storage.googleapis.com

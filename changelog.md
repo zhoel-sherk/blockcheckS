@@ -1,4 +1,8 @@
-## 1.3.7 — CLI modernization, Discord-UDP, Cursor MCP (2026-08-19)
+## Unreleased
+
+---
+
+## 1.3.7 — CLI modernization, Discord-UDP, Cursor MCP, preflight (2026-08-22)
 
 ### CLI Modernization & Simplification
 
@@ -33,6 +37,38 @@
 - Variant G: `scripts/run_variant.sh G 20` (`bs pair` Discord-UDP loop, 20h);
   not part of sequential A→F.
 - Bump 1.3.7.
+
+### Preflight CLI, prune, `--dpi-diag`
+
+- `bs preflight`: standalone triage (no strategy matrix); DNS audit reused once
+  via `PreflightOptions.dns_audits`; CDN/Fastly prefixes are not `ip_blocked`.
+- `--no-preflight` / `--quick` skip UDP 16KB so prior `udp_blocked` is kept;
+  `--no-preflight` also skips L3 persist.
+- Prune: `viable_foolings` is an AQ boost, not an exclusive gate. `dead_foolings`
+  only from explicit SSL **35** / `wrong_version` (not a generic handshake
+  timeout). Empty dead list persists as `[]` — no invented `badsum`/`send`.
+- `--dpi-diag` (opt-in on `preflight` / `scan` / `pair` / `full`): SNI whitelist,
+  FAT keepalive, l4-25 (pin IP), Siberian, CIDR-WL, AS/CGNAT notes. Overlay
+  writes `[dpi_diag]` / `viable.hosts`; **does not** set `dns_sinkhole`. Without
+  the flag, prior `viable.hosts` are not loaded into generators. FAT/l4-25 need
+  a successful first HEAD/handshake before DETECTED.
+
+### Packaging / container (2026-08-21)
+
+- Wheel install smoke in `podman` `python:3.12-slim`: `PROJECT_DIR=/usr/local/blockchecks`,
+  configs/blobs resolve (PKG-C1).
+- Local GitHub CI via act + rootless podman socket: `lint-and-quality` and
+  unit shards S1/S2/S3 (PKG-C2/C3). Do not run monolithic `pytest tests/` in CI.
+- README: Docker/Podman microguide; wheel data-files are self-contained (1.2.1a+).
+- CI S3 includes `test_cli_modernization`, `test_profiles`, `test_run_spec`,
+  `test_terminal`.
+
+### Backlog harvest
+
+Closed checklists formerly duplicated in `docs/todo.md` (1.0.x–1.3.7 CLI,
+lua_bridge L-batch, serve SVC-1…10, VPS-1/2, A→F scripts, memory P0/P1 slots)
+already live in the version notes below. `docs/todo.md` kept only open work:
+lua/host-mode/GP, Pi2 RSS/CPU, research ideas, RL/ML.
 
 ## 1.3.6 — GP integration, probe fixes, smoke (2026-08-18)
 

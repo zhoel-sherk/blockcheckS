@@ -277,7 +277,7 @@ count = 1
 file = "discord.txt"
 tags = ["discord"]
 description = "Discord domains"
-count = 22
+count = 32
 
 [domains.google-youtube]
 file = "google-youtube.txt"

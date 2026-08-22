@@ -58,7 +58,7 @@ jobs:
               tests/unit/test_checkers.py tests/unit/test_composite_runner.py
               tests/unit/test_curl_probe.py tests/unit/test_curl_repeats.py
               tests/unit/test_dns_secure.py tests/unit/test_discover_dns_alive.py
-              tests/unit/test_gv_ggc.py tests/unit/test_gv_url.py
+              tests/unit/test_dpi_diag.py tests/unit/test_gv_ggc.py tests/unit/test_gv_url.py
               tests/unit/test_in_ns_workers.py tests/unit/test_ip_block.py
               tests/unit/test_ip_pin.py tests/unit/test_l3_triage.py
               tests/unit/test_port_block.py tests/unit/test_preflight.py
@@ -99,7 +99,9 @@ jobs:
               tests/unit/test_code_quality.py tests/unit/test_mutation.py
               tests/unit/test_test_runner.py tests/unit/test_test_runner_full.py
               tests/unit/test_vulture.py tests/unit/test_logging.py
-              tests/unit/test_dead_cli_flags.py
+              tests/unit/test_dead_cli_flags.py tests/unit/test_cli_modernization.py
+              tests/unit/test_profiles.py tests/unit/test_run_spec.py
+              tests/unit/test_terminal.py
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -40,12 +40,13 @@
 2. [Сравнение с blockcheck.sh](#сравнение-с-blockchecksh)
 3. [Быстрый старт](#быстрый-старт)
 4. [Установка](#установка)
-5. [CLI команды](#cli-команды)
-6. [Пресеты](#пресеты)
-7. [Экспорт конфига для роутера](#экспорт-конфига-для-роутера)
-8. [Документация](#документация)
-9. [For contributors](#for-contributors)
-10. [Дисклеймер](#дисклеймер)
+5. [Docker / Podman](#docker--podman)
+6. [CLI команды](#cli-команды)
+7. [Пресеты](#пресеты)
+8. [Экспорт конфига для роутера](#экспорт-конфига-для-роутера)
+9. [Документация](#документация)
+10. [For contributors](#for-contributors)
+11. [Дисклеймер](#дисклеймер)
 
 ---
 
@@ -111,8 +112,10 @@ cd blockcheckS
 pip install -e ".[dev,discovery]"
 ```
 
-Почему **editable** (`-e`)? `configs/` и `presets/` лежат в корне репо —
-plain wheel их не найдёт. Это осознанное решение (см. [ONB-7](docs/package.md)).
+**Editable** (`-e`) удобен для разработки. С 1.2.1a wheel самодостаточен:
+`configs/`, `presets/`, `blobs/` и `lua/` входят в data-files
+(см. [ONB-7](docs/package.md)), поэтому `pip install blockchecks` или
+`pip install .` тоже находят их.
 
 **nfqws2 / zapret2** — blockcheckS сам скачает официальный релиз
 [bol-van/zapret2](https://github.com/bol-van/zapret2) при первом запуске в
@@ -138,6 +141,38 @@ bash scripts/setup-standalone.sh    # venv + pip install + smoke
 ```bash
 pytest -m "not integration"
 ```
+
+---
+
+## Docker / Podman
+
+Команды одинаковые для `podman` и `docker`. Slim-контейнер проверяет **пакет**
+(CLI, configs/blobs), не live DPI: `bs scan` / netns / nfqws2 нужны Linux-хост
+с root.
+
+```bash
+# из checkout
+podman run --rm -v "$PWD":/src:ro -w /src python:3.12-slim \
+  bash -c 'pip install . && bs --help'
+
+# из PyPI
+podman run --rm python:3.12-slim \
+  bash -c 'pip install blockchecks && bs --help'
+```
+
+Локальный GitHub CI (lint + шарды S1/S2/S3) — через [nektos/act](https://github.com/nektos/act)
+и socket podman. Бинарь `bin/act` локальный (не в git). Не гонять монолитный
+`pytest tests/` в CI.
+
+```bash
+systemctl --user enable --now podman.socket   # rootless
+export DOCKER_HOST="unix://${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock"
+./bin/act -j lint-and-quality -P ubuntu-latest=catthehacker/ubuntu:act-latest
+./bin/act -j unit-tests       -P ubuntu-latest=catthehacker/ubuntu:act-latest
+```
+
+Системный socket `unix:///run/podman/podman.sock` — если пользователь в группе
+`podman`/`docker`.
 
 ---
 
@@ -227,7 +262,7 @@ bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset
 | [Glossary](docs/glossary.md) | Терминология: netns, NFQUEUE, pair matrix, ... |
 | [API](docs/api.md) | HTTP/socket/MCP контракты, правила |
 | [Changelog](changelog.md) | История версий (1.3.7 и ранее) |
-| [Roadmap](docs/todo.md) | Бэклог: P1 (скорость), P2 (voice/GP), P3 (ML) |
+| [Roadmap](docs/todo.md) | Бэклог: открытое, PI2, уголок идей, RL/ML |
 
 Cookbook: [add checker](docs/cookbook/add-checker.md) ·
 [add generator](docs/cookbook/add-generator.md) ·
@@ -248,6 +283,8 @@ pip install -e ".[dev,discovery]"
 ruff check src tests    # линтер
 pytest -m "not integration"   # юнит-тесты (без root)
 ```
+
+CI как на GitHub — act + podman, см. [Docker / Podman](#docker--podman).
 
 ---
 

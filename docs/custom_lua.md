@@ -4,7 +4,7 @@
 > `write_ipc`) + backlog идей (§3–§5, §14). См. [lua/README.md](../lua/README.md)
 > для карты backend.  
 > **Upstream:** [zapret2/nfqws2](https://github.com/bol-van/zapret2) — `zapret-lib.lua`, `zapret-antidpi.lua`, `zapret-auto.lua`  
-> **Связанные:** [architecture.md](architecture.md), [byedpi_engine.md](byedpi_engine.md), [todo.md](todo.md) T3-4
+> **Связанные:** [architecture.md](architecture.md), [byedpi_engine.md](byedpi_engine.md), [todo.md](todo.md) (уголок идей: fork nfqws2)
 
 Документ описывает, как **кастомные Lua-скрипты** могут усилить blockcheckS: что уже есть в nfqws2, что из идей реализуемо без fork C, и как это стыкуется с Python-раннером. Секции с маркером `✅ done` реализованы; с `— backlog` — идеи на будущее.
 
@@ -823,7 +823,7 @@ CLI: `scan`/`pair`/`full` — `--lua-bridge`, `--bridge-batch`, `--lua-bridge-co
 
 `bs full`: sequential + adaptive AQ используют batch service при `--lua-bridge`; fan-out остаётся classic (WARN once).
 
-Поэтапный flip default → `lua_bridge`: см. `docs/todo.md` (L-transition-*).
+Поэтапный flip default → `lua_bridge`: см. [todo.md](todo.md) (открытое / lua_bridge).
 
 ### 9.2 nfqws2.conf generation (lua_bridge) — ✅ done
 
@@ -908,7 +908,7 @@ class LuaBridge:
 | Desync functions | `zapret-antidpi.lua` — `fake`, `multisplit`, … |
 | blockcheckS nfqws2 lifecycle | `src/blockchecks/service/nfqws2.py` |
 | Keenetic circular scaffold | `src/blockchecks/engine/conf_builder.py` |
-| Hot-reload todo | `docs/todo.md` T3-4 |
+| Hot-reload todo | [todo.md](todo.md) — уголок идей, fork nfqws2 |
 | ByeByeDPI probe parity | `docs/byedpi_engine.md` §8.5 |
 
 ---
