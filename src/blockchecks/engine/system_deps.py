@@ -16,6 +16,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from blockchecks import __version__
 from blockchecks.engine import config as cfg
 from blockchecks.engine.paths import CACHE_DIR, DATA_DIR, ensure_dirs
 
@@ -24,7 +25,7 @@ log = logging.getLogger(__name__)
 
 ZAPRET2_REPO = "bol-van/zapret2"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{ZAPRET2_REPO}/releases/latest"
-USER_AGENT = "blockcheckS/1.0.2 (+https://github.com/zhoel-sherk/blockcheckS)"
+USER_AGENT = f"blockcheckS/{__version__} (+https://github.com/zhoel-sherk/blockcheckS)"
 
 VENDOR_ROOT = DATA_DIR / "zapret2"
 VENDOR_BIN_LINK = DATA_DIR / "bin" / "nfqws2"
