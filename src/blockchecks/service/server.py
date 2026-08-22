@@ -371,7 +371,7 @@ class ProbeServer:
                             timeout=float(req.get("timeout") or 3.0),
                             bridge_batch=self.service.bridge_batch,
                             stop_event=stop,
-                            workers=int(getattr(runner, "pool_size", 4) or 4),
+                            workers=max(1, int(self.service.pool_size)),
                         ),
                         timeout=time_limit + 2.0,
                     )

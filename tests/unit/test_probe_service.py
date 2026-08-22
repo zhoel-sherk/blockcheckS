@@ -180,7 +180,6 @@ def test_find_strategy_populates_top_strategies(tmp_path, monkeypatch):
     item = StrategyItem(label="s1", strategy="fake:blob=stun")
     passed = TcpTestResult(item=item, domain="a.com", success=True, http_code=200, latency_ms=110.0)
     runner = MagicMock()
-    runner.pool_size = 2
     runner.test_tcp = AsyncMock(return_value=passed)
     runner._run_probe_batch = AsyncMock(return_value=[passed])
     runner.test_tcp_domains = AsyncMock(return_value=[passed])
@@ -190,7 +189,10 @@ def test_find_strategy_populates_top_strategies(tmp_path, monkeypatch):
     preset = tmp_path / "flowseal-fast.tls"
     preset.write_text("fake:blob=stun\n")
 
-    async def fake_bridge(r, queue, **_k):
+    captured: dict[str, int] = {}
+
+    async def fake_bridge(r, queue, **kwargs):
+        captured["workers"] = kwargs.get("workers")
         await r.test_tcp(item, "a.com")
         return SimpleNamespace(
             metrics=SimpleNamespace(jobs_run=1, jobs_passed=1, time_to_first_pass=0.4)
@@ -218,5 +220,6 @@ def test_find_strategy_populates_top_strategies(tmp_path, monkeypatch):
         assert resp["top_strategies"]
         assert resp["top_strategies"][0]["strategy"] == "fake:blob=stun"
         assert resp["top_strategies"][0]["success"] is True
+        assert captured["workers"] == 2
 
     asyncio.run(run())
