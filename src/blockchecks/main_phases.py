@@ -93,7 +93,8 @@ def _lua_extra_for(args: Any, triage: Any) -> list[str]:
 
         paths = [os.path.join(LUA_CUSTOM_DIR, name) for name in lua_files_for_triage(triage)]
         return list(dict.fromkeys(extra + paths))
-    except Exception:
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: triage lua extra skipped ({exc})")
         return extra
 
 
@@ -644,8 +645,8 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         if ctx.aq_result is not None and not getattr(args, "no_adaptive_weights", False):
             try:
                 await persist_adaptive_weights(ctx.db, ctx.aq_result.weights)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("%s", f"  WARNING: adaptive weights persist skipped ({exc})")
     if ctx.aq_result is None:
         raise RuntimeError("adaptive TCP run returned without result")
     progress.done = skipped + ctx.aq_result.done

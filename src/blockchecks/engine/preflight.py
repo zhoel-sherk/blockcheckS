@@ -894,7 +894,8 @@ def check_udp_16kb(timeout: float = 5.0) -> tuple[bool, str]:
 
     try:
         endpoints = _voice_endpoint_candidates()
-    except Exception:
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: voice endpoint candidates failed ({exc})")
         endpoints = []
     if not endpoints:
         return False, "no voice endpoint candidates"

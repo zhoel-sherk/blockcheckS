@@ -116,8 +116,8 @@ async def _resolve_host(host: str, sem: asyncio.Semaphore | None = None) -> str 
             addrs = await loop.getaddrinfo(host, 0, family=socket.AF_INET, type=socket.SOCK_DGRAM)
         if addrs:
             return addrs[0][4][0]
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: voice DNS resolve failed for {host} ({exc})")
     return None
 
 

@@ -248,8 +248,8 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
                 ]
             )
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: triage lua extra skipped ({exc})")
     return AsyncTestRunner(
         pool_size=pool_size,
         db=db,

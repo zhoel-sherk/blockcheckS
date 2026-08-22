@@ -42,7 +42,8 @@ async def _top_from_store(store: Any, domain: str) -> list[dict[str, Any]]:
         return []
     try:
         details = await store.get_working_tcp_details(domain)
-    except Exception:
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: working TCP details unavailable for {domain} ({exc})")
         return []
     return _merge_top_strategies(
         [

@@ -354,8 +354,8 @@ class TestRunner:
                         http_code=0,
                     )
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("%s", f"  WARNING: PASS upsert to data_block failed ({exc})")
         return result
 
     def test_sequential_udp(
