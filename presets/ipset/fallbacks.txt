@@ -1,0 +1,5 @@
+# Probe fallback endpoints. key → IPv4 or IPv4:port.
+# Env BLOCKCHECKS_GGC_IP still wins over `ggc`.
+voice 35.217.5.42:50006
+voice_preflight 35.217.42.214:50004
+ggc 74.125.108.234

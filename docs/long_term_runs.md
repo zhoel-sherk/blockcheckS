@@ -20,13 +20,13 @@ All runs:
 - domains: `presets/domains/coverage.txt` (~40)
 - **Profile shortcut (1.3.7):** `--profile 20h` bundles
   `--scan-level full --resume --no-preflight --no-wssize --timeout 2.0
-  `--allow-dns-hijack --fan-out` (see [guide.md](guide.md#run-profiles-profile))
+  `--allow-dns-hijack --fan-out` (see [guide.md](guide.md#профили))
 - `--max-timeh 20 --resume --data-block-sync --parallel 4 --bridge-batch 10`
 - `--allow-dns-hijack --no-preflight --isp-interface eth3`
 - `--no-wssize --no-settle-profile --timeout 2` (все варианты)
 - Adaptive queue ON by default (`--no-adaptive` to disable); legacy `--adaptive`
   flag kept as inverse alias only
-- PASS exported to `data_block/providers/<provider>/strategies.db` (`pass_strategies`)
+- PASS exported to XDG `data_block/providers/<provider>/strategies.db` (`pass_strategies`)
 
 ## Launch
 

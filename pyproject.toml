@@ -81,6 +81,7 @@ where = ["src"]
 "blockchecks/lua/custom" = ["lua/custom/*.lua", "lua/custom/manifest.toml", "lua/custom/README.md"]
 "blockchecks/presets/strategies" = ["presets/strategies/*.tls", "presets/strategies/*.txt", "presets/strategies/*.http", "presets/strategies/*.quic", "presets/strategies/*.udp"]
 "blockchecks/presets/domains" = ["presets/domains/*.txt"]
+"blockchecks/presets/ipset" = ["presets/ipset/*.txt"]
 "blockchecks/systemd" = ["systemd/*.service"]
 
 [tool.pytest.ini_options]
@@ -195,13 +196,39 @@ source_paths = [
 ]
 pytest_add_cli_args_test_selection = [
     # NOTE: do NOT pass "-m" here — [tool.pytest.ini_options].addopts already
-    # sets `-m "not integration and not quality and not mutation"`, which
-    # pytest auto-applies to every pytest.main() (incl. mutmut's internal
-    # run). Passing a second "-m" yields a double -m usage error
-    # (BadTestExecutionCommandsException) in mutmut 3.7.
-    "tests/unit",
+    # sets `-m "not integration and not quality and not mutation"`.
+    # Scoped to tests that cover [tool.mutmut].source_paths (full tests/unit
+    # hits unrelated file reads / shims under mutants/ and -x aborts stats).
+    "tests/unit/test_sqlite_store.py",
+    "tests/unit/test_nfqws2_settle.py",
+    "tests/unit/test_settle_profile.py",
+    "tests/unit/test_dns_secure.py",
+    "tests/unit/test_voice_dns.py",
+    "tests/unit/test_tcp_fanout.py",
+    "tests/unit/test_conf_builder.py",
+    "tests/unit/test_tcp_tls.py",
+    "tests/unit/test_ip_pin.py",
+    "tests/unit/test_in_ns_workers.py",
+    "tests/unit/test_netns_pool.py",
+    "tests/unit/test_lua_session.py",
+    "tests/unit/test_lua_bridge.py",
+    "tests/unit/test_adaptive_queue.py",
+    "tests/unit/test_batch_bridge_probe.py",
+    "tests/unit/test_batch_probe.py",
+    "tests/unit/test_nfqws2_manager.py",
 ]
 pytest_add_cli_args = ["-q"]
+# Scoped source_paths copy only those files into mutants/; tests import
+# blockchecks from mutants/src and need the rest of the package + data dirs.
+also_copy = [
+    "src/blockchecks",
+    "blobs",
+    "configs",
+    "presets",
+    "lua",
+    "scripts",
+    "settings.example.toml",
+]
 do_not_mutate_patterns = ["logger\\.", "raise "]
 [tool.blockchecks.architecture]
 package = "blockchecks"
@@ -302,6 +329,7 @@ preflight = [
     "src/blockchecks/cli/cliapp.py",
     "src/blockchecks/cli/parser.py",
 ]
+data-block = ["src/blockchecks/cli/commands/data_block.py"]
 
 [tool.blockchecks.settings]
 env_prefix = "BLOCKCHECKS_"

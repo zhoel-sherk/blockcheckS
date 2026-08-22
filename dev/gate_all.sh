@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # gate_all.sh — run every static/unit quality gate in one shot.
 #
-#   scripts/gate_all.sh            → unit + quality + ruff + vulture
-#   scripts/gate_all.sh --integration → also runs the sudo integration suite
+#   bash dev/gate_all.sh               → unit + quality + ruff + vulture
+#   bash dev/gate_all.sh --integration → also runs the sudo integration suite
 #
 # Exits non-zero on the first failing gate.
 set -euo pipefail

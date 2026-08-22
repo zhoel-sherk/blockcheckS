@@ -15,6 +15,7 @@ from blockchecks.checkers.dns_secure import (
     doh_bootstrap_ip,
     doh_query,
     has_dns_hijack,
+    has_dns_sinkhole,
     pick_working_doh,
     prepare_dns_for_run,
     udp_resolve,
@@ -114,6 +115,25 @@ def test_audit_tampered_when_sets_disjoint():
 
 
 @pytest.mark.unit
+def test_audit_ok_google_googleapis_disjoint_anycast():
+    """172.217 vs 173.194 are both Google — not a hijack (LLC Fiord false positive)."""
+    with (
+        patch(
+            "blockchecks.checkers.dns_secure.udp_resolve",
+            return_value=(["172.217.20.164"], "", 1.0),
+        ),
+        patch(
+            "blockchecks.checkers.dns_secure.doh_query",
+            return_value=(["173.194.220.99", "173.194.220.147"], "", 2.0),
+        ),
+    ):
+        r = audit_domain("googleapis.com", doh_url="https://example/dns-query")
+    assert not r.tampering_detected
+    assert r.verdict == "ok"
+    assert "anycast" in r.description.lower()
+
+
+@pytest.mark.unit
 def test_audit_ok_anycast_cdn_disjoint_ips():
     with (
         patch(
@@ -171,13 +191,29 @@ def test_dns_run_cache_ttl():
 
 
 @pytest.mark.unit
-def test_prepare_dns_aborts_on_hijack():
+def test_prepare_dns_warns_on_tampered_does_not_abort():
     from blockchecks.checkers.dns_secure import DnsAuditResult
 
     fake = DnsAuditResult(domain="x.com", tampering_detected=True, verdict="tampered")
+    with (
+        patch("blockchecks.checkers.dns_secure.audit_domains", return_value=[fake]),
+        patch("blockchecks.checkers.dns_secure.DnsRunCache.prime"),
+    ):
+        _, _, rc = prepare_dns_for_run(["x.com"], secure_dns=True)
+    assert rc == 0
+    assert has_dns_hijack([fake])
+    assert not has_dns_sinkhole([fake])
+
+
+@pytest.mark.unit
+def test_prepare_dns_aborts_on_sinkhole():
+    from blockchecks.checkers.dns_secure import DnsAuditResult
+
+    fake = DnsAuditResult(domain="x.com", tampering_detected=True, verdict="sinkhole")
     with patch("blockchecks.checkers.dns_secure.audit_domains", return_value=[fake]):
         _, _, rc = prepare_dns_for_run(["x.com"], secure_dns=True)
     assert rc == 1
+    assert has_dns_sinkhole([fake])
 
 
 @pytest.mark.unit

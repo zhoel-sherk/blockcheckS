@@ -79,9 +79,10 @@ async def maybe_write_best_config_data_block() -> None:
 
 
 async def maybe_sync_data_block(args=None) -> None:
-    """Commit+push data_block/ when the ``--data-block-sync`` flag is set.
+    """Export XDG providers into the git submodule and commit+push.
 
-    No-op otherwise (keeps the submodule clean after routine scans).
+    No-op unless ``--data-block-sync`` is set. Pip installs without a
+    ``data_block/.git`` checkout get a warning; the scan does not fail.
     """
     enabled = False
     if args is not None:
@@ -93,11 +94,22 @@ async def maybe_sync_data_block(args=None) -> None:
     if not enabled:
         return
     try:
-        from blockchecks.data_block.provider import get_provider_dir
-        from blockchecks.data_block.store import ProviderStore
+        from blockchecks.data_block.export import (
+            CLONE_HINT,
+            default_export_dest,
+            export_runtime_data_block,
+            sync_exported,
+        )
 
-        store = ProviderStore(get_provider_dir())
-        store.sync_commit(push=True)
+        dest = default_export_dest()
+        if dest is None:
+            log.warning("%s", f"  WARNING: --data-block-sync skipped; {CLONE_HINT}")
+            return
+        export_runtime_data_block(dest)
+        if not (dest / ".git").exists():
+            log.warning("%s", f"  WARNING: {dest} has no .git; copied but not committed")
+            return
+        sync_exported(dest, push=True)
     except Exception as exc:
         log.warning("%s", f"  WARNING: data_block sync failed ({exc})")
 

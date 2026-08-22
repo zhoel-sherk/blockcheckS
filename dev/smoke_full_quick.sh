@@ -3,7 +3,7 @@
 # deadline stop, export (nfqws2_*.conf, user.list) and run_summary JSON.
 #
 # Usage:
-#   scripts/smoke_full_quick.sh [domain] [max-strategies]
+#   bash dev/smoke_full_quick.sh [domain] [max-strategies]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

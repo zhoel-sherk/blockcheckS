@@ -50,6 +50,8 @@ blockcheckS/
 ├── configs/                   # repo-root .conf (CONFIGS_DIR)
 ├── presets/                   # manifest.toml registry + domains/ + strategies/
 ├── tests/
+├── scripts/                   # campaign runners, systemd, blobs (not in wheel)
+├── dev/                       # smokes, gate_all, benches (not in wheel / CI)
 ├── docs/
 └── pyproject.toml
 ```
@@ -70,9 +72,11 @@ where `[tool.setuptools.data-files]` ships `blobs/`, `configs/`, `lua/` and
 - **Runtime data (XDG):**
   - `~/.config/blockcheckS/config.toml` — user defaults
   - `~/.config/blockcheckS/presets/` — reserved (`USER_PRESETS_DIR`)
+  - `~/.config/blockcheckS/presets/ipset/` — CIDR catalog overlay (first-run copy)
   - `~/.local/state/blockcheckS/state.db` — run state DB (default `--db`)
   - `~/.local/state/blockcheckS/logs/` — runtime logs
   - `~/.local/state/blockcheckS/presets/` — reserved (`USER_DATA_PRESETS_DIR`)
+  - `~/.local/share/blockcheckS/data_block/providers/<slug>/` — live provider store
   - `~/.local/share/blockcheckS/export/` — nfconf export (default `--out-dir`; 1.0.x legacy: `state/.../export`)
   - `~/.local/share/blockcheckS/shortlists/` — shortlist JSON (legacy under `state/`)
   - `~/.local/share/blockcheckS/zapret2/` — optional auto-fetched vendor tree
@@ -121,7 +125,7 @@ Re-exported from `blockchecks.engine` and `blockchecks.checkers` — see
 ## Repository Structure & Metrics
 
 Full tree with line counts (Python / shell / lua / md; binaries excluded).
-Unit suite: **1270 passed**, quality **122**, integration **22** (sudo E2E).
+Unit suite: **1507 passed**, quality **136**, integration **22** (sudo E2E).
 
 ```
 src/blockchecks/                      (≈25 700 строк, 108+ py-файлов)
@@ -150,15 +154,16 @@ src/blockchecks/                      (≈25 700 строк, 108+ py-файло�
 │   batch_service 385 | firewall 120 | lua_bridge_ipc 133 | lua_conf 112 |
 │   lua_netns 82 | lua_session 141 | metrics 216 | netns_pool 228 | nfqws2 316 |
 │   nfqws2_settle 71 | probe 107 | probe_service 219 | run_control 178 | server 181
-tests/unit/                        (≈18 600 строк, 112 файлов)  — 1270 passed
-tests/integration/                 (≈670 строк, 6 файлов)       — 22 passed (sudo)
+tests/unit/                        (≈18 600 строк, 122 файла)   — 1507 passed
+tests/integration/                 (≈670 строк, 5 файлов)       — 22 passed (sudo)
 lua/blockchecks/                   (≈200 строк): geneva 65 | scan_bridge 90 |
                                    write_ipc 44 | init 3
-scripts/                           (≈1 600 строк, 24 скрипта)
+scripts/                           (≈1 000 строк, 14 скриптов + README) — кампании, install, пресеты
+dev/                               (≈1 700 строк, 19 скриптов + README) — смоки, гейты, бенчи
 blobs/                             (31 .bin + README 68)  — verify_blobs 31 OK
 presets/                           manifest.toml + domains 11 + strategies 27 + README 180
 systemd/                           blockcheck-series.service 18 | blockcheck-serve.service 18
-docs/                              (≈3 250 строк, 9 md + cookbook 5)
+docs/                              (≈3 560 строк, 9 md + cookbook 5)
 ```
 
 Biggest modules: `main_phases` 1102 | `async_runner` 1007 | `curl_probe` 941 |
@@ -171,6 +176,7 @@ Biggest modules: `main_phases` 1102 | `async_runner` 1007 | `curl_probe` 941 |
 pip install -e ".[dev,discovery]"
 ruff check src tests
 pytest -m "not integration"
+bash dev/gate_all.sh                 # unit + quality + ruff + vulture
 ```
 
 ## Deprecated

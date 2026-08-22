@@ -34,6 +34,8 @@ def test_ensure_dirs_creates_tree(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "PYCACHE_DIR", tmp_path / "cache" / "pycache")
     paths.ensure_dirs()
     assert (tmp_path / "data" / "export").is_dir()
+    assert (tmp_path / "config" / "presets" / "ipset").is_dir()
+    assert (tmp_path / "data" / "data_block" / "providers").is_dir()
     assert (tmp_path / "cache" / "pycache").is_dir()
     # sensitive dirs must be 0700 (owner-only)
     import stat as _stat

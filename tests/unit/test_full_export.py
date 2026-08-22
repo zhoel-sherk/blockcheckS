@@ -270,15 +270,25 @@ async def test_maybe_export_on_time_limit(tmp_path):
     assert "discord.com" in user
 
 
-def test_maybe_sync_data_block_pushes(monkeypatch):
-    """--data-block-sync must push (sync_commit(push=True))."""
+def test_maybe_sync_data_block_pushes(monkeypatch, tmp_path):
+    """--data-block-sync must export then commit+push (push=True)."""
     from blockchecks.engine import run_finalize
 
-    calls: list[dict] = []
-    store = type(
-        "FakeStore", (), {"sync_commit": lambda self, push=False: calls.append({"push": push})}
-    )()
-    monkeypatch.setattr("blockchecks.data_block.provider.get_provider_dir", lambda: ".")
-    monkeypatch.setattr("blockchecks.data_block.store.ProviderStore", lambda *a, **k: store)
+    dest = tmp_path / "data_block"
+    dest.mkdir()
+    (dest / ".git").mkdir()
+    calls: list[tuple] = []
+
+    monkeypatch.setattr(
+        "blockchecks.data_block.export.default_export_dest", lambda: dest
+    )
+    monkeypatch.setattr(
+        "blockchecks.data_block.export.export_runtime_data_block",
+        lambda d, **_k: calls.append(("export", d)) or 1,
+    )
+    monkeypatch.setattr(
+        "blockchecks.data_block.export.sync_exported",
+        lambda d, push=False: calls.append(("sync", d, push)) or True,
+    )
     asyncio.run(run_finalize.maybe_sync_data_block(args=type("A", (), {"data_block_sync": True})()))
-    assert calls == [{"push": True}]
+    assert calls == [("export", dest), ("sync", dest, True)]

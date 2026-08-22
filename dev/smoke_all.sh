@@ -65,17 +65,17 @@ echo "smoke_all $TS budget=${BUDGET}s" | tee "$OUT/summary.log"
 echo "host=$(hostname) bs=$ROOT/.venv/bin/bs" | tee -a "$OUT/summary.log"
 
 # Offline / unit first (no nfqws2 contention)
-run gate_all 180 bash "$ROOT/scripts/gate_all.sh"
-run smoke_flags 1500 bash "$ROOT/scripts/smoke_flags.sh"
+run gate_all 180 bash "$ROOT/dev/gate_all.sh"
+run smoke_flags 1500 bash "$ROOT/dev/smoke_flags.sh"
 run functional_smoke 1200 bash "$ROOT/dev/functional_smoke.sh"
-run smoke_backend_matrix 600 bash "$ROOT/scripts/smoke_backend_matrix.sh"
-run smoke_20min 2700 bash "$ROOT/scripts/smoke_20min.sh"
-run voice_smoke 180 bash "$ROOT/scripts/voice_smoke.sh"
-run gv1_smoke 240 bash "$ROOT/scripts/gv1_smoke.sh"
-run smoke_full_quick 180 bash "$ROOT/scripts/smoke_full_quick.sh"
-run smoke_scan 180 bash "$ROOT/scripts/smoke_scan.sh"
+run smoke_backend_matrix 600 bash "$ROOT/dev/smoke_backend_matrix.sh"
+run smoke_20min 2700 bash "$ROOT/dev/smoke_20min.sh"
+run voice_smoke 180 bash "$ROOT/dev/voice_smoke.sh"
+run gv1_smoke 240 bash "$ROOT/dev/gv1_smoke.sh"
+run smoke_full_quick 180 bash "$ROOT/dev/smoke_full_quick.sh"
+run smoke_scan 180 bash "$ROOT/dev/smoke_scan.sh"
 # fan-out can hang past --max-timem; keep a hard cap
-run release_smoke 1080 bash "$ROOT/scripts/release_smoke.sh"
+run release_smoke 1080 bash "$ROOT/dev/release_smoke.sh"
 
 cleanup
 {

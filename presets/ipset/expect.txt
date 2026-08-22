@@ -1,0 +1,22 @@
+# Exact FQDN → allowed origin/CDN CIDRs (dpi_diag AS/org mismatch).
+# Repeat the domain for git-friendly diffs. No suffix match.
+discord.com 162.159.0.0/16
+discord.com 162.158.0.0/15
+discord.com 104.16.0.0/12
+discord.com 172.64.0.0/13
+discord.com 8.6.112.0/24
+discord.com 8.47.69.0/24
+discord.gg 162.159.0.0/16
+discord.gg 162.158.0.0/15
+discord.gg 104.16.0.0/12
+youtube.com 142.250.0.0/15
+youtube.com 74.125.0.0/16
+youtube.com 173.194.0.0/16
+youtube.com 216.58.192.0/19
+googlevideo.com 142.250.0.0/15
+googlevideo.com 74.125.0.0/16
+googlevideo.com 173.194.0.0/16
+google.com 142.250.0.0/15
+google.com 74.125.0.0/16
+google.com 173.194.0.0/16
+google.com 216.58.192.0/19

@@ -26,6 +26,13 @@ DNS_RANGE = (14000, 14148)
 # Typical voice UDP ports
 VOICE_PORTS = [50000, 50001, 50002, 50003, 50004, 50005, 50006]
 
+
+def _is_discord_voice_ip(ip: str) -> bool:
+    """True when *ip* sits in the Discord voice/Fastly catalog (cdn-discord.txt)."""
+    from blockchecks.engine.ipset_catalog import cdn_family
+
+    return cdn_family(ip) == "discord"
+
 # Maks-gaming discord-servers (daily GitHub Actions refresh)
 # Region-specific list; not every region is published under regions/ (russia /
 # frankfurt 404) — fall back to the global all-regions list below.
@@ -96,10 +103,13 @@ def _load_cache() -> dict | None:
 
 def _save_cache(endpoints: list[dict]) -> None:
     """Save voice endpoints to cache."""
-    _ensure_cache_dir()
-    data = {"timestamp": time.time(), "endpoints": endpoints}
-    with open(_cache_file(), "w") as f:
-        json.dump(data, f)
+    try:
+        _ensure_cache_dir()
+        data = {"timestamp": time.time(), "endpoints": endpoints}
+        with open(_cache_file(), "w") as f:
+            json.dump(data, f)
+    except OSError as exc:
+        log.warning("%s", f"[voice-dns] cache write skipped ({exc})")
 
 
 async def _resolve_host(host: str, sem: asyncio.Semaphore | None = None) -> str | None:
@@ -142,7 +152,7 @@ async def resolve_finland_range(
 
     ip_to_hosts: dict[str, list[str]] = {}
     for host, ip in zip(hosts, results):
-        if ip and ip.startswith("35."):  # Only GCP Hamina IPs
+        if ip and _is_discord_voice_ip(ip):
             ip_to_hosts.setdefault(ip, []).append(host)
 
     return ip_to_hosts

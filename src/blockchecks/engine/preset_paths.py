@@ -36,6 +36,17 @@ def _user_strategies_dir() -> Path:
     return Path(USER_PRESETS_DIR) / "strategies"
 
 
+def _bundled_ipset_dir() -> Path:
+    return Path(PROJECT_DIR) / "presets" / "ipset"
+
+
+def _user_ipset_dir() -> Path:
+    env = os.environ.get("BLOCKCHECKS_IPSET_DIR", "").strip()
+    if env:
+        return Path(os.path.expanduser(os.path.expandvars(env)))
+    return Path(USER_PRESETS_DIR) / "ipset"
+
+
 def normalize_preset_name(name: str, *, strip_suffixes: tuple[str, ...] = ()) -> str:
     """Return a safe basename token or raise PresetPathError."""
     if not name or not isinstance(name, str):
@@ -107,3 +118,33 @@ def resolve_strategy_preset(name: str) -> Path:
             if hit is not None:
                 return hit
     raise FileNotFoundError(base)
+
+
+def resolve_ipset_file(name: str) -> Path:
+    """Resolve presets/ipset/{name}.txt inside user or bundled jail."""
+    base = normalize_preset_name(name, strip_suffixes=(".txt",))
+    filename = f"{base}.txt"
+    for root in (_user_ipset_dir(), _bundled_ipset_dir()):
+        if not root.is_dir():
+            continue
+        hit = _resolve_under(root, filename)
+        if hit is not None:
+            return hit
+    raise FileNotFoundError(filename)
+
+
+def iter_ipset_files(*, prefix: str = "") -> list[Path]:
+    """User overlay wins per basename; then bundled files not overridden."""
+    seen: set[str] = set()
+    out: list[Path] = []
+    for root in (_user_ipset_dir(), _bundled_ipset_dir()):
+        if not root.is_dir():
+            continue
+        for path in sorted(root.glob("*.txt")):
+            if prefix and not path.name.startswith(prefix):
+                continue
+            if path.name in seen:
+                continue
+            seen.add(path.name)
+            out.append(path)
+    return out

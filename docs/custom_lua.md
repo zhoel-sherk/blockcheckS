@@ -795,7 +795,7 @@ Preset: `presets/strategies/gp-custom-dupfake.tls` (dupfake-строки акт�
 ### 8.4 Debug / regression
 
 - `argdebug`, `pktdebug`, `zapret-pcap.lua`
-- `scripts/strategy_debug_probe.py`
+- `dev/strategy_debug_probe.py`
 - `--debug=@logs/nfqws2_q200_*.log`
 
 ---

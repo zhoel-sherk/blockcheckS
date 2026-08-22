@@ -258,115 +258,22 @@ class DnsAuditResult:
     untrusted_doh: dict[str, list[str]] = field(default_factory=dict)
 
 
-# Reserved / sinkhole / RKN-stub IP networks (DNS poisoning signatures).
-_SINKHOLE_NETS = [
-    ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("192.0.2.0/24"),
-    ipaddress.ip_network("198.18.0.0/15"),
-    ipaddress.ip_network("198.51.100.0/24"),
-    ipaddress.ip_network("203.0.113.0/24"),
-    ipaddress.ip_network("240.0.0.0/4"),
-    # RFC1918 private (a poisoned answer should never be a public A record)
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    # IPv6 loopback / unspecified / documentation / ULA
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("::/128"),
-    ipaddress.ip_network("2001:db8::/32"),
-    ipaddress.ip_network("fc00::/7"),
-]
+# Reserved / sinkhole / RKN-stub IP networks (DNS poisoning signatures)
+# live in presets/ipset/sinkhole.txt (see engine.ipset_catalog).
 
 
 def _sinkhole_ip(ips: list[str]) -> list[str]:
     """Return the IPs from *ips* that fall into sinkhole/bogon networks."""
-    bad: list[str] = []
-    for raw in ips or []:
-        try:
-            ip = ipaddress.ip_address(raw.strip())
-        except ValueError:
-            continue
-        if any(ip in net for net in _SINKHOLE_NETS):
-            bad.append(str(ip))
-    return bad
+    from blockchecks.engine.ipset_catalog import ip_in_nets, sinkhole_nets
 
-
-# Published unicast prefixes of major CDNs. Disjoint UDP vs DoH answers inside
-# the same family are anycast/geo-DNS, not hijacking.
-_CDN_NETS: tuple[tuple[str, tuple[ipaddress.IPv4Network, ...]], ...] = tuple(
-    (name, tuple(ipaddress.ip_network(n) for n in cidrs))
-    for name, cidrs in (
-        (
-            "cloudflare",
-            (
-                "1.0.0.0/24",
-                "1.1.1.0/24",
-                "104.16.0.0/12",
-                "108.162.192.0/18",
-                "141.101.64.0/18",
-                "162.158.0.0/15",
-                "172.64.0.0/13",
-                "173.245.48.0/20",
-                "188.114.0.0/16",
-                "190.93.240.0/20",
-                "197.234.240.0/22",
-                "198.41.128.0/17",
-            ),
-        ),
-        (
-            "google",
-            (
-                "8.8.4.0/24",
-                "8.8.8.0/24",
-                "64.233.160.0/19",
-                "66.102.0.0/20",
-                "72.14.192.0/18",
-                "74.125.0.0/16",
-                "108.177.0.0/17",
-                "142.250.0.0/15",
-                "172.217.0.0/16",
-                "209.85.128.0/17",
-                "216.58.192.0/19",
-            ),
-        ),
-        ("fastly", ("151.101.0.0/16", "199.232.0.0/16")),
-        (
-            "akamai",
-            ("2.16.0.0/13", "23.32.0.0/11", "23.192.0.0/11", "104.64.0.0/10", "184.24.0.0/13"),
-        ),
-        (
-            "amazon",
-            (
-                "13.32.0.0/15",
-                "13.224.0.0/12",
-                "52.84.0.0/15",
-                "54.230.0.0/16",
-                "99.84.0.0/16",
-                "143.204.0.0/16",
-            ),
-        ),
-        (
-            "discord",
-            (
-                "35.207.0.0/16",
-                "35.212.0.0/16",
-                "35.213.0.0/16",
-                "35.215.0.0/16",
-                "35.217.0.0/16",
-            ),
-        ),
-    )
-)
+    nets = sinkhole_nets()
+    return [raw.strip() for raw in ips or [] if ip_in_nets(raw, nets)]
 
 
 def _cdn_family(ip: str) -> str | None:
-    try:
-        addr = ipaddress.ip_address(ip.strip())
-    except ValueError:
-        return None
-    return next((name for name, nets in _CDN_NETS if any(addr in net for net in nets)), None)
+    from blockchecks.engine.ipset_catalog import cdn_family
+
+    return cdn_family(ip)
 
 
 def _same_slash16(a: str, b: str) -> bool:
@@ -594,6 +501,10 @@ def has_dns_hijack(results: list[DnsAuditResult]) -> bool:
     return any(r.tampering_detected for r in results)
 
 
+def has_dns_sinkhole(results: list[DnsAuditResult]) -> bool:
+    return any(r.verdict == "sinkhole" for r in results)
+
+
 @dataclass
 class DnsRunCache:
     """Per-batch DoH cache with optional hosts-file IP pins.
@@ -749,12 +660,20 @@ def prepare_dns_for_run(
     if not skip_audit:
         results = audit_domains(domains, doh_url=url, timeout=timeout)
         print_audit_table(results)
-        if has_dns_hijack(results) and not allow_hijack:
+        # UDP≠DoH is diagnostic: probes already use DoH + auto-pin (CURLOPT_RESOLVE).
+        # Abort only on sinkhole/bogon — that would pin a reserved IP.
+        if has_dns_sinkhole(results) and not allow_hijack:
             log.error(
-                "\n  ERROR: DNS hijack detected. Use --allow-dns-hijack to continue "
-                "or --no-secure-dns to disable DoH pre-resolve."
+                "\n  ERROR: DNS sinkhole/bogon answer. Use --allow-dns-hijack to "
+                "continue or --no-secure-dns to disable DoH pre-resolve."
             )
             return cache, results, 1
+        if has_dns_hijack(results):
+            log.warning(
+                "\n  WARNING: UDP:53 ≠ DoH for %d domain(s). "
+                "Probes use DoH IPs + auto-pin; plaintext hijack is ignored.",
+                sum(1 for r in results if r.tampering_detected),
+            )
 
     cache.prime(domains, doh_url=url)
     return cache, results, 0

@@ -914,8 +914,11 @@ def check_udp_16kb(timeout: float = 5.0) -> tuple[bool, str]:
 
 def _voice_endpoint_candidates() -> list[tuple[str, int]]:
     """Short list of voice endpoint IP:port candidates (cache → default)."""
+    from blockchecks.engine.ipset_catalog import fallback_endpoint
     from blockchecks.engine.paths import VOICE_DNS_CACHE_FILE
 
+    fb = fallback_endpoint("voice_preflight")
+    baked = (fb.ip, fb.port or 50004)
     try:
         import json as _json
 
@@ -923,9 +926,9 @@ def _voice_endpoint_candidates() -> list[tuple[str, int]]:
             data = _json.loads(VOICE_DNS_CACHE_FILE.read_text(encoding="utf-8"))
             eps = data.get("endpoints", [])
             if eps:
-                return [(e["ip"], int(e.get("port", 50004))) for e in eps[:3] if e.get("ip")]
+                return [(e["ip"], int(e.get("port", baked[1]))) for e in eps[:3] if e.get("ip")]
     except Exception as exc:
-        log.warning("%s", f"  WARNING: voice cache unreadable ({exc}); using 35.217.42.214:50004")
+        log.warning("%s", f"  WARNING: voice cache unreadable ({exc}); using {baked[0]}:{baked[1]}")
     else:
-        log.warning("%s", "  WARNING: no voice endpoints cached; using 35.217.42.214:50004")
-    return [("35.217.42.214", 50004)]
+        log.warning("%s", f"  WARNING: no voice endpoints cached; using {baked[0]}:{baked[1]}")
+    return [baked]

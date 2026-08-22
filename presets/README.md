@@ -1,4 +1,4 @@
-# Presets — domain & strategy lists
+# Presets — domain, strategy, and IP/CIDR catalogs
 
 ## Domain presets (`presets/domains/`)
 
@@ -21,6 +21,33 @@ bs scan --list-presets                # list domain + strategy presets
 
 `denylist.txt` (28 domains) is a filter list applied to the domain set — it is
 not selectable as a preset.
+
+## IP/CIDR catalogs (`presets/ipset/`)
+
+Static classification nets for DNS audit / CDN hints / probe fallbacks. **Not**
+kernel ipset and **not** `bc-nfconf --ipset` (that exports nfqws2 filters from
+the DNS cache).
+
+| File | Role |
+|------|------|
+| `sinkhole.txt` | bogon / RFC1918 / IPv6 ULA — DNS abort |
+| `cgnat.txt` | `100.64.0.0/10` (dpi_diag only) |
+| `cdn-*.txt` | Cloudflare, Google, Fastly, Akamai, Amazon, Discord |
+| `expect.txt` | exact FQDN → allowed CIDRs |
+| `fallbacks.txt` | `voice`, `voice_preflight`, `ggc` endpoints |
+
+# User overlay (copied on first `bs` if missing): `~/.config/blockcheckS/presets/ipset/`.
+# Optional `[ipset].dir` in config.toml / `BLOCKCHECKS_IPSET_DIR` overrides that path.
+# A user file of the same name **replaces** the bundled file (no merge).
+
+Auto-pin `hosts` is **not** here. Runtime pins live in
+`~/.local/share/blockcheckS/data_block/providers/<slug>/hosts`. Pip users publish
+that tree with:
+
+```bash
+git clone https://github.com/zhoel-sherk/data_block.git
+bs data-block --out ./data_block --git
+```
 
 ## Strategy presets (`presets/strategies/`)
 

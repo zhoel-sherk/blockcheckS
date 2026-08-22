@@ -36,6 +36,7 @@ export BLOCKCHECKS_BLOBS=/opt/zapret2/blobs
 ```bash
 ruff check src tests
 pytest -m "not integration and not quality and not mutation" -q
+bash dev/gate_all.sh    # unit + quality + ruff + vulture
 ```
 
 Static quality gates (policy in `pyproject.toml`: vulture, McCabe/C90, SIM, ARG, archon, AST, dead CLI flags):
@@ -49,7 +50,7 @@ CLI entry uses **pydantic CliApp** (`blockchecks.cli.cliapp`); flag definitions 
 Optional mutation testing (scoped via `[tool.mutmut]`, slow; also CI `workflow_dispatch`):
 
 ```bash
-./scripts/mutmut_gate.sh
+./dev/mutmut_gate.sh
 # or: pytest -m mutation
 ```
 

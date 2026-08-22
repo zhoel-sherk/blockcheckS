@@ -1,0 +1,2 @@
+# RFC 6598 shared-address space (ISP stub / CGNAT). Diagnostic only — not a DNS abort.
+100.64.0.0/10

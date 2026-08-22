@@ -100,7 +100,7 @@ def test_cmd_bench_settle_dns_error():
             "blockchecks.cli.commands.bench_settle.prepare_dns_for_run",
             return_value=(None, [], 4),
         ),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
     ):
         rc = asyncio.run(cmd_bench_settle(args))
     assert rc == 4
@@ -126,7 +126,7 @@ def test_cmd_bench_settle_runs_grid(tmp_path):
             "blockchecks.cli.commands.bench_settle.prepare_dns_for_run",
             return_value=(MagicMock(), [], None),
         ),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.cli.commands.bench_settle.AsyncTestRunner", return_value=runner),
         patch(
             "blockchecks.cli.commands.bench_settle._run_tcp_check",
@@ -161,7 +161,7 @@ def test_cmd_bench_settle_writes_profile(tmp_path):
             "blockchecks.cli.commands.bench_settle.prepare_dns_for_run",
             return_value=(MagicMock(), [], None),
         ),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.cli.commands.bench_settle.AsyncTestRunner", return_value=runner),
         patch(
             "blockchecks.cli.commands.bench_settle._run_tcp_check",

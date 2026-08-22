@@ -2,6 +2,7 @@ include configs/*.conf
 include configs/composite_discord.conf
 recursive-include presets/strategies *.tls *.txt *.http *.quic *.udp
 recursive-include presets/domains *.txt
+recursive-include presets/ipset *.txt
 include presets/blobs/README.md
 recursive-include blobs *.bin
 include blobs/README.md

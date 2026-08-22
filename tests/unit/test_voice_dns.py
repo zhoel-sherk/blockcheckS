@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from blockchecks.checkers.voice_dns import (
+    _is_discord_voice_ip,
     check_discover_mutex,
     discover_voice_endpoints,
     pair_log_domain,
@@ -21,7 +22,7 @@ async def test_dns_discovery_discovers_endpoints():
     eps = await discover_voice_endpoints(3, use_cache=False)
     assert len(eps) >= 1, f"Should find at least 1 endpoint, got {len(eps)}"
     for ep in eps:
-        assert ep["ip"].startswith("35."), f"Expected GCP IP, got {ep['ip']}"
+        assert _is_discord_voice_ip(ep["ip"]), f"Expected Discord CDN IP, got {ep['ip']}"
         assert 50000 <= ep["port"] <= 50006, f"Port out of range: {ep['port']}"
 
 
@@ -146,15 +147,15 @@ def test_resolve_finland_range(monkeypatch):
 
     async def fake_resolve(host, sem=None):
         if host == "finland14000.discord.gg":
-            return "35.1.2.3"
+            return "35.217.1.2"
         if host == "finland14001.discord.gg":
-            return "8.8.8.8"  # not GCP 35.x → filtered
+            return "8.8.8.8"  # not Discord voice CDN → filtered
         return None
 
     monkeypatch.setattr(vd, "_resolve_host", fake_resolve)
     monkeypatch.setattr(vd, "DNS_RANGE", (14000, 14002))
     result = asyncio.run(vd.resolve_finland_range(14000, 14002))
-    assert result == {"35.1.2.3": ["finland14000.discord.gg"]}
+    assert result == {"35.217.1.2": ["finland14000.discord.gg"]}
 
 
 # ── discover_dns_alive (mocked probes) ────────────────────────────────

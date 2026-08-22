@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from blockchecks.data_block.provider import (
     DEFAULT_PROVIDER,
+    data_block_runtime_root,
     get_provider_dir,
     provider_name,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "DATA_BLOCK_DNS_TTL",
     "DEFAULT_PROVIDER",
     "ProviderStore",
+    "data_block_runtime_root",
     "get_provider_dir",
     "provider_name",
     "write_best_config",

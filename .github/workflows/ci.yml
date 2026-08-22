@@ -53,6 +53,7 @@ jobs:
               tests/unit/test_conf_builder.py tests/unit/test_settle_profile.py
               tests/unit/test_bench_settle.py tests/unit/test_blob_filter.py
               tests/unit/test_static_validator.py tests/unit/test_static_validator_fuzzing.py
+              tests/unit/test_ipset_catalog.py
           - name: "S2 Checkers & Service"
             files: >-
               tests/unit/test_checkers.py tests/unit/test_composite_runner.py
@@ -163,10 +164,10 @@ jobs:
           # The integration suite needs a probe host with nfqws2 + sudo + netns
           # (LLC Fiord network). GitHub runners lack these, so we can only run
           # the subset that is safe without them; the rest run manually via:
-          #   scripts/release_smoke.sh  (probe host, sudo)
+          #   bash dev/release_smoke.sh  (probe host, sudo)
           if ! command -v nfqws2 >/dev/null 2>&1; then
             echo "nfqws2 not present on runner — run tests/integration on the probe host:"
-            echo "  sudo scripts/release_smoke.sh"
+            echo "  sudo bash dev/release_smoke.sh"
             exit 0
           fi
           python -m pytest tests/integration -m integration -q --timeout=600

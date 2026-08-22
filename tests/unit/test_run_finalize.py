@@ -244,17 +244,29 @@ def test_rank_pass_strategies_keeps_zero_latency():
 
 
 def test_maybe_sync_data_block_disabled():
-    with patch("blockchecks.data_block.provider.get_provider_dir") as gpd:
+    with patch("blockchecks.data_block.export.default_export_dest") as dest:
         asyncio.run(maybe_sync_data_block(_args(data_block_sync=False)))
-    gpd.assert_not_called()
+    dest.assert_not_called()
 
 
-def test_maybe_sync_data_block_enabled():
+def test_maybe_sync_data_block_enabled(tmp_path):
+    dest = tmp_path / "data_block"
+    dest.mkdir()
+    (dest / ".git").mkdir()
     with (
-        patch("blockchecks.data_block.provider.get_provider_dir", return_value=MagicMock()),
-        patch("blockchecks.data_block.store.ProviderStore") as StoreCls,
+        patch("blockchecks.data_block.export.default_export_dest", return_value=dest),
+        patch("blockchecks.data_block.export.export_runtime_data_block") as exp,
+        patch("blockchecks.data_block.export.sync_exported") as sync,
     ):
-        store = StoreCls.return_value
-        store.sync_commit = MagicMock()
         asyncio.run(maybe_sync_data_block(_args(data_block_sync=True)))
-        store.sync_commit.assert_called_once_with(push=True)
+        exp.assert_called_once_with(dest)
+        sync.assert_called_once_with(dest, push=True)
+
+
+def test_maybe_sync_data_block_warns_without_git():
+    with (
+        patch("blockchecks.data_block.export.default_export_dest", return_value=None),
+        patch("blockchecks.data_block.export.export_runtime_data_block") as exp,
+    ):
+        asyncio.run(maybe_sync_data_block(_args(data_block_sync=True)))
+        exp.assert_not_called()

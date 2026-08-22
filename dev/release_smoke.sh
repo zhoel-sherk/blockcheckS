@@ -45,7 +45,7 @@ elif [[ -n "${USER:-}" ]]; then
 fi
 
 echo "=== AQ benchmark ==="
-"$PY" scripts/aq_benchmark.py --db "${LOG_DIR}/state.db" | tee "${LOG_DIR}/aq_report.txt"
+"$PY" dev/aq_benchmark.py --db "${LOG_DIR}/state.db" | tee "${LOG_DIR}/aq_report.txt"
 
 echo "=== Shortlist export ==="
 "$PY" -m blockchecks.shortlist_export \

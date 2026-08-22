@@ -347,14 +347,14 @@ class ProviderStore:
 
     # sync (opt-in)
 
-    def sync_commit(self, *, push: bool = False) -> bool:
+    def sync_commit(self, *, push: bool = False, repo_root: Path | None = None) -> bool:
         """Commit data_block changes locally; push only if requested.
 
         When running as root via sudo, git is re-invoked as the original user
         (``sudo -u $SUDO_USER``) so its credentials (gh helper) are available —
         otherwise ``git push`` fails with "could not read Username".
         """
-        repo = self._dir.parents[1]  # .../data_block
+        repo = Path(repo_root) if repo_root is not None else self._dir.parents[1]
         if not (repo / ".git").exists():
             return False
         prefix: list[str] = []

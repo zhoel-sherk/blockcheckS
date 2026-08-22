@@ -59,6 +59,12 @@ class NetNsPool:
         subnet = BASE_CIDR + idx
         return f"10.200.{subnet}.0/30"
 
+    @staticmethod
+    def _dns_nameserver() -> str:
+        from blockchecks.engine.config import first_udp_nameserver
+
+        return first_udp_nameserver()
+
     @classmethod
     def _install_cleanup_hooks(cls) -> None:
         global _CLEANUP_HOOKS_INSTALLED
@@ -195,7 +201,7 @@ class NetNsPool:
         resolv = f"{dns_dir}/resolv.conf"
         r = subprocess.run(
             ["sudo", "tee", resolv],
-            input="nameserver 8.8.8.8\n",
+            input=f"nameserver {self._dns_nameserver()}\n",
             capture_output=True,
             text=True,
             timeout=15,

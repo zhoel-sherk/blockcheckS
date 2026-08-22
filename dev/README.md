@@ -1,28 +1,59 @@
-# dev/ — local debug helpers
+# dev/ — смоки, гейты, отладка
 
-Ad-hoc scripts for GP/control-plane smoke and `bs tcp` debugging.
-Not part of the installable `blockchecks` package; not run by CI.
+Локальные скрипты разработчика. **Не** входят в пакет `blockchecks`, **не**
+гоняются GitHub Actions. Предполагают `.venv` и запуск из **корня репо**.
 
-## Scripts
+Кампании A→F, systemd и блобы — в [scripts/](../scripts/README.md).
+Сброс leftover netns/nfqws2: `scripts/cleanup_env.sh`.
 
-| Script | What it does | How to run |
-|---|---|---|
-| `run_bs_tcp_debug.sh` | Single-strategy nfqws2 debug run (known-good baseline) | `bash dev/run_bs_tcp_debug.sh` |
-| `run_gp_debug.sh` | GP-verified strategy regression with debug output | `bash dev/run_gp_debug.sh` |
-| `functional_smoke.sh` | End-to-end functional test of every `bs` subcommand (sudo) | `bash dev/functional_smoke.sh` |
-| `byedpi_bench.py` | byedpi/ciadpi strategy micro-benchmark | `python3 dev/byedpi_bench.py` |
+## Quality gates
 
-## Test-campaign smoke scripts (in `scripts/`)
-
-These are the repeatable functional-test entry points used during audits:
-
-| Script | What it does |
+| Скрипт | Что делает |
 |---|---|
-| `scripts/smoke_scan.sh` | Quick `bs scan` on a known-good user matrix; backend selectable |
-| `scripts/smoke_full_quick.sh` | Time-boxed `bs full`; verifies deadline-stop, export, run_summary |
-| `scripts/smoke_backend_matrix.sh` | Functional test of `--classic` / `--probe-backend` / env / compare |
-| `scripts/gate_all.sh` | One-shot unit + quality + ruff + vulture (optionally integration) |
-| `scripts/cleanup_env.sh` | Reset netns / nfqws2 / shm / run.lock between campaigns |
+| `gate_all.sh` | unit + quality + ruff + vulture; `--integration` — sudo E2E |
+| `mutmut_gate.sh` | scoped `mutmut run` (`[tool.mutmut]` в pyproject) |
 
-All scripts assume project `.venv` and optional OpenCode install.
-Run from repo root.
+```bash
+bash dev/gate_all.sh
+bash dev/gate_all.sh --integration    # sudo + nfqws2, ~10–15 мин
+bash dev/mutmut_gate.sh               # медленно; джоба CI только workflow_dispatch
+```
+
+## Смоки (живой хост, sudo + nfqws2)
+
+| Скрипт | Что делает |
+|---|---|
+| `smoke_all.sh` | Оркестратор: все смоки + `gate_all` (бюджет ~90 мин) |
+| `smoke_scan.sh` | Короткий `bs scan` на известной матрице |
+| `smoke_full_quick.sh` | Time-boxed `bs full`: deadline, export, summary |
+| `smoke_backend_matrix.sh` | classic / lua_bridge / env / compare |
+| `smoke_flags.sh` | CLI help + флаги, которые другие смоки не трогают |
+| `smoke_20min.sh` | ~20 мин, ~90% путей `bs` |
+| `release_smoke.sh` | Релизный прогон: benchmark preset + AQ + shortlist |
+| `voice_smoke.sh` | UDP голос: dns-alive + `discord_udp` |
+| `gv1_smoke.sh` | googlevideo через `bs full` (нужен yt-dlp) |
+| `functional_smoke.sh` | По одной пробе каждой CLI-команды |
+
+```bash
+bash dev/smoke_scan.sh
+sudo bash dev/voice_smoke.sh
+bash dev/smoke_all.sh
+```
+
+## Отладка и бенчи
+
+| Скрипт | Что делает |
+|---|---|
+| `run_bs_tcp_debug.sh` | Одна известная TCP-стратегия с `--debug` nfqws2 |
+| `run_gp_debug.sh` | GP-подтверждённые стратегии + разбор лога |
+| `strategy_debug_probe.py` | Одна стратегия nfqws2 без полного скана |
+| `aq_benchmark.py` | Скорость нахождения PASS vs порядок очереди |
+| `speed_benchmark.sh` | blockcheck2.sh vs classic vs lua_bridge |
+| `byedpi_bench.py` | Микробенч byedpi/ciadpi vs nfqws2 |
+| `complexity_report.py` | Гистограмма McCabe (ruff C90) |
+
+```bash
+bash dev/run_bs_tcp_debug.sh
+python3 dev/strategy_debug_probe.py
+python3 dev/complexity_report.py
+```

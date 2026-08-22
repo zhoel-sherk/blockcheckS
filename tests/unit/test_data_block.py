@@ -233,12 +233,26 @@ def test_get_provider_dir(monkeypatch, tmp_path):
     cfg_file = cfg_dir / "config.toml"
     cfg_file.write_text('[provider]\nname = "p1"\n')
     monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
-    import blockchecks.engine.config as cfg_mod
-
-    monkeypatch.setattr(cfg_mod, "PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("BLOCKCHECKS_DATA_BLOCK", str(tmp_path / "xdg-db"))
+    monkeypatch.setattr(prov, "_repo_providers", lambda: None)
     prov._CACHE.clear()
+    prov._MIGRATED = False
     d = prov.get_provider_dir(allow_detect=False)
+    assert d == (tmp_path / "xdg-db" / "providers" / "p1")
     assert "p1" in str(d)
+
+
+def test_runtime_root_ignores_sys_prefix(monkeypatch, tmp_path):
+    import sys
+
+    import blockchecks.data_block.provider as prov
+    from blockchecks.engine.paths import DATA_DIR
+
+    under = Path(sys.prefix) / "local" / "blockchecks-data"
+    monkeypatch.setenv("BLOCKCHECKS_DATA_BLOCK", str(under))
+    assert prov.data_block_runtime_root() == DATA_DIR / "data_block"
+    monkeypatch.setenv("BLOCKCHECKS_DATA_BLOCK", str(tmp_path / "ok"))
+    assert prov.data_block_runtime_root() == tmp_path / "ok"
 
 
 # ── ProviderStore.sync_commit (git subprocess) ────────────────────────
@@ -383,3 +397,57 @@ def test_triage_toml_clusters_csv_primary(store: ProviderStore):
     loaded = store.load_triage()
     assert loaded is not None
     assert loaded.silent_drop_after_sni is True
+
+
+def test_migrate_provider_from_repo(monkeypatch, tmp_path):
+    import blockchecks.data_block.provider as prov
+
+    src = tmp_path / "repo" / "providers" / "isp"
+    src.mkdir(parents=True)
+    (src / "hosts").write_text("1.1.1.1\texample.com\n")
+    xdg = tmp_path / "xdg-db"
+    monkeypatch.setenv("BLOCKCHECKS_DATA_BLOCK", str(xdg))
+    monkeypatch.setattr(prov, "_repo_providers", lambda: src.parent)
+    monkeypatch.setattr(prov, "CONFIG_FILE", tmp_path / "cfg" / "config.toml")
+    (tmp_path / "cfg").mkdir()
+    (tmp_path / "cfg" / "config.toml").write_text('[provider]\nname = "isp"\n')
+    prov._CACHE.clear()
+    prov._MIGRATED = False
+    dest = prov.get_provider_dir(allow_detect=False)
+    assert dest == xdg / "providers" / "isp"
+    assert (dest / "hosts").read_text() == "1.1.1.1\texample.com\n"
+
+
+def test_export_copies_without_deleting_other_slugs(tmp_path, monkeypatch):
+    import blockchecks.data_block.provider as prov
+    from blockchecks.data_block.export import export_runtime_data_block
+
+    runtime = tmp_path / "runtime"
+    src = runtime / "providers" / "isp"
+    src.mkdir(parents=True)
+    (src / "hosts").write_text("9.9.9.9\tdiscord.com\n")
+    dest_root = tmp_path / "dest"
+    other = dest_root / "providers" / "other"
+    other.mkdir(parents=True)
+    (other / "hosts").write_text("keep-me\n")
+    monkeypatch.setattr(prov, "data_block_runtime_root", lambda: runtime)
+    n = export_runtime_data_block(dest_root)
+    assert n == 1
+    assert (dest_root / "providers" / "isp" / "hosts").read_text().startswith("9.9.9.9")
+    assert (other / "hosts").read_text() == "keep-me\n"
+    assert not (dest_root / "providers" / "default").exists()
+
+
+def test_cmd_data_block_requires_out_when_no_git(monkeypatch, tmp_path):
+    from argparse import Namespace
+
+    from blockchecks.cli.commands.data_block import cmd_data_block
+    from blockchecks.data_block import export as exp
+
+    monkeypatch.setattr(exp, "default_export_dest", lambda: None)
+    rc = cmd_data_block(Namespace(out=None, git=False, provider=None))
+    assert rc == 1
+    dest = tmp_path / "out"
+    monkeypatch.setattr(exp, "export_runtime_data_block", lambda *_a, **_k: 1)
+    rc = cmd_data_block(Namespace(out=str(dest), git=False, provider=None))
+    assert rc == 0

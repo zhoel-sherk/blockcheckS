@@ -110,8 +110,10 @@ def ensure_dirs() -> None:
         USER_PRESETS_DIR,
         USER_PRESETS_DIR / "domains",
         USER_PRESETS_DIR / "strategies",
+        USER_PRESETS_DIR / "ipset",
         STATE_DIR,
         DATA_DIR,
+        DATA_DIR / "data_block" / "providers",
         DEFAULT_OUT_DIR,
         DEFAULT_SHORTLIST_DIR,
         RUNTIME_LOGS_DIR,
@@ -131,6 +133,9 @@ def ensure_dirs() -> None:
             path.chmod(0o700)
         except OSError:
             pass
+    from blockchecks.engine.ipset_catalog import seed_user_overlay
+
+    seed_user_overlay()
 
 
 def _sudo_reclaim_ids() -> tuple[int, int] | None:

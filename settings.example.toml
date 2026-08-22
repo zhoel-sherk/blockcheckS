@@ -68,6 +68,27 @@ udp = [
   { name = "Quad9", ip = "9.9.9.9" },
 ]
 
+# Static CIDR catalogs (DNS sinkhole / CDN families / probe fallbacks).
+# Not kernel ipset and not `bc-nfconf --ipset` (that builds nfqws2 filters
+# from the DNS cache). User overlay: ~/.config/blockcheckS/presets/ipset/
+# Pin file (auto-pin hosts) lives under XDG data_block, not here.
+[ipset]
+# dir empty = ~/.config/blockcheckS/presets/ipset then bundled
+# dir = "/path/to/custom/ipset"
+# Filenames below override which catalog file is loaded (basename, .txt).
+sinkhole = "sinkhole.txt"
+cgnat = "cgnat.txt"
+cdn = [
+  "cdn-cloudflare.txt",
+  "cdn-google.txt",
+  "cdn-fastly.txt",
+  "cdn-akamai.txt",
+  "cdn-amazon.txt",
+  "cdn-discord.txt",
+]
+expect = "expect.txt"
+fallbacks = "fallbacks.txt"
+
 [http]
 # Bearer token for the `bs serve` HTTP bridge (--http-port). Required for any
 # /api/* route except /api/health. Also read from env BLOCKCHECKS_HTTP_TOKEN.

@@ -192,7 +192,7 @@ def test_prepare_run_dns_rc():
     args = _args()
     with (
         patch("blockchecks.main_phases.prepare_dns_for_run", return_value=(None, [], 7)),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
     ):
         cache, audits, rc = prepare_run_dns(args, ["a.com"])
     assert rc == 7
@@ -205,7 +205,7 @@ def test_prepare_run_dns_ok():
             "blockchecks.main_phases.prepare_dns_for_run",
             return_value=(MagicMock(), [MagicMock()], None),
         ),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
     ):
         cache, audits, rc = prepare_run_dns(args, ["a.com"])
     assert rc is None and audits

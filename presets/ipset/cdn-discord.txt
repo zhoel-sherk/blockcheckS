@@ -1,0 +1,8 @@
+# Discord voice / Fastly edge (not Discord web — that is Cloudflare).
+8.6.112.0/24
+8.47.69.0/24
+35.207.0.0/16
+35.212.0.0/16
+35.213.0.0/16
+35.215.0.0/16
+35.217.0.0/16

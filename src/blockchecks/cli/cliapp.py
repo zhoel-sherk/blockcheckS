@@ -473,6 +473,14 @@ def _run_preflight(model: BaseModel) -> int:
     return code or run_preflight_cmd(ns)
 
 
+def _run_data_block(model: BaseModel) -> int:
+    from blockchecks.cli.commands.data_block import cmd_data_block
+
+    ns = _to_namespace(model)
+    ns.command = "data-block"
+    return cmd_data_block(ns)
+
+
 def build_cli_root() -> type[BaseSettings]:
     from blockchecks.cli.user_config import apply_parser_defaults
 
@@ -513,6 +521,11 @@ def build_cli_root() -> type[BaseSettings]:
             "preflight",
             raw_blurbs,
             "DNS/L3/stall triage + data_block triage.toml/hosts (no matrix)",
+        ),
+        "data-block": _parser_blurb(
+            "data-block",
+            raw_blurbs,
+            "Export XDG provider store to a git data_block checkout",
         ),
     }
 
@@ -558,6 +571,12 @@ def build_cli_root() -> type[BaseSettings]:
         _run_preflight,
         blurbs["preflight"],
     )
+    DataBlockCmd = _make_cmd_model(
+        "DataBlockCmd",
+        model_from_subparser("DataBlockArgs", subs["data-block"]),
+        _run_data_block,
+        blurbs["data-block"],
+    )
 
     class BlockchecksCli(BaseSettings):
         """bs — lightspeed DPI strategy tester (CliApp)."""
@@ -588,6 +607,10 @@ def build_cli_root() -> type[BaseSettings]:
         mcp: CliSubCommand[McpCmd] = Field(description=blurbs["mcp"])  # type: ignore[valid-type]
         preflight: CliSubCommand[PreflightCmd] = Field(  # type: ignore[valid-type]
             description=blurbs["preflight"]
+        )
+        data_block: CliSubCommand[DataBlockCmd] = Field(  # type: ignore[valid-type]
+            alias="data-block",
+            description=blurbs["data-block"],
         )
 
         def cli_cmd(self) -> int:
@@ -662,6 +685,6 @@ def main(argv: list[str] | None = None) -> int:
         return _CLI_EXIT_CODE
     sub = get_subcommand(result, is_required=False)
     if sub is None:
-        log.info("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full|stop|preflight")
+        log.info("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full|stop|preflight|data-block")
         return 2
     return 0

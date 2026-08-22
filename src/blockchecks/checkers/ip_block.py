@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from blockchecks.checkers.dns_secure import DnsRunCache, pick_working_doh
+from blockchecks.checkers.dns_secure import DnsRunCache, _cdn_family, pick_working_doh
 from blockchecks.checkers.tcp_tls import TlsResult, check_tls
 from blockchecks.engine.config import UNBLOCKED_DOM
 
@@ -128,27 +128,15 @@ def print_ip_block_report(report: IpBlockReport) -> None:
             log.info("%s", f"    ⚠  {cdn_hint}")
 
 
-_CDN_OCTETS: tuple[str, ...] = (
-    "104.",
-    "162.158.",
-    "162.159.",
-    "172.64.",
-    "172.65.",
-    "172.66.",
-    "172.67.",
-    # Discord Fastly/CF anycast (AS13335), e.g. dl.discordapp.net
-    "8.6.112.",
-    "8.47.69.",
-)
-_CDN_NAMES: str = "Cloudflare"
-
-
 def _cdn_hint(ips: list[str]) -> str:
-    cdn_ips = [ip for ip in ips if ip.startswith(_CDN_OCTETS)]
-    if not cdn_ips:
+    """Non-empty when IPs sit in a known CDN family (SNI vs IP-block lookalike)."""
+    tagged = [(ip, _cdn_family(ip)) for ip in ips]
+    families = sorted({f for _, f in tagged if f})
+    if not families:
         return ""
+    n = sum(1 for _, f in tagged if f)
     return (
-        f"{len(cdn_ips)}/{len(ips)} IP(s) appear to be {_CDN_NAMES} CDN — "
+        f"{n}/{len(ips)} IP(s) appear to be {', '.join(families)} CDN — "
         "SNI enforcement indistinguishable from IP block. "
         "Verify with origin-server IPs."
     )

@@ -153,7 +153,7 @@ def test_prepare_dns_rc_short_circuits():
             "blockchecks.cli.commands.pair_phases.prepare_dns_for_run",
             return_value=(None, [], 7),
         ),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
     ):
         res = asyncio.run(prepare_dns_and_preflight(args, []))
     assert res.exit_code == 7
@@ -173,7 +173,7 @@ def test_prepare_dns_preflight_exit_code():
             "blockchecks.engine.preflight.run_preflight_async",
             new=AsyncMock(return_value=preflight),
         ),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.checkers.ip_pin.load_pins", return_value={}),
     ):
         res = asyncio.run(prepare_dns_and_preflight(args, []))
@@ -193,7 +193,7 @@ def test_prepare_dns_forwards_run_store():
             "blockchecks.engine.preflight.run_preflight_async",
             new=AsyncMock(return_value=preflight),
         ) as pf,
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.checkers.ip_pin.load_pins", return_value={}),
     ):
         asyncio.run(prepare_dns_and_preflight(args, [], store=store))
@@ -214,7 +214,7 @@ def test_prepare_dns_prolog_skip_domain():
             "blockchecks.engine.preflight.run_preflight_async",
             new=AsyncMock(return_value=preflight),
         ),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.checkers.ip_pin.load_pins", return_value={}),
     ):
         res = asyncio.run(prepare_dns_and_preflight(args, []))
@@ -235,7 +235,7 @@ def test_prepare_dns_ok_returns_no_exit():
             "blockchecks.engine.preflight.run_preflight_async",
             new=AsyncMock(return_value=preflight),
         ),
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.checkers.ip_pin.load_pins", return_value={}),
     ):
         res = asyncio.run(prepare_dns_and_preflight(args, []))

@@ -100,7 +100,7 @@ def test_tcp_strategy_source_runs_sequential():
         patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
         patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
         patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats,
     ):
         LoaderCls.return_value.from_string.return_value = ["fake:strategy"]
@@ -119,7 +119,7 @@ def test_tcp_config_source_uses_configs_path():
         patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
         patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
         patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats,
     ):
         LoaderCls.return_value.from_config.return_value = ["/tmp/x.conf"]
@@ -137,7 +137,7 @@ def test_tcp_fail_returns_1():
         patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
         patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
         patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats,
     ):
         LoaderCls.return_value.from_string.return_value = ["fake:strategy"]
@@ -170,7 +170,7 @@ def test_tcp_time_limit_prints_stopped():
         patch("blockchecks.cli.commands.tcp.StrategyLoader") as LoaderCls,
         patch("blockchecks.cli.commands.tcp.prepare_dns_for_run") as dns,
         patch("blockchecks.cli.commands.tcp.TestRunner") as RunnerCls,
-        patch("blockchecks.data_block.provider.provider_name"),
+        patch("blockchecks.data_block.provider.provider_name", return_value="testp"),
         patch("blockchecks.cli.commands.tcp.repeats_from_args") as repeats,
     ):
         LoaderCls.return_value.from_string.return_value = ["fake:a", "fake:b", "fake:c"]

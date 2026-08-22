@@ -21,6 +21,7 @@ _.optionxform  # unused attribute (src/blockchecks/checkers/voice_discovery.py:1
 has_fresh_url  # unused function (src/blockchecks/checkers/youtube_url.py:178)
 model_config  # unused variable (src/blockchecks/cli/cliapp.py:515)
 bench_settle  # unused variable (src/blockchecks/cli/cliapp.py:531)
+data_block  # unused variable (src/blockchecks/cli/cliapp.py:611)
 _.cli_cmd  # unused method (src/blockchecks/cli/cliapp.py:540)
 _.load_dns_records  # unused method (src/blockchecks/data_block/store.py:168)
 total_enqueued  # unused variable (src/blockchecks/engine/adaptive_queue.py:102)

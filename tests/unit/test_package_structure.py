@@ -52,6 +52,7 @@ class TestSubmoduleImports:
         "blockchecks.service.lua_netns",
         "blockchecks.service.lua_session",
         "blockchecks.engine.paths",
+        "blockchecks.engine.ipset_catalog",
         "blockchecks.engine.store",
         "blockchecks.engine.store",
         "blockchecks.engine.strategy_loader",

@@ -205,13 +205,17 @@ def check_tls(
     return result
 
 
-def resolve_domain(domain: str, nameserver: str = "8.8.8.8") -> list[str]:
+def resolve_domain(domain: str, nameserver: str | None = None) -> list[str]:
     """Pre-resolve domain to IPv4 addresses via specified DNS."""
     import subprocess
 
+    from blockchecks.engine.config import first_udp_nameserver
+
+    ns = nameserver or first_udp_nameserver()
+
     try:
         r = subprocess.run(
-            ["dig", "+short", f"@{nameserver}", "A", domain],
+            ["dig", "+short", f"@{ns}", "A", domain],
             capture_output=True,
             text=True,
             timeout=5,

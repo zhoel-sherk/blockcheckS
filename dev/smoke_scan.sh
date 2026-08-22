@@ -2,7 +2,7 @@
 # smoke_scan.sh — quick bs scan with a small known-good user matrix.
 #
 # Usage:
-#   scripts/smoke_scan.sh [backend] [domain]
+#   bash dev/smoke_scan.sh [backend] [domain]
 #     backend: default | classic | bridge | compare   (default: default)
 #     domain:  host to scan (default discord.com)
 #

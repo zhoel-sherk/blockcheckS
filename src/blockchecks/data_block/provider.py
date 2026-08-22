@@ -165,24 +165,129 @@ def provider_name(allow_detect: bool = True) -> str:
     return _ensure_provider_config(allow_detect=allow_detect)
 
 
-def get_provider_dir(allow_detect: bool = True) -> Path:
-    """Directory ``<repo>/data_block/providers/<provider>`` for this host."""
+def data_block_runtime_root() -> Path:
+    """XDG (or BLOCKCHECKS_DATA_BLOCK) root that contains ``providers/``."""
+    from blockchecks.engine.paths import DATA_DIR
+
+    env = os.environ.get("BLOCKCHECKS_DATA_BLOCK", "").strip()
+    if env:
+        p = Path(os.path.expandvars(os.path.expanduser(env)))
+        if p.is_absolute() and not _under_install_prefix(p):
+            return p
+    return DATA_DIR / "data_block"
+
+
+def data_block_repo_root() -> Path | None:
+    """Checkout of the data_block git repo/submodule, if present."""
     from blockchecks.engine.config import PROJECT_DIR
 
+    for cand in (Path.cwd() / "data_block", Path(PROJECT_DIR) / "data_block"):
+        if (cand / ".git").exists():
+            return cand
+    repo = Path(PROJECT_DIR) / "data_block"
+    if (repo / "providers").is_dir() and not _under_install_prefix(repo):
+        return repo
+    return None
+
+
+def _under_install_prefix(path: Path) -> bool:
+    import sys
+
+    try:
+        path.resolve().relative_to(Path(sys.prefix).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _repo_providers() -> Path | None:
+    from blockchecks.engine.config import PROJECT_DIR
+
+    src = Path(PROJECT_DIR) / "data_block" / "providers"
+    if src.is_dir() and not _under_install_prefix(src):
+        return src
+    return None
+
+
+def _provider_slot_empty(path: Path) -> bool:
+    if not path.exists():
+        return True
+    try:
+        names = {p.name for p in path.iterdir()}
+    except OSError:
+        return False
+    return not names or names <= {f"{path.name}.md"}
+
+
+def _copy_provider_tree(src: Path, dest: Path) -> None:
+    import shutil
+
+    from blockchecks.engine.paths import reclaim_sudo_ownership
+
+    tmp = dest.with_name(f".{dest.name}.migrating.{os.getpid()}")
+    if tmp.exists():
+        shutil.rmtree(tmp, ignore_errors=True)
+    shutil.copytree(src, tmp)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        shutil.rmtree(dest)
+    tmp.replace(dest)
+    reclaim_sudo_ownership(dest)
+
+
+_MIGRATED = False
+
+
+def _maybe_migrate_providers() -> None:
+    """One-time copy from repo submodule → XDG when the XDG slot is empty."""
+    global _MIGRATED
+    if _MIGRATED:
+        return
+    _MIGRATED = True
+    src_base = _repo_providers()
+    if src_base is None:
+        return
+    runtime = data_block_runtime_root() / "providers"
+    try:
+        runtime.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        log.warning("data_block runtime mkdir failed: %s", exc)
+        return
+    for src in src_base.iterdir():
+        if not src.is_dir():
+            continue
+        dest = runtime / src.name
+        if not _provider_slot_empty(dest):
+            continue
+        try:
+            _copy_provider_tree(src, dest)
+            log.info("%s", f"  [data_block] migrated {src.name} → {dest}")
+        except OSError as exc:
+            log.warning("data_block migrate failed (%s): %s", src, exc)
+
+
+def get_provider_dir(allow_detect: bool = True) -> Path:
+    """Directory ``DATA_DIR/data_block/providers/<provider>`` for this host."""
+    from blockchecks.engine.paths import reclaim_sudo_ownership
+
+    _maybe_migrate_providers()
     name = provider_name(allow_detect=allow_detect)
-    return Path(PROJECT_DIR) / "data_block" / "providers" / name
+    if not isinstance(name, str) or not name:
+        name = DEFAULT_PROVIDER
+    dest = data_block_runtime_root() / "providers" / name
+    dest.mkdir(parents=True, exist_ok=True)
+    reclaim_sudo_ownership(dest)
+    return dest
 
 
 def iter_provider_dirs(allow_detect: bool = True) -> list[Path]:
-    """All provider dirs under data_block/providers/ (agnostic to host provider).
+    """All provider dirs under the XDG data_block (agnostic to host provider).
 
     Returns current provider first (if its dir exists), then every other
-    provider dir. Used when aggregating DNS/IP data across providers — the repo
-    is shared/public, so multiple providers can be present.
+    provider dir. Used when aggregating DNS/IP data across providers.
     """
-    from blockchecks.engine.config import PROJECT_DIR
-
-    base = Path(PROJECT_DIR) / "data_block" / "providers"
+    _maybe_migrate_providers()
+    base = data_block_runtime_root() / "providers"
     if not base.is_dir():
         return []
     current = get_provider_dir(allow_detect=allow_detect)

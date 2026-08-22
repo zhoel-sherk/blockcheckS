@@ -181,3 +181,6 @@ def _apply_doh_catalog(s: BlockchecksSettings) -> None:
         )
     if s.udp_servers:
         cfg.UDP_DNS_SERVERS[:] = [(e["ip"], e["name"] or e["ip"]) for e in s.udp_servers]
+    from blockchecks.engine.ipset_catalog import apply_ipset_fallbacks
+
+    apply_ipset_fallbacks()

@@ -266,12 +266,12 @@ def add_secure_dns_args(
     g.add_argument(
         "--allow-dns-hijack",
         action="store_true",
-        help="Continue when DNS hijack detected",
+        help="Continue even on sinkhole/bogon DNS (UDP≠DoH is a warning; DoH+auto-pin is the mitigation)",
     )
     g.add_argument(
         "--data-block-sync",
         action="store_true",
-        help="Commit+push data_block/ (provider DNS cache, strategies) after scan",
+        help="Export XDG providers into data_block/.git (commit+push); warning if missing",
     )
     if not include_preflight:
         return
@@ -840,6 +840,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_system_deps_args(bench)
 
+    db = sub.add_parser(
+        "data-block",
+        help="Export XDG provider store to a git data_block checkout",
+    )
+    db.add_argument(
+        "--out",
+        default=None,
+        metavar="DIR",
+        help="Destination data_block root (default: workspace submodule with .git)",
+    )
+    db.add_argument(
+        "--git",
+        action="store_true",
+        help="git add/commit/push the destination (requires .git)",
+    )
+    db.add_argument(
+        "--provider",
+        default=None,
+        metavar="SLUG",
+        help="Export only this provider slug (default: all XDG providers)",
+    )
+
     return parser
 
 
@@ -925,6 +947,11 @@ def dispatch(args: argparse.Namespace) -> int:
             return 0
         return run_preflight_cmd(a)
 
+    def _data_block(a: argparse.Namespace) -> int:
+        from blockchecks.cli.commands.data_block import cmd_data_block
+
+        return cmd_data_block(a)
+
     handlers: dict[str, Callable[[argparse.Namespace], int]] = {
         "tcp": cmd_tcp,
         "udp": cmd_udp,
@@ -934,6 +961,7 @@ def dispatch(args: argparse.Namespace) -> int:
         "bench-settle": _bench,
         "stop": _stop,
         "preflight": _preflight,
+        "data-block": _data_block,
     }
     handler = handlers.get(args.command)
     if handler is not None:

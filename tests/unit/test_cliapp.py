@@ -103,6 +103,16 @@ def test_root_help_includes_subcommand_blurbs():
     assert "TCP x UDP pair matrix" in help_text or "TCP×UDP" in help_text
     assert "Single TCP strategy test" in help_text
     assert "triage.toml" in help_text or "preflight" in help_text.lower()
+    assert "data-block" in help_text.lower() or "data_block" in help_text.lower()
+
+
+@pytest.mark.unit
+def test_data_block_export_parses():
+    Root = build_cli_root()
+    model = Root(_cli_parse_args=["data-block", "--git", "--out", "/tmp/db"])
+    sub = get_subcommand(model, is_required=True)
+    assert sub.git is True
+    assert sub.out == "/tmp/db"
 
 
 @pytest.mark.unit

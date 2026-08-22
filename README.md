@@ -1,110 +1,65 @@
-# blockcheckS — lightspeed DPI strategy tester
+# blockcheckS — подбор стратегий обхода DPI
 
 [![version](https://img.shields.io/badge/version-1.3.7-green)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1300%20passed-success)](#)
+[![tests](https://img.shields.io/badge/tests-1507%20unit-success)](#)
 
-**Твой провайдер режет YouTube, Discord и Telegram через DPI?**
-*blockcheckS за 10 минут найдёт работающий обход из 10 000+ комбинаций,
-пока ты пьёшь кофе. В 33 раза быстрее, чем blockcheck.sh.*
+Программа на Linux перебирает стратегии **nfqws2 / zapret2** и показывает,
+какие из них реально открывают заблокированный сайт у твоего провайдера.
+Результат можно выгрузить в готовый конфиг для роутера (Keenetic, OpenWrt, Linux).
 
-> Асинхронный подбор стратегий nfqws2/zapret2 в изолированных network
-> namespaces. HTTP/2 и HTTP/3 через браузерный TLS-отпечаток (JA4),
-> TCP×UDP pair matrix с авто-дискавери голосовых эндпоинтов Discord,
-> checkpoint/resume, SQLite-стейт и экспорт готового конфига для Keenetic.
-
-- ⚡ **1 тест/сек** — 33× быстрее blockcheck.sh (0.43 тест/сек)
-- 🔍 **10 886+ стратегий** — StandardGenerator: TCP-семей + HTTP :80 + QUIC + UDP voice
-- 🎭 **Браузерный JA4** — curl_cffi с Chrome 124 BoringSSL (не палится как скрипт)
-- 🏊 **Netns pool** — пресозданные изолированные namespace'ы
-- 🔬 **Preflight Triage** — детерминированный профиль DPI до скана (DNS/L3/SNI/
-  stream-stall/QoS/QUIC/TLS-fingerprint) → отсечение бесполезных веток генераторов
-- 🧬 **Adaptive queue** — ON по умолчанию; генетический буст PASS-стратегий по family/blob/traits
-- 🛰️ **`bs serve`** — резидентный on-the-fly probe server (Unix socket + HTTP)
-- 🧩 **`bs mcp`** — MCP-мост (FastMCP, stdio) для LLM-клиентов (Claude/Cursor/opencode)
-- 🧪 **Статический валидатор** — офлайн-проверка стратегий до netns (9+ правил,
-  fuzz-устойчив) + кастомные Lua (`lua/custom/`, `manifest.toml` с included/excluded)
-- 📊 **TCP×UDP матрицы** — ищет пары стратегий для голоса Discord
-- 💾 **Checkpoint/resume** — упал роутер? Продолжи с места, SQLite помнит всё
-- 📦 **nfconf export** — готовый конфиг для Keenetic, Linux, OpenWrt (+ `--ipset`
-  из DNS-кэша, IP→CIDR через ip2net)
-- 🤖 **Zapret2 auto-fetch** — сам скачает nfqws2 с GitHub, если нет локально
-- 🍓 **Raspberry Pi 2+ (armv7l)** — установка без компиляции (stdlib /proc, без psutil)
+Нужны **Linux и root** (network namespaces + iptables). Python 3.10+.
 
 ---
 
 ## Оглавление
 
-1. [Что такое blockcheckS? (30 секунд)](#что-такое-blockchecks-30-секунд)
-2. [Сравнение с blockcheck.sh](#сравнение-с-blockchecksh)
-3. [Быстрый старт](#быстрый-старт)
-4. [Установка](#установка)
-5. [Docker / Podman](#docker--podman)
-6. [CLI команды](#cli-команды)
-7. [Пресеты](#пресеты)
-8. [Экспорт конфига для роутера](#экспорт-конфига-для-роутера)
-9. [Документация](#документация)
-10. [For contributors](#for-contributors)
-11. [Дисклеймер](#дисклеймер)
+1. [Как это работает](#как-это-работает)
+2. [Быстрый старт](#быстрый-старт)
+3. [Установка](#установка)
+4. [Docker / Podman](#docker--podman)
+5. [Команды](#команды)
+6. [Пресеты](#пресеты)
+7. [Экспорт для роутера](#экспорт-для-роутера)
+8. [Документация](#документация)
+9. [Для разработчиков](#для-разработчиков)
+10. [Дисклеймер](#дисклеймер)
 
 ---
 
-## Что такое blockcheckS? (30 секунд)
+## Как это работает
 
-Берёшь домен (скажем, `discord.com`), запускаешь одну команду — и через пару
-минут получаешь список стратегий nfqws2, которые **реально работают** на твоём
-провайдере. Никакого гадания на кофейной гуще с `badsum`/`fakedsplit` — только
-холодный, циничный перебор через изолированные netns с браузерным JA4.
+Берёшь домен, запускаешь одну команду — получаешь список рабочих стратегий.
+Каждая проба идёт в отдельном network namespace, чтобы не ломать сеть хоста.
+Состояние пишется в SQLite: можно остановить прогон и продолжить позже.
 
 ```bash
 sudo bs scan -d discord.com --generate --parallel 4
-# → 29 стратегий за 8 секунд, 3 PASS
 ```
 
-Под капотом: asyncio + NetNsPool + curl_cffi + nfqws2 + SQLite + немного магии.
-
----
-
-## Сравнение с blockcheck.sh
-
-| blockcheck.sh (оригинал) | blockcheckS (этот парень) |
-|---|---|
-| ~60–120 сек на стратегию | ~3–5 сек на стратегию (async parallel) |
-| System curl / OpenSSL | curl_cffi с браузерным JA4 (Chrome 124 BoringSSL) |
-| Только TCP | TCP + UDP voice (STUN + IP Discovery) |
-| Последовательный shell | asyncio + NetNsPool (netns переиспользуются) |
-| Легко «ложно-зелёный» | Content validation + DPI fake detection |
-| 32 000+ комбинаций, медленно | 10 886 комбинаций, **быстро** (покрытие ≥90% BC2) |
-| Только bash | Python-пакет, `pip install`, pytest, ruff |
+По сравнению с оригинальным `blockcheck.sh` тот же перебор быстрее (параллельные
+пробы) и умеет не только TCP, но и голос Discord (UDP).
 
 ---
 
 ## Быстрый старт
 
-Три команды — и ты в деле:
-
 ```bash
-# 1. Установка (editable, см. ниже почему)
 pip install -e ".[dev,discovery]"
 
-# 2. Быстрый smoke — 20 стратегий, AQ + preflight по умолчанию
-sudo bs scan -d discord.com --profile smoke --generate
+# проверить, что nfqws2 и sudo живы (~минуты)
+sudo bs scan --preset benchmark --profile smoke --generate
 
-# 3. Полный скан — 29 стратегий на discord.com
-sudo bs scan -d discord.com --generate --parallel 4
-
-# 4. Продолжить после обрыва (checkpoint/resume)
-sudo bs scan -d discord.com --generate --resume
+# YouTube + Discord + соседние сервисы (часы, с resume)
+sudo bs full --preset coverage-tcp --resume --parallel 4
 ```
 
-Больше примеров в [User Guide](docs/guide.md).
+Подробности и экспорт: [docs/guide.md](docs/guide.md).
 
 ---
 
 ## Установка
-
-**Linux с root** (нужен для netns + iptables). Python 3.10+.
 
 ```bash
 git clone https://github.com/zhoel-sherk/blockcheckS.git
@@ -112,32 +67,29 @@ cd blockcheckS
 pip install -e ".[dev,discovery]"
 ```
 
-**Editable** (`-e`) удобен для разработки. С 1.2.1a wheel самодостаточен:
-`configs/`, `presets/`, `blobs/` и `lua/` входят в data-files
-(см. [ONB-7](docs/package.md)), поэтому `pip install blockchecks` или
-`pip install .` тоже находят их.
+С версии 1.2.1a пакет с PyPI тоже самодостаточен (`pip install blockchecks`):
+в wheel входят `configs/`, `presets/`, `blobs/` и `lua/`.
 
-**nfqws2 / zapret2** — blockcheckS сам скачает официальный релиз
-[bol-van/zapret2](https://github.com/bol-van/zapret2) при первом запуске в
-`~/.local/share/blockcheckS/zapret2/` (под armv7l/arm64 — `binaries/linux-arm`).
-Если nfqws2 уже стоит в `/opt/zapret2` — использует его. Отключить авто-фетч:
-`--no-fetch-deps`.
+**nfqws2.** Если бинаря нет, blockcheckS скачает релиз
+[bol-van/zapret2](https://github.com/bol-van/zapret2) в
+`~/.local/share/blockcheckS/zapret2/`. Уже стоит `/opt/zapret2` — использует его.
+Отключить скачивание: `--no-fetch-deps`.
 
-**Блобы** (fake payloads) — в репо `blobs/` (без скачивания). Override:
-`BLOCKCHECKS_BLOBS`. Опционально: `scripts/install_blobs.sh` для extras на хосте.
-Flowseal-техники: `--tcp-sources flowseal` / `-M flowseal-fast`
-([Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube);
-howto: [docs/cookbook/blobs.md](docs/cookbook/blobs.md)).
+**Блобы** лежат в репо (`blobs/`). Другой каталог: `BLOCKCHECKS_BLOBS`.
+Дополнительно на хост: `scripts/install_blobs.sh`. Flowseal-наборы:
+`--tcp-sources flowseal` / `-M flowseal-fast`
+([howto](docs/cookbook/blobs.md)).
 
-**Raspberry Pi 2+ (armv7l)** — все обязательные зависимости имеют armv7l
-wheels на PyPI (psutil убран → stdlib `/proc`), поэтому установка **без
-компиляции**:
+**Raspberry Pi 2+ (armv7l)** — установка без компиляции:
+
 ```bash
-bash scripts/setup-standalone.sh    # venv + pip install + smoke
-# подробности: docs/install-rpi.md
+bash scripts/setup-standalone.sh
 ```
 
-Юнит-тесты запускаются **без root**:
+Подробности: [docs/install-rpi.md](docs/install-rpi.md).
+
+Юнит-тесты **без root**:
+
 ```bash
 pytest -m "not integration"
 ```
@@ -146,106 +98,79 @@ pytest -m "not integration"
 
 ## Docker / Podman
 
-Команды одинаковые для `podman` и `docker`. Slim-контейнер проверяет **пакет**
-(CLI, configs/blobs), не live DPI: `bs scan` / netns / nfqws2 нужны Linux-хост
-с root.
+Контейнер проверяет пакет (CLI, configs/blobs), не живой DPI.
+Для `bs scan` нужен Linux-хост с root.
 
 ```bash
-# из checkout
 podman run --rm -v "$PWD":/src:ro -w /src python:3.12-slim \
   bash -c 'pip install . && bs --help'
 
-# из PyPI
 podman run --rm python:3.12-slim \
   bash -c 'pip install blockchecks && bs --help'
 ```
 
-Локальный GitHub CI (lint + шарды S1/S2/S3) — через [nektos/act](https://github.com/nektos/act)
-и socket podman. Бинарь `bin/act` локальный (не в git). Не гонять монолитный
-`pytest tests/` в CI.
+Локальный CI как на GitHub — [nektos/act](https://github.com/nektos/act) + socket
+podman. Монолитный `pytest tests/` в CI не гонять (шарды S1/S2/S3).
 
 ```bash
-systemctl --user enable --now podman.socket   # rootless
+systemctl --user enable --now podman.socket
 export DOCKER_HOST="unix://${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock"
 ./bin/act -j lint-and-quality -P ubuntu-latest=catthehacker/ubuntu:act-latest
 ./bin/act -j unit-tests       -P ubuntu-latest=catthehacker/ubuntu:act-latest
 ```
 
-Системный socket `unix:///run/podman/podman.sock` — если пользователь в группе
-`podman`/`docker`.
-
 ---
 
-## CLI команды
+## Команды
 
-| Команда | Что делает | Пример |
+| Команда | Простыми словами | Пример |
 |---|---|---|
-| `bs scan` | Асинхронный TCP-батч | `sudo bs scan -d discord.com --generate --parallel 4` |
-| `bs pair` | TCP×UDP pair matrix | `sudo bs pair -d discord.com --generate --auto-discover 5` |
-| `bs full` | Масс-скан + экспорт (долгий) | `sudo bs full --profile 20h` |
-| `bs tcp` | Одна TCP-стратегия (sync) | `sudo bs tcp -d discord.com -c configs/simple_fake__fake_ts.conf` |
-| `bs udp` | Один UDP-конфиг (sync) | `sudo bs udp -c configs/udp_voice__fake_r6.conf` |
-| `bs composite` | Композитный TCP+UDP конфиг | `sudo bs composite -c configs/composite_discord.conf` |
-| `bs bench-settle` | Калибровка settle/curl таймаутов | `sudo bs bench-settle -d discord.com` |
-| `bs serve` | Резидентный probe server (Unix socket + HTTP) | `sudo bs serve --pool 2` |
-| `bs mcp` | MCP-сервер (stdio) для LLM-клиентов | `bs-mcp` (см. [docs/mcp.md](docs/mcp.md)) |
-| `bc-nfconf` | Экспорт nfqws2-конфигов из БД (+`--ipset`) | `bc-nfconf --db state.db --out-dir output --ipset` |
+| `bs scan` | Подобрать TCP-стратегии | `sudo bs scan -d discord.com --generate --parallel 4` |
+| `bs pair` | То же + голос Discord (UDP) | `sudo bs pair -d discord.com --generate --auto-discover 5` |
+| `bs full` | Длинная кампания и экспорт | `sudo bs full --profile 20h` |
+| `bs tcp` / `bs udp` | Проверить одну готовую стратегию | `sudo bs tcp -d discord.com -c configs/simple_fake__fake_ts.conf` |
+| `bs preflight` | Только диагноз DPI, без перебора | `sudo bs preflight -d youtube.com` |
+| `bs serve` | Демон для повторных проб | `sudo bs serve --pool 2` |
+| `bs mcp` | Мост для Cursor / Claude / opencode | `bs-mcp` — [docs/mcp.md](docs/mcp.md) |
+| `bc-nfconf` | Собрать конфиг роутера из БД | `bc-nfconf --db state.db --out-dir output` |
 
-**Профили прогона** (`--profile`): `smoke` (20 стратегий, quick preflight),
-`fast` (100, scan-level fast), `20h` (long-term серия: full + resume +
-fan-out). Работают в `scan`, `pair`, `full`.
+Готовые наборы флагов: `--profile smoke` (20 стратегий), `fast` (100),
+`20h` (длинная серия). Работают в `scan`, `pair`, `full`.
 
-**Защитные фичи ON по умолчанию** (strict inversion — отключать явно):
-`--no-adaptive`, `--no-preflight` / `--quick`, `--no-ech`, `--no-wssize`,
-`--no-secure-dns`.
+Полезные вещи включены по умолчанию. Выключить явно:
+`--no-adaptive`, `--no-preflight` (или `--quick`), `--no-ech`, `--no-wssize`,
+`--no-voice`.
 
-Прочие флаги: `--resume`, `--preset`, `-M`, `--generate`, `--tcp-sources`,
-`--parallel`, `--max`, `--scan-level`, `--repeats`, `--max-timeh`.
-Bare `--generate` (без значения) = `custom,configs`; явно:
-`--generate fake,configs`.
-
-Подробный CLI reference: [docs/guide.md](docs/guide.md).
+Полный справочник: [docs/guide.md](docs/guide.md).
 
 ---
 
 ## Пресеты
 
-Готовые списки доменов и стратегий из GP control-plane:
+Готовые списки доменов и стратегий:
 
 ```bash
-# Домены
-bs scan --preset benchmark --generate        # 6 доменов для быстрой проверки
-bs scan --preset discord --generate          # голый Discord (22 домена)
-bs scan --preset google-youtube --generate   # YouTube CDN (23 домена)
-bs scan --preset critical --generate         # критичные: YT + Discord + GV
-
-# Стратегии
-bs scan -d discord.com -M blockcheckS-best   # 9 проверенных стратегий
-bs scan -d discord.com -M gp-verified        # 12 GP-подтверждённых
-bs pair -d discord.com -M gp-voice           # голосовые UDP-стратегии
+bs scan --preset benchmark --generate        # 6 доменов, быстрая проверка
+bs scan --preset discord --generate          # Discord
+bs scan --preset google-youtube --generate   # YouTube
+bs scan -d discord.com -M blockcheckS-best   # проверенные стратегии
 ```
 
-Посмотреть всё: `bs scan --list-presets`.  
-Детали: [presets/README.md](presets/README.md).
+Список: `bs scan --list-presets`. Подробности: [presets/README.md](presets/README.md).
 
 ---
 
-## Экспорт конфига для роутера
+## Экспорт для роутера
 
-После прогона blockcheckS экспортирует готовые nfqws2-конфиги из best-стратегий
-в XDG-каталог:
+После прогона лучшие стратегии можно выгрузить в nfqws2-конфиг:
 
 ```bash
-# default: ~/.local/share/blockcheckS/export/nfqws2_<ts>.conf (+ raw, user.list)
 bc-nfconf --db logs/run.db --out-dir /path/to/out
-
-# Добавить IP-фильтр из DNS-кэша (без DNS на роутере):
-#   малые наборы → --ipset-ip inline, большие → user.ipset
-bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset
+bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset   # плюс IP-фильтр
 ```
 
-На Keenetic скопируйте `nfqws2_*.conf` → `/opt/etc/nfqws2/nfqws2.conf`.
-Детали: [configs/README.md](configs/README.md).
+На Keenetic: `nfqws2_*.conf` → `/opt/etc/nfqws2/nfqws2.conf`.
+См. [configs/README.md](configs/README.md).
 
 ---
 
@@ -253,42 +178,42 @@ bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset
 
 | Документ | О чём |
 |---|---|
-| [User Guide](docs/guide.md) | CLI reference, примеры, known limitations |
-| [Architecture](docs/architecture.md) | Data flow, module map, voice discovery flow |
-| [Package Layout](docs/package.md) | XDG-пути, деревья, import graph |
-| [Database Schema](docs/database.md) | ER-диаграмма, SQL examples, checkpoint logic |
-| [MCP Server](docs/mcp.md) | Установка MCP в Claude Desktop / Cursor / opencode |
-| [Raspberry Pi (armv7l)](docs/install-rpi.md) | Установка на RPi 2+ без компиляции |
-| [Glossary](docs/glossary.md) | Терминология: netns, NFQUEUE, pair matrix, ... |
-| [API](docs/api.md) | HTTP/socket/MCP контракты, правила |
-| [Changelog](changelog.md) | История версий (1.3.7 и ранее) |
-| [Roadmap](docs/todo.md) | Бэклог: открытое, PI2, уголок идей, RL/ML |
+| [User Guide](docs/guide.md) | Команды, примеры, ограничения |
+| [Architecture](docs/architecture.md) | Как устроен прогон |
+| [Package Layout](docs/package.md) | Дерево репозитория, пути |
+| [Database](docs/database.md) | SQLite, resume |
+| [MCP](docs/mcp.md) | Подключение к LLM-клиентам |
+| [Raspberry Pi](docs/install-rpi.md) | Установка на armv7l |
+| [Glossary](docs/glossary.md) | Термины |
+| [API](docs/api.md) | HTTP / сокет / MCP |
+| [Changelog](changelog.md) | История (1.3.7 и ранее) |
+| [Roadmap](docs/todo.md) | Что ещё не сделано |
 
-Cookbook: [add checker](docs/cookbook/add-checker.md) ·
-[add generator](docs/cookbook/add-generator.md) ·
-[add CLI flag](docs/cookbook/add-cli-flag.md) ·
-[GP bridge](docs/cookbook/gp-bridge.md).
+Скрипты кампаний: [scripts/README.md](scripts/README.md).
+Смоки и гейты качества: [dev/README.md](dev/README.md).
+
+Cookbook: [checker](docs/cookbook/add-checker.md) ·
+[generator](docs/cookbook/add-generator.md) ·
+[CLI-флаг](docs/cookbook/add-cli-flag.md) ·
+[GP](docs/cookbook/gp-bridge.md).
 
 ---
 
-## For contributors
+## Для разработчиков
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, тесты, PR flow, что коммитить а что нет
-- [docs/architecture.md](docs/architecture.md) — data flow, module map
-- [docs/cookbook/](docs/cookbook/) — как добавить checker / generator / CLI flag
+- [CONTRIBUTING.md](CONTRIBUTING.md) — установка, тесты, PR
+- [docs/architecture.md](docs/architecture.md) — устройство кода
 
-Быстрый старт для разработчика:
 ```bash
 pip install -e ".[dev,discovery]"
-ruff check src tests    # линтер
-pytest -m "not integration"   # юнит-тесты (без root)
+ruff check src tests
+pytest -m "not integration"          # юнит, без root
+bash dev/gate_all.sh                 # unit + quality + ruff + vulture
 ```
-
-CI как на GitHub — act + podman, см. [Docker / Podman](#docker--podman).
 
 ---
 
-## ⚖️ Legal Disclaimer / Дисклеймер
+## Дисклеймер
 
 ### English
 This software is provided "as is", without warranty of any kind, express or

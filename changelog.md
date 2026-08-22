@@ -1,5 +1,13 @@
 ## Unreleased
 
+- **IP/CIDR catalogs** (`presets/ipset/*.txt`): sinkhole, CGNAT, CDN families,
+  expect, fallbacks. User overlay `~/.config/blockcheckS/presets/ipset/`.
+  Config `[ipset]` in `settings.example.toml`. Distinct from `bc-nfconf --ipset`.
+- **XDG-only provider store**: runtime writes go to
+  `~/.local/share/blockcheckS/data_block/providers/<slug>/` (one-time migrate
+  from the git submodule). `bs data-block [--out] [--git]` materializes
+  a git-ready snapshot; `--data-block-sync` uses the same path.
+
 ---
 
 ## 1.3.7 — CLI modernization, Discord-UDP, Cursor MCP, preflight (2026-08-22)
@@ -33,10 +41,14 @@
   `--queue-bypass`, coexist waits for two nfqws2 (q200+q201), pair writes `log_udp`.
 - `udp_discord` full scan expands repeats/TTL; cores include `--filter-udp=50000-50100`.
 - Cursor MCP: `~/.cursor/mcp.json` / `.cursor/mcp.json` → `.venv/bin/bs-mcp`.
-- `scripts/smoke_20min.sh` step 7: host pinned EP PASS + netns `udp_results` PASS.
+- `dev/smoke_20min.sh` step 7: host pinned EP PASS + netns `udp_results` PASS.
 - Variant G: `scripts/run_variant.sh G 20` (`bs pair` Discord-UDP loop, 20h);
   not part of sequential A→F.
 - Bump 1.3.7.
+- **DNS**: UDP:53 ≠ DoH is a warning, not a hard abort. Probes already use
+  DoH IPs + auto-pin (`CURLOPT_RESOLVE`); `--allow-dns-hijack` remains only
+  for sinkhole/bogon answers. Google anycast ranges include `173.194.0.0/16`
+  so `googleapis.com` 172.217 vs 173.194 is not a false HIJACK.
 
 ### Preflight CLI, prune, `--dpi-diag`
 
@@ -69,6 +81,25 @@ Closed checklists formerly duplicated in `docs/todo.md` (1.0.x–1.3.7 CLI,
 lua_bridge L-batch, serve SVC-1…10, VPS-1/2, A→F scripts, memory P0/P1 slots)
 already live in the version notes below. `docs/todo.md` kept only open work:
 lua/host-mode/GP, Pi2 RSS/CPU, research ideas, RL/ML.
+
+### Fixes after bump
+
+- `--no-voice` skips UDP generation and the pair phase (`main_phases`). Previously
+  `bs full --no-voice` still built ~50 UDP strategies and ran `--pair-max` (default
+  200) — `test_e2e_full_smoke` hit the 180s wall.
+- `find_strategy` workers come from the serve netns pool size, not a missing
+  `runner.pool_size` default of 4.
+- Export ranking keeps `latency_ms=0` (was treated as missing → worst rank).
+- Silent provider/blob fallbacks log a warning instead of swallowing errors.
+- `data_block` providers on disk: `default` + `llc_trc_fiord`.
+- GitHub `USER_AGENT` follows `blockchecks.__version__`.
+
+### scripts / dev split
+
+- `scripts/`: campaign runners (A→F/G), systemd install, blobs, presets, host
+  `cleanup_env.sh`. See `scripts/README.md`.
+- `dev/`: smokes, `gate_all` / `mutmut_gate`, benches, debug probes. See
+  `dev/README.md`. Not packaged, not run by CI.
 
 ## 1.3.6 — GP integration, probe fixes, smoke (2026-08-18)
 

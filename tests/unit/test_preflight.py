@@ -787,6 +787,20 @@ def test_apply_ip_block_discord_fastly_not_ip_blocked():
 
 
 @pytest.mark.unit
+def test_apply_ip_block_google_keeps_bypassable():
+    from blockchecks.checkers.ip_block import IpBlockReport
+    from blockchecks.engine.preflight import _apply_ip_block
+    from blockchecks.engine.triage import TriageProfile
+
+    report = IpBlockReport("youtube.com", "iana.org")
+    report.blocked_ips = ["172.217.20.164"]
+    report.ip_block_on = ["172.217.20.164"]
+    triage = TriageProfile()
+    _apply_ip_block(triage, "youtube.com", report, is_primary=True)
+    assert triage.unbypassable_l3 is False
+    assert triage.domain_reports["youtube.com"]["sni_block_likely"] is True
+
+
 def test_apply_ip_block_origin_sets_unbypassable():
     from blockchecks.checkers.ip_block import IpBlockReport
     from blockchecks.engine.preflight import _apply_ip_block

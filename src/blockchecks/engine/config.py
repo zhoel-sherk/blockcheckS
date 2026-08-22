@@ -375,6 +375,11 @@ GGC_HOST = _env_or("BLOCKCHECKS_GGC_HOST", "rr5---sn-5goeenes.googlevideo.com")
 GGC_FALLBACK_IP = _env_or("BLOCKCHECKS_GGC_IP", "74.125.108.234")
 
 
+def first_udp_nameserver() -> str:
+    """First UDP resolver from [secure_dns].udp (baked catalog if unset)."""
+    return UDP_DNS_SERVERS[0][0] if UDP_DNS_SERVERS else "8.8.8.8"
+
+
 def ggc_enabled(domain: str | None = None) -> bool:
     """Whether the deterministic GGC probe is active for *domain*.
 

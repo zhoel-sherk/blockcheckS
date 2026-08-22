@@ -112,6 +112,12 @@ OUT=$(timeout 60 "${ROOT}/.venv/bin/bc-nfconf" --db "/tmp/fs_pair_$TS.db" -d dis
   --out-dir "/tmp/fs_nfconf_$TS" --limit 3 2>&1 || true)
 if echo "$OUT" | grep -q "keenetic\|nfqws2_"; then report "bc-nfconf export" 1; else report "bc-nfconf export" 0; fi
 
+# ── bs data-block export ────────────────────────────────────
+echo "--- bs data-block export ---" | tee -a "$LOG"
+OUT=$(timeout 30 "$BS" data-block --out "/tmp/fs_datablock_$TS" 2>&1 || true)
+if echo "$OUT" | grep -q "export complete"; then report "bs data-block export" 1; else report "bs data-block export" 0; fi
+rm -rf "/tmp/fs_datablock_$TS"
+
 # ── shortlist export → import round-trip ─────────────────────
 echo "--- shortlist round-trip ---" | tee -a "$LOG"
 SL="/tmp/fs_shortlist_$TS.json"
