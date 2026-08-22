@@ -66,16 +66,25 @@ def aliases_for_class(cls: str) -> list[str]:
 def filter_blob_aliases(
     aliases: list[str] | tuple[str, ...] | None,
     profile: TriageProfile | None,
+    protocol: str = "tcp",
 ) -> list[str]:
     """Keep aliases whose class (or name) is in ``profile.viable_blobs``.
 
     Empty ``viable_blobs`` → no filter (unknown, keep everything).
+    Protocol-aware: TCP TLS blob grid viability (stun, tls_clienthello) applies
+    to TLS/HTTP blobs; UDP and QUIC blobs are not pruned by TCP TLS preflight.
     """
     pool = list(aliases) if aliases is not None else list(BLOB_ALIAS_MAP)
     if profile is None or not profile.viable_blobs:
         return pool
     allowed = set(profile.viable_blobs)
-    return [a for a in pool if a in allowed or blob_class(a) in allowed]
+    return [
+        a
+        for a in pool
+        if a in allowed
+        or blob_class(a) in allowed
+        or (protocol in ("udp_voice", "udp_game", "quic") and blob_class(a) in ("discord_udp", "game_udp", "quic"))
+    ]
 
 
 def lua_entries_for_triage(profile: TriageProfile | None) -> list[dict]:

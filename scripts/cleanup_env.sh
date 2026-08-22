@@ -22,7 +22,7 @@ for ns in $(sudo ip netns list 2>/dev/null | awk '{print $1}'); do
   echo "  netns del $ns"
   sudo ip netns del "$ns" 2>/dev/null || true
 done
-for vh in $(ip -br link show 2>/dev/null | awk '{print $1}' | grep '^vh-bs-p'); do
+for vh in $(ip -br link show 2>/dev/null | awk '{print $1}' | grep -E '^(vh-|vn-|veth)'); do
   echo "  link del $vh"
   sudo ip link del "$vh" 2>/dev/null || true
 done

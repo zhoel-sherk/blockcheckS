@@ -156,6 +156,22 @@ class NetNsPool:
         # Cleanup any leftovers from previous runs
         self._run("ip", "netns", "delete", name, check=False)
         self._run("ip", "link", "delete", veth_h, check=False)
+        # Clean up any stale host interface holding host_ip from a prior aborted PID
+        try:
+            r = subprocess.run(
+                ["ip", "-o", "-4", "addr", "show", "to", host_ip],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in r.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    old_iface = parts[1]
+                    if old_iface.startswith(("vh-", "vn-", "veth")):
+                        self._run("ip", "link", "delete", old_iface, check=False)
+        except Exception:
+            pass
         time.sleep(0.1)
 
         # Create

@@ -177,7 +177,8 @@ def _item_survives(
         return False
     if not _ttl_ok(strat, dpi, server):
         return False
-    if not _blob_ok(strat, profile):
+    proto = getattr(item, "protocol", "tcp") or "tcp"
+    if not _blob_ok(strat, profile, protocol=proto):
         return False
     if contextual and _static_numeric_split(strat):
         return False
@@ -186,13 +187,13 @@ def _item_survives(
     return not (split_mode == "sni_marker" and re.search(r"pos=1(?:,|$)", strat))
 
 
-def _blob_ok(strategy: str, profile: TriageProfile) -> bool:
+def _blob_ok(strategy: str, profile: TriageProfile, protocol: str = "tcp") -> bool:
     aliases = re.findall(r"blob=([A-Za-z0-9_]+)", strategy)
     if not aliases or not profile.viable_blobs:
         return True
     from blockchecks.engine.blob_filter import filter_blob_aliases
 
-    return bool(filter_blob_aliases(aliases, profile))
+    return bool(filter_blob_aliases(aliases, profile, protocol=protocol))
 
 
 def _ttl_ok(strategy: str, dpi_hops: int | None, server_hops: int | None) -> bool:

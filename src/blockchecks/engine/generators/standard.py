@@ -197,7 +197,7 @@ _SCAN_MUTATORS: dict[str, dict[str, Callable[[dict], None]]] = {
 }
 
 
-def _apply_triage_axes(fam: dict, triage, scan_level: str) -> None:
+def _apply_triage_axes(fam: dict, triage, scan_level: str, protocol: str = "tcp") -> None:
     from blockchecks.engine.blob_filter import filter_blob_aliases
     from blockchecks.engine.family_registry import (
         filter_fooling_values,
@@ -208,7 +208,7 @@ def _apply_triage_axes(fam: dict, triage, scan_level: str) -> None:
     if fam.get("foolings") is not None:
         fam["foolings"] = filter_fooling_values(fam["foolings"], triage)
     if fam.get("blobs") is not None:
-        fam["blobs"] = filter_blob_aliases(fam["blobs"], triage)
+        fam["blobs"] = filter_blob_aliases(fam["blobs"], triage, protocol=protocol)
     if fam.get("ttl_static") is not None:
         fam["ttl_static"] = filter_ttl_values(fam["ttl_static"], triage, scan_level=scan_level)
     if fam.get("positions") is not None:
@@ -572,7 +572,7 @@ class StandardGenerator(
             if mut := _SCAN_MUTATORS.get(scan_level, {}).get(stype):
                 mut(fam)
             if triage is not None:
-                _apply_triage_axes(fam, triage, scan_level)
+                _apply_triage_axes(fam, triage, scan_level, protocol=protocol)
             prepared[stype] = fam
 
         expanded = {
