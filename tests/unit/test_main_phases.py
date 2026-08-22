@@ -317,6 +317,18 @@ def test_generate_strategy_items_tcp_only():
     gen.generate_quic.assert_not_called()
 
 
+def test_generate_strategy_items_no_voice():
+    args = _args(no_voice=True)
+    ctx = build_full_run_context(args, MagicMock(), ["a.com"], "f", None, [])
+    gen = MagicMock()
+    gen.generate_tcp = AsyncMock(return_value=[MagicMock()])
+    gen.generate_http = AsyncMock(return_value=[])
+    gen.generate_quic = AsyncMock(return_value=[])
+    rc = asyncio.run(generate_strategy_items(ctx, gen))
+    assert rc is None
+    gen.generate_udp.assert_not_called()
+
+
 # ── configure_tcp_execution ───────────────────────────────────────────
 
 
@@ -552,6 +564,15 @@ def test_run_pairs_phase_skipped_tcp_only():
     ctx = _mk_ctx()
     ctx.args.tcp_only = True
     asyncio.run(run_pairs_phase(ctx, "1.2.3.4", 50004))
+
+
+def test_run_pairs_phase_skipped_no_voice():
+    ctx = _mk_ctx(udp_items=[MagicMock()])
+    ctx.args.tcp_only = False
+    ctx.args.no_voice = True
+    ctx.runner.test_pair_matrix = AsyncMock()
+    asyncio.run(run_pairs_phase(ctx, "1.2.3.4", 50004))
+    ctx.runner.test_pair_matrix.assert_not_called()
 
 
 def test_run_pairs_phase_no_working_tcp():

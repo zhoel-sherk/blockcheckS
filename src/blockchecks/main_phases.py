@@ -344,7 +344,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             protocol=args.protocol,
             triage=gen_triage,
         )
-    if not args.tcp_only:
+    if not args.tcp_only and not getattr(args, "no_voice", False):
         ctx.udp_items = await gen.generate_udp(
             sources=ctx.udp_sources,
             domain=ctx.primary,
@@ -1077,7 +1077,12 @@ async def run_pairs_phase(
 ) -> None:
     args = ctx.args
     pair_step = _pair_step(ctx)
-    if not ctx.stop.is_set() and not args.tcp_only and ctx.udp_items:
+    if (
+        not ctx.stop.is_set()
+        and not args.tcp_only
+        and not getattr(args, "no_voice", False)
+        and ctx.udp_items
+    ):
         log.info("%s", f"\n  {CYAN}[{pair_step}/{ctx.steps}] Pair matrix...{RESET}")
         details = await ctx.db.get_working_tcp_details(ctx.primary)
         by_status = {d["name"]: d for d in details}
