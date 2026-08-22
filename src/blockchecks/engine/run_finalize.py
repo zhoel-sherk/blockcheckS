@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -13,6 +14,8 @@ from blockchecks.engine.paths import RUNTIME_LOGS_DIR
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.store import RunStateStore
 from blockchecks.nfconf import export_configs
+
+log = logging.getLogger(__name__)
 
 
 def rank_pass_strategies_for_export(
@@ -70,8 +73,8 @@ async def maybe_write_best_config_data_block() -> None:
             comment=comment,
         )
         store.write_best_config(content)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: best_config write skipped ({exc})")
 
 
 async def maybe_sync_data_block(args=None) -> None:
@@ -94,8 +97,8 @@ async def maybe_sync_data_block(args=None) -> None:
 
         store = ProviderStore(get_provider_dir())
         store.sync_commit(push=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: data_block sync failed ({exc})")
 
 
 def _now() -> str:

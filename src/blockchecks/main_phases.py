@@ -601,7 +601,8 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         from blockchecks.data_block.store import ProviderStore
 
         provider_store = ProviderStore(get_provider_dir())
-    except Exception:
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: provider store unavailable ({exc})")
         provider_store = None
 
     queue, skipped = await build_adaptive_queue(

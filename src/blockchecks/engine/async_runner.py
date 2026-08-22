@@ -544,8 +544,8 @@ class AsyncTestRunner:
         if self.dns_cache:
             try:
                 return self.dns_cache.resolve(domain)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("%s", f"  WARNING: DNS resolve failed for {domain} ({exc})")
         return []
 
     def _tcp_result_from_data(self, item: StrategyItem, domain: str, data: dict) -> TcpTestResult:
@@ -870,7 +870,8 @@ class AsyncTestRunner:
         if self.db:
             try:
                 completed = await self.db.get_completed_pair_keys(log_domain)
-            except Exception:
+            except Exception as exc:
+                log.warning("%s", f"  WARNING: pair resume keys unavailable ({exc})")
                 completed = set()
         if isinstance(resume_from, Checkpoint) and resume_from.tcp_label:
             log.info(

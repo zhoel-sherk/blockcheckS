@@ -678,6 +678,7 @@ class DnsRunCache:
         # known-good IPs instead of tampered UDP answers.
         cached_ips = _data_block_dns_ips(domain)
         if cached_ips:
+            log.info("%s", f"  live DoH failed for {domain}; using data_block IPs")
             self.set(domain, cached_ips)
             return self._pinned_first(domain, cached_ips)
         return self._pinned_first(domain, ips)
@@ -693,7 +694,8 @@ class DnsRunCache:
             return list(cached)
         try:
             return list(self.resolve(domain))
-        except Exception:
+        except Exception as exc:
+            log.warning("%s", f"  WARNING: DNS candidates failed for {domain} ({exc})")
             return []
 
     def prime(self, domains: list[str], doh_url: str | None = None) -> None:
@@ -718,7 +720,8 @@ def _data_block_dns_ips(domain: str) -> list[str]:
         if isinstance(value, tuple):
             return list(value[0] or [])
         return list(value or [])
-    except Exception:
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: data_block DNS lookup failed for {domain} ({exc})")
         return []
 
 

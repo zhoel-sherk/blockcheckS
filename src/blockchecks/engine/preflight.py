@@ -69,8 +69,8 @@ async def _sync_dns_to_data_block(results: list[dict]) -> None:
         await store.save_dns_records(records)
         await store.save_dns_tampered(tampered_rows)
         store.write_hosts(records)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.info("%s", f"  data_block DNS sync skipped ({exc})")
 
 
 @dataclass
@@ -213,8 +213,8 @@ def _data_block_cached_ip(domain: str) -> str | None:
             return value[0][0] if value[0] else None
         if value:
             return value[0]
-    except Exception:
-        pass
+    except Exception as exc:
+        log.info("%s", f"  data_block DNS cache miss for {domain} ({exc})")
     return None
 
 
@@ -672,8 +672,12 @@ def _load_prior_triage() -> TriageProfile:
         from blockchecks.data_block.store import ProviderStore
 
         prior = ProviderStore(get_provider_dir(allow_detect=False)).load_triage()
-        return prior if prior is not None else TriageProfile()
-    except Exception:
+        if prior is None:
+            log.info("%s", "  no triage.toml; starting empty profile")
+            return TriageProfile()
+        return prior
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: triage load failed ({exc}); using empty profile")
         return TriageProfile()
 
 
@@ -688,8 +692,8 @@ async def _persist_triage(triage: TriageProfile, primary: str, opts: PreflightOp
         store = ProviderStore(get_provider_dir(allow_detect=False))
         store.save_triage(triage, primary_domain=csv_primary)
         _flush_l3_pins(store, opts.dns_cache)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: triage persist failed ({exc})")
     saver = getattr(opts.store, "save_triage_snapshot", None)
     if not callable(saver):
         return
@@ -697,8 +701,8 @@ async def _persist_triage(triage: TriageProfile, primary: str, opts: PreflightOp
         result = saver(csv_primary, triage.to_dict())
         if asyncio.iscoroutine(result):
             await result
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: triage snapshot failed ({exc})")
 
 
 def _flush_l3_pins(store: Any, cache: Any) -> None:
@@ -919,6 +923,8 @@ def _voice_endpoint_candidates() -> list[tuple[str, int]]:
             eps = data.get("endpoints", [])
             if eps:
                 return [(e["ip"], int(e.get("port", 50004))) for e in eps[:3] if e.get("ip")]
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: voice cache unreadable ({exc}); using 35.217.42.214:50004")
+    else:
+        log.warning("%s", "  WARNING: no voice endpoints cached; using 35.217.42.214:50004")
     return [("35.217.42.214", 50004)]

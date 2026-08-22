@@ -81,7 +81,8 @@ async def _apply_provider_weights(
             rows = await provider_store.pass_strategies(approved_only=True)
         else:
             rows = []
-    except Exception:
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: provider pass_strategies load failed ({exc})")
         rows = []
     if not rows:
         return

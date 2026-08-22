@@ -6,6 +6,7 @@ Do not pass options= to get()/request() on curl_cffi >= 0.15; use Session.curl.s
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 import re
 from dataclasses import dataclass, field
 
@@ -29,6 +30,8 @@ try:
 except AttributeError:
     CURLOPT_IPRESOLVE = 113
 _CURL_IPRESOLVE_V4 = 1
+
+log = logging.getLogger(__name__)
 
 _SMALL_BODY_STATUSES = frozenset({101, 204, 206, 301, 302, 303, 307, 308})
 
@@ -288,6 +291,7 @@ def prepare_ggc_probe(
         except Exception:
             ip = None
     if not ip:
+        log.warning("%s", f"  WARNING: DoH failed for {host}; using GGC fallback {GGC_FALLBACK_IP}")
         ip = GGC_FALLBACK_IP
 
     return (

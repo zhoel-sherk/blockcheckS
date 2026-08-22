@@ -4,11 +4,14 @@ Search order: BLOCKCHECKS_BLOBS, repo blobs/, /opt/zapret2/blobs, /opt/zapret2/f
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Iterable
 
 from blockchecks.engine.config import BLOB_DIR, PROJECT_DIR, REPO_BLOBS_DIR
+
+log = logging.getLogger(__name__)
 
 FAKE_FILES_DIR = os.environ.get("BLOCKCHECKS_FAKE_FILES", "/opt/zapret2/files/fake")
 _OPT_BLOBS = "/opt/zapret2/blobs"
@@ -105,7 +108,9 @@ def resolve_blob_path(name: str, blobs_dir: str | None = None) -> str | None:
         if not candidates:
             candidates = [f for f in known if name in f]
         if candidates:
-            return os.path.join(base, candidates[0])
+            chosen = os.path.join(base, candidates[0])
+            log.warning("%s", f"  WARNING: fuzzy blob {name!r} -> {candidates[0]}")
+            return chosen
 
     if mapped:
         for base in search_bases:

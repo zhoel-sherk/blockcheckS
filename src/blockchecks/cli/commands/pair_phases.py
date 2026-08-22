@@ -149,7 +149,8 @@ def _default_pin_path() -> str:
         from blockchecks.data_block.provider import get_provider_dir
 
         return str(get_provider_dir() / "hosts")
-    except Exception:
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: provider hosts path unavailable ({exc})")
         return ""
 
 

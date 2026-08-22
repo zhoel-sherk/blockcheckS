@@ -80,6 +80,7 @@ async def collect_export_strategies(  # noqa: C901
             if resolved := _resolve_export_strategy(cfg, row["strategy"]):
                 udp_strats.append(resolved)
     if not udp_strats:
+        log.warning("%s", "  WARNING: no UDP strategies in DB; using stock discord_udp")
         udp_strats = ["fake:blob=discord_udp:repeats=6"]
 
     # QUIC: best HTTP/3 strategies from state.db
@@ -89,6 +90,7 @@ async def collect_export_strategies(  # noqa: C901
         if resolved := _resolve_export_strategy(cfg, row["strategy"]):
             quic_strats.append(resolved)
     if not quic_strats:
+        log.warning("%s", "  WARNING: no QUIC strategies in DB; using stock quic_initial")
         quic_strats = ["fake:blob=quic_initial:repeats=11"]
     return tcp_strats, udp_strats, quic_strats
 

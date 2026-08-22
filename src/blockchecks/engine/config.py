@@ -41,6 +41,7 @@ def _resolve_project_dir() -> str:
     # Editable src/ layout without relying on configs/
     if os.path.basename(_PARENT) == "src":
         return _REPO_CANDIDATE
+    log.warning("%s", "  WARNING: project dir last-resort; using package dir")
     return _PACKAGE_DIR
 
 

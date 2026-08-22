@@ -338,7 +338,8 @@ class ProviderStore:
             import tomllib
 
             raw = tomllib.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
+            log.warning("%s", f"  WARNING: triage.toml unreadable ({exc})")
             return None
         from blockchecks.engine.triage import TriageProfile
 

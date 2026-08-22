@@ -22,6 +22,7 @@ _AS_PREFIX = re.compile(r"^\s*AS\d+\b\s*", re.IGNORECASE)
 _NON_SLUG = re.compile(r"[^a-z0-9_]+")
 
 _CACHE: dict[str, str] = {}
+_SKIP_DETECT_WARNED = False
 
 
 def _cached_provider(fn):
@@ -39,10 +40,14 @@ def _cached_provider(fn):
 def normalize_provider_name(org: str) -> str:
     """Turn an ipinfo ``org`` line into a slug-safe provider name."""
     if not org or not org.strip():
+        log.warning("%s", "  WARNING: empty ipinfo org; using provider default")
         return DEFAULT_PROVIDER
     text = _AS_PREFIX.sub("", org).strip().lower()
     text = _NON_SLUG.sub("_", text).strip("_")
-    return text or DEFAULT_PROVIDER
+    if not text:
+        log.warning("%s", "  WARNING: org slug empty; using provider default")
+        return DEFAULT_PROVIDER
+    return text
 
 
 def _query_ipinfo(timeout: float = 5.0) -> str | None:
@@ -69,7 +74,8 @@ def _read_provider_from_cfg() -> str:
         prov = data.get("provider") or {}
         if isinstance(prov, dict) and prov.get("name"):
             return str(prov["name"]).strip()
-    except Exception:
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: config.toml provider unreadable ({exc})")
         return ""
     return ""
 
@@ -135,6 +141,10 @@ def _ensure_provider_config(allow_detect: bool = True) -> str:
         _write_provider_to_cfg(env_override)
         return env_override
     if not allow_detect:
+        global _SKIP_DETECT_WARNED
+        if not _SKIP_DETECT_WARNED:
+            log.warning("%s", "  WARNING: provider detect skipped; using default")
+            _SKIP_DETECT_WARNED = True
         return DEFAULT_PROVIDER
     org = _query_ipinfo()
     if not org:

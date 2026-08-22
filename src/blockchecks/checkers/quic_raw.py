@@ -4,6 +4,7 @@ Uses a baked quic_initial blob, or a synthetic RFC 9000 Initial.
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import time
@@ -11,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from blockchecks.engine.fail_phase import FailPhase
+
+log = logging.getLogger(__name__)
 
 # Baked QUIC Initial blobs (prefer a real ClientHello for realistic DPI trigger).
 _QUIC_BLOB_CANDIDATES = (
@@ -55,6 +58,7 @@ def load_quic_initial() -> tuple[bytes, str]:
             data = path.read_bytes()
             if len(data) >= 40:
                 return data, str(path.name)
+    log.warning("%s", "  WARNING: no QUIC Initial blob; using synthetic RFC 9000 packet")
     return _synthetic_rfc9000_initial(), "synthetic_rfc9000"
 
 

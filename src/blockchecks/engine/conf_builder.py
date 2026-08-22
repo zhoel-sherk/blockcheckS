@@ -89,8 +89,10 @@ def load_custom_lua_manifest() -> dict[str, dict[str, Any]]:
                 "requires_triage": list(entry.get("requires_triage") or []),
                 "blob_classes": list(entry.get("blob_classes") or []),
             }
-    except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
-        pass
+    except OSError as exc:
+        log.info("%s", f"  lua manifest missing ({exc})")
+    except (tomllib.TOMLDecodeError, TypeError, ValueError) as exc:
+        log.warning("%s", f"  WARNING: lua manifest unreadable ({exc})")
     _CUSTOM_LUA_MANIFEST = registry
     return registry
 

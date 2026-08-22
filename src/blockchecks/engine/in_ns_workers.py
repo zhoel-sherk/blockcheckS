@@ -5,6 +5,7 @@ Called from AsyncTestRunner via asyncio.to_thread, or as python -m ... --mode cu
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess as sp
@@ -41,6 +42,8 @@ from blockchecks.service.probe import (
     invoke_curl_probe_worker as _invoke_curl_probe_worker,
 )
 from blockchecks.service.probe import probe_request_dict as _probe_request_dict
+
+log = logging.getLogger(__name__)
 
 
 def udp_filter_covers_port(spec: str, port: int) -> bool:
@@ -747,8 +750,8 @@ async def _save_pass_strategy_data_block(
             latency_ms=latency_ms,
             http_code=http_code,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("%s", f"  WARNING: PASS upsert to data_block failed ({exc})")
 
 
 # Subprocess entries (integrated from _curl_probe_worker / _probe_worker)
