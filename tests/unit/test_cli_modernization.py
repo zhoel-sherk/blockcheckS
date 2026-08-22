@@ -19,6 +19,10 @@ def test_preflight_options_no_preflight():
     assert opts.skip_ip_block is True
     assert opts.skip_nfqws2_check is True
     assert opts.skip_dns_audit is True
+    assert opts.skip_udp_16kb is True
+    assert opts.skip_l3_triage is True
+    assert opts.skip_persist is True
+    assert opts.dpi_diag is False
 
 
 def test_preflight_options_quick():
@@ -28,6 +32,8 @@ def test_preflight_options_quick():
     assert opts.skip_port_block is True
     assert opts.skip_ip_block is True
     assert opts.skip_prolog is False  # prolog still runs in quick mode
+    assert opts.skip_udp_16kb is True
+    assert opts.skip_persist is False
 
 
 def test_adaptive_args_parser():

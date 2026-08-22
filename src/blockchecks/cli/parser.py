@@ -286,6 +286,11 @@ def add_secure_dns_args(
         action="store_true",
         help="Quick preflight: run prolog only, skip deep baseline/IP-block/port-block probes",
     )
+    g.add_argument(
+        "--dpi-diag",
+        action="store_true",
+        help="Extra DPI diagnostics (SNI whitelist, FAT/l4-25, Siberian, CIDR-WL, AS/org DNS)",
+    )
     g.add_argument("--skip-ip-block", action="store_true", help="Skip IP-block cross-test")
     g.add_argument(
         "--unblocked-dom",
@@ -742,6 +747,46 @@ def build_parser() -> argparse.ArgumentParser:
     scan = sub.add_parser("scan", help="Async TCP strategy batch scan")
     add_campaign_args(scan, mode="scan")
 
+    preflight = sub.add_parser(
+        "preflight",
+        help="DNS/L3/stall triage + data_block triage.toml/hosts (no matrix)",
+    )
+    preflight.add_argument(
+        "-d",
+        "--domain",
+        action="append",
+        default=None,
+        help="Target domain (repeatable)",
+    )
+    preflight.add_argument(
+        "--preset", default=None, help="Domain preset name (presets/domains/{name}.txt)"
+    )
+    preflight.add_argument("--domains-file", help="Path to domain list file")
+    preflight.add_argument(
+        "--list-presets", action="store_true", help="List available presets and exit"
+    )
+    preflight.add_argument(
+        "--timeout",
+        type=float,
+        default=3.0,
+        help="Probe timeout in seconds (default: 3.0)",
+    )
+    preflight.add_argument(
+        "--debug",
+        action="store_true",
+        help="Python DEBUG logs + nfqws2 --debug=1 (toggle at runtime with SIGUSR1)",
+    )
+    preflight.add_argument(
+        "--nfqws2-debug",
+        nargs="?",
+        const="1",
+        default=None,
+        help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
+    )
+    add_secure_dns_args(preflight, include_preflight=True)
+    add_domain_filter_args(preflight)
+    add_system_deps_args(preflight)
+
     composite = sub.add_parser("composite", help="Test composite nfqws2 config")
     composite.add_argument("-c", "--config", required=True, help="Path to composite .conf file")
     composite.add_argument(
@@ -808,10 +853,10 @@ def dispatch(args: argparse.Namespace) -> int:
         if dbg is not None:
             os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
 
-    live = {"tcp", "udp", "scan", "pair", "composite", "bench-settle"}
-    # Skip deps when listing presets under scan/pair.
+    live = {"tcp", "udp", "scan", "pair", "composite", "bench-settle", "preflight"}
+    # Skip deps when listing presets under scan/pair/preflight.
     if args.command in live and not (
-        args.command in {"scan", "pair"} and getattr(args, "list_presets", False)
+        args.command in {"scan", "pair", "preflight"} and getattr(args, "list_presets", False)
     ):
         code = ensure_system_deps_or_exit(args)
         if code:
@@ -870,6 +915,16 @@ def dispatch(args: argparse.Namespace) -> int:
 
         return cmd_stop(a)
 
+    def _preflight(a: argparse.Namespace) -> int:
+        from blockchecks.cli.commands.preflight import run_preflight_cmd
+
+        if getattr(a, "list_presets", False):
+            from blockchecks.cli.presets import list_presets
+
+            list_presets()
+            return 0
+        return run_preflight_cmd(a)
+
     handlers: dict[str, Callable[[argparse.Namespace], int]] = {
         "tcp": cmd_tcp,
         "udp": cmd_udp,
@@ -878,6 +933,7 @@ def dispatch(args: argparse.Namespace) -> int:
         "composite": _composite,
         "bench-settle": _bench,
         "stop": _stop,
+        "preflight": _preflight,
     }
     handler = handlers.get(args.command)
     if handler is not None:

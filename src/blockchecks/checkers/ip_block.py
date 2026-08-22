@@ -136,6 +136,9 @@ _CDN_OCTETS: tuple[str, ...] = (
     "172.65.",
     "172.66.",
     "172.67.",
+    # Discord Fastly/CF anycast (AS13335), e.g. dl.discordapp.net
+    "8.6.112.",
+    "8.47.69.",
 )
 _CDN_NAMES: str = "Cloudflare"
 

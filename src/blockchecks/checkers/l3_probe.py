@@ -60,19 +60,19 @@ def probe_l3(
 ) -> L3ProbeResult:
     """Classify L3/L4 blocking for ip:port.
 
-    ``use_raw`` tries a raw SYN + ICMP receiver first (needs root); when the
-    raw socket can't be created (no CAP_NET_RAW) it falls back to TCP connect
-    classification (RST vs silent drop vs reachable).
+    ``use_raw`` listens for ICMP dest-unreach/admin-prohibit (needs
+    CAP_NET_RAW). That is conclusive only on an ICMP filter; otherwise
+    classification falls through to TCP connect (RST vs silent drop vs
+    reachable). Missing raw sockets also fall through.
     """
     t0 = time.perf_counter()
     res = L3ProbeResult(ip=ip, port=port)
 
     if use_raw:
         out = _probe_l3_raw(res, timeout)
-        if out is not None:
-            res = out
-            res.latency_ms = (time.perf_counter() - t0) * 1000
-            return res
+        if out is not None and out.phase == FailPhase.ICMP_BLOCK:
+            out.latency_ms = (time.perf_counter() - t0) * 1000
+            return out
 
     # Fallback: TCP connect classification.
     try:

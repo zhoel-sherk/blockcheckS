@@ -104,6 +104,38 @@ def test_l3_probe_silent_drop_doc_ip(monkeypatch):
 
 
 @pytest.mark.unit
+def test_l3_raw_unknown_falls_back_to_connect(monkeypatch):
+    import contextlib
+
+    monkeypatch.setattr(
+        "blockchecks.checkers.l3_probe._probe_l3_raw",
+        lambda res, _timeout: res,
+    )
+    monkeypatch.setattr(
+        "blockchecks.checkers.l3_probe.socket.create_connection",
+        lambda *_a, **_k: contextlib.nullcontext(),
+    )
+    r = probe_l3("8.8.8.8", 443, timeout=2, use_raw=True)
+    assert r.phase == FailPhase.PASS
+    assert r.tcp_reachable is True
+
+
+@pytest.mark.unit
+def test_l3_raw_icmp_block_skips_tcp(monkeypatch):
+    def _icmp(res, _timeout):
+        res.phase = FailPhase.ICMP_BLOCK
+        return res
+
+    def _no_tcp(*_a, **_k):
+        raise AssertionError("TCP fallback must not run after ICMP block")
+
+    monkeypatch.setattr("blockchecks.checkers.l3_probe._probe_l3_raw", _icmp)
+    monkeypatch.setattr("blockchecks.checkers.l3_probe.socket.create_connection", _no_tcp)
+    r = probe_l3("192.0.2.1", 443, timeout=1, use_raw=True)
+    assert r.phase == FailPhase.ICMP_BLOCK
+
+
+@pytest.mark.unit
 def test_l3_probe_result_to_dict():
     r = L3ProbeResult(ip="1.2.3.4", port=443, phase=FailPhase.ICMP_BLOCK)
     d = r.to_dict()

@@ -62,7 +62,7 @@ async def _run_full_campaign(args) -> int:
         return dns_rc
 
     domains, primary, preflight_rc = await run_preflight_filter(
-        args, domains, args.domain or domains[0], dns_cache, db
+        args, domains, args.domain or domains[0], dns_cache, db, dns_audits=dns_audits
     )
     if preflight_rc is not None:
         return preflight_rc

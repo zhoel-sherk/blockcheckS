@@ -61,7 +61,7 @@ def _read_bundle(paths: list[str]) -> str:
 
 @pytest.mark.parametrize(
     "command",
-    ["tcp", "udp", "scan", "pair", "composite", "bench-settle", "stop", "serve"],
+    ["tcp", "udp", "scan", "pair", "composite", "bench-settle", "stop", "serve", "preflight"],
 )
 def test_no_dead_cli_flags(command: str) -> None:
     from blockchecks.cli.parser import build_parser

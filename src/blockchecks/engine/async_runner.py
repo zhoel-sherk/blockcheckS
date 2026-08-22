@@ -12,6 +12,7 @@ from blockchecks.engine.config import (
     PIN_TIMEOUT,
     PYTHON_BIN,
 )
+from blockchecks.engine.fail_phase import FailPhase
 from blockchecks.engine.in_ns_workers import RETRY_IP_TIMEOUT
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.settle_profile import SettleProfile
@@ -30,8 +31,17 @@ log = logging.getLogger(__name__)
 # IPs at startup. Pinned IPs override DoH order against per-IP throttling.
 PIN_STRATEGY = "fake:blob=stun:repeats=6:tcp_ts=-1000"
 PIN_SETTLE_MAX = 0.5
+_L3_SKIP_PIN = frozenset({FailPhase.L4_SYN_DROP, FailPhase.ICMP_BLOCK})
 # Budget for retry-on-next-IP attempts after the first failed IP (keeps
 # throttled-IP worst case from N×timeout, see per-IP throttling).
+
+
+def _pin_candidate_l3_ok(ip: str) -> bool:
+    """False when SYN is dropped or ICMP-filtered — skip expensive stun L7."""
+    from blockchecks.checkers.l3_probe import probe_l3
+
+    return probe_l3(ip, 443, timeout=min(PIN_TIMEOUT, 1.5), use_raw=True).phase not in _L3_SKIP_PIN
+
 
 from blockchecks.engine.conf_builder import add_blobs_from_strategy, split_cli_args
 from blockchecks.engine.in_ns_workers import (
@@ -270,6 +280,8 @@ class AsyncTestRunner:
                     candidates.append(ip)
             picked = None
             for ip in candidates:
+                if not _pin_candidate_l3_ok(ip):
+                    continue
                 if await self._probe_pin_ip(domain, ip):
                     picked = ip
                     break

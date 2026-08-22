@@ -30,6 +30,15 @@ from blockchecks.engine.triage import TriageProfile
 
 log = logging.getLogger(__name__)
 
+_L3_DEAD = frozenset(
+    {
+        FailPhase.L4_SYN_DROP,
+        FailPhase.ICMP_BLOCK,
+        FailPhase.L4_RST_AT_SYN,
+    }
+)
+_L3_IP_CAP = 6
+
 
 async def _sync_dns_to_data_block(results: list[dict]) -> None:
     """Persist DoH results (all + tampered) into data_block dns.db.
@@ -76,15 +85,25 @@ class PreflightOptions:
     abort_on_nfqws2: bool = False
     skip_dns_audit: bool = False
     skip_diagnostics: bool = True  # default off; from_args enables it on campaigns
+    skip_udp_16kb: bool = False
+    skip_l3_triage: bool = False
+    skip_persist: bool = False
+    dpi_diag: bool = False
     force: bool = False
     verify_content: bool = False
     dns_cache: DnsRunCache | None = None
     store: object = None
     fooling_probe_fn: object = None  # optional (strategy) → (ok, error, http)
+    dns_audits: list[Any] = field(default_factory=list)
 
     @classmethod
     def from_args(
-        cls, args, *, dns_cache: DnsRunCache | None = None, store: object = None
+        cls,
+        args,
+        *,
+        dns_cache: DnsRunCache | None = None,
+        store: object = None,
+        dns_audits: list | None = None,
     ) -> PreflightOptions:
         """Build options from CLI namespace (pair/main shared)."""
         no_preflight = bool(getattr(args, "no_preflight", False))
@@ -100,10 +119,15 @@ class PreflightOptions:
             abort_on_nfqws2=getattr(args, "abort_on_nfqws2", False),
             skip_dns_audit=no_preflight or getattr(args, "skip_dns_audit", False),
             skip_diagnostics=no_preflight or quick,
+            skip_udp_16kb=no_preflight or quick,
+            skip_l3_triage=no_preflight,
+            skip_persist=no_preflight,
+            dpi_diag=bool(getattr(args, "dpi_diag", False)) and not no_preflight,
             force=getattr(args, "force", False),
             verify_content=getattr(args, "prolog_content", False),
             dns_cache=dns_cache,
             store=store,
+            dns_audits=list(dns_audits or []),
         )
 
 
@@ -118,6 +142,7 @@ class PreflightReport:
     ip_reports: list[IpBlockReport] = field(default_factory=list)
     udp_16kb_blocked: bool = False
     udp_16kb_detail: str = ""
+    dpi_diag: Any = None
     triage: TriageProfile | None = None
     exit_code: int = 0
     error: str = ""
@@ -250,20 +275,37 @@ async def _audit_domains_parallel(
     async def _one(domain: str) -> dict:
         # audit_domain is sync I/O — run off the event loop
         result = await asyncio.to_thread(audit_domain, domain, doh, timeout)
-        return {
-            "domain": domain,
-            "tampered": result.tampering_detected,
-            "udp_ips": ", ".join(result.udp_ips) if result.udp_ips else "",
-            "doh_ips": ", ".join(result.doh_ips) if result.doh_ips else "",
-            "verdict": result.verdict,
-            "doh_server": result.doh_server or "",
-        }
+        return _dns_audit_row(result)
 
     results = await asyncio.gather(*(_one(d) for d in domains))
-    tampered = [r for r in results if r["tampered"]]
+    await _ingest_dns_rows(list(results), cache, store)
+    return list(results)
 
+
+def _dns_audit_row(result: Any) -> dict:
+    if isinstance(result, dict):
+        return {
+            "domain": result.get("domain", ""),
+            "tampered": result.get("tampered", False),
+            "udp_ips": result.get("udp_ips", ""),
+            "doh_ips": result.get("doh_ips", ""),
+            "verdict": result.get("verdict", ""),
+            "doh_server": result.get("doh_server", ""),
+        }
+    return {
+        "domain": result.domain,
+        "tampered": result.tampering_detected,
+        "udp_ips": ", ".join(result.udp_ips) if result.udp_ips else "",
+        "doh_ips": ", ".join(result.doh_ips) if result.doh_ips else "",
+        "verdict": result.verdict,
+        "doh_server": result.doh_server or "",
+    }
+
+
+async def _ingest_dns_rows(results: list[dict], cache: Any, store: Any = None) -> None:
+    """Write dns.db/hosts and pin tampered DoH answers. No extra UDP/DoH round-trip."""
     await _sync_dns_to_data_block(results)
-
+    tampered = [r for r in results if r["tampered"]]
     writer = getattr(store, "write_dns_audit_log", None) if store else None
     if callable(writer) and tampered:
         for r in tampered:
@@ -274,16 +316,27 @@ async def _audit_domains_parallel(
                 r["verdict"],
                 r["doh_server"],
             )
-    if tampered:
-        for r in tampered:
-            ips = [ip.strip() for ip in r["doh_ips"].split(",") if ip.strip()]
-            if ips and cache:
-                cache.set(r["domain"], ips)
-        log.info("%s", f"\n  [DNS TAMPERED] {len(tampered)}/{len(domains)} domains:")
-        for r in tampered:
-            log.info("%s", f"    {r['domain']}: UDP={r['udp_ips'] or '-'}  →  DoH={r['doh_ips']}")
+    if not tampered:
+        return
+    for r in tampered:
+        ips = [ip.strip() for ip in r["doh_ips"].split(",") if ip.strip()]
+        if ips and cache:
+            cache.set(r["domain"], ips)
+    log.info("%s", f"\n  [DNS TAMPERED] {len(tampered)}/{len(results)} domains:")
+    for r in tampered:
+        log.info("%s", f"    {r['domain']}: UDP={r['udp_ips'] or '-'}  →  DoH={r['doh_ips']}")
 
-    return list(results)
+
+async def _dns_rows_for_preflight(
+    o: PreflightOptions, domains: list[str], cache: Any
+) -> list[dict]:
+    if o.skip_dns_audit or cache is None:
+        return []
+    if o.dns_audits:
+        rows = [_dns_audit_row(r) for r in o.dns_audits]
+        await _ingest_dns_rows(rows, cache, o.store)
+        return rows
+    return await _audit_domains_parallel(domains, cache, o.timeout, store=o.store)
 
 
 async def run_preflight_async(
@@ -324,23 +377,22 @@ async def run_preflight_async(
         if detail and detail in _baseline_candidates(o.unblocked_dom):
             report.baseline_domain = detail
 
-    # Parallel UDP vs DoH DNS check
-    dns_rows: list[dict] = []
-    if not o.skip_dns_audit and cache:
-        dns_rows = await _audit_domains_parallel(domains, cache, o.timeout, store=o.store)
+    dns_rows = await _dns_rows_for_preflight(o, domains, cache)
 
-    # UDP voice burst >16KB
-    # Simulate a voice stream to a Discord voice endpoint; a sustained >16KB
-    # burst tells us whether the TSPU "voice" heuristic applies (endpoint
-    # answers) or the transfer is dropped (blocked). Feeds strategy selection.
-    report.udp_16kb_blocked, report.udp_16kb_detail = check_udp_16kb(o.timeout)
-    if report.udp_16kb_detail:
-        log.info("%s", f"  UDP 16KB voice check: {report.udp_16kb_detail}")
+    # UDP voice burst >16KB. Skip on --quick/--no-preflight so prior udp_blocked stays.
+    if not o.skip_udp_16kb:
+        report.udp_16kb_blocked, report.udp_16kb_detail = check_udp_16kb(o.timeout)
+        if report.udp_16kb_detail:
+            log.info("%s", f"  UDP 16KB voice check: {report.udp_16kb_detail}")
 
     triage = _load_prior_triage()
+    triage.viable_hosts = []
+    if not o.dpi_diag:
+        triage.dpi_diag = {}
     _apply_dns_audit(triage, dns_rows)
-    triage.udp_blocked = bool(report.udp_16kb_blocked)
-    triage.voice_ok = not report.udp_16kb_blocked
+    if not o.skip_udp_16kb:
+        triage.udp_blocked = bool(report.udp_16kb_blocked)
+        triage.voice_ok = not report.udp_16kb_blocked
     report.triage = triage
 
     primary = domains[0] if domains else ""
@@ -377,7 +429,11 @@ async def run_preflight_async(
                     "%s", f"  → skipping strategy tests for {domain} (use --force to override)"
                 )
 
-        if not o.skip_ip_block and domain.rstrip(".") != ref:
+        if (
+            not o.skip_ip_block
+            and domain not in report.skip_domains
+            and domain.rstrip(".") != ref
+        ):
             ip_r = run_ip_block_cross_test(
                 domain,
                 unblocked_domain=ref,
@@ -389,16 +445,46 @@ async def run_preflight_async(
             _apply_ip_block(triage, domain, ip_r, is_primary=is_primary)
 
         # L3/L4, stream stall, per-domain phase
-        if domain not in report.skip_domains:
+        if domain not in report.skip_domains and not o.skip_l3_triage:
             _triage_domain(triage, domain, ips, o, cache, is_primary=is_primary)
 
     if not o.skip_diagnostics:
         diag_domain = next((d for d in domains if d not in report.skip_domains), primary)
         await _run_diagnostics(triage, diag_domain, cache, o)
 
+    for domain, phase in triage.domain_phases.items():
+        _domain_report(triage, domain).setdefault("phase", phase)
+
     report.triage = triage
-    await _persist_triage(triage, primary, o)
+    await _finish_preflight(report, triage, primary, o, domains, cache, dns_rows)
     return report
+
+
+async def _finish_preflight(
+    report: PreflightReport,
+    triage: TriageProfile,
+    primary: str,
+    o: PreflightOptions,
+    domains: list[str],
+    cache: Any,
+    dns_rows: list,
+) -> None:
+    if o.dpi_diag:
+        report.dpi_diag = await _run_dpi_diag_safe(domains, triage, cache, o, dns_rows)
+    if not o.skip_persist:
+        await _persist_triage(triage, primary, o)
+
+
+async def _run_dpi_diag_safe(
+    domains: list[str], triage: TriageProfile, cache: Any, opts: PreflightOptions, dns_rows: list
+) -> Any:
+    from blockchecks.checkers.dpi_diag import run_dpi_diag
+
+    try:
+        return await run_dpi_diag(domains, triage, cache, opts, dns_rows=dns_rows)
+    except Exception as exc:  # noqa: BLE001
+        log.info("%s", f"  dpi-diag skipped ({exc})")
+        return None
 
 
 def _apply_dns_audit(triage: TriageProfile, rows: list[dict]) -> None:
@@ -419,14 +505,29 @@ def _apply_dns_audit(triage: TriageProfile, rows: list[dict]) -> None:
         )
 
 
+def _domain_report(triage: TriageProfile, domain: str) -> dict:
+    return triage.domain_reports.setdefault(domain, {})
+
+
 def _apply_prolog(triage: TriageProfile, domain: str, tls: TlsResult, *, is_primary: bool) -> None:
+    row = _domain_report(triage, domain)
     if tls.success:
         triage.domain_phases[domain] = FailPhase.PASS.value
+        row.update(phase=FailPhase.PASS.value, prolog_ok=True, rst_at_sni=False, silent_drop=False)
         if is_primary:
             triage.handshake_phase = FailPhase.PASS
+            triage.rst_at_sni = False
+            triage.silent_drop_after_sni = False
         return
     phase = classify_fail_phase(tls.error or "", tls.http_status)
     triage.domain_phases[domain] = phase.value
+    row["phase"] = phase.value
+    row["prolog_ok"] = False
+    row["rst_at_sni"] = phase == FailPhase.TLS_RST_AT_SNI
+    row["silent_drop"] = phase in (
+        FailPhase.TLS_SILENT_DROP_AFTER_SNI,
+        FailPhase.CONNECT_TIMEOUT,
+    )
     if not is_primary:
         return
     triage.handshake_phase = phase
@@ -447,9 +548,17 @@ def _apply_ip_block(
     probed = blocked_ips[:5]
     if not probed or not ip_block_on or len(ip_block_on) < len(probed):
         return
+    row = _domain_report(triage, domain)
+    # CDN SNI-enforcement / cross-test lookalike — keep prolog/L3 phase.
+    if ip_r.sni_block_likely or _cdn_hint(probed):
+        row["ip_blocked"] = False
+        row["sni_block_likely"] = True
+        return
     triage.domain_phases[domain] = FailPhase.IP_BLOCKED.value
-    # CDN SNI-enforcement looks like IP-block; desync can still help.
-    if is_primary and not _cdn_hint(probed):
+    row["phase"] = FailPhase.IP_BLOCKED.value
+    row["ip_blocked"] = True
+    row["l3"] = FailPhase.IP_BLOCKED.value
+    if is_primary:
         triage.unbypassable_l3 = True
         triage.l3_phase = FailPhase.IP_BLOCKED
 
@@ -512,6 +621,7 @@ async def _run_diagnostics(
 
 async def _run_fooling_and_blob_grids(triage: TriageProfile, domain: str, probe_fn) -> None:
     from blockchecks.checkers.fooling_probe import (
+        re_ssl35,
         run_blob_grid_async,
         run_fooling_grid_async,
         run_split_grid_async,
@@ -519,6 +629,7 @@ async def _run_fooling_and_blob_grids(triage: TriageProfile, domain: str, probe_
 
     grid = await run_fooling_grid_async(probe_fn)
     triage.viable_foolings = list(grid.viable)
+    triage.dead_foolings = [lab for lab, err in grid.failed.items() if re_ssl35(err)]
     if grid.viable:
         log.info("%s", f"  Triage {domain}: viable foolings {', '.join(grid.viable)}")
     triage.split_mode = (await run_split_grid_async(probe_fn)) or triage.split_mode
@@ -567,24 +678,177 @@ def _load_prior_triage() -> TriageProfile:
 
 
 async def _persist_triage(triage: TriageProfile, primary: str, opts: PreflightOptions) -> None:
+    from blockchecks.engine.triage import clustered_primary_domain
+
+    csv_primary = clustered_primary_domain(triage.domain_reports, fallback=primary)
     try:
         from blockchecks.data_block.provider import get_provider_dir
         from blockchecks.data_block.store import ProviderStore
 
-        ProviderStore(get_provider_dir(allow_detect=False)).save_triage(
-            triage, primary_domain=primary
-        )
+        store = ProviderStore(get_provider_dir(allow_detect=False))
+        store.save_triage(triage, primary_domain=csv_primary)
+        _flush_l3_pins(store, opts.dns_cache)
     except Exception:
         pass
     saver = getattr(opts.store, "save_triage_snapshot", None)
     if not callable(saver):
         return
     try:
-        result = saver(primary, triage.to_dict())
+        result = saver(csv_primary, triage.to_dict())
         if asyncio.iscoroutine(result):
             await result
     except Exception:
         pass
+
+
+def _flush_l3_pins(store: Any, cache: Any) -> None:
+    """Merge live L3 pins into provider hosts (DoH rows already written)."""
+    pins = cache.pins() if cache is not None else {}
+    if not pins:
+        return
+    store.write_hosts({domain: [ip] for domain, ip in pins.items() if ip})
+
+
+def _l3_is_live(r: Any) -> bool:
+    return r.phase == FailPhase.PASS or r.tcp_reachable is True
+
+
+def _first_live_l3(ips: list[str], timeout: float) -> Any:
+    """Probe up to ``_L3_IP_CAP`` A-records; return first PASS or last dead result."""
+    from blockchecks.checkers.l3_probe import L3ProbeResult, probe_l3
+
+    last: L3ProbeResult | None = None
+    for ip in ips[:_L3_IP_CAP]:
+        last = probe_l3(ip, 443, timeout=timeout, use_raw=True)
+        if _l3_is_live(last):
+            return last
+    return last
+
+
+def _apply_l3_pick(
+    triage: TriageProfile,
+    domain: str,
+    ips: list[str],
+    cache: Any,
+    picked: Any,
+    *,
+    is_primary: bool,
+) -> Any | str:
+    """Return live L3 result, ``"dead"`` to stop, or None to continue."""
+    if _l3_is_live(picked):
+        if cache:
+            cache.add_pin(domain, picked.ip)
+        _domain_report(triage, domain)["l3"] = FailPhase.PASS.value
+        log.info("%s", f"  Triage {domain}: {picked.phase.value} ({picked.ip}:{picked.port})")
+        return picked
+    if picked.phase not in _L3_DEAD:
+        return None
+    triage.domain_phases[domain] = picked.phase.value
+    row = _domain_report(triage, domain)
+    row["phase"] = picked.phase.value
+    row["l3"] = picked.phase.value
+    if is_primary and not _cdn_hint(ips):
+        triage.unbypassable_l3 = True
+        triage.l3_phase = picked.phase
+    log.info("%s", f"  Triage {domain}: {picked.phase.value} ({picked.ip}:{picked.port})")
+    return "dead"
+
+
+def _triage_stream_stall(
+    triage: TriageProfile, domain: str, opts: PreflightOptions, cache: Any, *, is_primary: bool
+) -> None:
+    from blockchecks.checkers.curl_probe import run_stream_triage_probe
+
+    try:
+        res = run_stream_triage_probe(
+            f"https://{domain}",
+            timeout=min(opts.timeout, 8.0),
+            resolved_ip=cache.primary_ip(domain) if cache else None,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.info("%s", f"  Triage {domain}: stream probe skipped ({e})")
+        return
+    phase = (
+        FailPhase(res.phase) if res.phase in FailPhase._value2member_map_ else FailPhase.UNKNOWN
+    )
+    triage.domain_phases.setdefault(domain, phase.value)
+    row = _domain_report(triage, domain)
+    row.setdefault("phase", phase.value)
+    row["stall"] = phase.value
+    if phase == FailPhase.TLS_RST_AT_SNI:
+        row["rst_at_sni"] = True
+    if phase == FailPhase.TLS_SILENT_DROP_AFTER_SNI:
+        row["silent_drop"] = True
+    if is_primary:
+        triage.stall_phase = phase
+        triage.stall_at_bytes = res.stall_at_bytes
+        triage.read_rate_bps = res.read_rate_bps
+        triage.bandwidth_throttled = res.phase == "bandwidth_throttled"
+        if phase == FailPhase.TLS_RST_AT_SNI:
+            triage.rst_at_sni = True
+        if phase == FailPhase.TLS_SILENT_DROP_AFTER_SNI:
+            triage.silent_drop_after_sni = True
+    if phase not in (FailPhase.PASS, FailPhase.UNKNOWN):
+        log.info("%s", f"  Triage {domain}: {res.phase} @ {res.stall_at_bytes or 0}B")
+
+
+def _triage_tls_profile(
+    triage: TriageProfile, domain: str, opts: PreflightOptions, cache: Any, *, is_primary: bool
+) -> None:
+    try:
+        from blockchecks.checkers.curl_probe import run_tls_profile_probe
+
+        fp = run_tls_profile_probe(
+            domain,
+            timeout=min(opts.timeout, 5.0),
+            resolved_ip=cache.primary_ip(domain) if cache else None,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.info("%s", f"  Triage {domain}: TLS profile probe skipped ({e})")
+        return
+    if is_primary:
+        triage.client_hello_len = fp.client_hello_len
+        triage.is_tls_fingerprint_blocked = fp.is_fingerprint_blocked
+        triage.requires_postquantum_awareness = fp.client_hello_len > 1400
+        triage.fingerprint_pass = dict(fp.profile_pass)
+    if fp.is_fingerprint_blocked:
+        log.info(
+            "%s", f"  Triage {domain}: TLS fingerprint-blocked (chrome fails, lighter passes)"
+        )
+    elif is_primary and triage.requires_postquantum_awareness:
+        log.info("%s", f"  Triage {domain}: post-quantum ClientHello ~{fp.client_hello_len}B")
+
+
+def _triage_quic(
+    triage: TriageProfile,
+    domain: str,
+    ips: list[str],
+    opts: PreflightOptions,
+    cache: Any,
+    live: Any,
+    *,
+    is_primary: bool,
+) -> None:
+    try:
+        from blockchecks.checkers.quic_raw import probe_quic_initial
+
+        qip = (
+            (cache.primary_ip(domain) if cache else None)
+            or (live.ip if live else None)
+            or (ips[0] if ips else None)
+        )
+        if not qip:
+            return
+        qr = probe_quic_initial(qip, 443, timeout=min(opts.timeout, 3.0))
+        dropped = qr.phase in (FailPhase.QUIC_DROP, FailPhase.UDP_BLOCKED)
+        _domain_report(triage, domain)["quic_drop"] = dropped
+        if is_primary:
+            triage.quic_drop = dropped
+            if qr.phase == FailPhase.UDP_BLOCKED:
+                triage.udp_blocked = True
+        log.info("%s", f"  Triage {domain}: QUIC Initial {qr.phase.value} ({qr.blob_used})")
+    except Exception as e:  # noqa: BLE001
+        log.info("%s", f"  Triage {domain}: QUIC probe skipped ({e})")
 
 
 def _triage_domain(
@@ -601,87 +865,17 @@ def _triage_domain(
     Scalar fields on *triage* are written only for the primary domain so a
     multi-domain scan does not clobber the campaign profile with the last host.
     """
-    from blockchecks.checkers.curl_probe import run_stream_triage_probe
-    from blockchecks.checkers.l3_probe import probe_l3
-
-    # L3/L4 blackhole check on the first resolved IP.
-    if ips:
-        r = probe_l3(ips[0], 443, timeout=min(opts.timeout, 3.0), use_raw=False)
-        if r.phase in (FailPhase.L4_SYN_DROP, FailPhase.ICMP_BLOCK, FailPhase.L4_RST_AT_SYN):
-            triage.domain_phases[domain] = r.phase.value
-            # CDN SNI-enforcement looks like SYN drop; desync can still help.
-            if is_primary and not _cdn_hint(ips):
-                triage.unbypassable_l3 = True
-                triage.l3_phase = r.phase
-            log.info("%s", f"  Triage {domain}: {r.phase.value} ({r.ip}:{r.port})")
+    live = None
+    if ips and (picked := _first_live_l3(ips, min(opts.timeout, 3.0))):
+        result = _apply_l3_pick(triage, domain, ips, cache, picked, is_primary=is_primary)
+        if result == "dead":
             return
+        if result is not None:
+            live = result
 
-    # Stream stall probe (Range 0-256KB) — first domain only.
-    try:
-        resolved_ip = cache.primary_ip(domain) if cache else None
-        res = run_stream_triage_probe(
-            f"https://{domain}",
-            timeout=min(opts.timeout, 8.0),
-            resolved_ip=resolved_ip,
-        )
-        phase = (
-            FailPhase(res.phase) if res.phase in FailPhase._value2member_map_ else FailPhase.UNKNOWN
-        )
-        triage.domain_phases.setdefault(domain, phase.value)
-        if is_primary:
-            triage.stall_phase = phase
-            triage.stall_at_bytes = res.stall_at_bytes
-            triage.read_rate_bps = res.read_rate_bps
-            triage.bandwidth_throttled = res.phase == "bandwidth_throttled"
-            if phase == FailPhase.TLS_RST_AT_SNI:
-                triage.rst_at_sni = True
-            if phase == FailPhase.TLS_SILENT_DROP_AFTER_SNI:
-                triage.silent_drop_after_sni = True
-        if phase not in (FailPhase.PASS, FailPhase.UNKNOWN):
-            log.info("%s", f"  Triage {domain}: {res.phase} @ {res.stall_at_bytes or 0}B")
-    except Exception as e:  # noqa: BLE001 — triage must never abort preflight
-        log.info("%s", f"  Triage {domain}: stream probe skipped ({e})")
-
-    # Multi-profile TLS fingerprint (chrome vs firefox vs safari vs bare).
-    try:
-        from blockchecks.checkers.curl_probe import run_tls_profile_probe
-
-        fp = run_tls_profile_probe(
-            domain,
-            timeout=min(opts.timeout, 5.0),
-            resolved_ip=cache.primary_ip(domain) if cache else None,
-        )
-        if is_primary:
-            triage.client_hello_len = fp.client_hello_len
-            triage.is_tls_fingerprint_blocked = fp.is_fingerprint_blocked
-            triage.requires_postquantum_awareness = fp.client_hello_len > 1400
-            triage.fingerprint_pass = dict(fp.profile_pass)
-        if fp.is_fingerprint_blocked:
-            log.info(
-                "%s", f"  Triage {domain}: TLS fingerprint-blocked (chrome fails, lighter passes)"
-            )
-        elif is_primary and triage.requires_postquantum_awareness:
-            log.info("%s", f"  Triage {domain}: post-quantum ClientHello ~{fp.client_hello_len}B")
-    except Exception as e:  # noqa: BLE001
-        log.info("%s", f"  Triage {domain}: TLS profile probe skipped ({e})")
-
-    # Raw QUIC Initial drop probe (host default netns, one-shot UDP :443).
-    try:
-        from blockchecks.checkers.quic_raw import probe_quic_initial
-
-        qip = ips[0] if ips else cache.primary_ip(domain) if cache else None
-        if qip:
-            qr = probe_quic_initial(qip, 443, timeout=min(opts.timeout, 3.0))
-            if is_primary:
-                triage.quic_drop = qr.phase in (
-                    FailPhase.QUIC_DROP,
-                    FailPhase.UDP_BLOCKED,
-                )
-                if qr.phase == FailPhase.UDP_BLOCKED:
-                    triage.udp_blocked = True
-            log.info("%s", f"  Triage {domain}: QUIC Initial {qr.phase.value} ({qr.blob_used})")
-    except Exception as e:  # noqa: BLE001
-        log.info("%s", f"  Triage {domain}: QUIC probe skipped ({e})")
+    _triage_stream_stall(triage, domain, opts, cache, is_primary=is_primary)
+    _triage_tls_profile(triage, domain, opts, cache, is_primary=is_primary)
+    _triage_quic(triage, domain, ips, opts, cache, live, is_primary=is_primary)
 
 
 def check_udp_16kb(timeout: float = 5.0) -> tuple[bool, str]:

@@ -2,7 +2,7 @@
 
 import os
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -158,14 +158,20 @@ async def test_auto_pin_writes_only_when_changed(tmp_path):
     runner.pinned_path = path
 
     # pinned IP still works -> file content unchanged -> no rewrite
-    with patch.object(runner, "_probe_pin_ip", new_callable=AsyncMock) as probe:
+    with (
+        patch("blockchecks.engine.async_runner._pin_candidate_l3_ok", return_value=True),
+        patch.object(runner, "_probe_pin_ip", new_callable=AsyncMock) as probe,
+    ):
         probe.return_value = True
         await runner._auto_pin_ips()
     with open(path, encoding="utf-8") as f:
         content_before = f.read()
     mtime_before = os.path.getmtime(path)
     time.sleep(0.05)
-    with patch.object(runner, "_probe_pin_ip", new_callable=AsyncMock) as probe:
+    with (
+        patch("blockchecks.engine.async_runner._pin_candidate_l3_ok", return_value=True),
+        patch.object(runner, "_probe_pin_ip", new_callable=AsyncMock) as probe,
+    ):
         probe.return_value = True
         await runner._auto_pin_ips()
     with open(path, encoding="utf-8") as f:
@@ -177,10 +183,35 @@ async def test_auto_pin_writes_only_when_changed(tmp_path):
     async def _probe(domain, ip):
         return ip == "162.159.136.232"
 
-    with patch.object(runner, "_probe_pin_ip", new_callable=AsyncMock) as probe:
+    with (
+        patch("blockchecks.engine.async_runner._pin_candidate_l3_ok", return_value=True),
+        patch.object(runner, "_probe_pin_ip", new_callable=AsyncMock) as probe,
+    ):
         probe.side_effect = _probe
         await runner._auto_pin_ips()
     with open(path, encoding="utf-8") as f:
         updated = f.read()
     assert "162.159.136.232\tdiscord.com" in updated
     assert "162.159.135.232" not in updated.split("\t")[0]
+
+
+@pytest.mark.asyncio(loop_scope="package")
+async def test_auto_pin_skips_syn_drop_before_l7():
+    from blockchecks.engine.fail_phase import FailPhase
+
+    runner, _cache = _make_runner_with_cache(
+        entries={"example.com": ["192.0.2.1", "203.0.113.5"]},
+    )
+
+    def _l3(ip, *_a, **_k):
+        r = MagicMock()
+        r.phase = FailPhase.L4_SYN_DROP if ip == "192.0.2.1" else FailPhase.PASS
+        return r
+
+    with (
+        patch("blockchecks.checkers.l3_probe.probe_l3", side_effect=_l3),
+        patch.object(runner, "_probe_pin_ip", new_callable=AsyncMock) as probe,
+    ):
+        probe.return_value = True
+        await runner._auto_pin_ips()
+    probe.assert_called_once_with("example.com", "203.0.113.5")

@@ -6,7 +6,9 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from blockchecks.engine.paths import CONFIG_FILE
@@ -36,6 +38,8 @@ class BlockchecksSettings(BaseSettings):
     pool: int = 4
     secure_dns: bool = True
     doh_server: str = ""
+    doh_servers: list[dict[str, Any]] = Field(default_factory=list)
+    udp_servers: list[dict[str, Any]] = Field(default_factory=list)
     proxy: str = ""
     unblocked_dom: str = "ripe.net"
     curl_parallel: int = 1
@@ -73,7 +77,59 @@ def _overlay_from_toml(data: dict[str, Any]) -> dict[str, Any]:
             out["secure_dns"] = bool(secure["enabled"])
         if secure.get("doh_server") and not os.environ.get("BLOCKCHECKS_DOH_SERVER"):
             out["doh_server"] = str(secure["doh_server"])
+        if servers := _doh_entries(secure.get("servers")):
+            out["doh_servers"] = servers
+        if udp := _udp_entries(secure.get("udp")):
+            out["udp_servers"] = udp
     return out
+
+
+def _doh_entries(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    return [e for x in raw if (e := _one_doh(x))]
+
+
+def _one_doh(raw: Any) -> dict[str, Any] | None:
+    if isinstance(raw, str) and raw.strip().startswith("http"):
+        url = raw.strip()
+        host = (urlsplit(url).hostname or url).lower()
+        return {"name": host, "url": url, "ip": "", "trusted": True}
+    if not isinstance(raw, dict):
+        return None
+    url = str(raw.get("url") or "").strip()
+    if not url.startswith("http"):
+        return None
+    trusted = True if "trusted" not in raw else bool(raw["trusted"])
+    if raw.get("untrusted"):
+        trusted = False
+    host = (urlsplit(url).hostname or url).lower()
+    return {
+        "name": str(raw.get("name") or "").strip() or host,
+        "url": url,
+        "ip": str(raw.get("ip") or "").strip(),
+        "trusted": trusted,
+    }
+
+
+def _udp_entries(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    return [e for x in raw if (e := _one_udp(x))]
+
+
+def _one_udp(raw: Any) -> dict[str, Any] | None:
+    if isinstance(raw, str):
+        parts = raw.strip().split()
+        if not parts:
+            return None
+        return {"ip": parts[0], "name": " ".join(parts[1:]) or parts[0]}
+    if not isinstance(raw, dict):
+        return None
+    ip = str(raw.get("ip") or "").strip()
+    if not ip:
+        return None
+    return {"ip": ip, "name": str(raw.get("name") or "").strip() or ip}
 
 
 @lru_cache(maxsize=1)
@@ -101,4 +157,27 @@ def apply_settings_env(settings: BlockchecksSettings | None = None) -> Blockchec
     os.environ.setdefault("BLOCKCHECKS_PROXY", s.proxy)
     os.environ.setdefault("BLOCKCHECKS_UNBLOCKED_DOM", s.unblocked_dom)
     os.environ.setdefault("BLOCKCHECKS_CURL_PARALLEL", str(s.curl_parallel))
+    _apply_doh_catalog(s)
     return s
+
+
+def _apply_doh_catalog(s: BlockchecksSettings) -> None:
+    """Replace in-memory DoH/UDP catalogs when the user listed servers."""
+    from blockchecks.engine import config as cfg
+
+    if s.doh_servers:
+        cfg.DOH_SERVERS[:] = [(e["url"], e["name"] or e["url"]) for e in s.doh_servers]
+        cfg.UNTRUSTED_DOH_URLS.clear()
+        cfg.UNTRUSTED_DOH_URLS.update(
+            e["url"].rstrip("/") for e in s.doh_servers if not e.get("trusted", True)
+        )
+        cfg.DOH_BOOTSTRAP.clear()
+        cfg.DOH_BOOTSTRAP.update(
+            {
+                host: e["ip"]
+                for e in s.doh_servers
+                if e.get("ip") and (host := (urlsplit(e["url"]).hostname or "").lower())
+            }
+        )
+    if s.udp_servers:
+        cfg.UDP_DNS_SERVERS[:] = [(e["ip"], e["name"] or e["ip"]) for e in s.udp_servers]

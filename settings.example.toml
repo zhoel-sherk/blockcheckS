@@ -47,8 +47,26 @@ blobs = "/opt/zapret2/blobs"
 # proxy = "socks5://127.0.0.1:11080"
 
 [secure_dns]
-# enabled = true
-# doh_server = "https://cloudflare-dns.com/dns-query"
+enabled = true
+# Preferred DoH when it answers. Rotation still walks `servers` below.
+doh_server = "https://cloudflare-dns.com/dns-query"
+
+# Full catalog (no cap — add as many as you need). `ip` is CURLOPT_RESOLVE
+# bootstrap so hijacked UDP cannot poison the resolver hostname.
+# trusted = false → shown in the audit table, ignored for verdict / cache / pin.
+servers = [
+  { name = "Cloudflare", url = "https://cloudflare-dns.com/dns-query", ip = "1.1.1.1", trusted = true },
+  { name = "Google", url = "https://dns.google/dns-query", ip = "8.8.8.8", trusted = true },
+  { name = "Quad9", url = "https://dns.quad9.net/dns-query", ip = "9.9.9.9", trusted = true },
+  { name = "AdGuard", url = "https://dns.adguard-dns.com/dns-query", ip = "94.140.14.14", trusted = true },
+  { name = "Yandex", url = "https://dns.yandex.ru/dns-query", ip = "77.88.8.8", trusted = false },
+]
+
+udp = [
+  { name = "Google", ip = "8.8.8.8" },
+  { name = "Cloudflare", ip = "1.1.1.1" },
+  { name = "Quad9", ip = "9.9.9.9" },
+]
 
 [http]
 # Bearer token for the `bs serve` HTTP bridge (--http-port). Required for any

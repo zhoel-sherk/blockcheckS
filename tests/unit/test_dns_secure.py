@@ -1,15 +1,18 @@
 """Unit tests for secure DNS module."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from blockchecks.checkers.dns_secure import (
+    CURLOPT_RESOLVE,
     DnsRunCache,
     _build_dns_query,
+    _doh_json_query,
     _domain_to_dns_ascii,
     _parse_dns_response,
     audit_domain,
+    doh_bootstrap_ip,
     doh_query,
     has_dns_hijack,
     pick_working_doh,
@@ -193,3 +196,186 @@ def test_pick_working_doh_uses_first_success():
     ):
         url = pick_working_doh([("https://a/", "a"), ("https://b/", "b")])
     assert url == "https://b/"
+
+
+@pytest.mark.unit
+def test_doh_bootstrap_ip_known_hosts():
+    assert doh_bootstrap_ip("https://cloudflare-dns.com/dns-query") == "1.1.1.1"
+    assert doh_bootstrap_ip("https://dns.google/dns-query") == "8.8.8.8"
+    assert doh_bootstrap_ip("https://dns.quad9.net/dns-query") == "9.9.9.9"
+    assert doh_bootstrap_ip("https://unknown.example/dns-query") is None
+
+
+@pytest.mark.unit
+def test_doh_json_setopt_resolve_bootstrap():
+    with patch("blockchecks.checkers.dns_secure.curl_cffi.Session") as sess_cls:
+        session = sess_cls.return_value.__enter__.return_value
+        resp = MagicMock()
+        resp.json.return_value = {"Answer": [{"type": 1, "data": "9.9.9.9"}]}
+        session.get.return_value = resp
+        ips, err, _ = _doh_json_query("example.com", "https://cloudflare-dns.com/dns-query")
+    assert ips == ["9.9.9.9"]
+    assert not err
+    session.curl.setopt.assert_called_once_with(
+        CURLOPT_RESOLVE, ["cloudflare-dns.com:443:1.1.1.1"]
+    )
+
+
+@pytest.mark.unit
+def test_doh_is_trusted_rejects_yandex():
+    from blockchecks.checkers.dns_secure import doh_is_trusted
+
+    assert not doh_is_trusted("https://dns.yandex.ru/dns-query")
+    assert doh_is_trusted("https://dns.google/dns-query")
+
+
+@pytest.mark.unit
+def test_pick_working_doh_skips_yandex():
+    yandex = "https://dns.yandex.ru/dns-query"
+    google = "https://dns.google/dns-query"
+
+    def fake(_domain, url, timeout=5.0):
+        return (["1.1.1.1"], "", 1.0) if url == yandex else (["8.8.8.8"], "", 1.0)
+
+    with (
+        patch("blockchecks.checkers.dns_secure.DEFAULT_DOH_SERVER", ""),
+        patch("blockchecks.checkers.dns_secure.doh_query", side_effect=fake),
+    ):
+        url = pick_working_doh([(yandex, "Yandex"), (google, "Google")])
+    assert url == google
+
+
+@pytest.mark.unit
+def test_audit_yandex_shown_untrusted_not_in_verdict():
+    yandex = "https://dns.yandex.ru/dns-query"
+    google = "https://dns.google/dns-query"
+
+    def fake(_domain, url, timeout=5.0):
+        if "yandex" in url:
+            return ["81.88.1.1"], "", 1.0
+        return ["1.2.3.4"], "", 1.0
+
+    with (
+        patch(
+            "blockchecks.checkers.dns_secure.udp_resolve",
+            return_value=(["1.2.3.4"], "", 1.0),
+        ),
+        patch("blockchecks.checkers.dns_secure.doh_query", side_effect=fake),
+        patch(
+            "blockchecks.checkers.dns_secure.DOH_SERVERS",
+            [(google, "Google"), (yandex, "Yandex")],
+        ),
+        patch("blockchecks.checkers.dns_secure.UNTRUSTED_DOH_URLS", frozenset({yandex})),
+    ):
+        r = audit_domain("example.com", doh_url=google)
+    assert r.verdict == "ok"
+    assert not r.tampering_detected
+    assert r.doh_ips == ["1.2.3.4"]
+    assert r.untrusted_doh.get("Yandex") == ["81.88.1.1"]
+    assert r.udp_server == "8.8.8.8"
+    assert r.udp_name == "Google"
+
+
+@pytest.mark.unit
+def test_cache_resolve_skips_untrusted_yandex():
+    yandex = "https://dns.yandex.ru/dns-query"
+    google = "https://dns.google/dns-query"
+    cache = DnsRunCache(doh_server="https://dead.example/dns-query")
+
+    def fake(_domain, url, timeout=5.0):
+        if url == yandex:
+            return ["9.9.9.9"], "", 1.0
+        if url == google:
+            return ["8.8.8.8"], "", 1.0
+        return [], "fail", 1.0
+
+    with (
+        patch("blockchecks.checkers.dns_secure.doh_query", side_effect=fake),
+        patch(
+            "blockchecks.checkers.dns_secure.DOH_SERVERS",
+            [(yandex, "Yandex"), (google, "Google")],
+        ),
+        patch("blockchecks.checkers.dns_secure.UNTRUSTED_DOH_URLS", frozenset({yandex})),
+    ):
+        ips = cache.resolve("example.com")
+    assert ips == ["8.8.8.8"]
+    assert cache.doh_server == google
+
+
+@pytest.mark.unit
+def test_doh_display_name_from_catalog():
+    from blockchecks.checkers.dns_secure import doh_display_name
+
+    assert doh_display_name("https://cloudflare-dns.com/dns-query") == "Cloudflare"
+    assert doh_display_name("https://dns.google/dns-query/") == "Google"
+    assert doh_display_name("https://dns.example.net/dns-query") == "dns.example.net"
+    assert doh_display_name("") == "DoH"
+
+
+@pytest.mark.unit
+def test_format_audit_table_labels_udp_and_doh():
+    from blockchecks.checkers.dns_secure import DnsAuditResult, format_audit_table
+
+    text = format_audit_table(
+        [
+            DnsAuditResult(
+                domain="discord.com",
+                udp_ips=["162.159.138.232", "162.159.128.233"],
+                doh_ips=["162.159.135.232", "162.159.136.232"],
+                doh_server="https://cloudflare-dns.com/dns-query",
+                udp_server="8.8.8.8",
+                udp_name="Google",
+                verdict="ok",
+                udp_latency_ms=8.0,
+                doh_latency_ms=21.0,
+                untrusted_doh={"Yandex": []},
+            ),
+            DnsAuditResult(
+                domain="discordapp.net",
+                doh_server="https://cloudflare-dns.com/dns-query",
+                udp_server="8.8.8.8",
+                udp_name="Google",
+                verdict="no_resolution",
+                untrusted_doh={"Yandex": []},
+            ),
+        ]
+    )
+    assert "plaintext UDP:53" in text
+    assert "encrypted DoH" in text
+    assert "no DoT" in text
+    assert "Google (8.8.8.8)" in text
+    assert "Cloudflare" in text
+    assert "cloudflare-dns.com" in text
+    assert "discord.com" in text
+    assert "162.159.138.232" in text
+    assert "162.159.135.232" in text
+    assert "Yandex=--" not in text
+    assert "untrusted — display only" in text
+    assert "NO A" in text
+    assert "discordapp.net" in text
+    assert "Yandex DoH: no answers" in text
+    # IPs must not smash into the next cell
+    assert "233162.159" not in text
+
+
+@pytest.mark.unit
+def test_format_audit_table_shows_untrusted_only_when_answered():
+    from blockchecks.checkers.dns_secure import DnsAuditResult, format_audit_table
+
+    text = format_audit_table(
+        [
+            DnsAuditResult(
+                domain="example.com",
+                udp_ips=["1.2.3.4"],
+                doh_ips=["1.2.3.4"],
+                doh_server="https://dns.google/dns-query",
+                udp_server="8.8.8.8",
+                udp_name="Google",
+                verdict="ok",
+                untrusted_doh={"Yandex": ["77.88.8.8"]},
+            )
+        ]
+    )
+    assert "77.88.8.8" in text
+    assert "untrusted" in text
+    assert "Yandex DoH: no answers" not in text

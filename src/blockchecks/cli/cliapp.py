@@ -76,6 +76,8 @@ def _annotation_for_action(action: argparse.Action) -> Any:
         return int if action.required else (int | None if action.default is None else int)
     if action.type is float:
         return float if action.required else (float | None if action.default is None else float)
+    if isinstance(action, argparse._AppendAction):
+        return list[str] | None if action.default is None else list[str]
     if action.nargs in ("+", "*"):
         return list[str]
     if action.required:
@@ -458,6 +460,19 @@ def _run_mcp(model: BaseModel) -> int:
     return cmd_mcp(_to_namespace(model))
 
 
+def _run_preflight(model: BaseModel) -> int:
+    from blockchecks.cli.commands.preflight import run_preflight_cmd
+    from blockchecks.cli.parser import ensure_system_deps_or_exit
+
+    ns = _to_namespace(model)
+    ns.command = "preflight"
+    if getattr(ns, "list_presets", False):
+        code = 0
+    else:
+        code = ensure_system_deps_or_exit(ns)
+    return code or run_preflight_cmd(ns)
+
+
 def build_cli_root() -> type[BaseSettings]:
     from blockchecks.cli.user_config import apply_parser_defaults
 
@@ -493,6 +508,11 @@ def build_cli_root() -> type[BaseSettings]:
             "mcp",
             raw_blurbs,
             "Model Context Protocol server (stdio) bridging LLM → bs serve daemon",
+        ),
+        "preflight": _parser_blurb(
+            "preflight",
+            raw_blurbs,
+            "DNS/L3/stall triage + data_block triage.toml/hosts (no matrix)",
         ),
     }
 
@@ -532,6 +552,12 @@ def build_cli_root() -> type[BaseSettings]:
     McpCmd = _make_cmd_model(
         "McpCmd", model_from_subparser("McpArgs", subs["mcp"]), _run_mcp, blurbs["mcp"]
     )
+    PreflightCmd = _make_cmd_model(
+        "PreflightCmd",
+        model_from_subparser("PreflightArgs", subs["preflight"]),
+        _run_preflight,
+        blurbs["preflight"],
+    )
 
     class BlockchecksCli(BaseSettings):
         """bs — lightspeed DPI strategy tester (CliApp)."""
@@ -560,6 +586,9 @@ def build_cli_root() -> type[BaseSettings]:
         stop: CliSubCommand[StopCmd] = Field(description=blurbs["stop"])  # type: ignore[valid-type]
         serve: CliSubCommand[ServeCmd] = Field(description=blurbs["serve"])  # type: ignore[valid-type]
         mcp: CliSubCommand[McpCmd] = Field(description=blurbs["mcp"])  # type: ignore[valid-type]
+        preflight: CliSubCommand[PreflightCmd] = Field(  # type: ignore[valid-type]
+            description=blurbs["preflight"]
+        )
 
         def cli_cmd(self) -> int:
             global _CLI_EXIT_CODE
@@ -633,6 +662,6 @@ def main(argv: list[str] | None = None) -> int:
         return _CLI_EXIT_CODE
     sub = get_subcommand(result, is_required=False)
     if sub is None:
-        log.info("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full|stop")
+        log.info("bs — use a subcommand: tcp|udp|scan|pair|composite|bench-settle|full|stop|preflight")
         return 2
     return 0

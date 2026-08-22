@@ -297,6 +297,11 @@ bench-settle = ["src/blockchecks/cli/commands/bench_settle.py"]
 full = ["src/blockchecks/main.py", "src/blockchecks/main_phases.py"]
 stop = ["src/blockchecks/cli/commands/stop.py"]
 serve = ["src/blockchecks/cli/commands/serve.py", "src/blockchecks/service/server.py", "src/blockchecks/service/probe_service.py"]
+preflight = [
+    "src/blockchecks/cli/commands/preflight.py",
+    "src/blockchecks/cli/cliapp.py",
+    "src/blockchecks/cli/parser.py",
+]
 
 [tool.blockchecks.settings]
 env_prefix = "BLOCKCHECKS_"

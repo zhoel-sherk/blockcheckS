@@ -115,6 +115,139 @@ def test_preflight_skips_domain_on_prolog():
     assert "discord.com" in r.skip_domains
     assert r.triage is not None
     assert r.triage.handshake_phase.value == "pass"
+    assert r.triage.silent_drop_after_sni is False
+    assert r.triage.rst_at_sni is False
+
+
+@pytest.mark.unit
+def test_preflight_skips_ip_block_on_prolog_ok_domain():
+    from blockchecks.checkers.tcp_tls import TlsResult
+
+    cache = MagicMock()
+    cache.resolve.return_value = ["1.2.3.4"]
+    ip_cross = MagicMock()
+    with (
+        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "")),
+        patch(
+            "blockchecks.engine.preflight.run_prolog_tls",
+            return_value=TlsResult(domain="discord.gg", success=True, http_status=200),
+        ),
+        patch("blockchecks.engine.preflight.run_port_block_probe"),
+        patch("blockchecks.engine.preflight.print_port_block_report"),
+        patch("blockchecks.engine.preflight.run_ip_block_cross_test", ip_cross),
+        patch("blockchecks.engine.preflight.print_ip_block_report"),
+        patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
+        patch("blockchecks.engine.preflight._triage_domain"),
+    ):
+        run_preflight(
+            ["discord.gg"],
+            PreflightOptions(
+                skip_nfqws2_check=True,
+                skip_ip_block=False,
+                skip_dns_audit=True,
+                dns_cache=cache,
+            ),
+        )
+    ip_cross.assert_not_called()
+
+
+@pytest.mark.unit
+def test_preflight_reuses_prepared_dns_audits():
+    from blockchecks.checkers.dns_secure import DnsAuditResult
+
+    cache = MagicMock()
+    cache.resolve.return_value = ["1.2.3.4"]
+    audit = DnsAuditResult(
+        domain="discord.com",
+        doh_ips=["1.2.3.4"],
+        udp_ips=["10.0.0.1"],
+        tampering_detected=True,
+        verdict="tampered",
+        doh_server="https://doh",
+    )
+    audit_fn = AsyncMock()
+    sync = AsyncMock()
+    with (
+        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "")),
+        patch("blockchecks.engine.preflight._audit_domains_parallel", audit_fn),
+        patch("blockchecks.engine.preflight._sync_dns_to_data_block", sync),
+        patch("blockchecks.engine.preflight.check_udp_16kb", return_value=(False, "")),
+        patch("blockchecks.engine.preflight.run_prolog_tls"),
+        patch("blockchecks.engine.preflight._triage_domain"),
+        patch("blockchecks.engine.preflight.run_port_block_probe"),
+        patch("blockchecks.engine.preflight.print_port_block_report"),
+    ):
+        r = run_preflight(
+            ["discord.com"],
+            PreflightOptions(
+                skip_nfqws2_check=True,
+                skip_ip_block=True,
+                skip_port_block=True,
+                skip_prolog=True,
+                dns_cache=cache,
+                dns_audits=[audit],
+            ),
+        )
+    audit_fn.assert_not_called()
+    sync.assert_awaited()
+    assert r.triage.dns_hijacked is True
+
+
+@pytest.mark.unit
+def test_no_preflight_skips_udp_l3_and_persist():
+    from types import SimpleNamespace
+
+    prior = TriageProfile(udp_blocked=True, viable_foolings=["tcp_ts=-1000"])
+    persist = AsyncMock()
+    udp = MagicMock(return_value=(False, "answered"))
+    l3 = MagicMock()
+    with (
+        patch("blockchecks.engine.preflight._load_prior_triage", return_value=prior),
+        patch("blockchecks.engine.preflight._persist_triage", persist),
+        patch("blockchecks.engine.preflight.check_udp_16kb", udp),
+        patch("blockchecks.engine.preflight._triage_domain", l3),
+    ):
+        r = run_preflight(
+            ["discord.com"],
+            PreflightOptions.from_args(SimpleNamespace(no_preflight=True, timeout=5.0)),
+        )
+    udp.assert_not_called()
+    persist.assert_not_called()
+    l3.assert_not_called()
+    assert r.triage.udp_blocked is True
+    assert r.triage.viable_foolings == ["tcp_ts=-1000"]
+
+
+@pytest.mark.unit
+def test_quick_skips_udp_burst_keeps_prior():
+    from types import SimpleNamespace
+
+    prior = TriageProfile(udp_blocked=True, viable_foolings=["tcp_md5"])
+    persist = AsyncMock()
+    udp = MagicMock(return_value=(False, "answered"))
+    with (
+        patch("blockchecks.engine.preflight._load_prior_triage", return_value=prior),
+        patch("blockchecks.engine.preflight._persist_triage", persist),
+        patch("blockchecks.engine.preflight.check_udp_16kb", udp),
+        patch("blockchecks.engine.preflight.run_unblocked_baseline", return_value=(True, "")),
+        patch("blockchecks.engine.preflight.run_prolog_tls"),
+        patch("blockchecks.engine.preflight._triage_domain"),
+        patch("blockchecks.engine.preflight.run_port_block_probe"),
+        patch("blockchecks.engine.preflight.print_port_block_report"),
+    ):
+        r = run_preflight(
+            ["discord.com"],
+            PreflightOptions.from_args(
+                SimpleNamespace(
+                    quick=True, timeout=5.0, skip_nfqws2_check=True, skip_dns_audit=True
+                ),
+                dns_cache=MagicMock(),
+            ),
+        )
+    udp.assert_not_called()
+    persist.assert_awaited()
+    assert r.triage.udp_blocked is True
+    assert r.triage.viable_foolings == ["tcp_md5"]
 
 
 @pytest.mark.unit
@@ -174,14 +307,17 @@ def test_from_args_skip_diagnostics_quick_and_no_preflight():
 
     campaign = SimpleNamespace(timeout=5.0)
     assert PreflightOptions.from_args(campaign).skip_diagnostics is False
-    assert (
-        PreflightOptions.from_args(SimpleNamespace(quick=True, timeout=5.0)).skip_diagnostics
-        is True
-    )
-    assert (
-        PreflightOptions.from_args(SimpleNamespace(no_preflight=True, timeout=5.0)).skip_diagnostics
-        is True
-    )
+    quick = PreflightOptions.from_args(SimpleNamespace(quick=True, timeout=5.0))
+    assert quick.skip_diagnostics is True
+    assert quick.skip_udp_16kb is True
+    assert quick.skip_l3_triage is False
+    assert quick.skip_persist is False
+    none = PreflightOptions.from_args(SimpleNamespace(no_preflight=True, timeout=5.0))
+    assert none.skip_diagnostics is True
+    assert none.skip_udp_16kb is True
+    assert none.skip_l3_triage is True
+    assert none.skip_persist is True
+    assert none.dpi_diag is False
 
 
 def test_sync_dns_to_data_block(tmp_path):
@@ -610,8 +746,43 @@ def test_apply_ip_block_cdn_keeps_bypassable():
     report.ip_block_on = ["162.159.1.1"]
     triage = TriageProfile()
     _apply_ip_block(triage, "discord.com", report, is_primary=True)
-    assert triage.domain_phases["discord.com"] == "ip_blocked"
+    assert "discord.com" not in triage.domain_phases
     assert triage.bypassable is True
+    assert triage.unbypassable_l3 is False
+    assert triage.domain_reports["discord.com"]["ip_blocked"] is False
+    assert triage.domain_reports["discord.com"]["sni_block_likely"] is True
+
+
+@pytest.mark.unit
+def test_apply_ip_block_sni_likely_skips_ip_blocked():
+    from blockchecks.checkers.ip_block import IpBlockReport
+    from blockchecks.engine.preflight import _apply_ip_block
+    from blockchecks.engine.triage import TriageProfile
+
+    report = IpBlockReport("example.com", "iana.org")
+    report.blocked_ips = ["93.184.216.34"]
+    report.ip_block_on = ["93.184.216.34"]
+    report.sni_block_likely = True
+    triage = TriageProfile()
+    triage.domain_phases["example.com"] = "tls_silent_drop_after_sni"
+    _apply_ip_block(triage, "example.com", report, is_primary=True)
+    assert triage.domain_phases["example.com"] == "tls_silent_drop_after_sni"
+    assert triage.unbypassable_l3 is False
+
+
+@pytest.mark.unit
+def test_apply_ip_block_discord_fastly_not_ip_blocked():
+    from blockchecks.checkers.ip_block import IpBlockReport
+    from blockchecks.engine.preflight import _apply_ip_block
+    from blockchecks.engine.triage import TriageProfile
+
+    report = IpBlockReport("dl.discordapp.net", "iana.org")
+    report.blocked_ips = ["8.6.112.0", "8.47.69.0"]
+    report.ip_block_on = ["8.6.112.0", "8.47.69.0"]
+    triage = TriageProfile()
+    triage.domain_phases["dl.discordapp.net"] = "tls_silent_drop_after_sni"
+    _apply_ip_block(triage, "dl.discordapp.net", report, is_primary=True)
+    assert triage.domain_phases["dl.discordapp.net"] == "tls_silent_drop_after_sni"
     assert triage.unbypassable_l3 is False
 
 
@@ -636,7 +807,9 @@ def test_triage_domain_cdn_syn_drop_keeps_bypassable():
     from blockchecks.engine.preflight import PreflightOptions, _triage_domain
     from blockchecks.engine.triage import TriageProfile
 
-    report = MagicMock(phase=FailPhase.L4_SYN_DROP, ip="162.159.1.1", port=443)
+    report = MagicMock(
+        phase=FailPhase.L4_SYN_DROP, tcp_reachable=False, ip="162.159.1.1", port=443
+    )
     triage = TriageProfile()
     with patch("blockchecks.checkers.l3_probe.probe_l3", return_value=report):
         _triage_domain(
@@ -653,7 +826,9 @@ def test_triage_domain_origin_syn_drop_unbypassable():
     from blockchecks.engine.preflight import PreflightOptions, _triage_domain
     from blockchecks.engine.triage import TriageProfile
 
-    report = MagicMock(phase=FailPhase.L4_SYN_DROP, ip="93.184.216.34", port=443)
+    report = MagicMock(
+        phase=FailPhase.L4_SYN_DROP, tcp_reachable=False, ip="93.184.216.34", port=443
+    )
     triage = TriageProfile()
     with patch("blockchecks.checkers.l3_probe.probe_l3", return_value=report):
         _triage_domain(
@@ -661,3 +836,148 @@ def test_triage_domain_origin_syn_drop_unbypassable():
         )
     assert triage.unbypassable_l3 is True
     assert triage.l3_phase == FailPhase.L4_SYN_DROP
+
+
+@pytest.mark.unit
+def test_triage_domain_second_ip_live_not_unbypassable():
+    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.engine.preflight import PreflightOptions, _triage_domain
+    from blockchecks.engine.triage import TriageProfile
+
+    drop = MagicMock(
+        phase=FailPhase.L4_SYN_DROP, tcp_reachable=False, ip="93.184.216.34", port=443
+    )
+    live = MagicMock(phase=FailPhase.PASS, tcp_reachable=True, ip="93.184.216.35", port=443)
+
+    def _probe(ip, *_a, **_k):
+        return drop if ip == "93.184.216.34" else live
+
+    cache = MagicMock()
+    cache.primary_ip.return_value = "93.184.216.35"
+    triage = TriageProfile()
+    with (
+        patch("blockchecks.checkers.l3_probe.probe_l3", side_effect=_probe) as l3,
+        patch(
+            "blockchecks.checkers.curl_probe.run_stream_triage_probe",
+            side_effect=RuntimeError("skip"),
+        ),
+        patch(
+            "blockchecks.checkers.curl_probe.run_tls_profile_probe",
+            side_effect=RuntimeError("skip"),
+        ),
+        patch(
+            "blockchecks.checkers.quic_raw.probe_quic_initial",
+            side_effect=RuntimeError("skip"),
+        ),
+    ):
+        _triage_domain(
+            triage,
+            "example.com",
+            ["93.184.216.34", "93.184.216.35"],
+            PreflightOptions(),
+            cache,
+            is_primary=True,
+        )
+    assert l3.call_count == 2
+    cache.add_pin.assert_called_once_with("example.com", "93.184.216.35")
+    assert triage.unbypassable_l3 is False
+
+
+@pytest.mark.unit
+def test_cluster_domain_reports_groups_identical():
+    from blockchecks.engine.triage import cluster_domain_reports, clustered_primary_domain
+
+    drop = {"phase": "tls_silent_drop_after_sni", "prolog_ok": False, "silent_drop": True}
+    reports = {
+        "discord.com": dict(drop),
+        "discord.gg": dict(drop),
+        "gateway.discord.gg": dict(drop),
+        "storage.googleapis.com": {"phase": "pass", "prolog_ok": True},
+    }
+    clusters = cluster_domain_reports(reports)
+    assert clustered_primary_domain(reports) == "discord.com, discord.gg, gateway.discord.gg"
+    assert len(clusters) == 2
+    assert clusters[1]["primary_domain"] == "storage.googleapis.com"
+
+
+@pytest.mark.unit
+def test_flush_l3_pins_writes_hosts():
+    from blockchecks.engine.preflight import _flush_l3_pins
+
+    store = MagicMock()
+    cache = MagicMock()
+    cache.pins.return_value = {"discord.com": "162.159.1.1", "empty.net": ""}
+    _flush_l3_pins(store, cache)
+    store.write_hosts.assert_called_once_with({"discord.com": ["162.159.1.1"]})
+
+
+@pytest.mark.unit
+def test_collect_preflight_domains_requires_source():
+    from argparse import Namespace
+
+    from blockchecks.cli.commands.preflight import collect_preflight_domains
+
+    domains, rc = collect_preflight_domains(Namespace(domain=None, preset=None, domains_file=None))
+    assert rc == 1
+    assert domains == []
+
+
+@pytest.mark.unit
+def test_collect_preflight_domains_merges_repeatable_d(tmp_path):
+    from argparse import Namespace
+
+    from blockchecks.cli.commands.preflight import collect_preflight_domains
+
+    path = tmp_path / "extra.txt"
+    path.write_text("cdn.discordapp.com\n", encoding="utf-8")
+    domains, rc = collect_preflight_domains(
+        Namespace(
+            domain=["discord.com", "discord.gg"],
+            preset=None,
+            domains_file=str(path),
+            allow_unsafe_domains=True,
+            list_presets=False,
+        )
+    )
+    assert rc is None
+    assert domains == ["discord.com", "discord.gg", "cdn.discordapp.com"]
+
+
+@pytest.mark.unit
+def test_cmd_preflight_runs_without_matrix(monkeypatch):
+    import asyncio
+    from argparse import Namespace
+    from unittest.mock import AsyncMock
+
+    from blockchecks.cli.commands import preflight as pf
+    from blockchecks.engine.preflight import PreflightReport
+
+    monkeypatch.setattr("blockchecks.data_block.provider.provider_name", lambda **_k: "testp")
+    monkeypatch.setattr(
+        pf,
+        "prepare_dns_for_run",
+        lambda *_a, **_k: (MagicMock(pins=lambda: {}), [], 0),
+    )
+    monkeypatch.setattr(pf, "_resolve_pin_path", lambda _a: "")
+    report = PreflightReport()
+    report.exit_code = None
+    monkeypatch.setattr(pf, "run_preflight_async", AsyncMock(return_value=report))
+    rc = asyncio.run(
+        pf.cmd_preflight(
+            Namespace(
+                domain=["discord.com"],
+                preset=None,
+                domains_file=None,
+                list_presets=False,
+                no_secure_dns=True,
+                skip_dns_audit=True,
+                allow_dns_hijack=True,
+                doh_server=None,
+                data_block_sync=False,
+                timeout=3.0,
+            )
+        )
+    )
+    assert rc == 0
+    pf.run_preflight_async.assert_awaited_once()
+    assert pf.run_preflight_async.await_args.args[0] == ["discord.com"]

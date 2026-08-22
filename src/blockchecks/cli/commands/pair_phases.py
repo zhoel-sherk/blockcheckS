@@ -209,7 +209,9 @@ async def prepare_dns_and_preflight(
 
     preflight = await run_preflight_async(
         test_domains,
-        PreflightOptions.from_args(args, dns_cache=dns_cache, store=store),
+        PreflightOptions.from_args(
+            args, dns_cache=dns_cache, store=store, dns_audits=dns_audits
+        ),
     )
     if preflight.exit_code:
         log.error("%s", f"{RED}ERROR: preflight failed: {preflight.error}{RESET}")

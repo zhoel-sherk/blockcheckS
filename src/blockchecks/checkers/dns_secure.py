@@ -11,6 +11,7 @@ import struct
 import time
 from dataclasses import dataclass, field
 from itertools import product
+from urllib.parse import urlsplit
 
 import curl_cffi
 from curl_cffi.requests import RequestsError
@@ -18,9 +19,12 @@ from curl_cffi.requests import RequestsError
 from blockchecks.engine.config import (
     DEFAULT_DOH_SERVER,
     DNS_CACHE_TTL,
+    DOH_BOOTSTRAP,
     DOH_SERVERS,
     UDP_DNS_SERVERS,
+    UNTRUSTED_DOH_URLS,
 )
+from blockchecks.terminal import CYAN, GREEN, GREY, RED, RESET, YELLOW
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +34,20 @@ try:
     CURLOPT_RESOLVE = curl_cffi.CurlOpt.RESOLVE
 except AttributeError:
     CURLOPT_RESOLVE = 10203
+
+
+def doh_bootstrap_ip(doh_url: str) -> str | None:
+    """Static bootstrap IP for a DoH URL hostname, or None if unknown."""
+    host = (urlsplit(doh_url).hostname or "").lower()
+    return DOH_BOOTSTRAP.get(host)
+
+
+def _pin_doh_session(session: curl_cffi.Session, doh_url: str) -> None:
+    """CURLOPT_RESOLVE so DoH TLS keeps SNI but skips hijacked system DNS."""
+    if not (ip := doh_bootstrap_ip(doh_url)):
+        return
+    host = (urlsplit(doh_url).hostname or "").lower()
+    apply_curl_resolve(session, host, ip)
 
 
 def _domain_to_dns_ascii(domain: str) -> str:
@@ -131,6 +149,7 @@ def _doh_json_query(
     start = time.perf_counter()
     try:
         with curl_cffi.Session(impersonate="chrome124") as session:
+            _pin_doh_session(session, doh_url)
             resp = session.get(
                 f"{doh_url}?name={_domain_to_dns_ascii(domain)}&type=A",
                 timeout=timeout,
@@ -154,6 +173,7 @@ def _doh_wire_query(
     try:
         wire = _build_dns_query(domain)
         with curl_cffi.Session(impersonate="chrome124") as session:
+            _pin_doh_session(session, doh_url)
             resp = session.post(
                 doh_url,
                 data=wire,
@@ -182,21 +202,42 @@ def doh_query(domain: str, doh_url: str, timeout: float = 5.0) -> tuple[list[str
     return [], err or err2, lat2
 
 
+def doh_is_trusted(url: str) -> bool:
+    """False for resolvers whose answers must not drive cache/pin/verdict."""
+    u = (url or "").rstrip("/")
+    host = (urlsplit(u).hostname or "").lower()
+    untrusted_hosts = {(urlsplit(x).hostname or "").lower() for x in UNTRUSTED_DOH_URLS}
+    return u not in UNTRUSTED_DOH_URLS and host not in untrusted_hosts
+
+
+def trusted_doh_servers(
+    servers: list[tuple[str, str]] | None = None,
+) -> list[tuple[str, str]]:
+    return [(u, n) for u, n in (servers or DOH_SERVERS) if doh_is_trusted(u)]
+
+
+def untrusted_doh_servers(
+    servers: list[tuple[str, str]] | None = None,
+) -> list[tuple[str, str]]:
+    return [(u, n) for u, n in (servers or DOH_SERVERS) if not doh_is_trusted(u)]
+
+
 def pick_working_doh(
     servers: list[tuple[str, str]] | None = None,
     probe_domain: str = "cloudflare.com",
     timeout: float = 3.0,
 ) -> str:
-    """Return first working DoH server URL (blockcheck2 ``doh_find_working``)."""
-    if DEFAULT_DOH_SERVER:
+    """Return first working *trusted* DoH URL (blockcheck2 ``doh_find_working``)."""
+    pool = trusted_doh_servers(servers) or trusted_doh_servers()
+    if DEFAULT_DOH_SERVER and doh_is_trusted(DEFAULT_DOH_SERVER):
         ips, err, _ = doh_query(probe_domain, DEFAULT_DOH_SERVER, timeout)
         if ips and not err:
             return DEFAULT_DOH_SERVER
-    for url, _name in servers or DOH_SERVERS:
+    for url, _name in pool:
         ips, err, _ = doh_query(probe_domain, url, timeout)
         if ips and not err:
             return url
-    return (servers or DOH_SERVERS)[0][0]
+    return (pool or servers or DOH_SERVERS)[0][0]
 
 
 @dataclass
@@ -210,8 +251,11 @@ class DnsAuditResult:
     udp_latency_ms: float = 0.0
     doh_latency_ms: float = 0.0
     doh_server: str = ""
+    udp_server: str = ""
+    udp_name: str = ""
     udp_error: str | None = None
     doh_error: str | None = None
+    untrusted_doh: dict[str, list[str]] = field(default_factory=dict)
 
 
 # Reserved / sinkhole / RKN-stub IP networks (DNS poisoning signatures).
@@ -351,8 +395,10 @@ def audit_domain(
 ) -> DnsAuditResult:
     """Compare UDP vs DoH for one domain."""
     result = DnsAuditResult(domain=domain)
-    for server, _name in UDP_DNS_SERVERS:
+    for server, name in UDP_DNS_SERVERS:
         ips, err, lat = udp_resolve(domain, server, timeout=timeout)
+        result.udp_server = server
+        result.udp_name = name
         if ips and not err:
             result.udp_ips = ips
             result.udp_latency_ms = lat
@@ -361,12 +407,18 @@ def audit_domain(
             result.udp_error = err
 
     doh = doh_url or pick_working_doh(timeout=timeout)
+    if not doh_is_trusted(doh):
+        doh = pick_working_doh(timeout=timeout)
     result.doh_server = doh
     ips, err, lat = doh_query(domain, doh, timeout=timeout)
     result.doh_ips = ips
     result.doh_latency_ms = lat
     if err:
         result.doh_error = err
+    result.untrusted_doh = {
+        name: doh_query(domain, url, timeout=min(timeout, 2.0))[0]
+        for url, name in untrusted_doh_servers()
+    }
 
     # Sinkhole / bogon detection: even an "overlapping" UDP+DoH answer that
     # resolves to loopback / reserved / RKN stub subnets is DNS poisoning.
@@ -416,23 +468,126 @@ def audit_domains(
     return [audit_domain(d, doh_url=doh, timeout=timeout) for d in domains]
 
 
+_VERDICT_STYLE = {
+    "ok": (GREEN, "OK"),
+    "no_resolution": (GREY, "NO A"),
+    "tampered": (RED, "HIJACK"),
+    "sinkhole": (RED, "SINKHOLE"),
+    "doh_blocked": (YELLOW, "DoH DOWN"),
+    "udp_blocked": (YELLOW, "UDP DOWN"),
+}
+
+
+def doh_display_name(url: str) -> str:
+    """Human name for a catalog DoH URL, else the hostname."""
+    target = (url or "").rstrip("/")
+    named = {u.rstrip("/"): n for u, n in DOH_SERVERS}
+    if name := named.get(target):
+        return name
+    return (urlsplit(url).hostname or url or "DoH") if url else "DoH"
+
+
+def _ip_cell(ips: list[str], err: str | None = None) -> str:
+    if ips:
+        return ", ".join(ips[:3])
+    if err:
+        return err.replace("\n", " ").strip()[:48]
+    return "—"
+
+
+def _ms(latency: float) -> str:
+    return f"{GREY}{latency:.0f}ms{RESET}" if latency else ""
+
+
+def _verdict_tag(result: DnsAuditResult) -> str:
+    color, label = _VERDICT_STYLE.get(
+        result.verdict,
+        (RED, "HIJACK") if result.tampering_detected else (GREY, result.verdict.upper() or "?"),
+    )
+    return f"{color}{label}{RESET}"
+
+
+def _legend_lines(results: list[DnsAuditResult]) -> list[str]:
+    sample = results[0]
+    udp_who = sample.udp_name or "public"
+    udp_ip = sample.udp_server or "?"
+    doh_who = doh_display_name(sample.doh_server)
+    doh_host = urlsplit(sample.doh_server).hostname or sample.doh_server or "?"
+    untrusted = [name for _url, name in untrusted_doh_servers()]
+    return [
+        "",
+        f"  {CYAN}DNS audit{RESET}  plaintext UDP:53  vs  encrypted DoH  (no DoT in this stack)",
+        f"    UDP:53  {udp_who} ({udp_ip})     plaintext public resolver",
+        f"    DoH     {doh_who} ({doh_host})   trusted — pin/verdict",
+        *(
+            [f"    DoH     {', '.join(untrusted)}     untrusted — display only, ignored"]
+            if untrusted
+            else []
+        ),
+        f"  {'─' * 72}",
+    ]
+
+
+def _audit_row_lines(result: DnsAuditResult) -> list[str]:
+    udp_who = (
+        f"{result.udp_name} ({result.udp_server})"
+        if result.udp_server
+        else (result.udp_name or "UDP:53")
+    )
+    doh_who = doh_display_name(result.doh_server)
+    untrusted = [
+        f"    DoH     {name:<22} {_ip_cell(ips)}   {GREY}untrusted{RESET}"
+        for name, ips in result.untrusted_doh.items()
+        if ips
+    ]
+    udp_ms = f"  {_ms(result.udp_latency_ms)}" if result.udp_latency_ms else ""
+    doh_ms = f"  {_ms(result.doh_latency_ms)}" if result.doh_latency_ms else ""
+    return [
+        f"  {_verdict_tag(result)}  {result.domain}",
+        f"    UDP:53  {udp_who:<22} {_ip_cell(result.udp_ips, result.udp_error)}{udp_ms}",
+        f"    DoH     {doh_who:<22} {_ip_cell(result.doh_ips, result.doh_error)}{doh_ms}",
+        *untrusted,
+    ]
+
+
+def _footer_lines(results: list[DnsAuditResult]) -> list[str]:
+    tampered = [r for r in results if r.tampering_detected]
+    unanswered = sorted(
+        {name for r in results for name, ips in r.untrusted_doh.items() if not ips}
+    )
+    answered = any(ips for r in results for ips in r.untrusted_doh.values())
+    note = (
+        [f"  {GREY}{', '.join(unanswered)} DoH: no answers (untrusted, ignored){RESET}"]
+        if unanswered and not answered
+        else []
+    )
+    hijack = [f"    {r.domain}: {r.description}" for r in tampered]
+    return [
+        f"  {'─' * 72}",
+        f"  Hijack: {len(tampered)}/{len(results)}",
+        *hijack,
+        *note,
+    ]
+
+
+def format_audit_table(results: list[DnsAuditResult]) -> str:
+    """Render the UDP:53 vs DoH audit as a labeled multi-line report."""
+    if not results:
+        return ""
+    lines = [
+        *_legend_lines(results),
+        *(line for r in results for line in _audit_row_lines(r)),
+        *_footer_lines(results),
+    ]
+    return "\n".join(lines)
+
+
 def print_audit_table(results: list[DnsAuditResult]) -> None:
-    """Print the UDP vs DoH comparison table."""
-    log.info("\n  DNS audit (UDP vs DoH)")
-    log.info("%s", f"  {'-' * 72}")
-    log.info("%s", f"  {'Domain':<24}{'UDP':<22}{'DoH':<22}{'Verdict'}")
-    log.info("%s", f"  {'-' * 72}")
-    for r in results:
-        udp = ", ".join(r.udp_ips[:2]) if r.udp_ips else (r.udp_error or "--")
-        doh = ", ".join(r.doh_ips[:2]) if r.doh_ips else (r.doh_error or "--")
-        tag = "OK" if not r.tampering_detected else "TAMPERED"
-        log.info("%s", f"  {r.domain:<24}{udp:<22}{doh:<22}{tag}")
-    tampered = sum(1 for r in results if r.tampering_detected)
-    log.info("%s", f"  {'-' * 72}")
-    log.info("%s", f"  Tampered: {tampered}/{len(results)}")
-    for r in results:
-        if r.tampering_detected:
-            log.info("%s", f"    {r.domain}: {r.description}")
+    """Print plaintext UDP:53 vs trusted DoH, with resolver names."""
+    if not results:
+        return
+    for line in format_audit_table(results).splitlines():
+        log.info("%s", line)
 
 
 def has_dns_hijack(results: list[DnsAuditResult]) -> bool:
@@ -510,7 +665,7 @@ class DnsRunCache:
             self.set(domain, ips)
             return self._pinned_first(domain, ips)
         # Rotate DoH server on failure (skip the one that just failed)
-        for alt, _name in DOH_SERVERS:
+        for alt, _name in trusted_doh_servers():
             if alt == url:
                 continue
             ips2, err2, _ = doh_query(domain, alt, timeout=timeout)

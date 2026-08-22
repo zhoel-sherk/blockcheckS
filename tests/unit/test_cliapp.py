@@ -102,6 +102,7 @@ def test_root_help_includes_subcommand_blurbs():
     assert "Async TCP strategy batch scan" in help_text
     assert "TCP x UDP pair matrix" in help_text or "TCP×UDP" in help_text
     assert "Single TCP strategy test" in help_text
+    assert "triage.toml" in help_text or "preflight" in help_text.lower()
 
 
 @pytest.mark.unit

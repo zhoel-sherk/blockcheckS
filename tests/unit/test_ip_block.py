@@ -85,6 +85,7 @@ def test_cdn_hint():
 
     assert _cdn_hint(["104.16.1.1", "10.0.0.1"]) != ""
     assert _cdn_hint(["10.0.0.1"]) == ""
+    assert _cdn_hint(["8.6.112.0", "8.47.69.0"]) != ""
 
 
 def test_run_ip_block_preflight_skips_ref():

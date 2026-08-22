@@ -323,6 +323,15 @@ DOH_SERVERS = [
     ("https://dns.adguard-dns.com/dns-query", "AdGuard"),
     ("https://dns.yandex.ru/dns-query", "Yandex"),
 ]
+# Mutated in place by settings overlay; Yandex is untrusted by default.
+UNTRUSTED_DOH_URLS: set[str] = {"https://dns.yandex.ru/dns-query"}
+DOH_BOOTSTRAP: dict[str, str] = {
+    "cloudflare-dns.com": "1.1.1.1",
+    "dns.google": "8.8.8.8",
+    "dns.quad9.net": "9.9.9.9",
+    "dns.adguard-dns.com": "94.140.14.14",
+    "dns.yandex.ru": "77.88.8.8",
+}
 UDP_DNS_SERVERS = [
     ("8.8.8.8", "Google"),
     ("1.1.1.1", "Cloudflare"),
