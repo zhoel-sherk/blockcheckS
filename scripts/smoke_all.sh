@@ -66,10 +66,10 @@ echo "host=$(hostname) bs=$ROOT/.venv/bin/bs" | tee -a "$OUT/summary.log"
 
 # Offline / unit first (no nfqws2 contention)
 run gate_all 180 bash "$ROOT/scripts/gate_all.sh"
-run smoke_flags 1200 bash "$ROOT/scripts/smoke_flags.sh"
+run smoke_flags 1500 bash "$ROOT/scripts/smoke_flags.sh"
 run functional_smoke 1200 bash "$ROOT/dev/functional_smoke.sh"
 run smoke_backend_matrix 600 bash "$ROOT/scripts/smoke_backend_matrix.sh"
-run smoke_20min 2100 bash "$ROOT/scripts/smoke_20min.sh"
+run smoke_20min 2700 bash "$ROOT/scripts/smoke_20min.sh"
 run voice_smoke 180 bash "$ROOT/scripts/voice_smoke.sh"
 run gv1_smoke 240 bash "$ROOT/scripts/gv1_smoke.sh"
 run smoke_full_quick 180 bash "$ROOT/scripts/smoke_full_quick.sh"

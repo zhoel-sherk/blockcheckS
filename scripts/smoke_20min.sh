@@ -106,7 +106,7 @@ LOG5="$DIR/step5_resume.log"
 sudo -n "$BS" full --db "$DIR/step4.db" --out-dir "$DIR/step5_export" --domains-file presets/domains/benchmark.txt \
   --scan-level fast --max 60 --parallel 2 --tcp-only --no-http --no-quic --no-voice \
   --resume --allow-dns-hijack --max-timem 2 --timeout 4 --skip-deps-check --skip-baseline --skip-port-block \
-  --skip-prolog --skip-ip-block 2>&1 | tee "$LOG5" >/dev/null || true
+  --skip-prolog --skip-ip-block --skip-dns-audit --no-preflight 2>&1 | tee "$LOG5" >/dev/null || true
 if grep -q "no TCP strategies generated" "$LOG5"; then
   bad "resume pruned matrix to TCP=0"
 elif grep -qE "skip=[1-9][0-9]*|\+[1-9][0-9]* resume skip" "$LOG5"; then

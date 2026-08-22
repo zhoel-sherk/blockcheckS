@@ -3,7 +3,7 @@
 # on the live host (sudo + nfqws2 + netns). Run after code changes.
 #
 # Covers:
-#   bs tcp · bs udp · bs composite · bs scan (classic+bridge) ·
+#   bs preflight · bs tcp · bs udp · bs composite · bs scan (classic+bridge) ·
 #   bs pair (tcp-only) · bs bench-settle · bs full (quick) · bs stop ·
 #   bc-nfconf export · shortlist round-trip
 #
@@ -30,8 +30,13 @@ report() { # report <label> <ok>
   fi
 }
 
-# ── preflight ────────────────────────────────────────────────
+# ── cleanup leftover netns / nfqws2 ──────────────────────────
 bash scripts/cleanup_env.sh >/dev/null 2>&1 || true
+
+# ── bs preflight ─────────────────────────────────────────────
+echo "--- bs preflight ---" | tee -a "$LOG"
+OUT=$(timeout 90 sudo -n "$BS" preflight -d discord.com --quick --skip-deps-check 2>&1 || true)
+if echo "$OUT" | grep -qE "Preflight|Triage |triage"; then report "bs preflight" 1; else report "bs preflight" 0; fi
 
 # ── bs tcp ───────────────────────────────────────────────────
 echo "--- bs tcp ---" | tee -a "$LOG"

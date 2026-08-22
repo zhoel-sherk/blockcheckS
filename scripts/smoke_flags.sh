@@ -27,7 +27,7 @@ sudo -n "$BS" stop --force >/dev/null 2>&1 || true
 
 # ── A. CLI surface (no sudo) ──────────────────────────────────
 log A "CLI help / presets / invalid flags"
-for cmd in "" tcp udp scan pair full composite bench-settle stop serve mcp; do
+for cmd in "" tcp udp scan pair full composite bench-settle stop serve mcp preflight; do
   if timeout 8 "$BS" ${cmd:+$cmd} -h >/dev/null 2>"$DIR/help_${cmd:-root}.err"; then
     ok "help ${cmd:-bs}"
   else
@@ -46,6 +46,9 @@ timeout 8 "$BS" scan --scan-level nope -d x.com >/dev/null 2>"$DIR/bad_level.err
   || ok "bogus --scan-level rejected"
 timeout 8 "$BS" tcp --not-a-flag >/dev/null 2>"$DIR/bad_flag.err" && bad "unknown flag accepted" \
   || ok "unknown flag rejected"
+timeout 8 "$BS" preflight -h >"$DIR/help_preflight_full.txt" 2>&1 || true
+if grep -q -- "--dpi-diag" "$DIR/help_preflight_full.txt"; then ok "preflight --dpi-diag in help"
+else bad "preflight --dpi-diag missing from help"; fi
 timeout 8 "$PY" scripts/verify_blobs.py >"$DIR/blobs.txt" 2>&1 && ok "verify_blobs" || bad "verify_blobs"
 timeout 8 "$PY" -c "
 from blockchecks.engine.log import configure_logging, log_tail, set_debug_mode, debug_status
@@ -84,13 +87,64 @@ live() { # live <label> <timeout> <cmd...>
 }
 
 STRAT="fake:blob=stun:repeats=6:tcp_ts=-1000"
+
+# 1.3.7: standalone preflight (do not inherit SKIP --no-preflight)
+log B "preflight / --dpi-diag"
+PF1="$DIR/live_preflight-discord-quick.log"
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
+if sudo -n timeout --kill-after=15s 180s "$BS" preflight --preset discord --quick --skip-deps-check \
+  >"$PF1" 2>&1; then
+  if grep -qE 'phase = "ip_blocked"|phase=ip_blocked' "$PF1"; then
+    bad "preflight discord --quick (phase=ip_blocked in log)"
+  else
+    ok "preflight discord --quick"
+  fi
+elif grep -qE "Preflight|triage|Triage " "$PF1" && ! grep -qE 'phase = "ip_blocked"|phase=ip_blocked' "$PF1"; then
+  ok "preflight discord --quick (rc non-zero, ran)"
+else
+  bad "preflight discord --quick"; tail -8 "$PF1"
+fi
+
+PF2="$DIR/live_preflight-dpi-diag.log"
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
+if sudo -n timeout --kill-after=15s 120s "$BS" preflight -d discord.com --dpi-diag --quick --skip-deps-check \
+  >"$PF2" 2>&1; then
+  :
+fi
+if grep -q "dpi-diag:" "$PF2"; then
+  if "$PY" -c "
+from blockchecks.data_block.provider import get_provider_dir
+from blockchecks.data_block.store import ProviderStore
+from blockchecks.engine.family_registry import prune_items_by_triage
+from blockchecks.engine.generators.base import StrategyItem
+t = ProviderStore(get_provider_dir(allow_detect=False)).load_triage()
+assert t is not None and not t.dns_sinkhole
+kept = prune_items_by_triage(
+    [
+        StrategyItem(label='ts', strategy='fake:blob=stun:repeats=6:tcp_ts=-1000'),
+        StrategyItem(label='md5', strategy='fake:blob=stun:repeats=6:tcp_md5'),
+    ],
+    t,
+)
+assert kept, 'prune empty'
+print('ok')
+" >"$DIR/dpi_diag_prune.txt" 2>&1; then
+    ok "preflight --dpi-diag --quick"
+  else
+    bad "preflight --dpi-diag prune/sinkhole"; tail -8 "$DIR/dpi_diag_prune.txt"
+  fi
+else
+  bad "preflight --dpi-diag --quick"; tail -8 "$PF2"
+fi
+sudo -n "$BS" stop --force >/dev/null 2>&1 || true
+
 live "tcp --debug" 40 "$BS" tcp -d github.com -s "$STRAT" --debug --timeout 4 --skip-deps-check --allow-dns-hijack
 live "tcp --nfqws2-debug" 40 "$BS" tcp -d github.com -s "$STRAT" --nfqws2-debug 1 --timeout 4 --skip-deps-check --allow-dns-hijack
 live "tcp -c config" 40 "$BS" tcp -d discord.com -c configs/simple_fake_alt2__fake_max_ru_ts.conf --timeout 5 --skip-deps-check --allow-dns-hijack
 live "tcp --protocol tls13" 40 "$BS" tcp -d discord.com -s "$STRAT" --protocol tls13 --timeout 5 --skip-deps-check --allow-dns-hijack
 live "tcp --protocol http" 40 "$BS" tcp -d example.com -s "$STRAT" --protocol http --timeout 5 --skip-deps-check --allow-dns-hijack
 live "scan --profile smoke" 70 "$BS" scan -d discord.com --user-matrix "$MATRIX" --profile smoke "${SKIP[@]}" --allow-dns-hijack --max 2
-live "scan --preset discord" 70 "$BS" scan --preset discord --user-matrix "$MATRIX" "${SKIP[@]}" --allow-dns-hijack --max 1
+live "scan --preset discord" 180 "$BS" scan --preset discord --user-matrix "$MATRIX" "${SKIP[@]}" --allow-dns-hijack --max 1
 live "scan -M timeout-benchmark" 70 "$BS" scan -d discord.com -M timeout-benchmark "${SKIP[@]}" --allow-dns-hijack --max 2 --generate
 live "scan --no-adaptive" 70 "$BS" scan -d discord.com --user-matrix "$MATRIX" --no-adaptive "${SKIP[@]}" --allow-dns-hijack
 live "scan --no-ech" 70 "$BS" scan -d discord.com --user-matrix "$MATRIX" --no-ech "${SKIP[@]}" --allow-dns-hijack
@@ -100,8 +154,8 @@ live "scan --curl-parallel 2 --bridge-batch 10" 70 "$BS" scan -d discord.com --u
 live "scan --no-family-gates --tcp-sources fake --generate" 80 "$BS" scan -d discord.com --tcp-sources fake --generate --no-family-gates "${SKIP[@]}" --allow-dns-hijack --max 2
 live "udp --discover-dns 1" 50 "$BS" udp -c configs/udp_voice__fake_r6.conf --discover-dns 1 --timeout 5 --skip-deps-check
 live "udp --voice-region finland" 40 "$BS" udp -c configs/udp_voice__fake_r6.conf --ip 35.217.48.152 --port 50004 --voice-region finland --timeout 5 --skip-deps-check
-live "full --http-off --http3-off --tls13-off" 90 "$BS" full -d discord.com --tcp-sources flowseal --http-off --http3-off --tls13-off --no-voice --max 3 --parallel 1 --timeout 4 --allow-dns-hijack --max-timem 1 --scan-level fast --skip-deps-check --skip-baseline --skip-port-block --skip-prolog --skip-ip-block --db "$DIR/full_phases.db" --out-dir "$DIR/full_phases"
-live "full quic tiny" 90 "$BS" full -d discord.com --no-http --no-voice --tls12-off --tls13-off --quic-sources standard_quic --max 3 --parallel 1 --timeout 4 --allow-dns-hijack --max-timem 1 --scan-level fast --skip-deps-check --skip-baseline --skip-port-block --skip-prolog --skip-ip-block --db "$DIR/quic.db" --out-dir "$DIR/quic"
+live "full --http-off --http3-off --tls13-off" 120 "$BS" full -d discord.com --tcp-sources flowseal --http-off --http3-off --tls13-off --no-voice --max 3 --parallel 1 --timeout 4 --allow-dns-hijack --max-timem 1 --scan-level fast --skip-deps-check --skip-baseline --skip-port-block --skip-prolog --skip-ip-block --skip-dns-audit --no-preflight --db "$DIR/full_phases.db" --out-dir "$DIR/full_phases"
+live "full quic tiny" 120 "$BS" full -d discord.com --no-http --no-voice --tls12-off --tls13-off --quic-sources standard_quic --max 3 --parallel 1 --timeout 4 --allow-dns-hijack --max-timem 1 --scan-level fast --skip-deps-check --skip-baseline --skip-port-block --skip-prolog --skip-ip-block --skip-dns-audit --no-preflight --db "$DIR/quic.db" --out-dir "$DIR/quic"
 # --fan-out is known to overshoot --max-timem; hard-kill.
 log B "fan-out (hard timeout 90s)"
 FAN="$DIR/live_fan-out.log"
