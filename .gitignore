@@ -17,6 +17,9 @@ build/
 state.db
 state.db-journal
 state.db-wal
+state.db-shm
+run.lock
+*.lock
 logs/
 output/
 .env
@@ -26,7 +29,9 @@ tmp-scripts/
 # pytest / lint
 .pytest_cache/
 .ruff_cache/
+.hypothesis/
 .mutmut-cache/
+.mypy_cache/
 html/
 mutants/
 

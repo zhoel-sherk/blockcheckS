@@ -3,6 +3,8 @@ include configs/composite_discord.conf
 recursive-include presets/strategies *.tls *.txt *.http *.quic *.udp
 recursive-include presets/domains *.txt
 recursive-include presets/ipset *.txt
+include presets/manifest.toml
+include presets/README.md
 include presets/blobs/README.md
 recursive-include blobs *.bin
 include blobs/README.md
@@ -10,7 +12,6 @@ recursive-include lua/blockchecks *.lua
 recursive-include lua/custom *.lua *.toml
 include lua/README.md
 include lua/custom/README.md
-include presets/README.md
 include LICENSE
 include README.md
 include docs/todo.md

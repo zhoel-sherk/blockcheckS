@@ -82,6 +82,7 @@ where = ["src"]
 "blockchecks/presets/strategies" = ["presets/strategies/*.tls", "presets/strategies/*.txt", "presets/strategies/*.http", "presets/strategies/*.quic", "presets/strategies/*.udp"]
 "blockchecks/presets/domains" = ["presets/domains/*.txt"]
 "blockchecks/presets/ipset" = ["presets/ipset/*.txt"]
+"blockchecks/presets" = ["presets/manifest.toml", "presets/README.md"]
 "blockchecks/systemd" = ["systemd/*.service"]
 
 [tool.pytest.ini_options]
