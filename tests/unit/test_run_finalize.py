@@ -232,6 +232,17 @@ def test_rank_pass_strategies_for_export_latency_and_discord_udp():
     assert "fake:blob=stun:repeats=6" in udp
 
 
+def test_rank_pass_strategies_keeps_zero_latency():
+    rows = [
+        {"strategy": "tcp_zero", "protocol": "tcp", "latency_ms": 0},
+        {"strategy": "tcp_slow", "protocol": "tcp", "latency_ms": 50},
+        {"strategy": "tcp_missing", "protocol": "tcp"},
+    ]
+    tcp, _ = rank_pass_strategies_for_export(rows, tcp_n=5, udp_n=5)
+    assert tcp[0] == "tcp_zero"
+    assert tcp[1] == "tcp_slow"
+
+
 def test_maybe_sync_data_block_disabled():
     with patch("blockchecks.data_block.provider.get_provider_dir") as gpd:
         asyncio.run(maybe_sync_data_block(_args(data_block_sync=False)))

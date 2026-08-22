@@ -25,7 +25,8 @@ def rank_pass_strategies_for_export(
 
     def _latency(row: dict[str, Any]) -> float:
         try:
-            return float(row.get("latency_ms") or 1e9)
+            v = row.get("latency_ms")
+            return float(v) if v is not None else 1e9
         except (TypeError, ValueError):
             return 1e9
 
