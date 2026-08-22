@@ -349,3 +349,37 @@ def test_triage_toml_roundtrip(store: ProviderStore):
     assert loaded.dead_foolings == ["badsum", "send"]
     assert loaded.server_hops == 12
     assert loaded.split_mode == "sni_marker"
+
+
+@pytest.mark.unit
+def test_triage_toml_empty_dead_foolings_not_invented(store: ProviderStore):
+    from blockchecks.engine.triage import TriageProfile
+
+    text = store.save_triage(TriageProfile(), primary_domain="x.com").read_text(encoding="utf-8")
+    assert "[dead]\nfoolings = []" in text
+    assert "badsum" not in text
+    loaded = store.load_triage()
+    assert loaded is not None
+    assert loaded.dead_foolings == []
+
+
+@pytest.mark.unit
+def test_triage_toml_clusters_csv_primary(store: ProviderStore):
+    from blockchecks.engine.triage import TriageProfile
+
+    drop = {"phase": "tls_silent_drop_after_sni", "prolog_ok": False, "silent_drop": True}
+    src = TriageProfile(
+        silent_drop_after_sni=True,
+        domain_reports={
+            "discord.com": dict(drop),
+            "discord.gg": dict(drop),
+            "storage.googleapis.com": {"phase": "pass", "prolog_ok": True},
+        },
+    )
+    text = store.save_triage(src, primary_domain="discord.com").read_text(encoding="utf-8")
+    assert 'primary_domain = "discord.com, discord.gg"' in text
+    assert "[[cluster]]" in text
+    assert "storage.googleapis.com" in text
+    loaded = store.load_triage()
+    assert loaded is not None
+    assert loaded.silent_drop_after_sni is True

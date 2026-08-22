@@ -54,6 +54,7 @@ class TriageProfile:
 
     # Per-domain detail (prolog/IP/stall) for the bandit context.
     domain_phases: dict[str, str] = field(default_factory=dict)
+    domain_reports: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # Fooling / hop / split diagnostics (Tier 1 preflight)
     viable_foolings: list[str] = field(default_factory=list)
@@ -65,6 +66,8 @@ class TriageProfile:
     ech_blocked: bool | None = None
     http_blocked: bool | None = None
     dead_foolings: list[str] = field(default_factory=list)
+    viable_hosts: list[str] = field(default_factory=list)
+    dpi_diag: dict[str, Any] = field(default_factory=dict)
 
     # convenience flags for generator pruning
 
@@ -127,6 +130,7 @@ class TriageProfile:
             "l7_impersonate_sufficient": self.l7_impersonate_sufficient,
             "prefer_contextual_split": self.prefer_contextual_split,
             "domain_phases": dict(self.domain_phases),
+            "domain_reports": {d: dict(r) for d, r in self.domain_reports.items()},
             "viable_foolings": list(self.viable_foolings),
             "viable_blobs": list(self.viable_blobs),
             "split_mode": self.split_mode,
@@ -136,6 +140,8 @@ class TriageProfile:
             "ech_blocked": self.ech_blocked,
             "http_blocked": self.http_blocked,
             "dead_foolings": list(self.dead_foolings),
+            "viable_hosts": list(self.viable_hosts),
+            "dpi_diag": dict(self.dpi_diag),
         }
 
     @classmethod
@@ -164,6 +170,9 @@ class TriageProfile:
             requires_postquantum_awareness=bool(data.get("requires_postquantum_awareness")),
             fingerprint_pass=dict(data.get("fingerprint_pass") or {}),
             domain_phases=dict(data.get("domain_phases") or {}),
+            domain_reports={
+                str(d): dict(r) for d, r in (data.get("domain_reports") or {}).items()
+            },
             viable_foolings=list(data.get("viable_foolings") or []),
             viable_blobs=list(data.get("viable_blobs") or []),
             split_mode=str(data.get("split_mode") or ""),
@@ -173,6 +182,8 @@ class TriageProfile:
             ech_blocked=data.get("ech_blocked"),
             http_blocked=data.get("http_blocked"),
             dead_foolings=list(data.get("dead_foolings") or []),
+            viable_hosts=list(data.get("viable_hosts") or []),
+            dpi_diag=dict(data.get("dpi_diag") or {}),
         )
 
     def to_context(self) -> dict[str, Any]:
@@ -192,6 +203,54 @@ class TriageProfile:
             "split_mode": self.split_mode,
             "n_foolings": len(self.viable_foolings),
         }
+
+
+_CLUSTER_KEYS = (
+    "phase",
+    "l3",
+    "rst_at_sni",
+    "silent_drop",
+    "stall",
+    "quic_drop",
+    "ip_blocked",
+    "prolog_ok",
+)
+
+
+def _report_fingerprint(row: dict[str, Any]) -> tuple:
+    return tuple(row.get(key) for key in _CLUSTER_KEYS)
+
+
+def cluster_domain_reports(reports: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group domains with identical probe fingerprints; largest cluster first."""
+    if not reports:
+        return []
+    fingerprints = {_report_fingerprint(row) for row in reports.values()}
+    names_for = {
+        fp: sorted(d for d, r in reports.items() if _report_fingerprint(r) == fp)
+        for fp in fingerprints
+    }
+    sample = {
+        fp: reports[names_for[fp][0]]
+        for fp in fingerprints
+        if names_for[fp]
+    }
+    order = sorted(fingerprints, key=lambda fp: (-len(names_for[fp]), names_for[fp][0]))
+    return [
+        {
+            "primary_domain": ", ".join(names_for[fp]),
+            **{k: sample[fp].get(k) for k in _CLUSTER_KEYS if k in sample[fp]},
+        }
+        for fp in order
+    ]
+
+
+def clustered_primary_domain(
+    reports: dict[str, dict[str, Any]], fallback: str = ""
+) -> str:
+    """CSV of the largest identical cluster, else *fallback*."""
+    clusters = cluster_domain_reports(reports)
+    return str(clusters[0]["primary_domain"]) if clusters else fallback
 
 
 def disable_ech_from(args: Any, triage: Any) -> bool:

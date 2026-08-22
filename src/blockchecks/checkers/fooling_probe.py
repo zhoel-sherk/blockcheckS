@@ -4,6 +4,7 @@ probe_fn injects the real probe. Without it the grid is empty and generators do 
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -46,7 +47,7 @@ def fooling_strategy(suffix: str, *, blob: str = "stun", repeats: int = 6) -> st
 
 
 def is_fooling_viable(error: str, http_code: int = 0) -> bool:
-    """SSL 35 / handshake-class failures mean the fooling itself was rejected."""
+    """SSL 35 / wrong_version mean the fooling itself was rejected."""
     if not error and http_code in (200, 204, 101):
         return True
     blob = f"{error} {http_code}"
@@ -57,8 +58,11 @@ def is_fooling_viable(error: str, http_code: int = 0) -> bool:
 
 
 def re_ssl35(text: str) -> bool:
+    """True only for L4-checksum SSL 35 / wrong_version — not a generic handshake timeout."""
     low = text.lower()
-    return "ssl" in low and ("35" in low or "wrong_version" in low or "handshake" in low)
+    if "wrong_version" in low:
+        return True
+    return "ssl" in low and bool(re.search(r"\b35\b", low))
 
 
 def evaluate_grid(outcomes: dict[str, tuple[bool, str, int]]) -> FoolingGridResult:

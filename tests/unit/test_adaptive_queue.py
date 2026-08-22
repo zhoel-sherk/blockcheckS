@@ -141,9 +141,11 @@ def test_scan_weights_seed_from_triage():
         )
     )
     assert w.family.get("fake", 1.0) >= 2.0
-    assert w.trait.get("fool:badsum") == 0.1
+    assert "fool:badsum" not in w.trait
     assert w.trait.get("fool:tcp_ts", 0) > 0
     assert w.blob.get("stun", 0) > 0
+    w.seed_from_triage(TriageProfile(dead_foolings=["badsum"]))
+    assert w.trait.get("fool:badsum") == 0.1
 
 
 def test_scan_weights_seed_pos_and_blob_aliases():

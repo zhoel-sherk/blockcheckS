@@ -425,13 +425,19 @@ def _hop_lines(d: dict) -> list[str]:
 
 def _dump_triage_toml(profile, *, primary_domain: str = "") -> str:
     d = profile.to_dict()
+    from blockchecks.engine.triage import cluster_domain_reports, clustered_primary_domain
+
+    reports = getattr(profile, "domain_reports", None) or d.get("domain_reports") or {}
+    clusters = cluster_domain_reports(reports)
+    top = clustered_primary_domain(reports, fallback=primary_domain)
     notes = ["send:repeats=6 → SSL 35 on L4-checksum-normalizing DPI"]
     hops = _hop_lines(d)
+    cluster_block = _cluster_toml_lines(clusters)
     return "\n".join(
         [
             "version = 1",
             f"updated_at = {_toml_str(_now())}",
-            f"primary_domain = {_toml_str(primary_domain or '')}",
+            f"primary_domain = {_toml_str(top or '')}",
             "",
             "[flags]",
             *_flag_lines(d),
@@ -443,13 +449,66 @@ def _dump_triage_toml(profile, *, primary_domain: str = "") -> str:
             f"foolings = {_toml_list(list(d.get('viable_foolings') or []))}",
             f"blobs = {_toml_list(list(d.get('viable_blobs') or []))}",
             f"split_mode = {_toml_str(str(d.get('split_mode') or ''))}",
+            *(
+                [f"hosts = {_toml_list(list(d.get('viable_hosts') or []))}"]
+                if d.get("viable_hosts")
+                else []
+            ),
             "",
             "[dead]",
-            f"foolings = {_toml_list(list(d.get('dead_foolings') or ['badsum', 'send']))}",
+            f"foolings = {_toml_list(list(d.get('dead_foolings') or []))}",
             f"notes = {_toml_list(notes)}",
+            *_dpi_diag_lines(d),
+            *cluster_block,
             "",
         ]
     )
+
+
+def _dpi_diag_lines(d: dict) -> list[str]:
+    diag = d.get("dpi_diag") or {}
+    if not diag:
+        return []
+    return [
+        "",
+        "[dpi_diag]",
+        f"sni_whitelist = {_toml_list(list(diag.get('sni_whitelist') or []))}",
+        f"dns_as_mismatch = {_toml_list(list(diag.get('dns_as_mismatch') or []))}",
+        f"cgnat_sinkhole = {_toml_list(list(diag.get('cgnat_sinkhole') or []))}",
+    ]
+
+
+def _cluster_toml_lines(clusters: list[dict]) -> list[str]:
+    if len(clusters) < 2:
+        return []
+    return [line for cluster in clusters for line in _one_cluster_lines(cluster)]
+
+
+def _one_cluster_lines(cluster: dict) -> list[str]:
+    keys = (
+        "phase",
+        "l3",
+        "stall",
+        "rst_at_sni",
+        "silent_drop",
+        "quic_drop",
+        "ip_blocked",
+        "prolog_ok",
+    )
+
+    def _line(key: str) -> str:
+        val = cluster[key]
+        if isinstance(val, bool):
+            return f"{key} = {_toml_bool(val)}"
+        return f"{key} = {_toml_str(str(val))}"
+
+    extras = [_line(key) for key in keys if key in cluster and cluster[key] is not None]
+    return [
+        "",
+        "[[cluster]]",
+        f"primary_domain = {_toml_str(cluster.get('primary_domain') or '')}",
+        *extras,
+    ]
 
 
 def _flatten_triage_toml(raw: dict) -> dict:
@@ -464,6 +523,8 @@ def _flatten_triage_toml(raw: dict) -> dict:
         "viable_blobs": list(viable.get("blobs") or []),
         "split_mode": str(viable.get("split_mode") or ""),
         "dead_foolings": list(dead.get("foolings") or []),
+        "viable_hosts": list(viable.get("hosts") or []),
+        "dpi_diag": dict(raw.get("dpi_diag") or {}),
     }
 
 

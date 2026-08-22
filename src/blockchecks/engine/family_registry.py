@@ -26,14 +26,6 @@ TRIAGE_TO_FAMILIES: dict[str, tuple[str, ...]] = {
     "udp_blocked": ("udp_discord",),
 }
 
-_GRID_FOOLINGS: tuple[str, ...] = (
-    "badsum",
-    "tcp_md5",
-    "tcp_ts",
-    "tcp_seq",
-    "badsid",
-    "tcp_ack",
-)
 # Grid cell ``tcp_seq=1000`` is the sequence-number probe; badsid is the same class.
 _FOOLING_EQUIV: dict[str, tuple[str, ...]] = {
     "tcp_seq": ("tcp_seq", "badsid"),
@@ -67,23 +59,17 @@ def families_for_profile(profile: TriageProfile | None) -> list[str]:
     return list(dict.fromkeys(families)) or list(DEFAULT_FAMILIES)
 
 
-def _viable_fooling_keys(profile: TriageProfile) -> set[str]:
-    return {
-        tok
-        for fool in profile.viable_foolings
-        for tok in _FOOLING_EQUIV.get(_fooling_key(fool), (_fooling_key(fool),))
-    }
-
-
 def dead_fooling_tokens(profile: TriageProfile | None) -> tuple[str, ...]:
-    """Grid foolings proven non-viable (empty when the grid was not run)."""
-    if profile is None:
+    """Explicit grid failures only. ``viable_foolings`` is an AQ boost, not a complement."""
+    if profile is None or not profile.dead_foolings:
         return ()
-    extra = tuple(_fooling_key(x) for x in profile.dead_foolings)
-    if not profile.viable_foolings:
-        return extra
-    viable = _viable_fooling_keys(profile)
-    return tuple(dict.fromkeys([*(tok for tok in _GRID_FOOLINGS if tok not in viable), *extra]))
+    return tuple(
+        dict.fromkeys(
+            tok
+            for fool in profile.dead_foolings
+            for tok in _FOOLING_EQUIV.get(_fooling_key(fool), (_fooling_key(fool),))
+        )
+    )
 
 
 def _fooling_key(token: str) -> str:
@@ -100,10 +86,7 @@ def filter_fooling_values(
 ) -> list[str]:
     """Drop fooling axis values the viability grid proved dead."""
     dead = set(dead_fooling_tokens(profile))
-    kept = [f for f in fools if not (dead and strategy_fooling_keys(f":{f}") & dead)]
-    if profile is not None and profile.viable_foolings:
-        kept = [f for f in kept if f]
-    return kept
+    return [f for f in fools if not (dead and strategy_fooling_keys(f":{f}") & dead)]
 
 
 def filter_ttl_values(
@@ -191,12 +174,6 @@ def _item_survives(
     strat = item.strategy
     keys = strategy_fooling_keys(strat)
     if dead and keys & dead:
-        return False
-    if (
-        profile.viable_foolings
-        and item.protocol in ("tls12", "tls13")
-        and not (keys & _viable_fooling_keys(profile))
-    ):
         return False
     if not _ttl_ok(strat, dpi, server):
         return False

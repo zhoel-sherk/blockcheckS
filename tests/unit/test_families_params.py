@@ -151,16 +151,20 @@ async def test_fake_max_one_starts_with_tcp_ts_not_ipv6_extra():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_fake_max_one_follows_viable_fooling_grid():
+async def test_fake_keeps_tcp_ts_when_grid_found_other_fooling():
     from blockchecks.engine.triage import TriageProfile
 
-    triage = TriageProfile(viable_foolings=["tcp_md5"], viable_blobs=["stun"])
+    triage = TriageProfile(
+        viable_foolings=["tcp_md5"],
+        viable_blobs=["stun"],
+        dead_foolings=["badsum"],
+    )
     items = await StandardGenerator(strategy_types=["fake"]).generate(
-        protocol="tls12", scan_level="fast", max_count=1, triage=triage
+        protocol="tls12", scan_level="fast", max_count=20, triage=triage
     )
     assert items
-    assert "tcp_md5" in items[0].strategy
-    assert "tcp_ts" not in items[0].strategy
+    assert any("tcp_ts=-1000" in i.strategy for i in items)
+    assert not any("badsum" in i.strategy for i in items)
 
 
 @pytest.mark.unit

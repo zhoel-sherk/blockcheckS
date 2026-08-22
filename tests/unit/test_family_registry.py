@@ -33,12 +33,9 @@ def test_families_udp_blocked():
     assert families_for_profile(TriageProfile(udp_blocked=True)) == ["udp_discord"]
 
 
-def test_dead_fooling_empty_until_grid_runs():
+def test_dead_fooling_empty_until_explicit():
     assert dead_fooling_tokens(TriageProfile()) == ()
-    dead = dead_fooling_tokens(TriageProfile(viable_foolings=["tcp_ts=-1000", "tcp_md5"]))
-    assert "badsum" in dead
-    assert "tcp_ts" not in dead
-    assert "tcp_md5" not in dead
+    assert dead_fooling_tokens(TriageProfile(viable_foolings=["tcp_ts=-1000", "tcp_md5"])) == ()
 
 
 def test_dead_foolings_from_profile_without_grid():
@@ -47,11 +44,27 @@ def test_dead_foolings_from_profile_without_grid():
     assert "badsum" in dead
 
 
-def test_tcp_seq_viable_does_not_kill_badsid():
-    dead = dead_fooling_tokens(TriageProfile(viable_foolings=["tcp_seq=1000"]))
-    assert "tcp_seq" not in dead
-    assert "badsid" not in dead
-    assert "badsum" in dead
+def test_tcp_seq_dead_also_kills_badsid():
+    dead = dead_fooling_tokens(TriageProfile(dead_foolings=["tcp_seq"]))
+    assert "tcp_seq" in dead
+    assert "badsid" in dead
+    assert "tcp_ts" not in dead
+
+
+def test_prune_keeps_tcp_ts_when_viable_is_narrow():
+    """Fryazino stun+tcp_ts must survive a discord grid that only saw tcp_md5/tcp_ack."""
+    items = [
+        StrategyItem(label="ts", strategy="fake:blob=stun:repeats=6:tcp_ts=-1000"),
+        StrategyItem(label="md5", strategy="fake:blob=stun:repeats=6:tcp_md5"),
+        StrategyItem(label="bad", strategy="fake:blob=stun:repeats=6:badsum"),
+    ]
+    profile = TriageProfile(
+        viable_foolings=["tcp_md5", "tcp_ack=-66000:tcp_ts_up"],
+        dead_foolings=["badsum", "send"],
+        viable_blobs=["stun"],
+    )
+    kept = {i.label for i in prune_items_by_triage(items, profile)}
+    assert kept == {"ts", "md5"}
 
 
 def test_prune_drops_dead_badsum():
@@ -60,12 +73,12 @@ def test_prune_drops_dead_badsum():
         StrategyItem(label="dead", strategy="fake:blob=stun:repeats=6:badsum"),
         StrategyItem(label="plain", strategy="fake:blob=stun:repeats=6"),
     ]
-    profile = TriageProfile(viable_foolings=["tcp_ts=-1000"])
+    profile = TriageProfile(dead_foolings=["badsum"])
     kept = prune_items_by_triage(items, profile)
-    assert [i.label for i in kept] == ["ok"]
+    assert [i.label for i in kept] == ["ok", "plain"]
 
 
-def test_prune_drops_ipv6_extra_without_viable_fooling():
+def test_prune_keeps_ipv6_extra_without_viable_fooling():
     items = [
         StrategyItem(label="hop", strategy="fake:blob=stun:repeats=6:ip6_hopbyhop"),
         StrategyItem(
@@ -73,7 +86,7 @@ def test_prune_drops_ipv6_extra_without_viable_fooling():
         ),
     ]
     profile = TriageProfile(viable_foolings=["tcp_ts=-1000"])
-    assert [i.label for i in prune_items_by_triage(items, profile)] == ["hop_ts"]
+    assert {i.label for i in prune_items_by_triage(items, profile)} == {"hop", "hop_ts"}
 
 
 def test_prune_drops_ttl_before_dpi():
@@ -101,12 +114,12 @@ def test_prune_partial_blobs_drops_stun():
 def test_filter_fooling_values_drops_badsum():
     from blockchecks.engine.family_registry import filter_fooling_values
 
-    profile = TriageProfile(viable_foolings=["tcp_ts=-1000", "tcp_md5"])
+    profile = TriageProfile(viable_foolings=["tcp_ts=-1000", "tcp_md5"], dead_foolings=["badsum"])
     kept = filter_fooling_values(["tcp_ts=-1000", "badsum", "tcp_md5", ""], profile)
     assert "badsum" not in kept
     assert "tcp_ts=-1000" in kept
     assert "tcp_md5" in kept
-    assert "" not in kept
+    assert "" in kept
 
 
 def test_filter_ttl_values_keeps_autottl_and_window():
