@@ -118,6 +118,16 @@ class FakeFamiliesMixin:
             )
 
         cores = expand_axes({"fool": p.foolings, "variant": p.variants}, _core)
+        if hosts := tuple(family.get("hosts") or ()):
+            extra = expand_axes(
+                {"host": hosts, "fool": required_foolings(p.foolings) or ("tcp_ts=-1000",)},
+                lambda a: (
+                    f"std_hf_host_{a['host']}_{a['fool'] or 'nofool'}",
+                    f"hostfakesplit:host={a['host']}:nofake2{_fooling_clause(a['fool'])}:repeats=1",
+                ),
+            )
+            if emit_rows(self._add, items, seen, scan_level, extra):
+                return items
         if emit_rows(self._add, items, seen, scan_level, cores):
             return items
 

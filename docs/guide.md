@@ -71,6 +71,8 @@ sudo bs full --profile 20h                     # 20-hour mass campaign bundle
 # Protective & intelligent features are ON by default (inverse flags to disable):
 #   Adaptive queue: default ON (disable: --no-adaptive; --adaptive kept as inverse alias)
 #   Preflight & triage: default ON (skip all: --no-preflight; prolog-only: --quick)
+#   Extra DPI diagnostics: default OFF (enable: --dpi-diag on preflight/scan/pair/full)
+#   Standalone triage: sudo bs preflight --preset discord [--dpi-diag --quick]
 #   Encrypted Client Hello: default ON (disable: --no-ech; alias: --disable-ech)
 #   Wssize fallback: default ON on scan/pair/full (disable: --no-wssize)
 #   Secure DNS: default ON (disable: --no-secure-dns)
@@ -139,6 +141,7 @@ Campaign commands (`scan`, `pair`, `full`) share a unified parser via
 |---------|---------|-------------------|
 | Adaptive queue (AQ) | ON | `--no-adaptive` |
 | Preflight (full) | ON | `--no-preflight` (skip all) or `--quick` (prolog only) |
+| Extra DPI diagnostics | OFF | `--dpi-diag` (SNI whitelist, FAT, l4-25, CGNAT/AS notes) |
 | ECH (Encrypted Client Hello) | ON | `--no-ech` (`--disable-ech` alias) |
 | Wssize TLS 1.2 fallback | ON | `--no-wssize` |
 | Secure DNS (DoH) | ON | `--no-secure-dns` |
@@ -146,6 +149,11 @@ Campaign commands (`scan`, `pair`, `full`) share a unified parser via
 Fine-grained preflight skips (`--skip-baseline`, `--skip-ip-block`,
 `--skip-port-block`, `--skip-prolog`, `--skip-dns-audit`) remain for scripts and
 partial control; `--no-preflight` and `--quick` cover the common cases.
+
+`--dpi-diag` is opt-in on `preflight` / `scan` / `pair` / `full`. It writes
+`[dpi_diag]` and `viable.hosts` (hostfake SNIs) into `triage.toml`. CGNAT
+`100.64/10` is logged only — it does **not** set `dns_sinkhole` or empty the
+matrix. Without the flag, prior `viable.hosts` are not loaded into generators.
 
 `--adaptive` is kept as an inverse alias (sets `no_adaptive=False`); AQ is already
 ON by default — explicit `--adaptive` is only needed to cancel a prior

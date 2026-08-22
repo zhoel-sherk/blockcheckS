@@ -213,6 +213,8 @@ def _apply_triage_axes(fam: dict, triage, scan_level: str) -> None:
         fam["ttl_static"] = filter_ttl_values(fam["ttl_static"], triage, scan_level=scan_level)
     if fam.get("positions") is not None:
         fam["positions"] = filter_split_positions(fam["positions"], triage, scan_level=scan_level)
+    if triage.viable_hosts:
+        fam["hosts"] = list(dict.fromkeys(triage.viable_hosts))[:8]
     if fam.get("ttl_auto") is not None and triage.autottl_delta is not None:
         fam["ttl_auto"] = list(dict.fromkeys([str(triage.autottl_delta), *fam["ttl_auto"]]))
 
