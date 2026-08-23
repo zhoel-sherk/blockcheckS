@@ -682,3 +682,162 @@ async def test_probe_strategy_aliases_dbg_probe(monkeypatch):
     assert r.status == "PASS"
     assert captured["domain"] == "a.com"
     assert captured["dry_run_db"] is True
+
+
+async def test_get_series_status_arbitrary_campaign_log(tmp_path, monkeypatch):
+    db = tmp_path / "week_cov.db"
+    _make_state_db(db)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    logfile = logs / "week_cov_20260822_233614.log"
+    logfile.write_text("  [1200/50000] pass=450 skip=0 3.12/s ETA 120m\n")
+    ptr = logs / "week_cov_LATEST.logpath"
+    ptr.write_text(str(logfile))
+
+    from blockchecks.mcp.server import get_series_status
+
+    info = _make_active_info(db, cwd=str(tmp_path), argv=["full", "--db", str(db)])
+    import blockchecks.service.run_control as rc
+
+    monkeypatch.setattr(rc, "read_active_run", lambda: info)
+
+    result = await get_series_status()
+    assert result["progress"] == "[1200/50000] pass=450 skip=0 3.12/s ETA 120m"
+    assert result["domain_pass_counts"].get("a.com") == 1
+
+
+def test_resolve_db_path_relative_candidate_dirs(tmp_path, monkeypatch):
+    import blockchecks.mcp.server as ms
+
+    db_dir = tmp_path / "logs"
+    db_dir.mkdir()
+    db_file = db_dir / "my_custom.db"
+    db_file.write_bytes(b"")
+
+    info = _make_active_info(db_file, cwd=str(tmp_path))
+    import blockchecks.service.run_control as rc
+
+    monkeypatch.setattr(rc, "read_active_run", lambda: info)
+
+    resolved = ms._resolve_db_path("logs/my_custom.db")
+    assert resolved == db_file.resolve()
+
+
+async def test_query_strategies_udp(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "udp_run.db"
+    con = sqlite3.connect(str(db))
+    con.execute("CREATE TABLE strategies (id INTEGER PRIMARY KEY, name TEXT, proto TEXT)")
+    con.execute(
+        "CREATE TABLE udp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, target TEXT, "
+        "status TEXT, latency_ms REAL, error TEXT, timestamp TEXT)"
+    )
+    con.execute("INSERT INTO strategies VALUES (1, 'fake:blob=discord_udp:repeats=6', 'udp')")
+    con.execute("INSERT INTO udp_results VALUES (1, 1, 'discord.media:50000', 'PASS', 45.0, '', '2026-08-23')")
+    con.commit()
+    con.close()
+
+    from blockchecks.mcp.server import query_strategies
+
+    res = await query_strategies("discord.media:50000", proto="udp", db_path=str(db))
+    assert len(res) == 1
+    assert res[0]["strategy"] == "fake:blob=discord_udp:repeats=6"
+    assert res[0]["latency_ms"] == 45.0
+    assert res[0]["status"] == "PASS"
+
+
+async def test_get_campaign_domains_summary(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "summary.db"
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, domain TEXT, status TEXT, latency_ms REAL)"
+    )
+    con.executemany(
+        "INSERT INTO tcp_results (domain, status, latency_ms) VALUES (?,?,?)",
+        [
+            ("discord.com", "PASS", 50.0),
+            ("discord.com", "PASS", 60.0),
+            ("discord.com", "FAIL", 0.0),
+            ("youtube.com", "FAIL", 0.0),
+            ("youtube.com", "FAIL", 0.0),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    from blockchecks.mcp.server import get_campaign_domains_summary
+
+    summary = await get_campaign_domains_summary(db_path=str(db))
+    assert summary["unique_domains"] == 2
+    assert summary["total_probes"] == 5
+    assert summary["total_pass"] == 2
+    assert summary["domains"][0]["domain"] == "discord.com"
+    assert summary["domains"][0]["pass_count"] == 2
+    assert summary["domains"][0]["fail_count"] == 1
+    assert summary["domains"][0]["pass_rate_pct"] == 66.7
+    assert summary["domains"][0]["min_pass_latency_ms"] == 50.0
+
+
+async def test_generate_router_config_offline_fallback(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = tmp_path / "offline.db"
+    con = sqlite3.connect(str(db))
+    con.execute("CREATE TABLE strategies (id INTEGER PRIMARY KEY, name TEXT, proto TEXT)")
+    con.execute(
+        "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, domain TEXT, status TEXT, latency_ms REAL)"
+    )
+    con.execute("INSERT INTO strategies VALUES (1, 'fake:blob=stun:repeats=6:tcp_ts=-1000', 'tcp')")
+    con.execute("INSERT INTO tcp_results VALUES (1, 1, 'discord.com', 'PASS', 85.0)")
+    con.commit()
+    con.close()
+
+    import blockchecks.mcp.server as ms
+
+    # Simulate daemon unreachable
+    async def boom(*a, **k):
+        raise ConnectionRefusedError("no daemon")
+
+    monkeypatch.setattr(ms, "_send_daemon_request", boom)
+
+    cfg = await ms.generate_router_config("keenetic", ["discord.com"], db_path=str(db))
+    assert "fake:blob=stun:repeats=6:tcp_ts=-1000" in cfg
+    assert "discord.com" in cfg
+
+
+async def test_get_provider_profile(tmp_path, monkeypatch):
+    import sqlite3
+
+    from blockchecks.data_block import provider as pmod
+    from blockchecks.mcp.server import get_provider_profile
+
+    p_dir = tmp_path / "providers" / "test_isp"
+    p_dir.mkdir(parents=True)
+    strat_db = p_dir / "strategies.db"
+    con = sqlite3.connect(str(strat_db))
+    con.execute(
+        "CREATE TABLE pass_strategies (id INTEGER PRIMARY KEY, strategy TEXT, domain TEXT, protocol TEXT, latency_ms REAL, http_code INTEGER, approved INTEGER, checked_at TEXT)"
+    )
+    con.execute(
+        "INSERT INTO pass_strategies VALUES (1, 'fake:blob=stun', 'discord.com', 'tcp', 90.0, 200, 1, '2026-08-23')"
+    )
+    con.commit()
+    con.close()
+
+    hosts_file = p_dir / "hosts"
+    hosts_file.write_text("1.1.1.1 discord.com\n")
+
+    monkeypatch.setattr(pmod, "iter_provider_dirs", lambda **k: [p_dir])
+    monkeypatch.setattr(pmod, "provider_name", lambda **k: "test_isp")
+    monkeypatch.setattr(pmod, "get_provider_dir", lambda **k: p_dir)
+
+    profile = await get_provider_profile()
+    assert profile["active_provider"] == "test_isp"
+    assert profile["pass_strategies_count"] == 1
+    assert profile["unique_domains_covered"] == 1
+    assert profile["pinned_hosts_count"] == 1
+    assert len(profile["top_strategies"]) == 1
+

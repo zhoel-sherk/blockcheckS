@@ -33,6 +33,7 @@ from blockchecks.engine.domain_loader import (
     auto_enable_gv_ggc,
     format_skip_summary,
     load_domains,
+    load_preset,
     warn_zero_pass_domains,
 )
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
@@ -183,32 +184,59 @@ async def open_full_run_db(args) -> Any:
     return db
 
 
-def load_run_domains(args) -> tuple[list[str], str, int | None]:
-    explicit = (getattr(args, "domain", None) or "").strip()
-    if explicit and not getattr(args, "domains_file", None):
-        domains = [explicit]
-        auto_enable_gv_ggc(domains)
-        return domains, explicit, None
-    domains_file = args.domains_file or DEFAULT_DOMAINS_FILE
-    try:
-        loaded = load_domains(
-            domains_file,
-            allow_unsafe=getattr(args, "allow_unsafe_domains", False),
-        )
-    except FileNotFoundError:
-        log.error("%s", f"{RED}ERROR: domains file not found: {domains_file}{RESET}")
-        return [], domains_file, 1
-    domains = loaded.domains
-    if not domains:
+def _finish_loaded_domains(loaded: Any, label: str) -> tuple[list[str], str, int | None]:
+    if not loaded.domains:
         log.error(
             "%s",
             f"{RED}ERROR: no domains left after denylist filter (use --allow-unsafe-domains){RESET}",
         )
-        return [], domains_file, 1
+        return [], label, 1
     if loaded.skipped:
         log.info("%s", f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
-    auto_enable_gv_ggc(domains)
-    return domains, domains_file, None
+    auto_enable_gv_ggc(loaded.domains)
+    return loaded.domains, label, None
+
+
+def _load_preset_domains(name: str, allow_unsafe: bool) -> tuple[list[str], str, int | None]:
+    from blockchecks.engine.preset_paths import PresetPathError
+
+    try:
+        loaded = load_preset(name, allow_unsafe=allow_unsafe)
+    except PresetPathError as exc:
+        log.error("%s", f"{RED}ERROR: {exc}{RESET}")
+        return [], name, 1
+    except FileNotFoundError:
+        log.error("%s", f"{RED}ERROR: preset not found: {name}{RESET}")
+        return [], name, 1
+    log.info("%s", f"  {CYAN}Preset '{name}': {len(loaded.domains)} domains{RESET}")
+    return _finish_loaded_domains(loaded, loaded.source)
+
+
+def load_run_domains(args) -> tuple[list[str], str, int | None]:
+    """Resolve --domains-file, then --preset, then -d, else coverage-tcp default."""
+    allow_unsafe = getattr(args, "allow_unsafe_domains", False)
+    domains_file = getattr(args, "domains_file", None)
+    preset_name = getattr(args, "preset", None)
+    explicit = (getattr(args, "domain", None) or "").strip()
+    if domains_file:
+        try:
+            loaded = load_domains(domains_file, allow_unsafe=allow_unsafe)
+        except FileNotFoundError:
+            log.error("%s", f"{RED}ERROR: domains file not found: {domains_file}{RESET}")
+            return [], domains_file, 1
+        return _finish_loaded_domains(loaded, domains_file)
+    if preset_name:
+        return _load_preset_domains(preset_name, allow_unsafe)
+    if explicit:
+        domains = [explicit]
+        auto_enable_gv_ggc(domains)
+        return domains, explicit, None
+    try:
+        loaded = load_domains(DEFAULT_DOMAINS_FILE, allow_unsafe=allow_unsafe)
+    except FileNotFoundError:
+        log.error("%s", f"{RED}ERROR: domains file not found: {DEFAULT_DOMAINS_FILE}{RESET}")
+        return [], DEFAULT_DOMAINS_FILE, 1
+    return _finish_loaded_domains(loaded, DEFAULT_DOMAINS_FILE)
 
 
 def prepare_run_dns(args, domains: list[str]) -> tuple[Any, list[Any], int | None]:

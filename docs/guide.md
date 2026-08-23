@@ -42,7 +42,7 @@ sudo bs full --preset coverage-tcp --resume --parallel 4
 
 Что это делает:
 
-- **14 доменов** из [`presets/domains/coverage-tcp.txt`](../presets/domains/coverage-tcp.txt):
+- **16 доменов** из [`presets/domains/coverage-tcp.txt`](../presets/domains/coverage-tcp.txt):
   `youtube.com`, `googlevideo.com`, `discord.com` / CDN, `signal.org`, …
 - генерирует TCP-матрицу (standard + custom + configs + flowseal), затем HTTP,
   QUIC и голос Discord, если их не выключили;
@@ -123,7 +123,7 @@ Raspberry Pi 2: [install-rpi.md](install-rpi.md) и раздел [Память](
 
 | Пресет | Доменов | Зачем |
 |---|---:|---|
-| `coverage-tcp` | 14 | **дефолт `bs full`**: YouTube + Discord + Signal/ECH |
+| `coverage-tcp` | 16 | **дефолт `bs full`**: YouTube + Discord + Signal/ECH |
 | `critical` | 4 | youtube, discord, discordcdn, signal — самый короткий «боевой» набор |
 | `benchmark` | 6 | дымовой прогон |
 | `discord` / `google-youtube` | ~22 / ~23 | один сервис целиком |

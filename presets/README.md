@@ -10,7 +10,7 @@ bs scan --preset discord              # 22 Discord domains
 bs scan --preset google-youtube       # 23 YouTube CDN domains
 bs scan -d discord.com --preset critical   # -d + preset: all preset domains
 bs scan --preset coverage             # 40 domains, full GP coverage
-bs scan --preset coverage-tcp         # 14 domains, lean TCP default for bs full
+bs scan --preset coverage-tcp         # 16 domains, lean TCP default for bs full
 bs scan --preset benchmark            # 6 domains, lightweight test
 bs scan --preset pi2                  # 3 domains, Pi2 / low-RAM lean
 bs scan --preset cloudflare           # 9 Cloudflare domains
@@ -122,13 +122,13 @@ bs scan --preset critical -M gp-verified --scan-level single
 # Settle × curl timeout grid (needs sudo + nfqws2)
 sudo bs bench-settle -d discord.com -M timeout-benchmark
 
-# Lean mass run (14 domains, coverage-tcp)
+# Lean mass run (16 domains, coverage-tcp)
 sudo bs full --profile fast --preset benchmark
 # or explicit:
 sudo bs full --domains-file presets/domains/coverage-tcp.txt --max 100
 ```
 
-Presets: `benchmark.txt` (6 dom), `critical.txt` (4 dom), `coverage-tcp.txt` (14 dom),
+Presets: `benchmark.txt` (6 dom), `critical.txt` (4 dom), `coverage-tcp.txt` (16 dom),
 `gp-verified.tls` (7 strategies), `timeout-benchmark.tls` (3 strategies for A9).
 
 ## Full mass run (`bs full`)

@@ -4,6 +4,7 @@ Callers cap volume with max_count. Fooling map: ts to tcp_ts=-1000, badseq to tc
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 
 from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP, resolve_blob_path
@@ -48,6 +49,8 @@ _QUIC_PREFERRED = (
 )
 _UDP_PREFERRED = ("discord_udp", "game_udp", "quic_dbank", "stun")
 
+log = logging.getLogger(__name__)
+
 
 def _available_aliases(preferred: tuple[str, ...]) -> list[str]:
     out = [n for n in preferred if n in BLOB_ALIAS_MAP and resolve_blob_path(n)]
@@ -75,6 +78,12 @@ def _pattern_blobs(blobs: list[str]) -> list[str]:
 
 class FlowsealGenerator(StrategyGenerator):
     """Flowseal-like nfqws2 strategy matrix (all bat techniques + custom blobs)."""
+
+    def _viable_blobs(self, aliases: list[str], protocol: str) -> list[str]:
+        from blockchecks.engine.blob_filter import filter_blob_aliases
+
+        kept = filter_blob_aliases(aliases, getattr(self, "_triage", None), protocol=protocol)
+        return kept or aliases
 
     async def generate(
         self,
@@ -108,6 +117,7 @@ class FlowsealGenerator(StrategyGenerator):
     ) -> list[StrategyItem]:
         items: list[StrategyItem] = []
         seen: set[str] = set()
+        considered = 0
         from blockchecks.engine.family_registry import prune_items_by_triage
 
         triage = getattr(self, "_triage", None)
@@ -115,12 +125,15 @@ class FlowsealGenerator(StrategyGenerator):
             if strategy in seen:
                 continue
             seen.add(strategy)
+            considered += 1
             item = StrategyItem(label=label, strategy=strategy, protocol=protocol)
             if not prune_items_by_triage([item], triage, scan_level=scan_level):
                 continue
             items.append(item)
             if scan_level == "single" or len(items) >= max_count:
                 break
+        if considered > len(items):
+            log.info("  pruned %s→%s (reason=fooling|blob)", considered, len(items))
         return items
 
     def _fools(self, src: list[str] | None = None) -> list[str]:
@@ -129,7 +142,7 @@ class FlowsealGenerator(StrategyGenerator):
         return filter_fooling_values(src or FOOLINGS, getattr(self, "_triage", None))
 
     def _iter_tcp(self) -> Iterator[tuple[str, str]]:
-        blobs = _tcp_blobs()
+        blobs = self._viable_blobs(_tcp_blobs(), "tcp")
         pats = _pattern_blobs(blobs)
         b0, b1 = blobs[0], blobs[1] if len(blobs) > 1 else blobs[0]
         pat0 = pats[0]
@@ -346,9 +359,8 @@ class FlowsealGenerator(StrategyGenerator):
                 yield f"flw_udp_{blob}_r{r}_ttl5", f"fake:blob={blob}:repeats={r}:ip_ttl=5"
 
     def _iter_http(self) -> Iterator[tuple[str, str]]:
-        for blob in ("max_ru", "google", "0x00000000"):
-            if blob != "0x00000000" and not resolve_blob_path(blob):
-                continue
+        named = [b for b in ("max_ru", "google") if resolve_blob_path(b)]
+        for blob in (*self._viable_blobs(named, "http"), "0x00000000"):
             for r in (6, 8, 11):
                 for fool in self._fools():
                     yield (

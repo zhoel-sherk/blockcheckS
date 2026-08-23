@@ -18,12 +18,14 @@
 | `run_coverage_new.sh` | Отдельный прогон B (полный пул + geneva.lua) |
 | `run_full_coverage.sh` | `bs full` по `coverage.txt` (~40 доменов) |
 | `run_full_20h.sh` | Один time-boxed `bs full` в tmux |
-| `monitor_series.sh` | Прогресс/PASS по БД варианта A–G |
+| `run_week_coverage.sh` | Неделя: Discord → YouTube → coverage-tcp → aws/cf/diag → UDP |
+| `monitor_series.sh` | Прогресс/PASS по БД варианта A–G или `week` |
 
 ```bash
 scripts/run_long_term_series.sh 20 A     # A→F, по 20 ч
 scripts/run_variant.sh G 20               # только Discord-voice UDP
-scripts/monitor_series.sh A
+scripts/run_week_coverage.sh              # неделя Discord→YouTube→lists
+scripts/monitor_series.sh week
 ```
 
 ## Установка и сервис

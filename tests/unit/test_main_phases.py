@@ -49,6 +49,7 @@ def _args(**over):
     base = dict(
         domain="youtube.com",
         domains_file=None,
+        preset=None,
         allow_unsafe_domains=False,
         no_secure_dns=False,
         skip_dns_audit=False,
@@ -183,6 +184,45 @@ def test_load_run_domains_file_wins_over_dash_d():
     assert rc is None
     assert domains == ["a.com"]
     assert fname == "x.txt"
+
+
+def test_load_run_domains_preset():
+    args = _args(domain="", domains_file=None, preset="discord")
+    loaded = MagicMock()
+    loaded.domains = ["discord.com", "updates.discord.com"]
+    loaded.skipped = []
+    loaded.source = "presets/domains/discord.txt"
+    with (
+        patch("blockchecks.main_phases.load_preset", return_value=loaded),
+        patch("blockchecks.main_phases.auto_enable_gv_ggc"),
+    ):
+        domains, fname, rc = load_run_domains(args)
+    assert rc is None
+    assert domains == ["discord.com", "updates.discord.com"]
+    assert fname.endswith("discord.txt")
+
+
+def test_load_run_domains_file_wins_over_preset():
+    args = _args(preset="discord", domains_file="x.txt", domain="")
+    loaded = MagicMock()
+    loaded.domains = ["a.com"]
+    loaded.skipped = []
+    with (
+        patch("blockchecks.main_phases.load_domains", return_value=loaded),
+        patch("blockchecks.main_phases.auto_enable_gv_ggc"),
+    ):
+        domains, fname, rc = load_run_domains(args)
+    assert rc is None
+    assert domains == ["a.com"]
+    assert fname == "x.txt"
+
+
+def test_load_run_domains_preset_missing():
+    args = _args(domain="", domains_file=None, preset="nope")
+    with patch("blockchecks.main_phases.load_preset", side_effect=FileNotFoundError):
+        domains, fname, rc = load_run_domains(args)
+    assert rc == 1 and domains == []
+    assert fname == "nope"
 
 
 # ── prepare_run_dns ───────────────────────────────────────────────────

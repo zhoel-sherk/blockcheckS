@@ -74,3 +74,29 @@ PASS strategies accumulate in `data_block/providers/llc_trc_fiord/strategies.db`
 - If a variant crashes (OOM/SIGKILL), `--resume` continues it on next launch;
   the orchestrator waits for the tmux session to end, so a crashed run must be
   relaunched manually.
+
+## Week coverage (Discord → YouTube → lists)
+
+Not A→F. New SQLite `logs/week_cov.db`; provider `strategies.db` is append-only
+(`--data-block-sync`). One tmux `bs-week`, one `bs full` at a time.
+
+| Stage | Hours | Preset / command |
+|---|---:|---|
+| S0 | ~30 min | DoH pin (`updates.discord.com`, `dl.discordapp.net`, …) — done before launch |
+| S1 | 48 | `bs full --preset discord --tcp-only` |
+| S2 | 48 | `--preset google-youtube --tcp-only --resume` |
+| S3 | 24 | `--preset coverage-tcp` (16 domains, incl. updates + gateway) |
+| S4 | 8+8+8 | amazon-aws → cloudflare → diagnostic |
+| S5 | 24 | Discord UDP `bs pair` → `logs/week_cov_udp.db` |
+
+```bash
+scripts/run_week_coverage.sh              # S1→S5, refuses if A→F tmux is up
+scripts/run_week_coverage.sh S3           # resume from coverage-tcp
+scripts/run_week_coverage.sh export       # bc-nfconf + pass_strategies dump
+tmux attach -t bs-week
+scripts/monitor_series.sh week
+bs stop                                   # stop current bs; orchestrator continues
+```
+
+Do **not** pass `--profile 20h` on the first pin; S1+ uses `--no-preflight`.
+TCP stages do **not** use `--allow-unsafe-domains`. Old `logs/run_A_*.db` stay.

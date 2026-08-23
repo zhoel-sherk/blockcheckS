@@ -181,7 +181,9 @@ def test_main_returns_zero(tmp_path, monkeypatch):
 def _fake_provider_dir(tmp_path, provider, records):
     """Write data_block/providers/<provider>/dns.db with one domain per record."""
     import sqlite3
+    import time
 
+    now_str = time.strftime("%Y-%m-%dT%H:%M:%S")
     prov = tmp_path / "providers" / provider
     prov.mkdir(parents=True)
     con = sqlite3.connect(str(prov / "dns.db"))
@@ -189,7 +191,7 @@ def _fake_provider_dir(tmp_path, provider, records):
     for dom, ips in records.items():
         con.execute(
             "INSERT INTO dns_records (domain, ips, checked_at) VALUES (?,?,?)",
-            (dom, ",".join(ips), "2026-08-16T00:00:00"),
+            (dom, ",".join(ips), now_str),
         )
     con.commit()
     con.close()

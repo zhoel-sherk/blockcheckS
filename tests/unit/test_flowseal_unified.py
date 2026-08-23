@@ -97,3 +97,19 @@ async def test_flowseal_prunes_dead_before_cap():
     assert len(items) == 20
     assert not any("badsid" in i.strategy for i in items)
     assert not any("tcp_seq" in i.strategy for i in items)
+
+
+@pytest.mark.asyncio
+async def test_flowseal_viable_blobs_skips_other_aliases(caplog):
+    import logging
+
+    from blockchecks.engine.triage import TriageProfile
+
+    gen = FlowsealGenerator()
+    triage = TriageProfile(viable_blobs=["stun"])
+    with caplog.at_level(logging.INFO):
+        items = await gen.generate("tls12", scan_level="fast", max_count=40, triage=triage)
+    assert items
+    assert not any("blob=google" in i.strategy or "blob=max_ru" in i.strategy for i in items)
+    ones = [r.message for r in caplog.records if "pruned 1→0" in r.message]
+    assert not ones

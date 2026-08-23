@@ -247,7 +247,7 @@ count = 9
 file = "coverage-tcp.txt"
 tags = ["coverage", "tcp", "default"]
 description = "Lean TCP coverage preset (default for bs full)"
-count = 14
+count = 16
 
 [domains.coverage]
 file = "coverage.txt"

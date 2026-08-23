@@ -217,26 +217,82 @@ async def find_working_strategy(
 async def generate_router_config(
     target_os: str,
     domains: list[str],
+    db_path: str | None = None,
 ) -> str:
     """
     Generates an optimized, ready-to-use routing configuration file (nfconf)
     for Keenetic, OpenWrt, or generic Linux/systemd based on the highest-scoring PASS
-    strategies in the local database.
+    strategies in the database.
+    Attempts to query the running daemon first; falls back to offline generation from state.db.
     """
     valid_targets = {"keenetic", "openwrt", "linux"}
-    if target_os.lower() not in valid_targets:
-        raise ValueError(f"Invalid target_os '{target_os}'. Allowed: {', '.join(valid_targets)}")
+    target_clean = target_os.lower().strip()
+    if target_clean not in valid_targets:
+        raise ValueError(f"Invalid target_os '{target_os}'. Allowed: {', '.join(sorted(valid_targets))}")
 
-    response = await _send_daemon_request(
-        "generate_config",
-        {"target_os": target_os.lower(), "domains": domains},
-        timeout=15.0,
+    # Try background daemon first if socket is responsive
+    try:
+        response = await _send_daemon_request(
+            "generate_config",
+            {"target_os": target_clean, "domains": domains},
+            timeout=5.0,
+        )
+        if response.get("ok"):
+            return response.get("data", {}).get("config_content", "")
+    except Exception:
+        pass  # Fall back to offline generation from database
+
+    # Offline generation
+    from blockchecks.engine.conf_builder import build_keenetic_conf, build_raw_conf
+
+    tcp_strats: list[str] = []
+    udp_strats: list[str] = []
+
+    path = _resolve_db_path(db_path)
+    if path and path.is_file():
+        import sqlite3
+
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
+            cur = con.cursor()
+            tcp_rows = cur.execute(
+                """SELECT s.name FROM strategies s
+                   JOIN tcp_results t ON t.strategy_id = s.id
+                   WHERE s.proto='tcp' AND t.status='PASS'
+                   GROUP BY s.name
+                   ORDER BY COUNT(DISTINCT t.domain) DESC, AVG(t.latency_ms) ASC
+                   LIMIT 5"""
+            ).fetchall()
+            tcp_strats = [r[0] for r in tcp_rows]
+
+            try:
+                udp_rows = cur.execute(
+                    """SELECT s.name FROM strategies s
+                       JOIN udp_results u ON u.strategy_id = s.id
+                       WHERE s.proto='udp' AND u.status='PASS'
+                       GROUP BY s.name
+                       ORDER BY COUNT(DISTINCT u.target) DESC, AVG(u.latency_ms) ASC
+                       LIMIT 2"""
+                ).fetchall()
+                udp_strats = [r[0] for r in udp_rows]
+            except sqlite3.Error:
+                pass
+            con.close()
+        except sqlite3.Error:
+            pass
+
+    if not tcp_strats:
+        tcp_strats = ["fake:blob=stun:repeats=6:tcp_ts=-1000"]
+    if not udp_strats:
+        udp_strats = ["fake:blob=discord_udp:repeats=6"]
+
+    if target_clean == "keenetic":
+        return build_keenetic_conf(
+            tcp_strategies=tcp_strats, udp_strategies=udp_strats, domains=domains
+        )
+    return build_raw_conf(
+        tcp_strategies=tcp_strats, udp_strategies=udp_strats, domains=domains
     )
-
-    if not response.get("ok"):
-        raise RuntimeError(f"Config generation failed: {response.get('error', 'Unknown error')}")
-
-    return response.get("data", {}).get("config_content", "")
 
 
 @mcp.tool()
@@ -348,6 +404,44 @@ async def get_series_status() -> dict[str, Any]:
     return payload
 
 
+def _resolve_db_path(db_path: str | None) -> Path | None:
+    """Active campaign DB from run.lock, else XDG default state.db."""
+    from blockchecks.engine.config import PROJECT_DIR
+    from blockchecks.engine.paths import DEFAULT_DB_PATH
+    from blockchecks.service.run_control import read_active_run
+
+    info = read_active_run()
+    if db_path:
+        p = Path(os.path.expanduser(db_path))
+        if not p.is_absolute():
+            candidate_dirs = []
+            if info and info.cwd:
+                candidate_dirs.append(Path(info.cwd))
+            candidate_dirs.append(Path(PROJECT_DIR))
+            candidate_dirs.append(Path.cwd())
+            for d in candidate_dirs:
+                candidate = d / p
+                if candidate.exists():
+                    return candidate.resolve()
+            return (candidate_dirs[0] / p).resolve()
+        return p
+    if info and info.db_path:
+        p = Path(info.db_path)
+        if not p.is_absolute():
+            candidate_dirs = []
+            if info.cwd:
+                candidate_dirs.append(Path(info.cwd))
+            candidate_dirs.append(Path(PROJECT_DIR))
+            candidate_dirs.append(Path.cwd())
+            for d in candidate_dirs:
+                candidate = d / p
+                if candidate.exists():
+                    return candidate.resolve()
+            return (candidate_dirs[0] / p).resolve()
+        return p
+    return DEFAULT_DB_PATH
+
+
 def _read_db_progress(db_path: Path) -> dict[str, Any]:
     """Read test counters from a state.db (read-only sqlite, never writes)."""
     import sqlite3
@@ -366,11 +460,31 @@ def _read_db_progress(db_path: Path) -> dict[str, Any]:
             "WHERE status='FAIL' AND fail_phase != '' GROUP BY fail_phase ORDER BY COUNT(*) DESC LIMIT 3"
         ).fetchall():
             rates[str(phase)] = int(cnt)
-        return {
+
+        domain_pass = {}
+        for d, cnt in cur.execute(
+            "SELECT domain, COUNT(*) FROM tcp_results WHERE status='PASS' GROUP BY domain ORDER BY COUNT(*) DESC LIMIT 10"
+        ).fetchall():
+            domain_pass[str(d)] = int(cnt)
+
+        udp_total = 0
+        udp_pass = 0
+        try:
+            udp_total = cur.execute("SELECT COUNT(*) FROM udp_results").fetchone()[0]
+            udp_pass = cur.execute("SELECT COUNT(*) FROM udp_results WHERE status='PASS'").fetchone()[0]
+        except sqlite3.Error:
+            pass
+
+        res: dict[str, Any] = {
             "tcp_total": int(total),
             "tcp_pass": int(passed),
+            "domain_pass_counts": domain_pass,
             "top_fail_phases": rates,
         }
+        if udp_total > 0:
+            res["udp_total"] = int(udp_total)
+            res["udp_pass"] = int(udp_pass)
+        return res
     except sqlite3.Error as err:
         return {"db_error": str(err)}
     finally:
@@ -378,11 +492,7 @@ def _read_db_progress(db_path: Path) -> dict[str, Any]:
 
 
 def _read_progress_line(info) -> str:
-    """Best-effort parse of `[done/total] pass=N skip=M rate ETA` from run logs.
-
-    The campaign prints progress to stdout; run_<VAR>_LATEST.logpath points at
-    the log file (owned by the invoking user, readable without root).
-    """
+    """Best-effort parse of `[done/total] pass=N skip=M rate ETA` from run logs."""
     import re
 
     logpath = _latest_run_logpath(info)
@@ -400,39 +510,75 @@ def _read_progress_line(info) -> str:
 
 
 def _latest_run_logpath(info) -> Path | None:
-    """Resolve the variant's stdout log file (run_<VAR>_*.log).
+    """Resolve the campaign's stdout log file (e.g. run_<VAR>_*.log or week_cov_*.log).
 
-    Variant letter (A..F) is the first token after ``run_`` in the db filename,
-    e.g. logs/run_A_base.db → A, logs/run_C_adaptive.db → C. The LATEST pointer
-    file (logs/run_<VAR>_LATEST.logpath) has the exact stdout path. Logs live in
-    the project ``logs/`` dir (cwd of the campaign), not XDG RUNTIME_LOGS_DIR.
+    Checks:
+    1. Direct DB stem (e.g. logs/week_cov.db -> week_cov_LATEST.logpath)
+    2. Variant letter if db_name starts with run_ (e.g. run_A_base.db -> run_A_LATEST.logpath)
+    3. Globbing for matching log files in logs directory and XDG RUNTIME_LOGS_DIR.
+    4. Fallback to campaign_log_path() from engine.log.
     """
     import glob
 
-    variant = ""
+    from blockchecks.engine.config import PROJECT_DIR
+    from blockchecks.engine.log import campaign_log_path
+
     db_name = str(info.db_path or "").split("/")[-1] if info.db_path else ""
+    db_stem = Path(db_name).stem if db_name else ""
+    variant = ""
     if db_name.startswith("run_") and "_" in db_name:
         variant = db_name.split("_", 2)[1][:1]
-    if not variant:
-        return None
 
     cwd = Path(info.cwd or Path.cwd())
-    for logs_dir in (cwd / "logs", RUNTIME_LOGS_DIR):
-        ptr = logs_dir / f"run_{variant}_LATEST.logpath"
-        if ptr.is_file():
-            try:
-                target = Path(ptr.read_text(encoding="utf-8").strip())
-                if target.exists():
-                    return target
-            except OSError:
-                pass
-        matches = sorted(
-            glob.glob(str(logs_dir / f"run_{variant}_*.log")),
-            key=lambda p: p,
-        )
-        if matches:
-            return Path(matches[-1])
-    return None
+    candidate_dirs = [cwd / "logs", RUNTIME_LOGS_DIR, Path(PROJECT_DIR) / "logs", Path.cwd() / "logs"]
+    seen_dirs: set[Path] = set()
+    unique_dirs: list[Path] = []
+    for d in candidate_dirs:
+        try:
+            res = d.resolve()
+            if res not in seen_dirs and res.is_dir():
+                seen_dirs.add(res)
+                unique_dirs.append(res)
+        except OSError:
+            pass
+
+    # 1. Pointers and glob patterns to check
+    ptr_names = []
+    if db_stem:
+        ptr_names.append(f"{db_stem}_LATEST.logpath")
+    if variant:
+        ptr_names.append(f"run_{variant}_LATEST.logpath")
+
+    glob_patterns = []
+    if db_stem:
+        glob_patterns.append(f"{db_stem}_*.log")
+        glob_patterns.append(f"{db_stem}.log")
+    if variant:
+        glob_patterns.append(f"run_{variant}_*.log")
+
+    for logs_dir in unique_dirs:
+        # Check LATEST.logpath pointers in this directory
+        for ptr_name in ptr_names:
+            ptr = logs_dir / ptr_name
+            if ptr.is_file():
+                try:
+                    target = Path(ptr.read_text(encoding="utf-8").strip())
+                    if target.exists():
+                        return target
+                except OSError:
+                    pass
+
+        # Check glob matches for specific db_stem or variant in this directory
+        for pat in glob_patterns:
+            matches = sorted(
+                glob.glob(str(logs_dir / pat)),
+                key=lambda p: Path(p).stat().st_mtime if Path(p).is_file() else 0,
+            )
+            if matches:
+                return Path(matches[-1])
+
+    # 3. Fallback to generic campaign_log_path
+    return campaign_log_path()
 
 
 @mcp.tool()
@@ -440,11 +586,13 @@ async def query_strategies(
     domain: str,
     status: str = "PASS",
     limit: int = 20,
+    proto: str = "tcp",
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Returns top working strategies for a domain from state.db (read-only).
+    Returns top working strategies for a domain/target from state.db (read-only).
     Reads the latest PASS/THROTTLED result per strategy ordered by latency.
+    proto: 'tcp' (default) or 'udp'.
     db_path defaults to the campaign DB from run.lock, else the XDG default.
     """
     import sqlite3
@@ -458,13 +606,16 @@ async def query_strategies(
     if status_key not in allowed:
         raise ValueError(f"Invalid status '{status}'. Allowed: {', '.join(sorted(allowed))}")
 
+    proto_key = proto.lower().strip()
+    if proto_key not in ("tcp", "udp"):
+        raise ValueError(f"Invalid proto '{proto}'. Allowed: tcp, udp")
+
     statuses = (
         ("PASS", "THROTTLED") if status_key in ("PASS", "THROTTLED", "ALL") else (status_key,)
     )
     limit = max(1, min(int(limit), 100))
 
     def _query() -> list[dict[str, Any]]:
-
         try:
             con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
         except sqlite3.Error as err:
@@ -472,24 +623,120 @@ async def query_strategies(
         try:
             cur = con.cursor()
             placeholders = ",".join("?" for _ in statuses)
-            rows = cur.execute(
-                f"""SELECT s.name, t.latency_ms, t.http_code, t.status, t.timestamp, t.fail_phase
-                    FROM strategies s
-                    JOIN tcp_results t ON t.strategy_id = s.id
-                    WHERE s.proto='tcp' AND t.domain=? AND t.status IN ({placeholders})
-                      AND t.id = (
-                        SELECT t2.id FROM tcp_results t2
-                        WHERE t2.strategy_id = s.id AND t2.domain=?
-                        ORDER BY t2.id DESC LIMIT 1
-                      )
-                    ORDER BY t.latency_ms ASC
-                    LIMIT ?""",
-                (domain, *statuses, domain, limit),
-            )
+            if proto_key == "tcp":
+                rows = cur.execute(
+                    f"""SELECT s.name, t.latency_ms, t.http_code, t.status, t.timestamp, t.fail_phase
+                        FROM strategies s
+                        JOIN tcp_results t ON t.strategy_id = s.id
+                        WHERE s.proto='tcp' AND t.domain=? AND t.status IN ({placeholders})
+                          AND t.id = (
+                            SELECT t2.id FROM tcp_results t2
+                            WHERE t2.strategy_id = s.id AND t2.domain=?
+                            ORDER BY t2.id DESC LIMIT 1
+                          )
+                        ORDER BY t.latency_ms ASC
+                        LIMIT ?""",
+                    (domain, *statuses, domain, limit),
+                )
+            else:
+                rows = cur.execute(
+                    f"""SELECT s.name, u.latency_ms, NULL as http_code, u.status, u.timestamp, u.error as fail_phase
+                        FROM strategies s
+                        JOIN udp_results u ON u.strategy_id = s.id
+                        WHERE s.proto='udp' AND u.target=? AND u.status IN ({placeholders})
+                          AND u.id = (
+                            SELECT u2.id FROM udp_results u2
+                            WHERE u2.strategy_id = s.id AND u2.target=?
+                            ORDER BY u2.id DESC LIMIT 1
+                          )
+                        ORDER BY u.latency_ms ASC
+                        LIMIT ?""",
+                    (domain, *statuses, domain, limit),
+                )
             cols = ["strategy", "latency_ms", "http_code", "status", "timestamp", "fail_phase"]
             return [dict(zip(cols, r)) for r in rows.fetchall()]
         except sqlite3.Error as err:
             return [{"error": str(err)}]
+        finally:
+            con.close()
+
+    return await asyncio.to_thread(_query)
+
+
+@mcp.tool()
+async def get_campaign_domains_summary(
+    db_path: str | None = None,
+    proto: str = "tcp",
+) -> dict[str, Any]:
+    """
+    Returns a per-domain breakdown of tested strategies and pass counts from state.db (read-only).
+    proto: 'tcp' (default) or 'udp'.
+    Useful for seeing which domains have working strategies and which fail.
+    """
+    import sqlite3
+
+    path = _resolve_db_path(db_path)
+    if path is None or not path.exists():
+        return {"error": f"state.db not found: {path}"}
+
+    proto_key = proto.lower().strip()
+    if proto_key not in ("tcp", "udp"):
+        raise ValueError(f"Invalid proto '{proto}'. Allowed: tcp, udp")
+
+    def _query() -> dict[str, Any]:
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
+        except sqlite3.Error as err:
+            return {"error": f"cannot open {path}: {err}"}
+        try:
+            cur = con.cursor()
+            table = "tcp_results" if proto_key == "tcp" else "udp_results"
+            target_col = "domain" if proto_key == "tcp" else "target"
+
+            rows = cur.execute(
+                f"""SELECT {target_col},
+                           COUNT(*) as total_count,
+                           SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) as pass_count,
+                           SUM(CASE WHEN status='FAIL' THEN 1 ELSE 0 END) as fail_count,
+                           MIN(CASE WHEN status='PASS' THEN latency_ms ELSE NULL END) as min_latency,
+                           AVG(CASE WHEN status='PASS' THEN latency_ms ELSE NULL END) as avg_latency
+                    FROM {table}
+                    GROUP BY {target_col}
+                    ORDER BY pass_count DESC, total_count DESC"""
+            ).fetchall()
+
+            domains = []
+            total_probes = 0
+            total_pass = 0
+            for r in rows:
+                dom, tot, p_cnt, f_cnt, min_lat, avg_lat = r
+                tot = int(tot or 0)
+                p_cnt = int(p_cnt or 0)
+                f_cnt = int(f_cnt or 0)
+                total_probes += tot
+                total_pass += p_cnt
+                rate = round(p_cnt / tot * 100.0, 1) if tot > 0 else 0.0
+                domains.append(
+                    {
+                        "domain": str(dom),
+                        "total": tot,
+                        "pass_count": p_cnt,
+                        "fail_count": f_cnt,
+                        "pass_rate_pct": rate,
+                        "min_pass_latency_ms": round(min_lat, 1) if min_lat is not None else None,
+                        "avg_pass_latency_ms": round(avg_lat, 1) if avg_lat is not None else None,
+                    }
+                )
+            return {
+                "db": str(path),
+                "proto": proto_key,
+                "unique_domains": len(domains),
+                "total_probes": total_probes,
+                "total_pass": total_pass,
+                "domains": domains,
+            }
+        except sqlite3.Error as err:
+            return {"error": str(err)}
         finally:
             con.close()
 
@@ -561,25 +808,6 @@ async def stop_campaign(wait: float = 30.0) -> dict[str, Any]:
         "error": response.get("error") or "stop failed",
         "status": status or "error",
     }
-
-
-def _resolve_db_path(db_path: str | None) -> Path | None:
-    """Active campaign DB from run.lock, else XDG default state.db."""
-    from blockchecks.engine.paths import DEFAULT_DB_PATH
-    from blockchecks.service.run_control import read_active_run
-
-    if db_path:
-        p = Path(os.path.expanduser(db_path))
-        if not p.is_absolute():
-            p = (Path.cwd() / p).resolve()
-        return p
-    info = read_active_run()
-    if info and info.db_path:
-        p = Path(info.db_path)
-        if not p.is_absolute():
-            p = (Path(info.cwd or Path.cwd()) / p).resolve()
-        return p
-    return DEFAULT_DB_PATH
 
 
 @mcp.tool()
@@ -876,6 +1104,110 @@ async def get_ipset_status() -> dict[str, Any]:
     return {"scripts": scripts, "kernel_tables": tables}
 
 
+@mcp.tool()
+async def get_provider_profile(provider: str | None = None) -> dict[str, Any]:
+    """
+    Inspects provider data in data_block/ (ISP name, triage.toml profile,
+    DNS cache size, tampered DNS entries, pass strategies count). Read-only.
+    """
+    from blockchecks.data_block.provider import (
+        get_provider_dir,
+        iter_provider_dirs,
+        provider_name,
+    )
+    from blockchecks.data_block.store import ProviderStore
+
+    all_provider_dirs = iter_provider_dirs(allow_detect=False)
+    all_providers = [d.name for d in all_provider_dirs]
+
+    active_name = provider.strip() if provider else provider_name(allow_detect=False)
+    p_dir = None
+    for d in all_provider_dirs:
+        if d.name == active_name:
+            p_dir = d
+            break
+    if p_dir is None:
+        p_dir = get_provider_dir(allow_detect=False)
+        active_name = p_dir.name
+
+    store = ProviderStore(p_dir)
+    triage = store.load_triage()
+    triage_data = triage.to_dict() if triage else None
+
+    # Inspect strategies.db (read-only)
+    pass_strategies_count = 0
+    unique_domains_count = 0
+    top_strategies: list[dict[str, Any]] = []
+    if store.strategies_db.is_file():
+        import sqlite3
+
+        try:
+            con = sqlite3.connect(f"file:{store.strategies_db}?mode=ro", uri=True, timeout=2.0)
+            cur = con.cursor()
+            pass_strategies_count = cur.execute("SELECT COUNT(*) FROM pass_strategies").fetchone()[0]
+            unique_domains_count = cur.execute(
+                "SELECT COUNT(DISTINCT domain) FROM pass_strategies"
+            ).fetchone()[0]
+            for row in cur.execute(
+                """SELECT strategy, COUNT(domain) as dom_count, AVG(latency_ms) as avg_lat
+                   FROM pass_strategies
+                   GROUP BY strategy
+                   ORDER BY dom_count DESC, avg_lat ASC
+                   LIMIT 5"""
+            ).fetchall():
+                top_strategies.append(
+                    {
+                        "strategy": str(row[0]),
+                        "domain_count": int(row[1]),
+                        "avg_latency_ms": round(float(row[2]), 1) if row[2] else 0.0,
+                    }
+                )
+            con.close()
+        except sqlite3.Error:
+            pass
+
+    # Inspect dns.db (read-only)
+    dns_records_count = 0
+    dns_tampered_count = 0
+    if store.dns_db.is_file():
+        import sqlite3
+
+        try:
+            con = sqlite3.connect(f"file:{store.dns_db}?mode=ro", uri=True, timeout=2.0)
+            cur = con.cursor()
+            dns_records_count = cur.execute("SELECT COUNT(*) FROM dns_records").fetchone()[0]
+            dns_tampered_count = cur.execute("SELECT COUNT(*) FROM dns_tampered").fetchone()[0]
+            con.close()
+        except sqlite3.Error:
+            pass
+
+    # Hosts file
+    hosts_count = 0
+    if store.hosts_file.is_file():
+        try:
+            hosts_count = sum(
+                1
+                for line in store.hosts_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            )
+        except OSError:
+            pass
+
+    return {
+        "active_provider": active_name,
+        "available_providers": all_providers,
+        "provider_dir": str(p_dir),
+        "triage": triage_data,
+        "pass_strategies_count": pass_strategies_count,
+        "unique_domains_covered": unique_domains_count,
+        "top_strategies": top_strategies,
+        "dns_records_count": dns_records_count,
+        "dns_tampered_count": dns_tampered_count,
+        "pinned_hosts_count": hosts_count,
+        "best_config_exists": store.best_config.is_file(),
+    }
+
+
 def subprocess_run(args: list[str], timeout: float) -> object:
     """subprocess.run helper (avoids importing subprocess at module top)."""
     import subprocess
@@ -919,7 +1251,7 @@ def main() -> None:
     except ImportError:
         import sys
 
-        print(  # noqa: print
+        print(  # noqa: T201, PRINT, CQ015
             "Missing optional dependency 'mcp'.\nInstall: pip install 'blockchecks[mcp]'",
             file=sys.stderr,
         )

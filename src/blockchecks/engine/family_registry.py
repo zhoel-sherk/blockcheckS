@@ -145,7 +145,7 @@ def prune_items_by_triage(
     if profile is None:
         return items
     if not profile.bypassable:
-        if items:
+        if len(items) > 1:
             log.info("  pruned %s→0 (reason=unbypassable_l3)", len(items))
         return []
     dead = set(dead_fooling_tokens(profile))
@@ -157,7 +157,7 @@ def prune_items_by_triage(
     kept = [
         it for it in items if _item_survives(it, profile, dead, dpi, server, contextual, split_mode)
     ]
-    if len(kept) != len(items):
+    if len(items) > 1 and len(kept) != len(items):
         log.info("  pruned %s→%s (reason=fooling|blob)", len(items), len(kept))
     return kept
 

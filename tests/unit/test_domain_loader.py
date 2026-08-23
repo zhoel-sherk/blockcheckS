@@ -60,6 +60,8 @@ def test_coverage_tcp_lean_default():
     assert 11 <= len(result.domains) <= 17
     assert "youtubei.googleapis.com" in result.domains
     assert "googlevideo.com" in result.domains  # GV-4 lean coverage
+    assert "updates.discord.com" in result.domains
+    assert "gateway.discord.gg" in result.domains
     assert not result.skipped
 
 

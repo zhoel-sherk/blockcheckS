@@ -54,10 +54,29 @@ def _redirect_hostname(location: str) -> str:
     return (parsed.hostname or "").lower().rstrip(".")
 
 
+_DISCORD_FAMILY_APEXES = frozenset({
+    "discord.com",
+    "discord.gg",
+    "discordapp.com",
+    "discordapp.net",
+    "discordcdn.com",
+    "discord.media",
+})
+
+
+def _in_discord_family(host: str) -> bool:
+    h = host.lower().rstrip(".")
+    return any(h == apex or h.endswith("." + apex) for apex in _DISCORD_FAMILY_APEXES)
+
+
 def _hosts_related(host: str, domain: str) -> bool:
-    """True if *host* is the same site as *domain* (subdomain ↔ apex included)."""
-    h, d = host.rstrip("."), domain.rstrip(".")
-    return bool(h and d) and (h == d or h.endswith("." + d) or d.endswith("." + h))
+    """True if *host* is the same site as *domain* (subdomain ↔ apex included, or brand family)."""
+    h, d = host.lower().rstrip("."), domain.lower().rstrip(".")
+    if not (h and d):
+        return False
+    if _in_discord_family(h) and _in_discord_family(d):
+        return True
+    return h == d or h.endswith("." + d) or d.endswith("." + h)
 
 
 def is_suspicious_redirect(domain: str, status: int, location: str) -> bool:
@@ -101,17 +120,24 @@ class TlsResult:
 def _validate_content(data: bytes, time_for_read: float, http_status: int = 200) -> list[str]:
     """Check response body for DPI manipulation.
 
-    Small-body HTTP status codes (301, 302, 101, 204, etc.) are
-    excluded from the minimum-size check — they legitimately carry
-    tiny or empty bodies.
+    Small-body HTTP status codes (301, 302, 101, 204, etc.) and TLS bypass-proof
+    statuses (401, 403, 404) are excluded from the minimum-size check.
     """
     warnings = []
     content_len = len(data)
 
-    if http_status not in SMALL_BODY_STATUSES and content_len < MIN_CONTENT_LENGTH:
+    if (
+        http_status not in SMALL_BODY_STATUSES
+        and http_status not in {401, 403, 404}
+        and content_len < MIN_CONTENT_LENGTH
+    ):
         warnings.append(f"body too small ({content_len}B < {MIN_CONTENT_LENGTH}B)")
 
-    if time_for_read > 0:
+    if (
+        time_for_read > 0
+        and http_status not in SMALL_BODY_STATUSES
+        and http_status not in {401, 403, 404}
+    ):
         rate = content_len / time_for_read
         if rate < MIN_BYTES_PER_SEC:
             warnings.append(f"slow read ({rate:.0f} B/s < {MIN_BYTES_PER_SEC} B/s)")
@@ -190,9 +216,14 @@ def check_tls(
             result.success = False
         elif verify_content:
             result.warnings = _validate_content(resp.content, read_elapsed, resp.status_code)
-            result.success = (200 <= resp.status_code < 400) and not result.warnings
+            result.success = (
+                (200 <= resp.status_code < 400 or resp.status_code in {401, 403, 404})
+                and not result.warnings
+            )
         else:
-            result.success = 200 <= resp.status_code < 400
+            result.success = (
+                200 <= resp.status_code < 400 or resp.status_code in {401, 403, 404}
+            )
 
     except RequestsError as e:
         result.error = _classify_tls_error(

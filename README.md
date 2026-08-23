@@ -11,6 +11,21 @@
 
 Нужны **Linux и root** (network namespaces + iptables). Python 3.10+.
 
+В отличие от остальных подборщиков использует curl_cffi для получения валидных результатов с помощью имитации слепка браузера, 
+стратегии полученные таким путём проверены и они работают в 99 случаях из 100 в отличии от стандартного blockcheck2.sh из комплекса zapret2 или blockcheckw который написан на Rust - респект чуваку за скорость но возиться долго не хочется с роутером из-за того что стратегии не подходят и нужен ручной перебор. 
+Так-же программа умеет определять DNS-hijack, резолвить на подборе валидный ip с игнором домена, что тоже плюс - ты не дёргаешь мёртвую сосиску просто так 20 часов. Так-же в проекте есть проверки по UDP - дискордик будет работать, остальных я потом прикручу по возможности.
+Кто дочитал досюда - да, этот проект написан на сто процентов нейросетсями - дипсик в4, грок4.6, гемини3.7 - мне не стыдно, когда-нибудь сам научусь.
+
+Очень помогли:
+[byedpi](https://github.com/hufrea/byedpi)
+[zapret2](https://github.com/bol-van/zapret2)
+[zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube)
+[blockcheckw](https://github.com/rcd27/blockcheckw)
+[discord-servers](https://github.com/Maks-gaming/discord-servers)
+[geneva](https://github.com/Kkevsterrr/geneva)
+[curl-cffi](https://github.com/lexiforest/curl_cffi)
+
+
 ---
 
 ## Оглавление

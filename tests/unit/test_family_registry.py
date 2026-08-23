@@ -162,3 +162,25 @@ def test_prune_stall_does_not_change_items_without_fooling_grid():
     items = [StrategyItem(label="x", strategy="fake:blob=stun:repeats=6:badsum")]
     profile = TriageProfile(stall_phase=FailPhase.DATA_STALL_16K)
     assert prune_items_by_triage(items, profile) == items
+
+
+def test_prune_one_item_does_not_log_info(caplog):
+    import logging
+
+    items = [StrategyItem(label="stun", strategy="fake:blob=stun:repeats=6:tcp_ts=-1000")]
+    profile = TriageProfile(viable_blobs=["tls_clienthello"])
+    with caplog.at_level(logging.INFO, logger="blockchecks.engine.family_registry"):
+        assert prune_items_by_triage(items, profile) == []
+    assert "pruned 1→0" not in caplog.text
+
+
+def test_prune_batch_still_logs_info(caplog):
+    import logging
+
+    items = [
+        StrategyItem(label="ok", strategy="fake:blob=stun:repeats=6"),
+        StrategyItem(label="dead", strategy="fake:blob=stun:repeats=6:badsum"),
+    ]
+    with caplog.at_level(logging.INFO, logger="blockchecks.engine.family_registry"):
+        prune_items_by_triage(items, TriageProfile(dead_foolings=["badsum"]))
+    assert "pruned 2→1 (reason=fooling|blob)" in caplog.text

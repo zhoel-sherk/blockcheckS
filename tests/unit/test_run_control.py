@@ -186,6 +186,24 @@ def test_cleanup_env_targets_xdg_run_lock():
     assert "sudo pkill -9 nfqws2" in text
 
 
+def test_week_coverage_script_is_sequential():
+    from pathlib import Path
+
+    from blockchecks.engine.config import PROJECT_DIR
+
+    text = (Path(PROJECT_DIR) / "scripts" / "run_week_coverage.sh").read_text(encoding="utf-8")
+    assert "logs/week_cov.db" in text
+    assert "logs/week_cov_udp.db" in text
+    assert "bs-series" in text
+    assert "--preset $preset" in text
+    assert "--tcp-only" in text
+    assert "--data-block-sync" in text
+    assert "--adaptive-epsilon" in text
+    assert "--adaptive \\" not in text
+    assert "bc-nfconf" in text
+    assert "discord" in text and "google-youtube" in text
+
+
 def test_read_active_run_foreign_cmdline_clears(run_lock_file, monkeypatch):
     import json
 

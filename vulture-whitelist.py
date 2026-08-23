@@ -170,6 +170,8 @@ get_ipset_status  # MCP tool (LAYER C)
 probe_strategy  # MCP tool (LAYER C)
 set_debug_mode  # MCP tool (LAYER A)
 get_log_tail  # MCP tool (LAYER A)
+get_campaign_domains_summary  # MCP tool (LAYER A2)
+get_provider_profile  # MCP tool (LAYER C)
 C  # terminal color namespace
 heading  # terminal helper
 eprint  # terminal helper

@@ -499,7 +499,7 @@ def test_ytcdn_probe_bare_no_thumb_for_gvt1():
     assert not any("/dQw4w9WgXcQ" in v.curl_url for v in variants)
 
 
-def _run_plain_probe(status, body=b"", headers=None, protocol="tls12"):
+def _run_plain_probe(status, body=b"", headers=None, protocol="tls12", domain="example.com"):
     """Run run_curl_probe with a fake session returning the given response."""
     from unittest.mock import patch
 
@@ -531,7 +531,7 @@ def _run_plain_probe(status, body=b"", headers=None, protocol="tls12"):
 
     with patch("curl_cffi.Session", FakeSession):
         return run_curl_probe(
-            CurlProbeRequest(domain="example.com", timeout=5.0, protocol=protocol)
+            CurlProbeRequest(domain=domain, timeout=5.0, protocol=protocol)
         )
 
 
@@ -622,6 +622,51 @@ def test_tls_401_with_body_passes():
     r = _run_plain_probe(401, b"x" * 400)
     assert r.success is True
     assert r.http_code == 401
+
+
+def test_tls_404_small_body_passes():
+    """Real responses from updates.discord.com/gateway.discord.gg have small bodies."""
+    r = _run_plain_probe(404, b"<pre>Not Found</pre>")
+    assert r.success is True
+    assert r.http_code == 404
+    assert r.content_ok is False
+
+
+def test_tls_401_small_body_passes():
+    r = _run_plain_probe(401, b"unauthorized")
+    assert r.success is True
+    assert r.http_code == 401
+    assert r.content_ok is False
+
+
+def test_tls_403_small_body_passes():
+    r = _run_plain_probe(403, b"Forbidden")
+    assert r.success is True
+    assert r.http_code == 403
+    assert r.content_ok is False
+
+
+def test_tls_404_empty_body_passes():
+    r = _run_plain_probe(404, b"")
+    assert r.success is True
+    assert r.http_code == 404
+    assert r.content_ok is False
+
+
+def test_discord_gg_redirect_to_com_passes():
+    r = _run_plain_probe(
+        301, b"", {"Location": "https://discord.com"}, domain="discord.gg"
+    )
+    assert r.success is True
+    assert r.error is None
+
+
+def test_dl_discordapp_redirect_to_com_passes():
+    r = _run_plain_probe(
+        301, b"", {"Location": "https://discord.com"}, domain="dl.discordapp.net"
+    )
+    assert r.success is True
+    assert r.error is None
 
 
 def test_tls_400_still_fails():

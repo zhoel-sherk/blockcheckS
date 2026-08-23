@@ -34,6 +34,7 @@ _CURL_IPRESOLVE_V4 = 1
 log = logging.getLogger(__name__)
 
 _SMALL_BODY_STATUSES = frozenset({101, 204, 206, 301, 302, 303, 307, 308})
+_TLS_BYPASS_PROOF_STATUSES = frozenset({401, 403, 404})
 
 #: Path-segment tokens of a same-host redirect that is still a provider stub.
 #: Matched as whole path segments (not substrings) so ``/login?error=...`` is OK.
@@ -566,11 +567,16 @@ def _classify_generic(
     if stub_err := _stub_body_err(req, resp, clen):
         return _resp_fail(resp, elapsed, clen, rate, stub_err)
     small_206 = resp.status_code == 206 and clen < 300 and not req.googlevideo
-    small_body_ok = (not dpi_fake) and (resp.status_code in _SMALL_BODY_STATUSES or small_206)
+    tls_bypass_proof = (
+        req.protocol != "http" and resp.status_code in _TLS_BYPASS_PROOF_STATUSES
+    )
+    small_body_ok = (not dpi_fake) and (
+        resp.status_code in _SMALL_BODY_STATUSES or small_206 or tls_bypass_proof
+    )
     status_ok = (
         200 <= resp.status_code < 400
         if req.protocol == "http"
-        else (200 <= resp.status_code < 400 or resp.status_code in {401, 403, 404})
+        else (200 <= resp.status_code < 400 or resp.status_code in _TLS_BYPASS_PROOF_STATUSES)
     )
     throttled = False
     success = False

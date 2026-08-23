@@ -61,6 +61,9 @@ def test_validate_content_small_body():
 def test_validate_content_small_status_ok():
     w = _validate_content(b"tiny", 0, 204)
     assert w == []
+    assert _validate_content(b"tiny", 0.5, 404) == []
+    assert _validate_content(b"tiny", 0.5, 403) == []
+    assert _validate_content(b"tiny", 0.5, 401) == []
 
 
 @pytest.mark.unit
