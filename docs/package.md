@@ -1,6 +1,6 @@
 # Package structure — blockcheckS
 
-Аудит layout после packaging + CLI modernization (2026-08, 1.3.7).
+Аудит layout после packaging + CLI modernization (2026-08, 1.3.8).
 
 ## Канон
 

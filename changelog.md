@@ -1,5 +1,19 @@
-## Unreleased
+## 1.3.8 — TLS bypass classification, Discord redirect handling, MCP tools overhaul (2026-08-23)
 
+- **TLS bypass classification fix**: Added `_TLS_BYPASS_PROOF_STATUSES` (401, 403, 404)
+  for TLS probes with small/empty bodies so valid server responses through TLS
+  are classified as PASS instead of false-positive DPI drops.
+- **Discord family redirect handling**: Added `_DISCORD_FAMILY_APEXES` to
+  `tcp_tls.py` and `_hosts_related` to correctly treat redirects across Discord
+  domains (e.g. `dl.discordapp.net` → `discord.com`, `discord.gg` → `discord.com`)
+  as valid bypasses.
+- **MCP server enhancements**:
+  - Universal log path resolution `_latest_run_logpath` supporting any campaign (`week_cov`, etc.).
+  - Robust `_resolve_db_path` resolving across `info.cwd`, `PROJECT_DIR`, and `cwd`.
+  - Added `proto="tcp"|"udp"` support in `query_strategies`.
+  - Added new `get_campaign_domains_summary` tool for real-time per-domain stats.
+  - Added offline fallback in `generate_router_config` when daemon is busy.
+  - Added new `get_provider_profile` tool for inspecting `data_block/` profiles and DNS caches.
 - **IP/CIDR catalogs** (`presets/ipset/*.txt`): sinkhole, CGNAT, CDN families,
   expect, fallbacks. User overlay `~/.config/blockcheckS/presets/ipset/`.
   Config `[ipset]` in `settings.example.toml`. Distinct from `bc-nfconf --ipset`.
@@ -7,6 +21,7 @@
   `~/.local/share/blockcheckS/data_block/providers/<slug>/` (one-time migrate
   from the git submodule). `bs data-block [--out] [--git]` materializes
   a git-ready snapshot; `--data-block-sync` uses the same path.
+- Bump 1.3.8.
 
 ---
 
