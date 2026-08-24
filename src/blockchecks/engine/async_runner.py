@@ -560,6 +560,10 @@ class AsyncTestRunner:
         result.error = data.get("error", "") or ""
         result.used_ip = data.get("used_ip") or ""
         result.rst_in_ttl = int(data.get("bridge_rst_in_ttl") or 0)
+        ba = data.get("bridge_applied")
+        result.bridge_applied = None if ba is None else bool(ba)
+        result.bridge_batch_id = int(data.get("batch_id") or 0)
+        result.bridge_gen = int(data.get("bridge_gen") or 0)
         if data.get("bridge_rst_in") and not result.success:
             # DPI injected a RST after the SNI was seen (scan_bridge detector).
             from blockchecks.engine.fail_phase import FailPhase
@@ -570,10 +574,12 @@ class AsyncTestRunner:
 
             result.fail_phase = classify_fail_phase(result.error, result.http_code).value
         if "bridge_applied" in data and data.get("bridge_applied") is False and result.success:
+            tail = data.get("bridge_raw_tail") or ""
             log.warning(
                 "%s",
                 f"  {YELLOW}WARN: bridge PASS without APPLIED event for "
-                f"{item.label[:24]} (strategy may not have been picked up by nfqws2){RESET}",
+                f"{item.label[:24]} (strategy may not have been picked up by nfqws2)"
+                f"{(' raw=[' + tail + ']') if tail else ''}{RESET}",
             )
         return result
 
@@ -612,6 +618,9 @@ class AsyncTestRunner:
             doh_server=doh_server,
             proto=proto_db,
             fail_phase=result.fail_phase,
+            bridge_applied=result.bridge_applied,
+            bridge_batch_id=result.bridge_batch_id,
+            bridge_gen=result.bridge_gen,
         )
         if status == "PASS":
             await _save_pass_strategy_data_block(

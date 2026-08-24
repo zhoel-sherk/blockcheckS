@@ -148,6 +148,14 @@ async def test_probe_batch_service_lua_bridge_mock() -> None:
 
     original = bp.BridgeSession
     bp.BridgeSession = FakeSession
+    # Fence stub: production calls run_tcp_check_bridge once post-boot;
+    # keep the probe-level publish/call assertions untouched here.
+    real_bridge_probe = bp.run_tcp_check_bridge
+    bp.run_tcp_check_bridge = lambda *a, **k: {
+        "success": True,
+        "bridge_applied": True,
+        "bridge_events": ["APPLIED"],
+    }
     try:
         deps = RunnerProbeDeps(
             python="python3",
@@ -181,6 +189,7 @@ async def test_probe_batch_service_lua_bridge_mock() -> None:
         assert result.backend == "lua_bridge"
         assert result.settle_ms == 100.0
     finally:
+        bp.run_tcp_check_bridge = real_bridge_probe
         bp.BridgeSession = original
 
 
@@ -225,6 +234,14 @@ async def test_probe_batch_service_recycles_on_memory_flag() -> None:
 
     original = bp.BridgeSession
     bp.BridgeSession = FakeSession
+    # Fence stub: production calls run_tcp_check_bridge once post-boot;
+    # keep the probe-level publish/call assertions untouched here.
+    real_bridge_probe = bp.run_tcp_check_bridge
+    bp.run_tcp_check_bridge = lambda *a, **k: {
+        "success": True,
+        "bridge_applied": True,
+        "bridge_events": ["APPLIED"],
+    }
     try:
         deps = RunnerProbeDeps(
             python="python3",
@@ -258,6 +275,7 @@ async def test_probe_batch_service_recycles_on_memory_flag() -> None:
         assert booted == 2  # initial boot + recycle boot
         assert result.backend == "lua_bridge"
     finally:
+        bp.run_tcp_check_bridge = real_bridge_probe
         bp.BridgeSession = original
 
 
@@ -380,7 +398,7 @@ def test_run_tcp_check_bridge_sets_bridge_applied_flag(tmp_path) -> None:
         def publish(self, strategy_id, gen, cmd=None):
             pass
 
-        def drain_events(self, since_gen=0):
+        def drain_events(self, since_gen=0, expect_id=None):
             from blockchecks.service.lua_bridge_ipc import BridgeEvent
 
             return [
@@ -475,6 +493,16 @@ async def test_recycle_preserves_strategy_idx_and_events() -> None:
 
     original = bp.BridgeSession
     bp.BridgeSession = FakeSession
+    # Fence + probe stub that mirrors the real publish side effects so the
+    # per-probe publish-id assertions below keep working.
+    real_bridge_probe = bp.run_tcp_check_bridge
+
+    def _publishing_probe(session, strategy_id, gen, *a, **k):
+        session.bridge.truncate_events()
+        session.bridge.publish(strategy_id, gen)
+        return {"success": True, "bridge_applied": True, "bridge_events": ["APPLIED"]}
+
+    bp.run_tcp_check_bridge = _publishing_probe
     try:
         deps = RunnerProbeDeps(
             python="python3",
@@ -506,10 +534,11 @@ async def test_recycle_preserves_strategy_idx_and_events() -> None:
         )
         await svc.run_batch(ctx, 5.0)
         assert booted == 2  # initial + recycle
-        # 3 probes, each published id = 1,2,3 (strategy position in batch)
-        assert [p[0] for p in published] == [1, 2, 3]
-        assert len(published) == 3
+        # Fence probe (id=1) + 3 probes, each published id = position in batch
+        assert [p[0] for p in published] == [1, 1, 2, 3]
+        assert len(published) == 4  # fence + 3 probes
     finally:
+        bp.run_tcp_check_bridge = real_bridge_probe
         bp.BridgeSession = original
 
 
@@ -541,6 +570,14 @@ async def test_debug_env_toggle_restarts_lua_daemon() -> None:
 
     original = bp.BridgeSession
     bp.BridgeSession = FakeSession
+    # Fence stub: production calls run_tcp_check_bridge once post-boot;
+    # keep the probe-level publish/call assertions untouched here.
+    real_bridge_probe = bp.run_tcp_check_bridge
+    bp.run_tcp_check_bridge = lambda *a, **k: {
+        "success": True,
+        "bridge_applied": True,
+        "bridge_events": ["APPLIED"],
+    }
     os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
     try:
         deps = RunnerProbeDeps(
@@ -595,6 +632,7 @@ async def test_debug_env_toggle_restarts_lua_daemon() -> None:
     finally:
         FakeSession.boot = orig_boot
         bp._debug_env = orig_debug_env
+        bp.run_tcp_check_bridge = real_bridge_probe
         bp.BridgeSession = original
         os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
 

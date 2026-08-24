@@ -18,6 +18,9 @@ class BridgeEvent:
     id: int = 0
     reason: str = ""
     ttl: int = 0
+    # scan_pick sets matched=N (instances executed for this id). -1 = field
+    # absent (upstream/older Lua) — treat as "applied" for compatibility.
+    matched: int = -1
     raw: dict | None = None
 
     @classmethod
@@ -37,12 +40,22 @@ class BridgeEvent:
             id=int(data.get("id") or 0),
             reason=str(data.get("reason") or ""),
             ttl=int(data.get("ttl") or 0),
+            matched=int(data["matched"]) if "matched" in data else -1,
             raw=data,
         )
 
     def is_rst_in(self) -> bool:
         """True if this event is a DPI-injected inbound RST (scan_bridge)."""
         return self.event == "STRATEGY_FAIL" and self.reason == "rst_in"
+
+    def is_applied(self) -> bool:
+        """True for an APPLIED event that actually executed >=1 instance.
+
+        matched == 0 means scan_pick ran but no instance carried the active
+        strategy id (nothing was sent) — that must not count as applied.
+        matched == -1 (field absent, older Lua) keeps the legacy meaning.
+        """
+        return self.event == "APPLIED" and self.matched != 0
 
     def to_dict(self) -> dict:
         """Serializable dict for API/SSE consumers (mirrors vars())."""
@@ -52,6 +65,7 @@ class BridgeEvent:
             "id": self.id,
             "reason": self.reason,
             "ttl": self.ttl,
+            "matched": self.matched,
         }
 
 
@@ -112,8 +126,18 @@ class LuaBridge:
         """Atomically publish strategy index + generation (os.replace).
 
         Writes all payload files in a staging dir, chmods for the dropped-uid
-        nfqws2 process (nobody), then replaces id/gen/cmd before strategy.ready
-        so Lua never observes a new id with a stale gen.
+        nfqws2 process (nobody), then replaces them before strategy.ready so
+        Lua never observes an inconsistent set.
+
+        Commit order matters: gen FIRST, then cmd, then id, ready last.
+        The Lua-side fence (bs_read_strategy_ipc) accepts a read only when
+        strategy.ready == strategy.gen. With id replaced before gen there was
+        a window where ready == gen (both stale) but id was already new —
+        Lua applied the new strategy yet reported the stale gen, and the
+        Python-side ``drain_events(since_gen=gen)`` filter dropped that
+        probe's APPLIED event ("bridge PASS without APPLIED"). With gen
+        committed first, every intermediate state fails the fence and readers
+        keep their previous consistent snapshot instead.
         """
         os.chmod(self.paths.base, 0o777)
         if self.paths.events.is_file():
@@ -141,7 +165,7 @@ class LuaBridge:
             os.chmod(src, 0o666)
 
         # Commit payload first; strategy.ready is the publish fence for Lua.
-        for name in ("strategy.id", "strategy.gen", "strategy.cmd"):
+        for name in ("strategy.gen", "strategy.cmd", "strategy.id"):
             src = staged_files.get(name)
             if src is not None and src.is_file():
                 dst = self.paths.base / name
@@ -155,13 +179,25 @@ class LuaBridge:
 
         shutil.rmtree(staging, ignore_errors=True)
 
-    def drain_events(self, since_gen: int = 0) -> list[BridgeEvent]:
+    def drain_events(
+        self, since_gen: int = 0, expect_id: int | None = None
+    ) -> list[BridgeEvent]:
+        """Read events written by Lua since *since_gen*.
+
+        An event is accepted when its generation is current OR when it was
+        emitted for the exact strategy id we published (expect_id). The id
+        branch rescues APPLIED events written by a daemon whose cached
+        _G.bs_active_gen lagged one publish behind (fence nil-read window):
+        those carry a stale gen but are unambiguously ours by id.
+        """
         if not self.paths.events.is_file():
             return []
         out: list[BridgeEvent] = []
         for line in self.paths.events.read_text(encoding="utf-8").splitlines():
             ev = BridgeEvent.from_line(line)
-            if ev and ev.gen >= since_gen:
+            if not ev:
+                continue
+            if ev.gen >= since_gen or (expect_id is not None and ev.id == expect_id):
                 out.append(ev)
         return out
 

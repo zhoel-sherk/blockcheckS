@@ -841,3 +841,27 @@ async def test_get_provider_profile(tmp_path, monkeypatch):
     assert profile["pinned_hosts_count"] == 1
     assert len(profile["top_strategies"]) == 1
 
+
+
+async def test_get_series_status_adaptive_default_on(tmp_path, monkeypatch):
+    """AQ is ON by default: no legacy --adaptive flag needed to report True."""
+    db = tmp_path / "run_W.db"
+    _make_state_db(db)
+    from blockchecks.mcp.server import get_series_status
+
+    info = _make_active_info(
+        db,
+        cwd=str(tmp_path),
+        argv=["full", "--db", str(db), "--adaptive-epsilon", "0.1"],
+    )
+    _patch_run_control(monkeypatch, info)
+
+    result = await get_series_status()
+    assert result["adaptive"] is True
+
+    info_off = _make_active_info(
+        db, cwd=str(tmp_path), argv=["full", "--db", str(db), "--no-adaptive"]
+    )
+    _patch_run_control(monkeypatch, info_off)
+    result = await get_series_status()
+    assert result["adaptive"] is False

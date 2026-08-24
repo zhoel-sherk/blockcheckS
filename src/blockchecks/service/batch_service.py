@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
+from blockchecks.checkers.curl_probe import is_googlevideo_domain, is_ytcdn_domain
 from blockchecks.service.batch_bridge_probe import run_tcp_check_bridge
 from blockchecks.service.batch_models import (
     BatchContext,
@@ -255,6 +256,7 @@ class ProbeBatchService:
         recycled = 0
         try:
             settle_ms = session.boot() * 1000
+            self._bridge_ready_fence(session, ctx, timeout, resolved_by_domain)
             boot_debug = _debug_env()
             self._record_daemon_mem(ns_name)
             for idx, (item, dom) in enumerate(
@@ -310,6 +312,49 @@ class ProbeBatchService:
                     domain=dom,
                     ip_lists=(ip_lists_by_domain or {}).get(dom),
                 )
+                if _bridge_silent(data) and isinstance(data, dict):
+                    # Zero bridge activity means the daemon died mid-batch (a
+                    # live scan_pick ALWAYS emits APPLIED on tls_client_hello).
+                    # Without this retry the rest of the batch runs clean
+                    # (queue-bypass) and unblocked domains record false PASSes.
+                    log.warning(
+                        "%s",
+                        f"  {YELLOW}[bridge] zero events for {getattr(item, 'label', '?')[:24]} "
+                        f"in {ns_name} — daemon presumed dead, rebooting and retrying once"
+                        f"{RESET}",
+                    )
+                    session.boot()
+                    gen = self.deps.next_probe_gen()
+                    data = run_tcp_check_bridge(
+                        session,
+                        idx,
+                        gen,
+                        item.strategy,
+                        dom,
+                        timeout_i,
+                        self.deps.python,
+                        self.deps.disable_ech,
+                        resolved_ip,
+                        self.deps.repeats,
+                        self.deps.parallel_repeats,
+                        "",
+                        item_proto,
+                        self.deps.repeats_mode,
+                        self.deps.quick_break,
+                        resolved_ips=(ip_lists_by_domain or {}).get(dom),
+                    )
+                    data = self._maybe_wssize_bridge_retry(
+                        session,
+                        idx,
+                        item,
+                        ctx,
+                        timeout_i,
+                        resolved_ip,
+                        item_proto,
+                        data,
+                        domain=dom,
+                        ip_lists=(ip_lists_by_domain or {}).get(dom),
+                    )
                 data["batch_id"] = ctx.batch_id
                 result = self.deps.tcp_result_from_data(item, dom, data)
                 results.append(result)
@@ -319,6 +364,117 @@ class ProbeBatchService:
             results=results,
             settle_ms=settle_ms,
             backend="lua_bridge",
+        )
+
+    def _bridge_ready_fence(
+        self,
+        session: BridgeSession,
+        ctx: BatchContext,
+        timeout: float,
+        resolved_by_domain: dict[str, tuple[str | None, str, str]],
+    ) -> None:
+        """Verify the freshly booted daemon actually applies strategies.
+
+        settle only waits for process visibility (/proc), but under load Lua
+        init (3 scripts + plan build) and the NFQUEUE bind can lag behind —
+        early probes then leave the netns clean (queue-bypass) producing
+        false "PASS without APPLIED" rows. Fire one synthetic probe against
+        the batch's first domain; require ANY bridge event. On silence,
+        reboot the daemon once and retry; give up with a loud warning.
+        """
+        if not ctx.items:
+            return
+        # Fence against the first plain-TLS domain: googlevideo/ytcdn probes
+        # need signed URLs / special prep and can legitimately produce no
+        # bridge events, which would trip the reboot logic.
+        dom = ""
+        resolved_ip = None
+        for item, d in zip(ctx.items, ctx.item_domains(), strict=False):
+            proto_i = getattr(item, "protocol", ctx.protocol) or ctx.protocol
+            if proto_i != "tls12" or is_googlevideo_domain(d) or is_ytcdn_domain(d):
+                continue
+            dom = d
+            resolved_ip = resolved_by_domain.get(d, (None, "", ""))[0]
+            break
+        if not dom:
+            return
+        protocol = getattr(ctx.items[0], "protocol", ctx.protocol) or ctx.protocol
+        # Fence is best-effort: never let it kill the batch. Any internal
+        # error here is logged loudly and skips the check.
+        try:
+            strat_text = (getattr(session, "strategies", None) or [""])[0]
+            gen = self.deps.next_probe_gen()
+            fence_timeout = min(timeout, 1.5)
+            data = run_tcp_check_bridge(
+                session,
+                1,
+                gen,
+                strat_text,
+                dom,
+                fence_timeout,
+                self.deps.python,
+                self.deps.disable_ech,
+                resolved_ip,
+                1,
+                False,
+                "",
+                protocol,
+                "fast",
+                False,
+            )
+        except Exception as exc:  # noqa: BLE001 — fence must not break probing
+            log.warning(
+                "%s",
+                f"  {YELLOW}[bridge] readiness fence errored ({exc}) — skipping check{RESET}",
+            )
+            return
+        # Non-dict responses come from test doubles / exotic backends:
+        # treat them as ready instead of rebooting (keeps mock semantics).
+        if not isinstance(data, dict):
+            return
+        events = data.get("bridge_events") or []
+        if data.get("bridge_applied") or events:
+            return
+        log.warning(
+            "%s",
+            f"  {YELLOW}[bridge] readiness fence silent in {session.ns_name} "
+            f"— rebooting daemon and retrying{RESET}",
+        )
+        session.boot()
+        try:
+            gen2 = self.deps.next_probe_gen()
+            data2 = run_tcp_check_bridge(
+                session,
+                1,
+                gen2,
+                strat_text,
+                dom,
+                fence_timeout,
+                self.deps.python,
+                self.deps.disable_ech,
+                resolved_ip,
+                1,
+                False,
+                "",
+                protocol,
+                "fast",
+                False,
+            )
+        except Exception as exc:  # noqa: BLE001 — fence must not break probing
+            log.warning(
+                "%s",
+                f"  {YELLOW}[bridge] readiness retry errored ({exc}) — skipping check{RESET}",
+            )
+            return
+        if not isinstance(data2, dict):
+            return
+        events2 = data2.get("bridge_events") or []
+        if data2.get("bridge_applied") or events2:
+            return
+        log.warning(
+            "%s",
+            f"  {YELLOW}[bridge] daemon in {session.ns_name} unresponsive to fence — "
+            f"probes may run clean (queue-bypass){RESET}",
         )
 
     def _record_daemon_mem(self, ns_name: str) -> None:
@@ -442,6 +598,20 @@ class ProbeBatchService:
             f"settle={result.settle_ms:.0f}ms wall={result.batch_wall_ms:.0f}ms "
             f"backend={result.backend}{fill}{RESET}",
         )
+
+
+def _bridge_silent(data: dict) -> bool:
+    """True when a lua-bridge probe produced no bridge activity at all.
+
+    A live scan_pick emits APPLIED for every tls_client_hello/http_req/
+    quic_initial it dissects, so an empty event set means the daemon never
+    saw the flow — i.e. nfqws2 is dead and traffic ran queue-bypassed.
+    """
+    if data.get("bridge_applied"):
+        return False
+    if data.get("bridge_events") or data.get("bridge_rst_in"):
+        return False
+    return "bridge_applied" in data  # absent key = non-bridge path (classic)
 
 
 _FANOUT_BRIDGE_WARNED = False

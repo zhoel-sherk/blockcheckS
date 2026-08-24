@@ -24,6 +24,11 @@ class TcpTestResult:
     used_ip: str = ""
     fail_phase: str = ""
     rst_in_ttl: int = 0
+    # Lua-bridge provenance: None = unknown (classic/QUIC paths),
+    # True = APPLIED event seen, False = PASS without APPLIED (suspicious).
+    bridge_applied: bool | None = None
+    bridge_batch_id: int = 0
+    bridge_gen: int = 0
 
 
 def tcp_results_from_details(

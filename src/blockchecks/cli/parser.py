@@ -435,6 +435,25 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
         default=3.0,
         help="Curl probe timeout in seconds (default: 3.0)",
     )
+    g = parser.add_argument_group("domain quarantine")
+    g.add_argument(
+        "--no-quarantine",
+        action="store_true",
+        default=False,
+        help="Keep probing domains that never PASS (quarantine ON by default)",
+    )
+    g.add_argument(
+        "--quarantine-min",
+        type=int,
+        default=300,
+        help="Failed attempts on a domain before it is quarantined (default: 300)",
+    )
+    g.add_argument(
+        "--quarantine-auto-denylist",
+        action="store_true",
+        default=False,
+        help="Append quarantined domains to presets/domains/denylist.txt",
+    )
     if mode in ("pair", "full"):
         parser.add_argument(
             "--udp-timeout",

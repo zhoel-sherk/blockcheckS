@@ -28,18 +28,21 @@ function scan_pick(ctx, desync)
 	orchestrate(ctx, desync)
 	local id = tonumber(_G.bs_active_id) or 1
 	local verdict = VERDICT_PASS
+	local matched = 0
 	while true do
 		local inst = plan_instance_pop(desync)
 		if not inst then break end
 		local strat = tonumber(inst.arg.strategy)
 		if strat and strat == id then
 			verdict = plan_instance_execute(desync, verdict, inst)
+			matched = matched + 1
 		end
 	end
 	bs_write_ipc({
 		event = "APPLIED",
 		id = id,
 		gen = tonumber(_G.bs_active_gen) or 0,
+		matched = matched,
 	})
 	return verdict
 end

@@ -1,5 +1,63 @@
 ## 1.3.8 — TLS bypass classification, Discord redirect handling, MCP tools overhaul (2026-08-23)
 
+### Bridge integrity: "PASS without APPLIED" root-caused & self-healing (2026-08-24)
+
+During week_cov S1 ~50% of PASS rows carried `bridge_applied=false`
+("bridge PASS without APPLIED event", ~11k of 22k). Investigation
+(`dev/diag_bridge_boot.py`, instrumented mini-scans) found three independent
+mechanisms, all fixed:
+
+- **Silent blob drop in bridge confs** (root cause #1): custom/config strategies
+  referencing blobs only via `seqovl_pattern=`/`--blob=` lines lost them at
+  bridge-conf build when unresolvable (`p4da` alias missing) — nfqws2 died
+  per-packet on the unknown blob, wrote no APPLIED, and the probe ran clean:
+  false PASSes on baseline-open domains (discordcdn.com showed 62% "pass").
+  Fix: `p4da`→`tls_clienthello_4pda_to.bin` alias; `append_blob_cli_lines` now
+  logs loudly and returns unresolved names; `ConfigFileGenerator` static-validates
+  every `.conf` and skips broken ones with a WARNING instead of poisoning batches.
+- **IPC publish race** (root cause #2, minor): `strategy.id` was committed before
+  `strategy.gen`, so Lua's fence could accept `(new id, stale gen)` — correct
+  desync applied but APPLIED carried a stale gen and was filtered by
+  `drain_events`. Fix: commit order is now gen → cmd → id → ready (any partial
+  state fails the fence); `drain_events(expect_id=...)` additionally rescues
+  events by strategy id.
+- **Mid-batch daemon death** (root cause #3): settle waits for process
+  visibility only; under load Lua init/NFQUEUE bind lags, and a daemon can also
+  die on queue-bind conflict — remaining probes run queue-bypassed. Fixes:
+  - **Readiness fence**: after each batch boot a synthetic probe must produce
+    any bridge event, else the daemon reboots once;
+  - **Zero-event retry**: a probe with zero bridge activity (live scan_pick
+    always emits APPLIED) triggers one daemon reboot + probe retry;
+  - `scan_pick` APPLIED events now carry `matched=N`; `matched=0` (nothing
+    executed) no longer counts as applied.
+
+Supporting changes:
+
+- **`tcp_results.bridge_applied` column** (nullable; NULL=classic/legacy):
+  suspicious PASSes are persisted, queryable, and distinguishable in exports.
+  Plus previously dead columns `bridge_batch_id`/`bridge_gen` are now populated.
+- **Domain quarantine** (new): domains with `0 PASS in >= N attempts` stop being
+  scheduled mid-run (AQ exclude + fan-out/sequential filters), logged loudly,
+  persisted to the new `quarantined` table, seeded from DB on `--resume`.
+  Flags: `--no-quarantine`, `--quarantine-min N` (default 300),
+  `--quarantine-auto-denylist` (appends to `presets/domains/denylist.txt`).
+  MCP `get_series_status` exposes `quarantined[]`.
+- **MCP fix**: `get_series_status.adaptive` reported False because it checked
+  legacy `--adaptive/--fan-out` argv flags; AQ is default-ON — now reports True
+  unless `--no-adaptive` is present.
+- **Host safety**: `scripts/cleanup_env.sh` matched bare `^veth*` links (Docker's
+  naming!) and flushed FORWARD — could tear networking off live containers
+  (bitmagnet). Now restricted to `vh-/vn-` prefixes with targeted rule deletion,
+  plus sweeps orphaned `10.200.x` MASQUERADE rules from SIGKILLed runs
+  (68 duplicates found on the host); `netns_pool` NAT rules are `-C`-guarded.
+- Diagnostics script: `dev/diag_bridge_boot.py` (boot-race harness), WARN lines
+  carry raw-event tails for post-mortem.
+
+---
+
+## 1.3.8 — original release notes (2026-08-23)
+
+
 - **TLS bypass classification fix**: Added `_TLS_BYPASS_PROOF_STATUSES` (401, 403, 404)
   for TLS probes with small/empty bodies so valid server responses through TLS
   are classified as PASS instead of false-positive DPI drops.

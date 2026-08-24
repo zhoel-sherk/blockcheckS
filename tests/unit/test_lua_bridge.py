@@ -185,3 +185,79 @@ def test_build_bridge_conf_escapes_lt(tmp_path: Path) -> None:
     assert "--out-range=s1\\<d1" in conf
     assert "--out-range=s1<d1" not in conf
     assert "--lua-desync=pktmod:ip_ttl=1:strategy=1" in conf
+
+
+@pytest.mark.unit
+def test_publish_commit_order_gen_before_id(tmp_path: Path, monkeypatch) -> None:
+    """gen must land before id: the Lua fence (ready==gen) then fails closed.
+
+    With the old order (id first) there was a window where Lua read a new id
+    with the stale gen, applied the strategy, but reported the stale gen —
+    Python's drain filter dropped the APPLIED event ("PASS without APPLIED").
+    """
+    import os as _os
+
+    order: list[str] = []
+    real_replace = _os.replace
+
+    def spy(src, dst, *a, **kw):
+        name = Path(str(dst)).name
+        if name in ("strategy.id", "strategy.gen", "strategy.cmd", "strategy.ready"):
+            order.append(name)
+        return real_replace(src, dst, *a, **kw)
+
+    monkeypatch.setattr(
+        "blockchecks.service.lua_bridge_ipc.os.replace", spy
+    )
+    bridge = LuaBridge("bs-p-order", shm_base=tmp_path)
+    bridge.setup()
+    bridge.publish(3, 9, cmd="fake:blob=stun:repeats=6")
+    assert order.index("strategy.gen") < order.index("strategy.id")
+    assert order.index("strategy.id") < order.index("strategy.ready")
+    assert bridge.paths.strategy_id.read_text() == "3\n"
+    bridge.teardown()
+
+
+@pytest.mark.unit
+def test_drain_events_rescues_stale_gen_matching_id(tmp_path: Path) -> None:
+    """APPLIED with a lagging gen is still ours when its id matches expect_id."""
+    bridge = LuaBridge("bs-p-rescue", shm_base=tmp_path)
+    bridge.setup()
+    bridge.paths.events.write_text(
+        '{"event":"APPLIED","id":4,"gen":10,"matched":2}\n'
+        '{"event":"APPLIED","id":5,"gen":11}\n',
+        encoding="utf-8",
+    )
+    rescued = bridge.drain_events(since_gen=11, expect_id=4)
+    assert [e.id for e in rescued] == [4, 5]  # id-rescue + current-gen
+    assert rescued[0].gen == 10 and rescued[0].id == 4
+
+    strict = bridge.drain_events(since_gen=11)
+    assert [e.id for e in strict] == [5]
+
+    rst_in = bridge.paths.events.write_text(
+        '{"event":"STRATEGY_FAIL","reason":"rst_in","gen":12,"ttl":118}\n',
+        encoding="utf-8",
+    )
+    del rst_in
+    evs = bridge.drain_events(since_gen=12, expect_id=7)
+    assert len(evs) == 1 and evs[0].is_rst_in()
+    bridge.teardown()
+
+
+@pytest.mark.unit
+def test_bridge_event_matched_semantics() -> None:
+    """matched=0 (nothing executed) must not count as applied; absent=-1 legacy."""
+    legacy = BridgeEvent.from_line('{"event":"APPLIED","id":1,"gen":2}')
+    assert legacy is not None and legacy.matched == -1
+    assert legacy.is_applied() is True
+
+    zero = BridgeEvent.from_line('{"event":"APPLIED","id":1,"gen":2,"matched":0}')
+    assert zero is not None and zero.matched == 0
+    assert zero.is_applied() is False
+
+    two = BridgeEvent.from_line('{"event":"APPLIED","id":1,"gen":2,"matched":2}')
+    assert two is not None and two.is_applied() is True
+
+    fail = BridgeEvent.from_line('{"event":"STRATEGY_FAIL","reason":"retrans"}')
+    assert fail is not None and fail.is_applied() is False

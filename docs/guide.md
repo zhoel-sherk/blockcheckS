@@ -183,6 +183,7 @@ sudo bs full --preset coverage-tcp --profile 20h   # только если ну�
 | Фича | Дефолт | Выключить |
 |---|---|---|
 | Adaptive queue | ON | `--no-adaptive` |
+| Domain quarantine | ON (min 300 fails) | `--no-quarantine` / `--quarantine-min N`; `--quarantine-auto-denylist` пишет в denylist.txt |
 | Preflight | ON | `--no-preflight` (всё) или `--quick` (только prolog) |
 | ECH | ON | `--no-ech` |
 | Wssize (TLS 1.2) | ON | `--no-wssize` |

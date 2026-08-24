@@ -14,6 +14,27 @@ from blockchecks.service.lua_session import BridgeSession
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 
 
+def _attach_bridge_verdict(data: dict, events: list, session=None) -> None:
+    """Attach APPLIED / rst-in provenance for this probe.
+
+    ``bridge_applied`` is True only when an APPLIED event actually executed
+    at least one instance (matched != 0). Stale-gen events for our own
+    strategy id are rescued inside drain_events(expect_id=...).
+    """
+    data["bridge_applied"] = any(e.is_applied() for e in events)
+    if not data["bridge_applied"] and session is not None:
+        # Diagnostic context for the "PASS without APPLIED" warning: raw
+        # events as Lua wrote them (pre-drain-filter), so lost-vs-filtered
+        # is distinguishable post-mortem.
+        try:
+            raw = session.bridge.paths.events.read_text(encoding="utf-8")
+            raw_lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        except Exception:
+            raw_lines = []
+        data["bridge_raw_tail"] = " ; ".join(ln[-90:] for ln in raw_lines[-2:])
+    _attach_rst_in(data, events)
+
+
 def _attach_rst_in(data: dict, events: list) -> None:
     """Attach DPI RST-injection details (scan_bridge STRATEGY_FAIL rst_in)."""
     rst_in = [e for e in events if e.is_rst_in()]
@@ -53,10 +74,9 @@ def run_tcp_check_bridge(
         data["settle_ms"] = 0.0
         data["bridge_gen"] = gen
         data["bridge_id"] = strategy_id
-        events = session.bridge.drain_events(since_gen=gen)
+        events = session.bridge.drain_events(since_gen=gen, expect_id=strategy_id)
         data["bridge_events"] = [e.event for e in events]
-        data["bridge_applied"] = any(e.event == "APPLIED" for e in events)
-        _attach_rst_in(data, events)
+        _attach_bridge_verdict(data, events, session)
         return data
 
     if is_gv:
@@ -119,10 +139,9 @@ def run_tcp_check_bridge(
             break
     data["bridge_gen"] = gen
     data["bridge_id"] = strategy_id
-    events = session.bridge.drain_events(since_gen=gen)
+    events = session.bridge.drain_events(since_gen=gen, expect_id=strategy_id)
     data["bridge_events"] = [e.event for e in events]
-    data["bridge_applied"] = any(e.event == "APPLIED" for e in events)
-    _attach_rst_in(data, events)
+    _attach_bridge_verdict(data, events, session)
     return data
 
 

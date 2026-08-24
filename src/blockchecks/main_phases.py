@@ -133,6 +133,7 @@ class FullRunContext:
     settle_profile: Any = None
     fp: str = ""
     runner: AsyncTestRunner | None = None
+    quarantine: Any = None
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     deadline: RunDeadline | None = None
     signal_interrupted: bool = False
@@ -652,6 +653,28 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         progress.done, progress.skipped, progress.passed = d, s, p
         progress.report()
 
+    quarantine = None
+    from blockchecks.engine.domain_quarantine import quarantine_from_args
+
+    qcfg = quarantine_from_args(args)
+    if qcfg is not None and ctx.db is not None:
+        from blockchecks.engine.domain_quarantine import DomainQuarantine
+
+        quarantine = DomainQuarantine(qcfg)
+        try:
+            rows = await ctx.db.domain_pass_rows()
+            seeded = quarantine.seed_from_rows(rows)
+            if seeded:
+                log.warning(
+                    "%s",
+                    f"  [quarantine] pre-seeded {len(seeded)} dead domains from DB "
+                    f"(0 PASS in >= {qcfg.min_attempts} attempts): "
+                    f"{', '.join(sorted(seeded))}",
+                )
+        except Exception as exc:
+            log.warning("%s", f"  [quarantine] seed skipped ({exc})")
+        ctx.quarantine = quarantine
+
     ctx.aq_result = None
     try:
         ctx.aq_result = await run_adaptive_tcp(
@@ -666,6 +689,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
             lua_bridge=resolve_probe_backend(args) == "lua_bridge",
             bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
             workers=max(1, int(getattr(args, "parallel", 4) or 4)),
+            quarantine=quarantine,
         )
     finally:
         # Persist adaptive weights even if the run crashed or hit the deadline,
@@ -735,10 +759,12 @@ async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
     async def _one_strategy(item: StrategyItem):
         if ctx.stop.is_set():
             return
+        qdead = ctx.quarantine.exclude_domains() if ctx.quarantine else set()
         pending = [
             d
             for d in ctx.domains
-            if not (args.resume and await ctx.db.has_tcp_result(item.label, d))
+            if d not in qdead
+            and not (args.resume and await ctx.db.has_tcp_result(item.label, d))
         ]
         progress.skipped += len(ctx.domains) - len(pending)
         progress.done += len(ctx.domains) - len(pending)
@@ -798,7 +824,13 @@ async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> Non
         await _one(item, domain)
 
     stop_msg = f"  {YELLOW}Stopped by signal{RESET}"
-    jobs = [(item, domain) for item in ctx.tcp_items for domain in ctx.domains]
+    qdead = ctx.quarantine.exclude_domains() if ctx.quarantine else set()
+    jobs = [
+        (item, domain)
+        for item in ctx.tcp_items
+        for domain in ctx.domains
+        if domain not in qdead
+    ]
     await _run_in_chunks(jobs, _one_pair, chunk=200, stop=ctx.stop, on_stop=stop_msg)
 
 

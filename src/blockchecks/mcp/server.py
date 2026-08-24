@@ -383,7 +383,10 @@ async def get_series_status() -> dict[str, Any]:
             if i + 1 < len(argv):
                 payload[dest] = argv[i + 1]
     payload["backend"] = "classic" if "--classic" in argv else "lua_bridge"
-    payload["adaptive"] = "--adaptive" in argv or "--fan-out" in argv
+    # Adaptive queue is ON by default (1.3.1+): it is disabled only by an
+    # explicit --no-adaptive. The legacy "--adaptive"/"--fan-out" flags are
+    # optional and their absence says nothing about the queue state.
+    payload["adaptive"] = "--no-adaptive" not in argv
 
     # DB progress (read-only, tolerant of WAL/locks).
     db_path = info.db_path
@@ -475,12 +478,30 @@ def _read_db_progress(db_path: Path) -> dict[str, Any]:
         except sqlite3.Error:
             pass
 
+        quarantined: list[dict[str, Any]] = []
+        try:
+            for d, reason, failed, created in cur.execute(
+                "SELECT domain, reason, failed, created FROM quarantined ORDER BY created"
+            ).fetchall():
+                quarantined.append(
+                    {
+                        "domain": str(d),
+                        "reason": str(reason or ""),
+                        "failed": int(failed or 0),
+                        "created": str(created or ""),
+                    }
+                )
+        except sqlite3.Error:
+            pass  # table absent in older campaign DBs
+
         res: dict[str, Any] = {
             "tcp_total": int(total),
             "tcp_pass": int(passed),
             "domain_pass_counts": domain_pass,
             "top_fail_phases": rates,
         }
+        if quarantined:
+            res["quarantined"] = quarantined
         if udp_total > 0:
             res["udp_total"] = int(udp_total)
             res["udp_pass"] = int(udp_pass)

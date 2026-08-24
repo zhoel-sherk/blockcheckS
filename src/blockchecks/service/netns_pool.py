@@ -196,13 +196,9 @@ class NetNsPool:
         # Allow forwarded traffic from veth pairs
         self._run("iptables", "-A", "FORWARD", "-i", veth_h, "-j", "ACCEPT", check=False)
         self._run("iptables", "-A", "FORWARD", "-o", veth_h, "-j", "ACCEPT", check=False)
-        self._run(
-            "iptables",
-            "-t",
-            "nat",
-            "-I",
-            "POSTROUTING",
-            "1",
+        # Idempotent NAT: -C first so a SIGKILLed previous run's orphan rule is
+        # reused instead of duplicated (leaked rules piled up 60+ across runs).
+        nat_args = (
             "-s",
             nat_subnet,
             "-o",
@@ -210,6 +206,17 @@ class NetNsPool:
             "-j",
             "MASQUERADE",
         )
+        chk = self._run("iptables", "-t", "nat", "-C", "POSTROUTING", *nat_args, check=False)
+        if chk.returncode != 0:
+            self._run(
+                "iptables",
+                "-t",
+                "nat",
+                "-I",
+                "POSTROUTING",
+                "1",
+                *nat_args,
+            )
 
         # DNS — argv-only write (no bash -c)
         dns_dir = f"/etc/netns/{name}"

@@ -85,6 +85,12 @@ erDiagram
     text doh_server
     text timestamp
   }
+  quarantined {
+    text domain PK
+    text reason
+    int failed
+    text created
+  }
 ```
 
 ## Views
@@ -128,6 +134,15 @@ never silently lost. WAL pragmas: `synchronous=OFF`, `mmap_size`,
 `--doh-server` / `--skip-dns-audit` control the UDP-vs-DoH audit written to
 `dns_audit_results` (verdict: `ok`/`tampered`/`sinkhole`/…). `scan_weights`
 persists adaptive-queue family/blob/trait weights between runs.
+
+## Quarantine
+
+`quarantined` holds domains auto-skipped mid-run (0 PASS in >= `--quarantine-min`
+attempts, default 300). Written by the campaign, read by MCP
+`get_series_status` → `quarantined[]`. `--no-quarantine` disables;
+`--quarantine-auto-denylist` also appends to `presets/domains/denylist.txt`.
+Suspicious lua-bridge PASSes (no APPLIED event) are marked
+`tcp_results.bridge_applied = 0` and should be excluded from exports/scoring.
 
 ## Resume / fingerprint
 

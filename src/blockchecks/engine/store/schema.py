@@ -111,6 +111,12 @@ CREATE TABLE IF NOT EXISTS dns_audit_results (
     doh_server TEXT DEFAULT '',
     timestamp TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS quarantined (
+    domain TEXT PRIMARY KEY,
+    reason TEXT NOT NULL DEFAULT '',
+    failed INTEGER NOT NULL DEFAULT 0,
+    created TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -130,6 +136,9 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         ("bridge_batch_id", "INTEGER DEFAULT 0"),
         ("bridge_gen", "INTEGER DEFAULT 0"),
         ("fail_phase", "TEXT DEFAULT ''"),
+        # NULL = unknown (classic backend / legacy rows); 1 = APPLIED seen,
+        # 0 = PASS without APPLIED (suspicious lua-bridge result).
+        ("bridge_applied", "INTEGER"),
     ):
         if col not in col_names:
             await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")

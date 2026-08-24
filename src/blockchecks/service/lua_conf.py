@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import tempfile
@@ -19,6 +20,8 @@ from blockchecks.engine.config import (
     get_blockchecks_lua_scripts,
     get_lua_init_scripts,
 )
+
+log = logging.getLogger(__name__)
 
 
 def stage_blockchecks_lua(ipc_dir: Path, extra: list[str] | None = None) -> list[Path]:
@@ -82,7 +85,13 @@ def build_bridge_conf(
     all_blob_names: list[str] = []
     for strat in strategies:
         all_blob_names.extend(extract_blob_names(strat))
-    append_blob_cli_lines(lines, all_blob_names, BLOB_DIR)
+    unresolved = append_blob_cli_lines(lines, all_blob_names, BLOB_DIR)
+    if unresolved:
+        log.warning(
+            "%s",
+            f"  WARNING: bridge conf has unresolvable blobs {sorted(set(unresolved))} — "
+            f"affected strategies will fail per-packet (no APPLIED, clean traffic)",
+        )
 
     for i, strat in enumerate(strategies, start=1):
         _append_strategy_desyncs(lines, strat, i)

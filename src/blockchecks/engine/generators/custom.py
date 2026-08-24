@@ -68,6 +68,41 @@ class ConfigFileGenerator(StrategyGenerator):
 
         self.config_dir = config_dir or CONFIGS_DIR
 
+    @staticmethod
+    def _desync_text(path: str) -> str:
+        """Extract concatenated --lua-desync payload from a .conf file."""
+        out: list[str] = []
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if line.startswith("--lua-desync="):
+                    out.append(line[len("--lua-desync=") :])
+        return "\n".join(out)
+
+    def _validate_or_skip(self, path: str, label: str) -> bool:
+        """Static-validate the config payload; skip (loudly) on errors.
+
+        A config referencing an unresolvable blob dies per-packet inside
+        nfqws2: the strategy is never applied but probes still hit the wire
+        clean — producing false "PASS without APPLIED" rows. Skipping here
+        keeps the matrix honest.
+        """
+        from blockchecks.engine.static_validator import validate_strategy
+
+        text = self._desync_text(path)
+        if not text:
+            return True  # no lua-desync payload; nothing to validate here
+        result = validate_strategy(text)
+        errors = [i for i in result.issues if i.severity == "error"]
+        if not errors:
+            return True
+        details = "; ".join(f"{i.code}: {i.message}" for i in errors)
+        log.warning(
+            "%s",
+            f"  WARNING: config {label!r} skipped — static validation failed ({details})",
+        )
+        return False
+
     async def generate(
         self,
         protocol: str = "tls12",
@@ -91,6 +126,8 @@ class ConfigFileGenerator(StrategyGenerator):
                 continue
             path = os.path.join(self.config_dir, fname)
             label = fname.replace(".conf", "")
+            if not self._validate_or_skip(path, label):
+                continue
             items.append(StrategyItem(label=label, strategy=path, is_config=True))
             if scan_level == "single" and items:
                 break

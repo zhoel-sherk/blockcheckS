@@ -77,6 +77,9 @@ class RunSpec:
     tcp_only: bool = False
     pair_max: int = 200
     zero_pass_warn: int = 10
+    no_quarantine: bool = False
+    quarantine_min: int = 300
+    quarantine_auto_denylist: bool = False
     isp_interface: str = "eth3"
     prefix: str = "/opt/etc/nfqws2"
     mode: str = "auto"
@@ -155,6 +158,11 @@ class RunSpec:
             tcp_only=bool(getattr(args, "tcp_only", False)),
             pair_max=int(getattr(args, "pair_max", 200) or 200),
             zero_pass_warn=int(getattr(args, "zero_pass_warn", 10) or 10),
+            no_quarantine=bool(getattr(args, "no_quarantine", False)),
+            quarantine_min=int(getattr(args, "quarantine_min", 0) or 300),
+            quarantine_auto_denylist=bool(
+                getattr(args, "quarantine_auto_denylist", False)
+            ),
             isp_interface=getattr(args, "isp_interface", "eth3") or "eth3",
             prefix=getattr(args, "prefix", "/opt/etc/nfqws2") or "/opt/etc/nfqws2",
             mode=getattr(args, "mode", "auto") or "auto",

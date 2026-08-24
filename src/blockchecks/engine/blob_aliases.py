@@ -24,6 +24,11 @@ BLOB_ALIAS_MAP: dict[str, str] = {
     "stun": "stun.bin",
     "stun2": "stun2.bin",
     "4pda": "tls_clienthello_4pda_to.bin",
+    # Flowseal/custom configs spell it without the leading digit:
+    # seqovl_pattern=p4da previously resolved to nothing and was silently
+    # dropped from bridge confs -> Lua died per-packet on the unknown blob
+    # and the probe reported "PASS without APPLIED" on clean traffic.
+    "p4da": "tls_clienthello_4pda_to.bin",
     "discord_udp": "discord_udp.bin",
     "discord_ipdisc": "discord_ipdisc.bin",
     "quic_google": "quic_initial_www_google_com.bin",
@@ -154,14 +159,30 @@ def append_blob_cli_lines(
     lines: list[str],
     names: Iterable[str],
     blobs_dir: str | None = None,
-) -> None:
-    """Append unique ``--blob=NAME:@path`` lines for each resolvable name."""
+) -> list[str]:
+    """Append unique ``--blob=NAME:@path`` lines for each resolvable name.
+
+    Returns the list of names that could NOT be resolved. Unresolved blob
+    references are logged loudly here — nfqws2 dies per-packet on an
+    undefined blob (no APPLIED event, clean-traffic probes), so a silent
+    skip here poisons results downstream.
+    """
+    unresolved: list[str] = []
     for name in names:
         if any(line.startswith(f"--blob={name}:@") for line in lines):
             continue
         cli = blob_cli_line(name, blobs_dir)
         if cli:
             lines.append(cli)
+        else:
+            unresolved.append(name)
+            log.warning(
+                "%s",
+                f"  WARNING: blob {name!r} not resolvable in "
+                f"{blobs_dir or BLOB_DIR} (searched aliases + repo/vendor dirs) — "
+                f"strategy will fail at runtime; add the .bin or fix the alias",
+            )
+    return unresolved
 
 
 def blob_cli_lines(names: Iterable[str], blobs_dir: str | None = None) -> list[str]:

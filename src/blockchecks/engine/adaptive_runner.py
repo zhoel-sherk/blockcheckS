@@ -122,6 +122,7 @@ async def run_adaptive_tcp_bridge(
     stop_event: asyncio.Event | None = None,
     on_progress: ProgressCb | None = None,
     workers: int = 4,
+    quarantine=None,
 ) -> AdaptiveRunResult:
     """AQ bridge mode: N concurrent accumulators → ProbeBatchService batch flush.
 
@@ -136,6 +137,8 @@ async def run_adaptive_tcp_bridge(
     from blockchecks.engine.config import AQ_DOMAIN_ISOLATE
 
     active_domains: set[str] = set()
+    if quarantine is not None:
+        active_domains |= quarantine.exclude_domains()
     domain_lock = asyncio.Lock()
     tasks = [
         asyncio.create_task(
@@ -149,6 +152,7 @@ async def run_adaptive_tcp_bridge(
                 on_progress=on_progress,
                 active_domains=active_domains if AQ_DOMAIN_ISOLATE else None,
                 domain_lock=domain_lock if AQ_DOMAIN_ISOLATE else None,
+                quarantine=quarantine,
             )
         )
         for _ in range(max(1, int(workers)))
@@ -186,6 +190,7 @@ async def _bridge_worker(  # noqa: C901
     on_progress: ProgressCb | None,
     active_domains: set[str] | None = None,
     domain_lock: asyncio.Lock | None = None,
+    quarantine=None,
 ) -> None:
     """One AQ bridge worker.
 
@@ -199,6 +204,16 @@ async def _bridge_worker(  # noqa: C901
     active_domains = active_domains or set()
     domain_lock = domain_lock or asyncio.Lock()
 
+    async def _account(job: AdaptiveJob, ok: bool) -> None:
+        queue.mark_done(job, passed=ok)
+        stats.done += 1
+        if ok:
+            stats.passed += 1
+        if quarantine is not None:
+            newly = quarantine.record(job.domain, ok)
+            if newly:
+                await _persist_quarantine(runner, quarantine, newly)
+
     async def flush() -> None:
         nonlocal acc
         jobs = acc.flush()
@@ -211,10 +226,7 @@ async def _bridge_worker(  # noqa: C901
         )
         for job, result in zip(jobs, results, strict=False):
             ok = bool(result.success)
-            queue.mark_done(job, passed=ok)
-            stats.done += 1
-            if ok:
-                stats.passed += 1
+            await _account(job, ok)
             if on_progress:
                 on_progress(stats.done, stats.skipped, stats.passed)
         async with domain_lock:
@@ -223,7 +235,10 @@ async def _bridge_worker(  # noqa: C901
     async def pop_isolated() -> AdaptiveJob | None:
         """Pop a job whose domain is not currently probed by another worker."""
         async with domain_lock:
-            job = queue.pop(exclude_domains=set(active_domains))
+            exclude = set(active_domains)
+            if quarantine is not None:
+                exclude |= quarantine.exclude_domains()
+            job = queue.pop(exclude_domains=exclude)
             if job is not None:
                 active_domains.add(job.domain)
             return job
@@ -232,10 +247,7 @@ async def _bridge_worker(  # noqa: C901
         results = [await runner.test_tcp(job.item, job.domain, timeout=timeout)]
         for result in results:
             ok = bool(result.success)
-            queue.mark_done(job, passed=ok)
-            stats.done += 1
-            if ok:
-                stats.passed += 1
+            await _account(job, ok)
             if on_progress:
                 on_progress(stats.done, stats.skipped, stats.passed)
         async with domain_lock:
@@ -291,6 +303,7 @@ async def run_adaptive_tcp(
     lua_bridge: bool = False,
     bridge_batch: int = 500,
     workers: int = 4,
+    quarantine=None,
 ) -> AdaptiveRunResult:
     """Run TCP jobs from *queue* until empty or stopped (AQ5)."""
     backend = "lua_bridge" if lua_bridge else "classic"
@@ -304,6 +317,7 @@ async def run_adaptive_tcp(
             stop_event=stop_event,
             on_progress=on_progress,
             workers=workers,
+            quarantine=quarantine,
         )
 
     done = 0
@@ -322,6 +336,13 @@ async def run_adaptive_tcp(
         if not batch:
             break
 
+        if quarantine is not None:
+            dead = quarantine.exclude_domains()
+            if dead:
+                batch = [j for j in batch if j.domain not in dead]
+                if not batch:
+                    continue
+
         item = batch[0].item
         doms = [j.domain for j in batch]
         results = await _classic_aq_probe(runner, item, doms, timeout)
@@ -332,6 +353,10 @@ async def run_adaptive_tcp(
             done += 1
             if ok:
                 passed += 1
+            if quarantine is not None:
+                newly = quarantine.record(job.domain, ok)
+                if newly:
+                    await _persist_quarantine(runner, quarantine, newly)
             if on_progress:
                 on_progress(done, skipped, passed)
             if stop_event and stop_event.is_set():
@@ -357,6 +382,25 @@ async def _classic_aq_probe(runner, item, doms: list[str], timeout: float):
     return await runner.test_tcp_domains(
         item, doms, timeout=timeout, curl_parallel=len(doms)
     )
+
+
+async def _persist_quarantine(runner, quarantine, domain: str) -> None:
+    """Persist + notify one newly quarantined domain (best-effort)."""
+    info = quarantine.quarantined.get(domain) or {}
+    db = getattr(runner, "db", None)
+    if db is not None:
+        try:
+            await db.quarantine_domain(
+                domain,
+                reason=info.get("reason", ""),
+                failed=info.get("attempts", 0),
+            )
+        except Exception as exc:
+            log.warning("%s", f"  [quarantine] DB persist skipped for {domain} ({exc})")
+    if quarantine.config.auto_denylist:
+        from blockchecks.engine.domain_quarantine import append_denylist
+
+        append_denylist([info])
 
 
 async def persist_adaptive_weights(db: RunStateStore, weights: ScanWeights) -> None:

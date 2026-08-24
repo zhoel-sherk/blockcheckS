@@ -156,8 +156,9 @@ class SqliteRunStore:
                                         """INSERT INTO tcp_results
                                            (strategy_id,domain,status,http_code,latency_ms,
                                             gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
-                                            resolved_ip,dns_verdict,doh_server,fail_phase)
-                                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                            resolved_ip,dns_verdict,doh_server,fail_phase,
+                                            bridge_applied,bridge_batch_id,bridge_gen)
+                                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                         (
                                             sid,
                                             entry["domain"],
@@ -172,7 +173,14 @@ class SqliteRunStore:
                                             entry["resolved_ip"],
                                             entry["dns_verdict"],
                                             entry["doh_server"],
-                                            entry.get("fail_phase", ""),
+                                            entry.get("fail_phase") or "",
+                                            (
+                                                None
+                                                if entry.get("bridge_applied") is None
+                                                else int(entry["bridge_applied"])
+                                            ),
+                                            entry.get("bridge_batch_id") or 0,
+                                            entry.get("bridge_gen") or 0,
                                         ),
                                     )
                                 for entry in udp_batch:
@@ -233,6 +241,9 @@ class SqliteRunStore:
         doh_server: str = "",
         proto: str = "tcp",
         fail_phase: str = "",
+        bridge_applied: bool | None = None,
+        bridge_batch_id: int = 0,
+        bridge_gen: int = 0,
     ) -> None:
         if self.batch_size > 0:
             self._tcp_pending.append(
@@ -252,6 +263,9 @@ class SqliteRunStore:
                     "dns_verdict": dns_verdict or "",
                     "doh_server": doh_server or "",
                     "fail_phase": fail_phase or "",
+                    "bridge_applied": bridge_applied,
+                    "bridge_batch_id": int(bridge_batch_id or 0),
+                    "bridge_gen": int(bridge_gen or 0),
                 }
             )
             if len(self._tcp_pending) >= self.batch_size:
@@ -265,8 +279,9 @@ class SqliteRunStore:
                 """INSERT INTO tcp_results
                    (strategy_id,domain,status,http_code,latency_ms,
                     gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
-                    resolved_ip,dns_verdict,doh_server,fail_phase)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    resolved_ip,dns_verdict,doh_server,fail_phase,
+                    bridge_applied,bridge_batch_id,bridge_gen)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     sid,
                     domain,
@@ -282,6 +297,9 @@ class SqliteRunStore:
                     dns_verdict or "",
                     doh_server or "",
                     fail_phase or "",
+                    None if bridge_applied is None else int(bridge_applied),
+                    int(bridge_batch_id or 0),
+                    int(bridge_gen or 0),
                 ),
             )
             await db.commit()
@@ -322,6 +340,51 @@ class SqliteRunStore:
             )
             await db.commit()
         reclaim_sudo_ownership(self._path)
+
+    async def quarantine_domain(
+        self, domain: str, *, reason: str = "", failed: int = 0
+    ) -> None:
+        """Persist one quarantined domain (rare event — write immediately)."""
+        async with aiosqlite.connect(self._path) as db:
+            await SqliteRunStore._apply_pragmas(db)
+            await db.execute(
+                """INSERT INTO quarantined (domain, reason, failed, created)
+                   VALUES(?,?,?,?)
+                   ON CONFLICT(domain) DO UPDATE SET
+                     reason=excluded.reason, failed=excluded.failed""",
+                (
+                    domain,
+                    reason or "",
+                    int(failed or 0),
+                    time.strftime("%Y-%m-%dT%H:%M:%S"),
+                ),
+            )
+            await db.commit()
+        reclaim_sudo_ownership(self._path)
+
+    async def get_quarantined(self) -> list[dict]:
+        """All quarantined domains recorded for this campaign DB."""
+        async with aiosqlite.connect(self._path) as db:
+            await SqliteRunStore._apply_pragmas(db)
+            cur = await db.execute(
+                "SELECT domain, reason, failed, created FROM quarantined ORDER BY created"
+            )
+            rows = await cur.fetchall()
+        return [
+            {"domain": r[0], "reason": r[1], "failed": r[2], "created": r[3]}
+            for r in rows
+        ]
+
+    async def domain_pass_rows(self) -> list[tuple[str, int, int]]:
+        """Bulk (domain, total_attempts, total_passed) for quarantine seeding."""
+        async with aiosqlite.connect(self._path) as db:
+            await SqliteRunStore._apply_pragmas(db)
+            cur = await db.execute(
+                "SELECT domain, COUNT(*), SUM(status='PASS') FROM tcp_results "
+                "GROUP BY domain"
+            )
+            rows = await cur.fetchall()
+        return [(r[0], int(r[1] or 0), int(r[2] or 0)) for r in rows]
 
     async def write_dns_audit_log(
         self,
