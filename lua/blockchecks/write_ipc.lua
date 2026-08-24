@@ -51,3 +51,14 @@ function bs_read_strategy_ipc()
 	id_f:close()
 	return id, gen
 end
+
+-- Daemon liveness heartbeat (epoch seconds). Python treats a stale file
+-- (> ~2-3s with a 200ms period) as "daemon dead" BEFORE burning a probe
+-- on queue-bypassed clean traffic.
+function bs_write_heartbeat()
+	local f = io.open(writable_file_name("heartbeat"), "w")
+	if not f then return end
+	f:write(tostring(os.time()))
+	f:write("\n")
+	f:close()
+end

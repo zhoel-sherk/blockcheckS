@@ -55,6 +55,49 @@ Supporting changes:
 
 ---
 
+## 1.3.8 — TLS bypass classification, Discord redirect handling, MCP tools overhaul (2026-08-23)
+
+### Run-mechanics audit follow-up: heartbeat, live observability, curl_cffi 0.16.1 (2026-08-25)
+
+Post-audit quality sprint (mechanics of the run itself):
+
+- **Daemon heartbeat (Lua↔Python)**: `init.lua` timer writes `heartbeat`
+  (epoch s) every 200ms; `LuaBridge.heartbeat_age()` + per-probe freshness
+  check in `batch_service` — a dead/wedged nfqws2 is rebooted BEFORE burning
+  a curl timeout on queue-bypassed clean traffic.
+- **Honest wssize**: the lua_bridge "wssize retry" was a silent no-op
+  (`strategy.cmd` is not parsed by Lua — extra desync never applied). Removed
+  from the bridge path (classic retry with real conf injection stays).
+  Remaining known gap: implement Mode-A cmd parsing or drop the file entirely.
+- **Live observability without restart**:
+  - `service/live_events.py`: per-probe NDJSON journal
+    (`~/.local/state/blockcheckS/logs/events_live.jsonl`, auto-rotate @32MB)
+    + atomic `current_probe.json`; written by both batch backends.
+  - MCP: new **`get_live_events(tail, domain)`** tool (disk-based, works
+    during A→F) and `get_series_status` → `live` field.
+  - `tail -f events_live.jsonl` = physical run view in real time.
+- **curl_cffi 0.15.0 → 0.16.1** (vendored wheel; PyPI unreachable via pip on
+  this network — direct download): studied new API first. Findings:
+  - `impersonate="chrome"` now resolves to chrome150 (auto-latest);
+    ExtraFingerprints gained `http3_sig_hash_algs`/`http3_tls_extension_order`
+    (QUIC ClientHello fingerprint knobs); http/3 fingerprints + UDP SOCKS5
+    proxy since 0.15; `curl-cffi update` refreshes fingerprints in place.
+  - New env knob `BLOCKCHECKS_IMPERSONATE` (default stays pinned `chrome124`
+    for cross-run comparability). A/B mini-scan critical preset:
+    chrome124 46 PASS vs chrome150 42 PASS (~100 probes each — parity within
+    noise; latency mixed). Keep pin, override for experiments.
+  - QUIC reality check on Fryazino: NO real QUIC egress — curl reports
+    `http_version=3` (ALPN offer) while zero UDP:443 hits the wire, and
+    forced v3-only times out everywhere including Cloudflare. The earlier
+    "discord.gg works over h3" reading was this false positive.
+- **`dev/capture_quic_blob.sh`**: capture a REAL QUIC v1 Initial from any
+  impersonate target into an nfqws2 UDP fake blob (Electron-like Chromium QUIC
+  fingerprint for the Discord preset). Host-mode (temporary /etc/hosts pin +
+  tcpdump + built-in Initial extractor, self-tested). On Fryazino run it on
+  the Selectel VPS (clean QUIC path) and copy the blob back — recipe inline.
+
+---
+
 ## 1.3.8 — original release notes (2026-08-23)
 
 

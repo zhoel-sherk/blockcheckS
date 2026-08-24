@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     pass
 
 from blockchecks.checkers.curl_probe import is_googlevideo_domain, is_ytcdn_domain
+from blockchecks.service import live_events
 from blockchecks.service.batch_bridge_probe import run_tcp_check_bridge
 from blockchecks.service.batch_models import (
     BatchContext,
@@ -183,6 +184,12 @@ class ProbeBatchService:
             timeout_i, settle_max = self.deps.timing_for(item, timeout)
             protocol = getattr(item, "protocol", ctx.protocol) or ctx.protocol
             resolved_ip, _, _ = resolved_by_domain[dom]
+            live_events.set_current(
+                domain=dom,
+                strategy=getattr(item, "label", item.strategy),
+                ns=ns_name,
+                backend="classic",
+            )
             data = self.deps.run_tcp_check(
                 ns_name,
                 item.strategy,
@@ -215,6 +222,19 @@ class ProbeBatchService:
             )
             data["batch_id"] = ctx.batch_id
             result = self.deps.tcp_result_from_data(item, dom, data)
+            live_events.write_probe(
+                domain=dom,
+                strategy=getattr(item, "label", item.strategy),
+                ns=ns_name,
+                backend="classic",
+                status=(
+                    "THROTTLED" if result.throttled
+                    else ("PASS" if result.success else "FAIL")
+                ),
+                http_code=result.http_code,
+                latency_ms=result.latency_ms,
+                applied=result.bridge_applied,
+            )
             results.append(result)
         _netns_tcp_probe_cleanup(ns_name)
         return BatchProbeResult(
@@ -278,10 +298,27 @@ class ProbeBatchService:
                     session.boot()
                     boot_debug = _debug_env()
                     recycled += 1
+                elif self._daemon_heartbeat_stale(session):
+                    # Heartbeat stale (Lua timer silent > ~3s): daemon is dead
+                    # or wedged — reboot proactively instead of burning a curl
+                    # timeout on queue-bypassed clean traffic.
+                    log.warning(
+                        "%s",
+                        f"  {YELLOW}[bridge] heartbeat stale in {ns_name} — "
+                        f"rebooting daemon before probe{RESET}",
+                    )
+                    session.boot()
+                    recycled += 1
                 gen = self.deps.next_probe_gen()
                 timeout_i, _ = self.deps.timing_for(item, timeout)
                 item_proto = getattr(item, "protocol", protocol) or protocol
                 resolved_ip, _, _ = resolved_by_domain[dom]
+                live_events.set_current(
+                    domain=dom,
+                    strategy=getattr(item, "label", item.strategy),
+                    ns=ns_name,
+                    backend="lua_bridge",
+                )
                 data = run_tcp_check_bridge(
                     session,
                     idx,
@@ -299,18 +336,6 @@ class ProbeBatchService:
                     self.deps.repeats_mode,
                     self.deps.quick_break,
                     resolved_ips=(ip_lists_by_domain or {}).get(dom),
-                )
-                data = self._maybe_wssize_bridge_retry(
-                    session,
-                    idx,
-                    item,
-                    ctx,
-                    timeout_i,
-                    resolved_ip,
-                    item_proto,
-                    data,
-                    domain=dom,
-                    ip_lists=(ip_lists_by_domain or {}).get(dom),
                 )
                 if _bridge_silent(data) and isinstance(data, dict):
                     # Zero bridge activity means the daemon died mid-batch (a
@@ -343,20 +368,21 @@ class ProbeBatchService:
                         self.deps.quick_break,
                         resolved_ips=(ip_lists_by_domain or {}).get(dom),
                     )
-                    data = self._maybe_wssize_bridge_retry(
-                        session,
-                        idx,
-                        item,
-                        ctx,
-                        timeout_i,
-                        resolved_ip,
-                        item_proto,
-                        data,
-                        domain=dom,
-                        ip_lists=(ip_lists_by_domain or {}).get(dom),
-                    )
                 data["batch_id"] = ctx.batch_id
                 result = self.deps.tcp_result_from_data(item, dom, data)
+                live_events.write_probe(
+                    domain=dom,
+                    strategy=getattr(item, "label", item.strategy),
+                    ns=ns_name,
+                    backend="lua_bridge",
+                    status=(
+                        "THROTTLED" if result.throttled
+                        else ("PASS" if result.success else "FAIL")
+                    ),
+                    http_code=result.http_code,
+                    latency_ms=result.latency_ms,
+                    applied=result.bridge_applied,
+                )
                 results.append(result)
         finally:
             session.shutdown()
@@ -365,6 +391,21 @@ class ProbeBatchService:
             settle_ms=settle_ms,
             backend="lua_bridge",
         )
+
+    def _daemon_heartbeat_stale(self, session: BridgeSession, max_age: float = 3.0) -> bool:
+        """True when the Lua heartbeat is missing/stale — daemon dead or wedged.
+
+        The heartbeat timer rewrites the file every ~200ms, so anything above
+        ~3s means no live event loop in nfqws2. Probing then would only burn
+        curl timeout on queue-bypassed clean traffic.
+        """
+        try:
+            age = session.bridge.heartbeat_age()
+        except Exception:
+            return False
+        if not isinstance(age, (int, float)):
+            return False
+        return age > max_age
 
     def _bridge_ready_fence(
         self,
@@ -384,6 +425,15 @@ class ProbeBatchService:
         """
         if not ctx.items:
             return
+        if self._daemon_heartbeat_stale(session):
+            # Heartbeat already stale right after boot: skip the synthetic
+            # probe and reboot immediately.
+            log.warning(
+                "%s",
+                f"  {YELLOW}[bridge] heartbeat stale in {session.ns_name} "
+                f"right after boot — rebooting before fence{RESET}",
+            )
+            session.boot()
         # Fence against the first plain-TLS domain: googlevideo/ytcdn probes
         # need signed URLs / special prep and can legitimately produce no
         # bridge events, which would trip the reboot logic.
@@ -542,48 +592,6 @@ class ProbeBatchService:
                 protocol,
                 settle_max,
                 None,
-                self.deps.repeats_mode,
-                self.deps.quick_break,
-                resolved_ips=ip_lists,
-            )
-        return data
-
-    def _maybe_wssize_bridge_retry(
-        self,
-        session: BridgeSession,
-        idx: int,
-        item,
-        ctx: BatchContext,
-        timeout_i: float,
-        resolved_ip: str | None,
-        protocol: str,
-        data: dict,
-        *,
-        domain: str | None = None,
-        ip_lists: list[str] | None = None,
-    ) -> dict:
-        if (
-            not data.get("success")
-            and self.deps.try_wssize
-            and protocol == "tls12"
-            and not item.is_config
-            and "wssize" not in item.strategy
-        ):
-            gen = self.deps.next_probe_gen()
-            return run_tcp_check_bridge(
-                session,
-                idx,
-                gen,
-                item.strategy,
-                domain or ctx.domain,
-                timeout_i,
-                self.deps.python,
-                self.deps.disable_ech,
-                resolved_ip,
-                self.deps.repeats,
-                self.deps.parallel_repeats,
-                "wssize:wsize=1:scale=6",
-                protocol,
                 self.deps.repeats_mode,
                 self.deps.quick_break,
                 resolved_ips=ip_lists,

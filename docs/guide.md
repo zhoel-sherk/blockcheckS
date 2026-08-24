@@ -184,6 +184,7 @@ sudo bs full --preset coverage-tcp --profile 20h   # только если ну�
 |---|---|---|
 | Adaptive queue | ON | `--no-adaptive` |
 | Domain quarantine | ON (min 300 fails) | `--no-quarantine` / `--quarantine-min N`; `--quarantine-auto-denylist` пишет в denylist.txt |
+| TLS fingerprint | `chrome124` (pin для сравнимости) | env `BLOCKCHECKS_IMPERSONATE=chrome` (latest, сейчас chrome150); см. `dev/capture_quic_blob.sh` для QUIC-блобов |
 | Preflight | ON | `--no-preflight` (всё) или `--quick` (только prolog) |
 | ECH | ON | `--no-ech` |
 | Wssize (TLS 1.2) | ON | `--no-wssize` |
@@ -346,6 +347,7 @@ export BLOCKCHECKS_MEM_MONITOR=1
 | `--nfqws2-debug [1\|syslog\|@path]` | только nfqws2 |
 | `BLOCKCHECKS_LOG_LEVEL=DEBUG` | уровень при старте |
 | SIGUSR1 кампании / `bs serve` | toggle; nfqws2 подхватит на **следующем** probe |
+| Live-пробы без перезапуска | MCP `get_live_events` / `tail -f ~/.local/state/blockcheckS/logs/events_live.jsonl`; текущая проба — `get_series_status.live` |
 | MCP `set_debug_mode` / `POST /api/set-debug` | то же через демон |
 
 ```bash

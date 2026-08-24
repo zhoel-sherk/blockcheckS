@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,6 +93,10 @@ class BridgePaths:
     @property
     def events(self) -> Path:
         return self.base / "events.ndjson"
+
+    @property
+    def heartbeat(self) -> Path:
+        return self.base / "heartbeat"
 
 
 class LuaBridge:
@@ -203,3 +208,18 @@ class LuaBridge:
 
     def truncate_events(self) -> None:
         self._init_events()
+
+    def heartbeat_age(self, *, now: float | None = None) -> float | None:
+        """Seconds since the daemon's last heartbeat, or None if unknown.
+
+        The Lua timer (init.lua) rewrites ``heartbeat`` (epoch seconds) every
+        ~200ms while nfqws2 is alive. A stale value means the daemon is dead
+        or wedged — check BEFORE burning a probe on queue-bypassed traffic.
+        """
+        try:
+            raw = self.paths.heartbeat.read_text(encoding="utf-8").strip()
+            ts = int(raw)
+        except (OSError, ValueError):
+            return None
+        ref = time.time() if now is None else now
+        return max(0.0, float(ref - ts))

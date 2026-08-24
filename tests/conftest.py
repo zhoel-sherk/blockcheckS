@@ -156,3 +156,14 @@ def nfqws2_available():
     if not os.path.exists(NFQWS2_BIN):
         pytest.skip(f"nfqws2 not available: {NFQWS2_BIN}")
     return NFQWS2_BIN
+
+
+@pytest.fixture(autouse=True)
+def _live_events_tmp(monkeypatch, tmp_path):
+    """Redirect live-journal files to tmp: unit tests must not write the
+    real state-dir journal/current-probe files."""
+    import blockchecks.service.live_events as le
+
+    monkeypatch.setattr(le, "EVENTS_FILE", tmp_path / "events_live.jsonl")
+    monkeypatch.setattr(le, "CURRENT_FILE", tmp_path / "current_probe.json")
+    yield

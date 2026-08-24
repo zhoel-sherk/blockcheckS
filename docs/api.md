@@ -83,7 +83,7 @@
 Реализовано **19 инструментов**. Детали и контракты — в [docs/mcp.md](mcp.md), воркфлоу — в [docs/mcp-skill.md](mcp-skill.md).
 
 - **Слой A (требуют демон):** `triage_domain`, `find_working_strategy`, `generate_router_config`, `get_service_status`, `set_debug_mode`
-- **Слой A2 (без демона):** `get_series_status`, `query_strategies`, `get_presets`, `stop_campaign` (через socket_core), `get_log_tail` (диск: python/campaign)
+- **Слой A2 (без демона):** `get_series_status`, `query_strategies`, `get_presets`, `stop_campaign` (через socket_core), `get_log_tail` (диск: python/campaign/nfqws2/live), `get_live_events` (live-журнал проб кампании)
 - **Слой B (требуют демон, отладка):** `dbg_probe_raw`, `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`
 - **Слой B (без демона):** `dbg_validate_strategy_syntax`
 - **Слой C (без демона, RO):** `get_nfqws2_status`, `get_zapret2_config`, `list_zapret2_blobs`, `get_ipset_status`

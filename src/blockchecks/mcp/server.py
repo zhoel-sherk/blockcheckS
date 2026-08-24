@@ -337,6 +337,31 @@ async def get_log_tail(
 
 
 @mcp.tool()
+async def get_live_events(
+    tail: int = 50,
+    domain: str = "",
+) -> dict[str, Any]:
+    """Live per-probe events of the RUNNING campaign (no daemon required).
+
+    Reads the campaign's live journal (state logs dir) written by the probe
+    loops: one record per finished probe with domain/strategy/ns/status/http/
+    latency/applied. Works during long runs (fair exclusion does not apply —
+    disk-based). Optional exact *domain* filter. Also see get_series_status →
+    "live" for what is being probed right now.
+    """
+    from blockchecks.service import live_events
+
+    events = live_events.tail_events(limit=max(1, min(int(tail), 500)),
+                                     domain=domain.strip() or None)
+    return {
+        "ok": True,
+        "path": str(live_events.EVENTS_FILE),
+        "count": len(events),
+        "events": events,
+    }
+
+
+@mcp.tool()
 async def get_series_status() -> dict[str, Any]:
     """
     Reads the long-term campaign status directly from disk (run.lock + state.db)
@@ -399,6 +424,9 @@ async def get_series_status() -> dict[str, Any]:
 
     # Progress line `[done/total] pass=N rate ETA` from the run log, if any.
     payload["progress"] = _read_progress_line(info)
+    from blockchecks.service import live_events
+
+    payload["live"] = live_events.read_current()
     payload["state_dir"] = str(STATE_DIR)
     payload["logs_dir"] = str(RUNTIME_LOGS_DIR)
     from blockchecks.engine.log import debug_status

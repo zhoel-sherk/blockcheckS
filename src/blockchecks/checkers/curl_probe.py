@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -24,6 +25,18 @@ from blockchecks.engine.config import (
     SOCKS5_PROXY,
     THROTTLED_MAX_BPS,
 )
+
+#: TLS/HTTP fingerprint target for all probes. Pinned to chrome124 by default
+#: so campaign results stay comparable across runs; override per-run with
+#: BLOCKCHECKS_IMPERSONATE (e.g. "chrome" -> latest preset, currently chrome150).
+DEFAULT_IMPERSONATE = "chrome124"
+
+
+def impersonate_target() -> str:
+    """Resolved curl_cffi impersonate target (env override, validated lazily)."""
+    val = (os.environ.get("BLOCKCHECKS_IMPERSONATE") or "").strip()
+    return val or DEFAULT_IMPERSONATE
+
 
 try:
     CURLOPT_IPRESOLVE = curl_cffi.CurlOpt.IPRESOLVE
@@ -491,7 +504,7 @@ def _open_curl_session(req: CurlProbeRequest) -> curl_cffi.Session | CurlProbeRe
         headers["Referer"] = "https://www.youtube.com/"
         headers["Origin"] = "https://www.youtube.com"
     session = curl_cffi.Session(
-        impersonate="chrome124",
+        impersonate=impersonate_target(),
         http_version="v1" if is_http else 2,
         headers=headers,
         allow_redirects=False,
