@@ -242,7 +242,11 @@ class NetNsPool:
         out_iface = self._get_iface()
         nat_subnet = self._nat_subnet(idx)
 
-        self._run("ip", "netns", "exec", name, "pkill", "-9", "nfqws2", check=False)
+        # Scoped kill (host-wide pkill via netns exec is forbidden — see
+        # metrics.pkill_nfqws2_in_ns).
+        from blockchecks.service.metrics import pkill_nfqws2_in_ns
+
+        pkill_nfqws2_in_ns(name)
         self._run("ip", "netns", "exec", name, "iptables", "-F", "OUTPUT", check=False)
         self._run("ip", "netns", "delete", name, check=False)
         self._run("ip", "link", "delete", veth_h, check=False)
@@ -268,9 +272,10 @@ class NetNsPool:
     def _cleanup_ns(self, ns_name: str) -> None:
         """Best-effort cleanup inside a netns before returning to pool."""
         from blockchecks.service.lua_bridge_ipc import LuaBridge
+        from blockchecks.service.metrics import pkill_nfqws2_in_ns
 
+        pkill_nfqws2_in_ns(ns_name)
         LuaBridge(ns_name).teardown()
-        self._run("ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2", check=False)
         self._run("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT", check=False)
 
     # Public API

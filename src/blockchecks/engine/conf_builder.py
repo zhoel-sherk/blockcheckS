@@ -15,6 +15,7 @@ from typing import Any
 from blockchecks.engine.blob_aliases import (
     STOCK_KEENETIC_BLOB_FILES,
     append_blob_cli_lines,
+    apply_blob_renames,
     blob_cli_lines,
     blob_export_cli_line,
     blob_export_filename,
@@ -339,9 +340,16 @@ def sanitize_arg_for_conf(cli: str) -> str:
     return escape_conf_lt(cli)
 
 
-def add_blobs_from_strategy(lines: list[str], strategy: str) -> None:
-    """Parse strategy for blob=NAME and seqovl_pattern=NAME; add --blob lines."""
-    append_blob_cli_lines(lines, extract_blob_names(strategy), BLOB_DIR)
+def add_blobs_from_strategy(lines: list[str], strategy: str) -> str:
+    """Parse strategy for blob=NAME / seqovl_pattern=NAME; add --blob lines.
+
+    Returns the (possibly rewritten) strategy text: identifiers that nfqws2
+    rejects (leading digit, e.g. ``4pda`` → "bad identifier") are renamed to
+    a safe form in BOTH the --blob lines and the returned strategy, keeping
+    classic-path confs bootable. Matrix labels/DB keys stay untouched.
+    """
+    renames = append_blob_cli_lines(lines, extract_blob_names(strategy), BLOB_DIR)
+    return apply_blob_renames(strategy, renames)
 
 
 def build_filter_lines(protocol: str) -> list[str]:

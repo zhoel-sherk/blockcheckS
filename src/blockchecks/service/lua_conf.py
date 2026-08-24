@@ -8,7 +8,11 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from blockchecks.engine.blob_aliases import append_blob_cli_lines, extract_blob_names
+from blockchecks.engine.blob_aliases import (
+    append_blob_cli_lines,
+    apply_blob_renames,
+    extract_blob_names,
+)
 from blockchecks.engine.conf_builder import (
     build_filter_lines,
     escape_conf_lt,
@@ -85,16 +89,23 @@ def build_bridge_conf(
     all_blob_names: list[str] = []
     for strat in strategies:
         all_blob_names.extend(extract_blob_names(strat))
-    unresolved = append_blob_cli_lines(lines, all_blob_names, BLOB_DIR)
-    if unresolved:
+    renames = append_blob_cli_lines(lines, all_blob_names, BLOB_DIR)
+    unresolvable = sorted(n for n, safe in renames.items() if not safe)
+    if unresolvable:
         log.warning(
             "%s",
-            f"  WARNING: bridge conf has unresolvable blobs {sorted(set(unresolved))} — "
+            f"  WARNING: bridge conf has unresolvable blobs {unresolvable} — "
             f"affected strategies will fail per-packet (no APPLIED, clean traffic)",
+        )
+    if any(k != v for k, v in renames.items()):
+        log.info(
+            "%s",
+            f"  [bridge] blob identifiers renamed for nfqws2: "
+            f"{ {k: v for k, v in renames.items() if k != v and v} }",
         )
 
     for i, strat in enumerate(strategies, start=1):
-        _append_strategy_desyncs(lines, strat, i)
+        _append_strategy_desyncs(lines, apply_blob_renames(strat, renames), i)
 
     return "\n".join(lines) + "\n"
 

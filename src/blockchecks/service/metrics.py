@@ -62,6 +62,27 @@ def _proc_status_value(pid: int, field: str) -> int:
     return 0
 
 
+def pkill_nfqws2_in_ns(ns_name: str) -> int:
+    """SIGKILL every nfqws2 whose netns inode matches *ns_name*; return count.
+
+    MUST be used instead of ``ip netns exec <ns> pkill -9 nfqws2``: netns exec
+    does NOT create a PID namespace, so that pkill scans the HOST /proc and
+    kills every nfqws2 in every namespace — massacring sibling workers'
+    daemons mid-batch (the real root cause of the "PASS without APPLIED"
+    storm). PID-scoped kill touches only the target namespace.
+    """
+    import signal as _signal
+
+    killed = 0
+    for pid in find_nfqws2_pids(ns_name):
+        try:
+            os.kill(pid, _signal.SIGKILL)
+            killed += 1
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    return killed
+
+
 def process_rss_bytes(pid: int) -> int:
     """RSS in bytes for *pid* (0 on any error). Stdlib /proc reader (no psutil)."""
     return _proc_status_value(pid, "VmRSS")

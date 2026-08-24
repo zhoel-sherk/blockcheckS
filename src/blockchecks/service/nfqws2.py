@@ -94,11 +94,10 @@ def start_daemon(
         shutil.copy2(config_path, tmp_conf)
         dbg_path = inject_debug_and_daemon(tmp_conf, tag=ns_name)
         if kill_existing:
-            subprocess.run(
-                ["sudo", "ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Scoped kill: netns exec pkill would hit nfqws2 host-wide (no PID ns).
+            from blockchecks.service.metrics import pkill_nfqws2_in_ns
+
+            pkill_nfqws2_in_ns(ns_name)
             # pkill is async: the old daemon may still hold the NFQUEUE socket
             # when the new one binds, causing the new daemon to die (settle
             # spikes, "PASS without APPLIED" warnings). Wait for it to actually

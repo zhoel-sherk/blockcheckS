@@ -56,7 +56,7 @@ def test_bridge_session_shutdown(session):
     ):
         session.shutdown()
     assert session.iptables_ready is False
-    assert m_run.call_count == 2  # pkill + iptables -F
+    assert m_run.call_count == 1  # iptables -F; pkill is PID-scoped now
     session.bridge.teardown.assert_called_once()
 
 

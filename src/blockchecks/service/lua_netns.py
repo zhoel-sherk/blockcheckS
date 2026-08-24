@@ -31,12 +31,9 @@ def _netns_tcp_probe_cleanup(ns_name: str) -> None:
     """Drop nfqws2 + flush OUTPUT iptables after classic per-probe runs."""
     import subprocess as sp
 
-    sp.run(
-        ["sudo", "ip", "netns", "exec", ns_name, "pkill", "-9", "nfqws2"],
-        capture_output=True,
-        check=False,
-        timeout=15,
-    )
+    from blockchecks.service.metrics import pkill_nfqws2_in_ns
+
+    pkill_nfqws2_in_ns(ns_name)
     sp.run(
         ["sudo", "ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT"],
         capture_output=True,

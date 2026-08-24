@@ -59,12 +59,9 @@ class BridgeSession:
     def shutdown(self) -> None:
         import subprocess as sp
 
-        sp.run(
-            ["sudo", "ip", "netns", "exec", self.ns_name, "pkill", "-9", "nfqws2"],
-            capture_output=True,
-            check=False,
-            timeout=15,
-        )
+        from blockchecks.service.metrics import pkill_nfqws2_in_ns
+
+        pkill_nfqws2_in_ns(self.ns_name)
         if self.iptables_ready:
             sp.run(
                 ["sudo", "ip", "netns", "exec", self.ns_name, "iptables", "-F", "OUTPUT"],

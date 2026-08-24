@@ -39,9 +39,14 @@ def test_check_netns_missing_raises():
 
 
 def test_netns_tcp_probe_cleanup():
-    with patch("subprocess.run") as run:
+    # pkill is now PID-scoped via metrics (netns-exec pkill is host-wide!);
+    # only the iptables -F remains a subprocess call.
+    with patch("subprocess.run") as run, patch(
+        "blockchecks.service.metrics.pkill_nfqws2_in_ns", return_value=0
+    ) as pk:
         _netns_tcp_probe_cleanup("bs-p-0")
-    assert run.call_count == 2
+    assert pk.call_count == 1 and pk.call_args.args == ("bs-p-0",)
+    assert run.call_count == 1
 
 
 def test_bridge_iptables_add_tcp():

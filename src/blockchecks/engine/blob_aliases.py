@@ -159,30 +159,63 @@ def append_blob_cli_lines(
     lines: list[str],
     names: Iterable[str],
     blobs_dir: str | None = None,
-) -> list[str]:
+    rename_map: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Append unique ``--blob=NAME:@path`` lines for each resolvable name.
 
-    Returns the list of names that could NOT be resolved. Unresolved blob
-    references are logged loudly here — nfqws2 dies per-packet on an
-    undefined blob (no APPLIED event, clean-traffic probes), so a silent
-    skip here poisons results downstream.
+    Returns the rename map applied (original -> conf-safe identifier) plus
+    entries for unresolvable names mapped to "" — callers must rewrite
+    strategy text accordingly. nfqws2 rejects identifiers starting with a
+    digit ("bad identifier '4pda'") and EXITS AT STARTUP, killing the whole
+    batch; such names are emitted as ``b<name>`` and strategy references are
+    renamed to match. Unresolvable names are logged loudly — a missing blob
+    dies per-packet at runtime (no APPLIED event, clean-traffic probes).
     """
-    unresolved: list[str] = []
+    renames: dict[str, str] = dict(rename_map or {})
     for name in names:
-        if any(line.startswith(f"--blob={name}:@") for line in lines):
+        safe = renames.get(name)
+        if safe is None:
+            safe = safe_blob_name(name)
+            renames[name] = safe
+        if not safe:
+            continue  # already reported as unresolvable
+        if any(line.startswith(f"--blob={safe}:@") for line in lines):
             continue
         cli = blob_cli_line(name, blobs_dir)
         if cli:
-            lines.append(cli)
+            lines.append(f"--blob={safe}:@{cli.split(':@', 1)[1]}")
         else:
-            unresolved.append(name)
+            renames[name] = ""
             log.warning(
                 "%s",
                 f"  WARNING: blob {name!r} not resolvable in "
                 f"{blobs_dir or BLOB_DIR} (searched aliases + repo/vendor dirs) — "
                 f"strategy will fail at runtime; add the .bin or fix the alias",
             )
-    return unresolved
+    return renames
+
+
+_BLOB_SAFE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def safe_blob_name(name: str) -> str:
+    """nfqws2-safe blob identifier (must not start with a digit)."""
+    return name if _BLOB_SAFE_RE.match(name) else f"b{name}"
+
+
+def apply_blob_renames(text: str, renames: dict[str, str]) -> str:
+    """Rewrite blob=/pattern=/seqovl_pattern= references per *renames*."""
+    if not renames:
+        return text
+    for orig, safe in renames.items():
+        if not orig or not safe or orig == safe:
+            continue
+        text = re.sub(
+            rf"((?:blob|pattern|seqovl_pattern)=){re.escape(orig)}\b",
+            rf"\g<1>{safe}",
+            text,
+        )
+    return text
 
 
 def blob_cli_lines(names: Iterable[str], blobs_dir: str | None = None) -> list[str]:

@@ -142,7 +142,7 @@ def _conf_from_file(strategy: str, port: int) -> str:
 def _inline_udp_lines(strategy: str, port: int) -> list[str]:
     base = _udp_base_lines()
     lines = [base[0], f"--filter-udp={voice_udp_filter_for_port(port)}", *base[1:]]
-    add_blobs_from_strategy(lines, strategy)
+    strategy = add_blobs_from_strategy(lines, strategy)
     if not any(ln.startswith("--blob=") for ln in lines):
         blob = os.path.join(BLOB_DIR, "discord_udp.bin")
         if os.path.exists(blob):
