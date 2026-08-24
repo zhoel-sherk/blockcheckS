@@ -167,7 +167,8 @@ EOF
   echo "===== STAGE $id preset=$preset ${hours}h $(date -Is) ====="
   set +e
   sudo -E env HOME="$HOME" BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}" \
-    BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}" "$runner"
+    BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}" \
+    BLOCKCHECKS_NFQWS2_DEBUG="${BLOCKCHECKS_NFQWS2_DEBUG-}" "$runner"
   local rc=$?
   set -e
   rm -f "$runner"

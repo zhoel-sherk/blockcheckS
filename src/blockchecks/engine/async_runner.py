@@ -400,7 +400,7 @@ class AsyncTestRunner:
                         ns_name,
                         item.strategy,
                         domain,
-                        timeout,
+                        min(timeout, 1.5),
                         item.is_config,
                         self.python,
                         self.disable_ech,

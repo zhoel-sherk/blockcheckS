@@ -43,6 +43,7 @@ class BlockchecksSettings(BaseSettings):
     proxy: str = ""
     unblocked_dom: str = "ripe.net"
     curl_parallel: int = 1
+    wall_slack: float = 3.0
 
 
 def _load_user_toml(path: Path | None = None) -> dict[str, Any]:
@@ -71,6 +72,8 @@ def _overlay_from_toml(data: dict[str, Any]) -> dict[str, Any]:
     run = data.get("run") or {}
     if isinstance(run, dict) and "parallel" in run and not os.environ.get("BLOCKCHECKS_POOL"):
         out["pool"] = int(run["parallel"])
+    if isinstance(run, dict) and "wall_slack" in run and not os.environ.get("BLOCKCHECKS_WALL_SLACK"):
+        out["wall_slack"] = float(run["wall_slack"])
     secure = data.get("secure_dns") or {}
     if isinstance(secure, dict):
         if "enabled" in secure and not os.environ.get("BLOCKCHECKS_SECURE_DNS"):
@@ -157,6 +160,7 @@ def apply_settings_env(settings: BlockchecksSettings | None = None) -> Blockchec
     os.environ.setdefault("BLOCKCHECKS_PROXY", s.proxy)
     os.environ.setdefault("BLOCKCHECKS_UNBLOCKED_DOM", s.unblocked_dom)
     os.environ.setdefault("BLOCKCHECKS_CURL_PARALLEL", str(s.curl_parallel))
+    os.environ.setdefault("BLOCKCHECKS_WALL_SLACK", str(s.wall_slack))
     _apply_doh_catalog(s)
     return s
 

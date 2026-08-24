@@ -26,6 +26,9 @@ bridge_batch = 10
 domain_isolate = true
 # Retry-on-next-IP budget after first failed IP (classic path), seconds.
 retry_ip_timeout = 1.0
+# Wall-clock slack (s) added atop probe timeout for the worker subprocess.
+# WARNING: keep >= 1.5 — lower values kill healthy workers on slow DNS/disk.
+# wall_slack = 3.0
 # AQ ε-greedy exploration.
 # adaptive_epsilon = 0.1
 # max = 0

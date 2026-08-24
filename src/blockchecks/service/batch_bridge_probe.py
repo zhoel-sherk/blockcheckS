@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from blockchecks.checkers.curl_probe import (
     CurlProbeRequest,
     is_googlevideo_domain,
@@ -12,6 +14,21 @@ from blockchecks.checkers.curl_probe import (
 )
 from blockchecks.service.lua_session import BridgeSession
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
+
+
+def _drain_with_poll(bridge, since_gen: int, expect_id: int) -> list:
+    """Drain bridge events with a short retry: Lua may flush its APPLIED line
+    a few ms after curl returns (write latency under load). Without the poll
+    such probes were misread as "daemon dead" and triggered costly reboots."""
+    events = bridge.drain_events(since_gen=since_gen, expect_id=expect_id)
+    if events:
+        return events
+    for _ in range(5):
+        time.sleep(0.04)
+        events = bridge.drain_events(since_gen=since_gen, expect_id=expect_id)
+        if events:
+            break
+    return events
 
 
 def _attach_bridge_verdict(data: dict, events: list, session=None) -> None:
@@ -74,7 +91,7 @@ def run_tcp_check_bridge(
         data["settle_ms"] = 0.0
         data["bridge_gen"] = gen
         data["bridge_id"] = strategy_id
-        events = session.bridge.drain_events(since_gen=gen, expect_id=strategy_id)
+        events = _drain_with_poll(session.bridge, gen, strategy_id)
         data["bridge_events"] = [e.event for e in events]
         _attach_bridge_verdict(data, events, session)
         return data
@@ -139,7 +156,7 @@ def run_tcp_check_bridge(
             break
     data["bridge_gen"] = gen
     data["bridge_id"] = strategy_id
-    events = session.bridge.drain_events(since_gen=gen, expect_id=strategy_id)
+    events = _drain_with_poll(session.bridge, gen, strategy_id)
     data["bridge_events"] = [e.event for e in events]
     _attach_bridge_verdict(data, events, session)
     return data

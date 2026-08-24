@@ -214,6 +214,11 @@ DEFAULT_PROBE_BACKEND = "lua_bridge"  # lua_bridge is the default probe backend
 
 # Retry-on-next-IP budget after the first failed IP (classic path).
 RETRY_IP_TIMEOUT = float(_env_or("BLOCKCHECKS_RETRY_IP_TIMEOUT", "1.0"))
+# Extra wall-clock seconds added atop the probe timeout for the curl worker
+# subprocess (spawn + interpreter import + drain). Lower it on fast machines
+# to fail hung workers sooner; keep >= 1.5 — below that healthy workers on
+# slow DNS/disk start getting killed mid-probe.
+WALL_SLACK = max(0.5, float(_env_or("BLOCKCHECKS_WALL_SLACK", "3.0")))
 # Auto-IP-pin candidate probe timeout (async_runner.ip_pin).
 PIN_TIMEOUT = float(_env_or("BLOCKCHECKS_PIN_TIMEOUT", "3.0"))
 # yt-dlp googlevideo URL fetch timeout.

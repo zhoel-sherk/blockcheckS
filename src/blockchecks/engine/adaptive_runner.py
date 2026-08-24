@@ -44,6 +44,7 @@ async def build_adaptive_queue(
     resume_check: ResumeCb | None = None,
     provider_store: Any = None,
     triage: Any = None,
+    quarantine=None,
 ) -> tuple[AdaptiveJobQueue, int]:
     """Create queue, optionally loading persisted weights and applying resume skip."""
     weights = ScanWeights()
@@ -59,6 +60,10 @@ async def build_adaptive_queue(
         weights.seed_from_triage(triage)
 
     queue = AdaptiveJobQueue.build(items, domains, weights=weights, epsilon=epsilon)
+    if quarantine is not None:
+        # Hard-exclude quarantined domains BEFORE resume filtering so dead
+        # domains never enter the heap at all.
+        queue.excluded_domains |= quarantine.exclude_domains()
     skipped = 0
     if resume_check:
         skipped = await queue.filter_resume(resume_check)
@@ -212,7 +217,9 @@ async def _bridge_worker(  # noqa: C901
         if quarantine is not None:
             newly = quarantine.record(job.domain, ok)
             if newly:
-                await _persist_quarantine(runner, quarantine, newly)
+                # Hard-exclude immediately so sibling workers drop these jobs.
+                queue.excluded_domains.add(domain := newly)
+                await _persist_quarantine(runner, quarantine, domain)
 
     async def flush() -> None:
         nonlocal acc

@@ -24,6 +24,7 @@ from blockchecks.engine.config import (
     MIN_READ_RATE_BPS,
     SOCKS5_PROXY,
     THROTTLED_MAX_BPS,
+    WALL_SLACK,
 )
 
 #: TLS/HTTP fingerprint target for all probes. Pinned to chrome124 by default
@@ -671,7 +672,7 @@ def worker_wall_timeout(
     n_domains: int = 1,
     curl_parallel: int = 1,
     parallel_repeats: bool = False,
-    settle_slack: float = 3.0,
+    settle_slack: float | None = None,
 ) -> float:
     """Subprocess wall-clock budget for curl probe worker (repeats-aware).
 
@@ -685,7 +686,9 @@ def worker_wall_timeout(
     par = max(1, int(curl_parallel))
     waves = math.ceil(n / par)
     per_wave = float(probe_timeout) if parallel_repeats and r > 1 else float(probe_timeout) * r
-    return per_wave * waves + max(3.0, float(settle_slack))
+    if settle_slack is None:
+        settle_slack = WALL_SLACK
+    return per_wave * waves + max(0.5, float(settle_slack))
 
 
 def run_curl_probe_with_repeats(

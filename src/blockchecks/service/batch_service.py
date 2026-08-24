@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-from blockchecks.checkers.curl_probe import is_googlevideo_domain, is_ytcdn_domain
 from blockchecks.service import live_events
 from blockchecks.service.batch_bridge_probe import run_tcp_check_bridge
 from blockchecks.service.batch_models import (
@@ -212,7 +211,7 @@ class ProbeBatchService:
             data = self._maybe_wssize_retry(
                 item,
                 ctx,
-                timeout_i,
+                min(timeout_i, 1.5),
                 ns_name,
                 resolved_ip,
                 protocol,
@@ -349,6 +348,9 @@ class ProbeBatchService:
                         f"{RESET}",
                     )
                     session.boot()
+                    # Give Lua time to finish init/plan-build before the retry
+                    # probe; otherwise it runs clean again and cascades.
+                    self._wait_heartbeat(session)
                     gen = self.deps.next_probe_gen()
                     data = run_tcp_check_bridge(
                         session,
@@ -407,6 +409,23 @@ class ProbeBatchService:
             return False
         return age > max_age
 
+    def _wait_heartbeat(self, session: BridgeSession, within: float = 1.2) -> bool:
+        """Block until the daemon's Lua heartbeat is fresh (age <= 1.0s).
+
+        Proof that the Lua event loop is running and the desync plan is built;
+        probing before that risks queue-bypassed clean traffic.
+        """
+        deadline = time.monotonic() + within
+        while time.monotonic() < deadline:
+            try:
+                age = session.bridge.heartbeat_age()
+            except Exception:
+                age = None
+            if isinstance(age, (int, float)) and age <= 1.0:
+                return True
+            time.sleep(0.05)
+        return False
+
     def _bridge_ready_fence(
         self,
         session: BridgeSession,
@@ -414,112 +433,27 @@ class ProbeBatchService:
         timeout: float,
         resolved_by_domain: dict[str, tuple[str | None, str, str]],
     ) -> None:
-        """Verify the freshly booted daemon actually applies strategies.
+        """Wait for the daemon's Lua heartbeat right after boot (readiness).
 
-        settle only waits for process visibility (/proc), but under load Lua
-        init (3 scripts + plan build) and the NFQUEUE bind can lag behind —
-        early probes then leave the netns clean (queue-bypass) producing
-        false "PASS without APPLIED" rows. Fire one synthetic probe against
-        the batch's first domain; require ANY bridge event. On silence,
-        reboot the daemon once and retry; give up with a loud warning.
+        settle only waits for process visibility (/proc); Lua init (3 scripts
+        + plan build) and the NFQUEUE bind can lag behind — early probes then
+        leave the netns clean (queue-bypass) producing false "PASS without
+        APPLIED" rows. The heartbeat timer (init.lua, 200ms) is a cheap proof
+        that the Lua event loop is alive; no synthetic curl needed. On silence
+        the daemon reboots once and we wait again; give up with a warning —
+        the per-probe zero-event retry remains as the last-resort backstop.
         """
-        if not ctx.items:
-            return
-        if self._daemon_heartbeat_stale(session):
-            # Heartbeat already stale right after boot: skip the synthetic
-            # probe and reboot immediately.
-            log.warning(
-                "%s",
-                f"  {YELLOW}[bridge] heartbeat stale in {session.ns_name} "
-                f"right after boot — rebooting before fence{RESET}",
-            )
-            session.boot()
-        # Fence against the first plain-TLS domain: googlevideo/ytcdn probes
-        # need signed URLs / special prep and can legitimately produce no
-        # bridge events, which would trip the reboot logic.
-        dom = ""
-        resolved_ip = None
-        for item, d in zip(ctx.items, ctx.item_domains(), strict=False):
-            proto_i = getattr(item, "protocol", ctx.protocol) or ctx.protocol
-            if proto_i != "tls12" or is_googlevideo_domain(d) or is_ytcdn_domain(d):
-                continue
-            dom = d
-            resolved_ip = resolved_by_domain.get(d, (None, "", ""))[0]
-            break
-        if not dom:
-            return
-        protocol = getattr(ctx.items[0], "protocol", ctx.protocol) or ctx.protocol
-        # Fence is best-effort: never let it kill the batch. Any internal
-        # error here is logged loudly and skips the check.
-        try:
-            strat_text = (getattr(session, "strategies", None) or [""])[0]
-            gen = self.deps.next_probe_gen()
-            fence_timeout = min(timeout, 1.5)
-            data = run_tcp_check_bridge(
-                session,
-                1,
-                gen,
-                strat_text,
-                dom,
-                fence_timeout,
-                self.deps.python,
-                self.deps.disable_ech,
-                resolved_ip,
-                1,
-                False,
-                "",
-                protocol,
-                "fast",
-                False,
-            )
-        except Exception as exc:  # noqa: BLE001 — fence must not break probing
-            log.warning(
-                "%s",
-                f"  {YELLOW}[bridge] readiness fence errored ({exc}) — skipping check{RESET}",
-            )
-            return
-        # Non-dict responses come from test doubles / exotic backends:
-        # treat them as ready instead of rebooting (keeps mock semantics).
-        if not isinstance(data, dict):
-            return
-        events = data.get("bridge_events") or []
-        if data.get("bridge_applied") or events:
+        del ctx, timeout, resolved_by_domain  # readiness no longer probes
+
+        if self._wait_heartbeat(session):
             return
         log.warning(
             "%s",
-            f"  {YELLOW}[bridge] readiness fence silent in {session.ns_name} "
-            f"— rebooting daemon and retrying{RESET}",
+            f"  {YELLOW}[bridge] no heartbeat from {session.ns_name} within 1.2s "
+            f"— rebooting daemon and waiting again{RESET}",
         )
         session.boot()
-        try:
-            gen2 = self.deps.next_probe_gen()
-            data2 = run_tcp_check_bridge(
-                session,
-                1,
-                gen2,
-                strat_text,
-                dom,
-                fence_timeout,
-                self.deps.python,
-                self.deps.disable_ech,
-                resolved_ip,
-                1,
-                False,
-                "",
-                protocol,
-                "fast",
-                False,
-            )
-        except Exception as exc:  # noqa: BLE001 — fence must not break probing
-            log.warning(
-                "%s",
-                f"  {YELLOW}[bridge] readiness retry errored ({exc}) — skipping check{RESET}",
-            )
-            return
-        if not isinstance(data2, dict):
-            return
-        events2 = data2.get("bridge_events") or []
-        if data2.get("bridge_applied") or events2:
+        if self._wait_heartbeat(session):
             return
         log.warning(
             "%s",

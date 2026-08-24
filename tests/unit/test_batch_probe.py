@@ -132,6 +132,8 @@ async def test_probe_batch_service_lua_bridge_mock() -> None:
         def __init__(self, **_k) -> None:
             self.bridge = MagicMock()
             self.bridge.truncate_events = MagicMock()
+            # Fence reads heartbeat: return fresh age so readiness passes.
+            self.bridge.heartbeat_age = MagicMock(return_value=0.0)
             self.bridge.publish = MagicMock()
             self.bridge.drain_events = MagicMock(return_value=[])
 
@@ -203,6 +205,8 @@ async def test_probe_batch_service_recycles_on_memory_flag() -> None:
         def __init__(self, **_k) -> None:
             self.bridge = MagicMock()
             self.bridge.truncate_events = MagicMock()
+            # Fence reads heartbeat: return fresh age so readiness passes.
+            self.bridge.heartbeat_age = MagicMock(return_value=0.0)
             self.bridge.publish = MagicMock()
             self.bridge.drain_events = MagicMock(return_value=[])
 
@@ -455,6 +459,8 @@ async def test_recycle_preserves_strategy_idx_and_events() -> None:
         def __init__(self, **_k) -> None:
             self.bridge = MagicMock()
             self.bridge.truncate_events = MagicMock()
+            # Fence reads heartbeat: return fresh age so readiness passes.
+            self.bridge.heartbeat_age = MagicMock(return_value=0.0)
             self.bridge.publish = MagicMock(
                 side_effect=lambda sid, gen, cmd=None: published.append((sid, gen))
             )
@@ -534,9 +540,10 @@ async def test_recycle_preserves_strategy_idx_and_events() -> None:
         )
         await svc.run_batch(ctx, 5.0)
         assert booted == 2  # initial + recycle
-        # Fence probe (id=1) + 3 probes, each published id = position in batch
-        assert [p[0] for p in published] == [1, 1, 2, 3]
-        assert len(published) == 4  # fence + 3 probes
+        # 3 probes, each published id = position in batch (fence is
+        # heartbeat-based now and does not publish).
+        assert [p[0] for p in published] == [1, 2, 3]
+        assert len(published) == 3
     finally:
         bp.run_tcp_check_bridge = real_bridge_probe
         bp.BridgeSession = original
@@ -555,6 +562,8 @@ async def test_debug_env_toggle_restarts_lua_daemon() -> None:
         def __init__(self, **_k) -> None:
             self.bridge = MagicMock()
             self.bridge.truncate_events = MagicMock()
+            # Fence reads heartbeat: return fresh age so readiness passes.
+            self.bridge.heartbeat_age = MagicMock(return_value=0.0)
             self.bridge.publish = MagicMock()
             self.bridge.drain_events = MagicMock(return_value=[])
 

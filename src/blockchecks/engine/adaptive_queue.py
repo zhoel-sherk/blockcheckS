@@ -306,6 +306,11 @@ class AdaptiveJobQueue:
         self._pending: dict[tuple[str, str], AdaptiveJob] = {}
         self._done: set[tuple[str, str]] = set()
         self._all_domains: list[str] = []
+        #: HARD exclusions (e.g. quarantined domains): jobs on these domains are
+        #: dropped on pop and never enqueued by fan-out. Unlike the soft
+        #: ``exclude_domains`` argument (other workers' active domains), hard
+        #: exclusions never fall through the "everything excluded" fallback.
+        self.excluded_domains: set[str] = set()
         self.metrics = AdaptiveMetrics()
 
     def __len__(self) -> int:
@@ -328,18 +333,26 @@ class AdaptiveJobQueue:
     def pop(self, exclude_domains: set[str] | None = None) -> AdaptiveJob | None:
         """Pop next job (highest priority or ε-random).
 
-        ``exclude_domains`` — skip jobs whose domain is already being probed by
-        another worker, so N parallel netns always isolate to N distinct domains
-        (no all-youtube). When every remaining job is excluded, falls back to the
-        highest-priority job regardless.
+        ``exclude_domains`` — soft skip for jobs whose domain is already being
+        probed by another worker (falls through to "any" when everything is
+        excluded). ``self.excluded_domains`` — HARD: those jobs are dropped
+        permanently (quarantine) and never returned, even by the fallback.
         """
         if not self._pending:
             return None
-        exclude = exclude_domains or set()
+        exclude = set(exclude_domains or ()) | self.excluded_domains
 
         if self.epsilon > 0 and self._rng.random() < self.epsilon and len(self._pending) > 1:
             eligible = [k for k in self._pending if self._pending[k].domain not in exclude]
-            key = self._rng.choice(eligible or list(self._pending.keys()))
+            if not eligible:
+                eligible = [
+                    k
+                    for k in self._pending
+                    if self._pending[k].domain not in self.excluded_domains
+                ]
+            if not eligible:
+                return None
+            key = self._rng.choice(eligible)
             return self._pending.pop(key)
 
         skipped: list[_HeapEntry] = []
@@ -347,6 +360,11 @@ class AdaptiveJobQueue:
             entry = heapq.heappop(self._heap)
             job = self._pending.get(entry.key)
             if job is None:
+                continue
+            if job.domain in self.excluded_domains:
+                # Quarantined (or otherwise hard-excluded): discard forever.
+                self._done.add(job.key)
+                self._pending.pop(job.key)
                 continue
             if job.domain in exclude:
                 skipped.append(entry)
@@ -356,13 +374,13 @@ class AdaptiveJobQueue:
                 for e in skipped:
                     heapq.heappush(self._heap, e)
             return job
-        # everything excluded — allow any pending job
-        if skipped:
+        # everything soft-excluded — allow any pending job that is not hard-excluded
+        while skipped:
             entry = heapq.heappop(skipped)
             job = self._pending.pop(entry.key, None)
-            for e in skipped:
-                heapq.heappush(self._heap, e)
             if job is not None:
+                for e in skipped:
+                    heapq.heappush(self._heap, e)
                 return job
         return None
 
@@ -383,6 +401,8 @@ class AdaptiveJobQueue:
         siblings = sibling_domains(job.domain, self._all_domains)
         added = 0
         for dom in siblings:
+            if dom in self.excluded_domains:
+                continue  # quarantined — never fan out
             fj = AdaptiveJob.from_item(job.item, dom, fanout=True)
             if self.enqueue(fj):
                 added += 1

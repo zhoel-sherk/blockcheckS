@@ -635,6 +635,13 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         log.warning("%s", f"  WARNING: provider store unavailable ({exc})")
         provider_store = None
 
+    quarantine = None
+    from blockchecks.engine.domain_quarantine import DomainQuarantine, quarantine_from_args
+
+    qcfg = quarantine_from_args(args)
+    if qcfg is not None:
+        quarantine = DomainQuarantine(qcfg)
+
     queue, skipped = await build_adaptive_queue(
         ctx.tcp_items,
         ctx.domains,
@@ -644,23 +651,9 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         resume_check=_resume_job if args.resume else None,
         provider_store=provider_store,
         triage=ctx.triage,
+        quarantine=quarantine,
     )
-    progress.done = skipped
-    progress.report()
-    log.info("%s", f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
-
-    def _progress(d: int, s: int, p: int):
-        progress.done, progress.skipped, progress.passed = d, s, p
-        progress.report()
-
-    quarantine = None
-    from blockchecks.engine.domain_quarantine import quarantine_from_args
-
-    qcfg = quarantine_from_args(args)
-    if qcfg is not None and ctx.db is not None:
-        from blockchecks.engine.domain_quarantine import DomainQuarantine
-
-        quarantine = DomainQuarantine(qcfg)
+    if qcfg is not None and ctx.db is not None and quarantine is not None:
         try:
             rows = await ctx.db.domain_pass_rows()
             seeded = quarantine.seed_from_rows(rows)
@@ -671,9 +664,34 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
                     f"(0 PASS in >= {qcfg.min_attempts} attempts): "
                     f"{', '.join(sorted(seeded))}",
                 )
+                # Persist the seed so the quarantined table (and MCP status)
+                # reflects reality even if this session never re-triggers them.
+                for dom in seeded:
+                    info = quarantine.quarantined.get(dom) or {}
+                    try:
+                        await ctx.db.quarantine_domain(
+                            dom,
+                            reason=info.get("reason", ""),
+                            failed=info.get("attempts", 0),
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "%s", f"  [quarantine] DB persist skipped for {dom} ({exc})"
+                        )
+                        break
+            ctx.quarantine = quarantine
         except Exception as exc:
             log.warning("%s", f"  [quarantine] seed skipped ({exc})")
-        ctx.quarantine = quarantine
+    progress.done = skipped
+    progress.report()
+    log.info("%s", f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
+
+    def _progress(d: int, s: int, p: int):
+        progress.done, progress.skipped, progress.passed = d, s, p
+        progress.report()
+
+    quarantine = None
+    from blockchecks.engine.domain_quarantine import quarantine_from_args
 
     ctx.aq_result = None
     try:
