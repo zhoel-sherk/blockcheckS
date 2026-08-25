@@ -81,6 +81,18 @@ def read_active_run() -> ActiveRunInfo | None:
     return info
 
 
+def _write_run_lock_exclusive(payload: dict[str, Any]) -> None:
+    """Create run.lock atomically (O_CREAT|O_EXCL). Caller handles FileExistsError."""
+    RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(payload, indent=2) + "\n"
+    fd = os.open(str(RUN_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    try:
+        os.write(fd, data.encode("utf-8"))
+    finally:
+        os.close(fd)
+    reclaim_sudo_ownership(RUN_LOCK_FILE)
+
+
 def register_active_run(
     command: str,
     *,
@@ -88,13 +100,6 @@ def register_active_run(
     argv: list[str] | None = None,
 ) -> None:
     """Record this process as the active long-running campaign."""
-    existing = read_active_run()
-    if existing and is_pid_alive(existing.pid) and existing.pid != os.getpid():
-        raise SystemExit(
-            f"ERROR: active run already registered (pid {existing.pid}, "
-            f"{existing.command}). Stop with: bs stop"
-        )
-
     payload = {
         "pid": os.getpid(),
         "command": command,
@@ -103,11 +108,52 @@ def register_active_run(
         "cwd": str(Path.cwd()),
         "argv": argv or _snapshot_argv(),
     }
-    tmp = RUN_LOCK_FILE.with_suffix(".tmp")
-    RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(RUN_LOCK_FILE)
-    reclaim_sudo_ownership(RUN_LOCK_FILE)
+
+    try:
+        _write_run_lock_exclusive(payload)
+        return
+    except FileExistsError:
+        pass
+
+    existing = read_active_run()
+    if existing is None:
+        try:
+            _write_run_lock_exclusive(payload)
+        except FileExistsError:
+            raise SystemExit(
+                "ERROR: failed to acquire run.lock (concurrent campaign started?)"
+            ) from None
+        return
+
+    if existing.pid == os.getpid():
+        try:
+            RUN_LOCK_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            _write_run_lock_exclusive(payload)
+        except FileExistsError:
+            raise SystemExit(
+                "ERROR: failed to acquire run.lock (concurrent campaign started?)"
+            ) from None
+        return
+
+    if is_pid_alive(existing.pid):
+        raise SystemExit(
+            f"ERROR: active run already registered (pid {existing.pid}, "
+            f"{existing.command}). Stop with: bs stop"
+        )
+
+    try:
+        RUN_LOCK_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+    try:
+        _write_run_lock_exclusive(payload)
+    except FileExistsError:
+        raise SystemExit(
+            "ERROR: failed to acquire run.lock (concurrent campaign started?)"
+        ) from None
 
 
 def clear_active_run() -> None:

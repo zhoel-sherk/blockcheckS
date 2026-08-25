@@ -23,7 +23,9 @@ BASE_CIDR = 20  # networks: 10.200.<n>.0/30 for pool member n
 _NETNS_BASE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _IFNAMSIZ = 15
 _ACTIVE_POOLS: weakref.WeakSet[NetNsPool] = weakref.WeakSet()
-_CLEANUP_HOOKS_INSTALLED = False
+_ATEXIT_HOOK_INSTALLED = False
+_SIGNAL_HOOKS_INSTALLED = False
+_SUDO_AUTH_MARKERS = ("password is required", "a terminal is required")
 
 
 class NetNsPool:
@@ -66,12 +68,12 @@ class NetNsPool:
         return first_udp_nameserver()
 
     @classmethod
-    def _install_cleanup_hooks(cls) -> None:
-        global _CLEANUP_HOOKS_INSTALLED
-        if _CLEANUP_HOOKS_INSTALLED:
+    def install_signal_hooks(cls) -> None:
+        """Install SIGTERM/SIGINT pool cleanup on the main thread (before asyncio.run)."""
+        global _SIGNAL_HOOKS_INSTALLED
+        if _SIGNAL_HOOKS_INSTALLED:
             return
-        _CLEANUP_HOOKS_INSTALLED = True
-        atexit.register(cls._destroy_active_pools)
+        _SIGNAL_HOOKS_INSTALLED = True
 
         def _on_signal(signum: int, _frame) -> None:
             cls._destroy_active_pools()
@@ -81,16 +83,39 @@ class NetNsPool:
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
                 signal.signal(sig, _on_signal)
-            except (ValueError, OSError):
-                pass
+            except (ValueError, OSError) as exc:
+                log.warning(
+                    "netns pool signal hook install failed for %s: %s",
+                    sig,
+                    exc,
+                )
+
+    @classmethod
+    def _register_atexit_hook(cls) -> None:
+        global _ATEXIT_HOOK_INSTALLED
+        if _ATEXIT_HOOK_INSTALLED:
+            return
+        _ATEXIT_HOOK_INSTALLED = True
+        atexit.register(cls._destroy_active_pools)
 
     @classmethod
     def _destroy_active_pools(cls) -> None:
         for pool in list(_ACTIVE_POOLS):
             try:
                 pool.destroy_all()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("destroy_active_pools failed for pool %r: %s", pool.base, exc)
+
+    @staticmethod
+    def _raise_if_sudo_auth_failed(r: subprocess.CompletedProcess, args: tuple[str, ...]) -> None:
+        if r.returncode == 0:
+            return
+        stderr = (r.stderr or "").lower()
+        if any(marker in stderr for marker in _SUDO_AUTH_MARKERS):
+            raise RuntimeError(
+                "passwordless sudo required for netns pool (sudo -n failed on "
+                f"{' '.join(args)}). Configure NOPASSWD for this user."
+            )
 
     def _ensure_queue(self) -> asyncio.Queue:
         if self._queue is None:
@@ -106,7 +131,12 @@ class NetNsPool:
         never deadlocks the event loop / worker thread.
         """
         try:
-            r = subprocess.run(["sudo"] + list(args), capture_output=True, text=True, timeout=15)
+            r = subprocess.run(
+                ["sudo", "-n"] + list(args),
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
         except subprocess.TimeoutExpired:
             r = subprocess.CompletedProcess(
                 args=list(args),
@@ -114,6 +144,7 @@ class NetNsPool:
                 stdout="",
                 stderr=f"timeout after 15s: {' '.join(args)}",
             )
+        self._raise_if_sudo_auth_failed(r, args)
         if check and r.returncode != 0:
             raise RuntimeError(f"cmd failed: {' '.join(args)} → {(r.stderr or '')[:200]!r}")
         return r
@@ -170,8 +201,8 @@ class NetNsPool:
                     old_iface = parts[1]
                     if old_iface.startswith(("vh-", "vn-", "veth")):
                         self._run("ip", "link", "delete", old_iface, check=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("stale veth cleanup failed for %s on %s: %s", name, host_ip, exc)
         time.sleep(0.1)
 
         # Create
@@ -223,12 +254,13 @@ class NetNsPool:
         self._run("mkdir", "-p", dns_dir)
         resolv = f"{dns_dir}/resolv.conf"
         r = subprocess.run(
-            ["sudo", "tee", resolv],
+            ["sudo", "-n", "tee", resolv],
             input=f"nameserver {self._dns_nameserver()}\n",
             capture_output=True,
             text=True,
             timeout=15,
         )
+        self._raise_if_sudo_auth_failed(r, ("tee", resolv))
         if r.returncode != 0:
             raise RuntimeError(f"tee resolv.conf failed: {r.stderr[:200]}")
 
@@ -282,7 +314,7 @@ class NetNsPool:
 
     def create_all(self) -> None:
         """Synchronous — create namespaces only (no Queue mutations)."""
-        self._install_cleanup_hooks()
+        self._register_atexit_hook()
         with self._lock:
             if self._created:
                 return
@@ -295,8 +327,12 @@ class NetNsPool:
                 for name in created:
                     try:
                         self._destroy_one(name)
-                    except Exception:
-                        pass
+                    except Exception as destroy_exc:
+                        log.warning(
+                            "netns rollback destroy failed for %s: %s",
+                            name,
+                            destroy_exc,
+                        )
                 self._names.clear()
                 raise
         log.info("%s", f"[netns] Pool created: {self.size} namespaces")

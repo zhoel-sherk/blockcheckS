@@ -145,6 +145,9 @@ def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
     deps_rc = ensure_system_deps_or_exit(args)
     if deps_rc:
         return deps_rc
+    from blockchecks.service.netns_pool import NetNsPool
+
+    NetNsPool.install_signal_hooks()
     return asyncio.run(run_full(args))
 
 

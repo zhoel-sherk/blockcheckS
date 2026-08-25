@@ -220,3 +220,62 @@ def test_cmdline_looks_like_campaign_missing_proc():
     from blockchecks.service.run_control import _cmdline_looks_like_campaign
 
     assert _cmdline_looks_like_campaign(99999999) is True
+
+
+def test_register_exclusive_lock_blocks_alive_peer(run_lock_file, monkeypatch):
+    import json
+
+    monkeypatch.setattr(
+        "blockchecks.service.run_control.is_pid_alive",
+        lambda pid: pid == 4242,
+    )
+    run_lock_file.write_text(
+        json.dumps({"pid": 4242, "command": "full", "started_at": "t"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="active run already registered"):
+        register_active_run("pair", db_path=None)
+
+
+def test_register_exclusive_lock_stale_then_acquire(run_lock_file, monkeypatch):
+    import json
+
+    run_lock_file.write_text(
+        json.dumps({"pid": 4242, "command": "full", "started_at": "t"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("blockchecks.service.run_control.is_pid_alive", lambda pid: False)
+    register_active_run("scan", db_path="logs/x.db")
+    info = read_active_run()
+    assert info is not None
+    assert info.pid == os.getpid()
+    assert info.command == "scan"
+
+
+def test_register_exclusive_lock_race_file_exists(run_lock_file, monkeypatch):
+    """Second O_EXCL attempt after stale clear still blocked → SystemExit."""
+    calls = {"open": 0}
+
+    def fake_open(path, flags, mode=0o644):
+        calls["open"] += 1
+        if calls["open"] == 1:
+            raise FileExistsError
+        if calls["open"] == 2:
+            raise FileExistsError
+        return os.open(str(run_lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
+
+    monkeypatch.setattr("blockchecks.service.run_control.os.open", fake_open)
+    monkeypatch.setattr(
+        "blockchecks.service.run_control.read_active_run",
+        lambda: None,
+    )
+    with pytest.raises(SystemExit, match="failed to acquire run.lock"):
+        register_active_run("full", db_path=None)
+
+
+def test_register_same_pid_replaces_lock(run_lock_file):
+    register_active_run("full", db_path="logs/a.db")
+    register_active_run("full", db_path="logs/b.db")
+    info = read_active_run()
+    assert info is not None
+    assert info.db_path == "logs/b.db"

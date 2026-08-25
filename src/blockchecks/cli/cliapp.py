@@ -678,6 +678,9 @@ def main(argv: list[str] | None = None) -> int:
     apply_pycache_prefix()
     ensure_dirs()
     configure_logging()
+    from blockchecks.service.netns_pool import NetNsPool
+
+    NetNsPool.install_signal_hooks()
     cfg = load_user_config()
     global _USER_CFG
     _USER_CFG = cfg
