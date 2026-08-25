@@ -86,3 +86,34 @@ def test_bridge_iptables_add_raises_when_add_fails():
         pytest.raises(IptablesError, match="NFQUEUE"),
     ):
         _bridge_iptables_add("bs-p-0", "443", "tls12")
+
+
+def test_iptables_verify_fail_raises(tmp_path, monkeypatch):
+    """-A успешен, но -C не находит правило → IptablesError (не молчаливый raw)."""
+    import pytest as _pytest
+
+    from blockchecks.service.lua_netns import IptablesError, _bridge_iptables_add
+
+    calls = {"n": 0}
+
+    class FakeProc:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(cmd, **kwargs):
+        calls["n"] += 1
+        # порядок вызовов: -F, -A, -C; на -C имитируем пропажу правила
+        p = FakeProc()
+        if "-C" in cmd:
+            p.returncode = 1
+            p.stderr = "iptables: Bad rule"
+        return p
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "blockchecks.service.lua_netns._check_netns_exists", lambda ns: None
+    )
+    with _pytest.raises(IptablesError):
+        _bridge_iptables_add("ns-x", "443")
+    assert calls["n"] == 3

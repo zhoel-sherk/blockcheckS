@@ -45,7 +45,7 @@ _BAKED_CGNAT = ("100.64.0.0/10",)
 _BAKED_FALLBACKS = {
     "voice": ("35.217.5.42", 50006),
     "voice_preflight": ("35.217.42.214", 50004),
-    "ggc": ("74.125.108.234", None),
+    "ggc": ("64.233.161.198", None),
 }
 
 _CDN_DEFAULTS = (

@@ -279,3 +279,82 @@ def test_export_configs_passes_ipset_to_builders(tmp_path, monkeypatch):
         )
     assert kc.call_args.kwargs["ipset_ips"] == ["1.2.3.4"]
     assert raw.call_args.kwargs["ipset_ips"] == ["1.2.3.4"]
+
+
+def test_manager_bind_retry_on_eperm(tmp_path, monkeypatch):
+    """Nfqws2Manager._launch: EPERM-бут → ретрай; живой бут со 2-й попытки."""
+    import blockchecks.service.nfqws2 as nfq
+
+    attempts = {"n": 0}
+    logs = []
+
+    class FakeProc:
+        def __init__(self):
+            self.pid = 4242
+
+        def poll(self):
+            attempts["n"] += 1
+            # 1-я попытка мертва (EPERM), последующие живы
+            return 1 if attempts["n"] == 1 else None
+
+    def fake_capture(tag):
+        path = tmp_path / f"out_{len(logs)+1}.log"
+        text = (
+            "nfq_create_queue(): Operation not permitted\n"
+            if len(logs) == 0
+            else "setting copy_packet mode\n"
+        )
+        path.write_text(text, encoding="utf-8")
+        logs.append(path)
+        fh = open(path, "rb")  # noqa: SIM115
+        return fh, path
+
+    monkeypatch.setattr(nfq.subprocess, "Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(nfq, "wait_nfqws2_ready", lambda *a, **k: 0.0)
+    monkeypatch.setattr(nfq.time, "sleep", lambda s: None)
+    monkeypatch.setattr(nfq, "open_out_capture", fake_capture)
+    monkeypatch.setattr(nfq, "_reclaim_debug_log", lambda p: None)
+
+    mgr = nfq.Nfqws2Manager(ns_name="ns-r")
+    conf = tmp_path / "m.conf"
+    conf.write_text("--qnum=200\n", encoding="utf-8")
+    mgr.start_config(str(conf))
+    assert attempts["n"] >= 2, "ретрай после EPERM не произошёл"
+    assert mgr._proc is not None
+    assert mgr.last_out_log == logs[-1]
+
+
+def test_manager_non_bind_error_raises_immediately(tmp_path, monkeypatch):
+    """Иная причина старта (без маркера очереди) — без ретраев, сразу raise."""
+    import pytest as _pytest
+
+    import blockchecks.service.nfqws2 as nfq
+
+    calls = {"n": 0}
+
+    class FakeProc:
+        pid = 1
+
+        def poll(self):
+            calls["n"] += 1
+            return 1
+
+    monkeypatch.setattr(nfq.subprocess, "Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(nfq, "wait_nfqws2_ready", lambda *a, **k: 0.0)
+    # out-файл без маркера nfq_create_queue
+    monkeypatch.setattr(
+        nfq,
+        "open_out_capture",
+        lambda tag: _open_empty(tmp_path),
+    )
+
+    def _open_empty(root):
+        f = root / "out.log"
+        f.write_text("some other failure\n", encoding="utf-8")
+        fh = open(f, "rb")  # noqa: SIM115
+        return fh, f
+
+    mgr = nfq.Nfqws2Manager(ns_name="ns-r")
+    with _pytest.raises(RuntimeError, match="failed to start"):
+        mgr._launch(f"@{tmp_path / 'x.conf'}")
+    assert calls["n"] == 1

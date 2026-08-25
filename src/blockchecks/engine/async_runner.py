@@ -496,6 +496,7 @@ class AsyncTestRunner:
                     result.latency_ms = data.get("latency_ms", 0)
                     result.content_length = data.get("content_len", 0)
                     result.error = data.get("error", "") or ""
+                    result.probe_host = data.get("resolve_name") or ""
                     if result.success or not _is_quic_dropped(result.error):
                         break
                     # timeout = TSPU dropped this variant; try the next fallback.

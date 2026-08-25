@@ -376,7 +376,7 @@ GOOGLEVIDEO_RANGE_SIZE = 17408  # 17KB, bytes=0-17407
 # heuristic. CDN responding (any HTTP) == bypassed; timeout == blocked.
 GGC_RANGE_SIZE = 1048576  # 1MiB, bytes=0-1048575
 GGC_HOST = _env_or("BLOCKCHECKS_GGC_HOST", "rr5---sn-5goeenes.googlevideo.com")
-GGC_FALLBACK_IP = _env_or("BLOCKCHECKS_GGC_IP", "74.125.108.234")
+GGC_FALLBACK_IP = _env_or("BLOCKCHECKS_GGC_IP", "64.233.161.198")
 
 
 def first_udp_nameserver() -> str:

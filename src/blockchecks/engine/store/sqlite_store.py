@@ -631,7 +631,7 @@ class SqliteRunStore:
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
-                f"""SELECT s.name, t.latency_ms, t.http_code, t.timestamp
+                f"""SELECT s.name, t.latency_ms, t.http_code, t.timestamp, t.probe_host
                    FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.proto='quic' AND t.domain=? AND t.status IN {_WORKING_STATUSES}
@@ -644,7 +644,7 @@ class SqliteRunStore:
                    LIMIT ?""",
                 (domain, domain, limit),
             )
-            cols = ["strategy", "latency_ms", "http_code", "timestamp"]
+            cols = ["strategy", "latency_ms", "http_code", "timestamp", "probe_host"]
             return [dict(zip(cols, r)) for r in await rows.fetchall()]
 
     async def get_best_udp(self, *, limit: int = 5) -> list[dict]:

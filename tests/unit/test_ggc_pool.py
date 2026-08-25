@@ -101,10 +101,13 @@ def test_ip_chain_order(pool_env, monkeypatch) -> None:
     g, cache = pool_env
     host = "rr5---sn-5goeenes.googlevideo.com"
 
-    # пусто → None (для не-baseline хоста legacy не применяется)
-    assert g.resolve_ip_chain("rr99---sn-unknown0.googlevideo.com") is None
-    # legacy константа только для GGC_HOST
-    assert (g.resolve_ip_chain(host) or "").startswith("74.125.")
+    # пустые тиры → ротация по DEFAULT_LAST_RESORT_IPS (перебор при DNS-ошибках)
+    assert (
+        g.resolve_ip_chain("rr99---sn-unknown0.googlevideo.com")
+        in g.DEFAULT_LAST_RESORT_IPS
+    )
+    # legacy-хост: ротация по живым edge (мёртвый 74.125.108.234 исключён)
+    assert (g.resolve_ip_chain(host) or "") in g.DEFAULT_LAST_RESORT_IPS
 
     # кэш резолва приоритетнее legacy
     (cache / "ggc_ips.json").write_text(json.dumps(

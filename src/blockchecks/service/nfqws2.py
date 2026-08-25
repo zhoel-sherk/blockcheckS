@@ -24,6 +24,9 @@ from blockchecks.service.nfqws2_settle import (
 
 log = logging.getLogger(__name__)
 
+#: Попытки бинда NFQUEUE при "queue busy" (сокет освобождается ядром с задержкой)
+NFQWS2_BIND_ATTEMPTS = 5
+
 
 def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
     """Ensure conf contains --daemon and optional --debug=@log. Returns log path."""
@@ -154,7 +157,7 @@ def start_daemon(
         # ребуте новый демон умирает с nfq_create_queue(): Operation not
         # permitted (zapret2#300). Ретраим бинд с backoff — stdout-захват
         # даёт надёжный маркер именно этой причины.
-        max_bind_attempts = 5
+        max_bind_attempts = NFQWS2_BIND_ATTEMPTS
         settle = 0.0
         from blockchecks.service.nfqws2_settle import nfqws2_count_in_ns
 
@@ -245,7 +248,7 @@ class Nfqws2Manager:
         # Bind-retry (тот же маркер, что в start_daemon): ядро освобождает
         # NFQUEUE-сокет после pkill с задержкой → первый запуск может упасть
         # с nfq_create_queue(): Operation not permitted.
-        max_bind_attempts = 4
+        max_bind_attempts = NFQWS2_BIND_ATTEMPTS
         last_err: RuntimeError | None = None
         for attempt in range(1, max_bind_attempts + 1):
             out_fh, out_path = open_out_capture(self.ns_name or "host")

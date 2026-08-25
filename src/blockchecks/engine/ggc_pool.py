@@ -56,6 +56,16 @@ IPS_TTL_SEC = 7 * 24 * 3600  # как dns_records в dns.db
 REAL_POOL_TTL_SEC = 6 * 3600  # реальные ссылки rr* живут максимум ~6ч
 _NO_REPEAT = 8  # не повторять последние K синтетических кодов
 
+#: Последний рубеж цепочки — проверенные живые Google edge (TCP 443 OK
+#: с этой сети 25.08; legacy 74.125.108.234 мёртв и исключён).
+DEFAULT_LAST_RESORT_IPS = [
+    "64.233.161.198",  # redirector-edge
+    "108.177.14.147",
+    "74.125.131.103",
+    "64.233.161.99",
+]
+_ROTATION = {"i": 0}
+
 
 @dataclass
 class GgcTarget:
@@ -215,7 +225,9 @@ def configured_fallback_ips() -> list[str]:
 
 
 def resolve_ip_chain(host: str) -> str | None:
-    """IP по всей цепочке: dns.db → кэш → конфиг/env → legacy константа."""
+    """IP по всей цепочке: dns.db → конфиг/env → кэш → ротация живых IP."""
+
+
     try:
         from blockchecks.data_block.provider import get_provider_dir
         from blockchecks.data_block.store import ProviderStore
@@ -224,20 +236,29 @@ def resolve_ip_chain(host: str) -> str | None:
     except Exception as exc:
         log.warning("GGC dns.db lookup failed for %s: %s", host, exc)
         recs = {}
+    pool: list[str] = []
     ips, _src = recs.get(host, ([], ""))
     if ips:
-        return ips[0]
-    # Явная конфигурация оператора выше глобального кэша:
-    # это сознательный override, а не «что-то недавно резолвилось».
-    configured = configured_fallback_ips()
-    if configured:
-        return configured[0]
-    cached = cached_ips()
-    if cached:
-        return cached[0]
-    if host == GGC_HOST:
-        return GGC_FALLBACK_IP
-    return None
+        pool = list(ips)  # точное имя хоста — самый сильный сигнал
+    else:
+        # Явная конфигурация оператора выше глобального кэша:
+        # это сознательный override, а не «что-то недавно резолвилось».
+        configured = configured_fallback_ips()
+        if configured:
+            pool = configured
+        else:
+            cached = cached_ips()
+            if cached:
+                pool = cached
+            else:
+                pool = list(DEFAULT_LAST_RESORT_IPS)
+    if not pool:
+        return GGC_FALLBACK_IP if host == GGC_HOST else None
+    # Перебор при повторных ошибках DNS: каждый вызов берёт следующий IP,
+    # неудачные адреса естественно вымываются из начала очереди кэшем.
+    i = _ROTATION["i"] % len(pool)
+    _ROTATION["i"] += 1
+    return pool[i]
 
 
 # ── выбор цели ─────────────────────────────────────────────────────────────

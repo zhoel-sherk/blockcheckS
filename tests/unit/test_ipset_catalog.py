@@ -86,7 +86,7 @@ def test_fallbacks_voice_and_ggc():
     pre = cat.fallback_endpoint("voice_preflight")
     assert pre.ip == "35.217.42.214"
     assert pre.port == 50004
-    assert cat.fallback_endpoint("ggc").ip == "74.125.108.234"
+    assert cat.fallback_endpoint("ggc").ip == "64.233.161.198"
 
 
 def test_parse_expect_and_fallbacks_files(tmp_path, monkeypatch):

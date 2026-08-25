@@ -222,6 +222,7 @@ import json
 from blockchecks.checkers.http3 import check_http3
 r = check_http3({domain!r}, {timeout}, pre_resolved_ip={resolved_ip_lit})
 print(json.dumps({{
+    "resolve_name": {domain!r}.split("/")[0],
     "success": r.success,
     "http_code": r.http_status,
     "latency_ms": r.latency_ms,
