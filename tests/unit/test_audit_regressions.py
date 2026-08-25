@@ -245,7 +245,10 @@ def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
     from blockchecks.engine import in_ns_workers as insw
 
     src = Path(nfq.__file__).read_text(encoding="utf-8")
-    assert "stderr=subprocess.DEVNULL" in src
+    # zapret2#300: bind-ошибки печатаются в stdout nfqws2 — захват обязателен,
+    # DEVNULL допустим только как fallback при недоступном файле лога.
+    assert "open_out_capture(" in src
+    assert "stderr=subprocess.STDOUT if out_fh is not None" in src
     assert "kill_existing" in inspect.signature(nfq.start_daemon).parameters
     assert "min_procs" in inspect.signature(nfq.start_daemon).parameters
     assert "kill_existing" in inspect.signature(ar._nfqws2_daemon).parameters

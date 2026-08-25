@@ -22,6 +22,8 @@ class TcpTestResult:
     read_rate_bps: float = 0
     error: str = ""
     used_ip: str = ""
+    # SNI, которым реально зондиовали (для googlevideo — хост из GGC-пула).
+    probe_host: str = ""
     fail_phase: str = ""
     rst_in_ttl: int = 0
     # Lua-bridge provenance: None = unknown (classic/QUIC paths),

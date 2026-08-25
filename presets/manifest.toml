@@ -283,7 +283,7 @@ count = 32
 file = "google-youtube.txt"
 tags = ["google", "youtube"]
 description = "Google/YouTube domains covering entire CDN"
-count = 23
+count = 25
 
 [domains.pi2]
 file = "pi2.txt"

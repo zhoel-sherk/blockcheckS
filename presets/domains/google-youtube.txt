@@ -22,3 +22,7 @@ gvt1.com
 googleapis.com
 googleusercontent.com
 play.google.com
+
+# YouTube CDN: точка входа + статика плеера
+redirector.googlevideo.com
+s.ytimg.com

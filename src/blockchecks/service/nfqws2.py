@@ -68,6 +68,43 @@ def _reclaim_debug_log(dbg_path: str | None) -> None:
         pass
 
 
+def open_out_capture(tag: str):
+    """Open stdout/stderr capture file for an nfqws2 launch.
+
+    Bind failures (`nfq_create_queue(): ...`) are printed by nfqws2 to
+    **stdout** — NOT to ``--debug=@file``. With --daemon and DEVNULL pipes
+    that message was lost, making daemon deaths look silent (zapret2#300).
+    Files match the ``nfqws2_*.log`` gc glob, so retention applies.
+
+    Returns an opened binary file or None on failure; caller must close it
+    after Popen (the child keeps its inherited fd).
+    """
+    from blockchecks.engine.paths import RUNTIME_LOGS_DIR
+
+    try:
+        RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = RUNTIME_LOGS_DIR / f"nfqws2_out_{tag}_{ts}.log"
+        # noqa: SIM115 — файл намеренно живёт дольше функции: его наследует
+        # дочерний процесс (stdout демона), закрывает вызывающий после Popen.
+        fh = open(path, "ab", buffering=0)  # noqa: SIM115
+        fh.write(f"=== nfqws2 launch tag={tag} {ts}\n".encode())
+        return fh
+    except OSError as exc:
+        log.warning("%s", f"  WARNING: out-capture disabled for {tag}: {exc}")
+        return None
+
+
+def _prune_out_logs() -> None:
+    """Apply keep-N retention to out/debug captures after each launch."""
+    try:
+        from blockchecks.engine.gc import prune_nfqws2_debug_logs
+
+        prune_nfqws2_debug_logs()
+    except Exception:
+        pass
+
+
 def start_daemon(
     ns_name: str,
     config_path: str,
@@ -113,7 +150,17 @@ def start_daemon(
             get_nfqws2_bin(),
             f"@{tmp_conf}",
         ]
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        out_fh = open_out_capture(ns_name)
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
+                stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
+            )
+        finally:
+            if out_fh is not None:
+                out_fh.close()
+                _prune_out_logs()
         settle = wait_nfqws2_ready(
             ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
         )
@@ -137,6 +184,7 @@ class Nfqws2Manager:
         self._pid: int | None = None
         self._temp_files: list[str] = []
         self.last_debug_log: str | None = None
+        self.last_out_log: Path | None = None
 
     def _launch(self, config_arg: str, *, stop_first: bool = True) -> None:
         """Start nfqws2 in foreground, verify it's alive.
@@ -155,14 +203,27 @@ class Nfqws2Manager:
         else:
             args = ["sudo", "-n"] + args
 
-        self._proc = subprocess.Popen(
-            args,
-            stdout=subprocess.DEVNULL,
-            # Never PIPE: unread buffer blocks a chatty/debug nfqws2.
-            # Init/errors go to --debug=@logfile when enabled.
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        out_fh = open_out_capture(self.ns_name or "host")
+        self.last_out_log = None
+        try:
+            self._proc = subprocess.Popen(
+                args,
+                stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
+                # Never PIPE: unread buffer blocks a chatty/debug nfqws2.
+                # Init/errors go to --debug=@file when enabled; bind errors
+                # (nfq_create_queue) go to stdout — captured in out-file.
+                stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        finally:
+            if out_fh is not None:
+                out_fh.close()
+                _prune_out_logs()
+                from blockchecks.engine.paths import RUNTIME_LOGS_DIR
+
+                matches = sorted(RUNTIME_LOGS_DIR.glob(f"nfqws2_out_{self.ns_name or 'host'}_*.log"))
+                if matches:
+                    self.last_out_log = matches[-1]
         self._pid = self._proc.pid
         if self.ns_name:
             wait_nfqws2_ready(self.ns_name)
@@ -172,12 +233,13 @@ class Nfqws2Manager:
 
         if self._proc.poll() is not None:
             hint = ""
-            if self.last_debug_log and os.path.exists(self.last_debug_log):
-                try:
-                    tail = Path(self.last_debug_log).read_text(errors="replace")[-300:]
-                    hint = f"; debug_tail={tail!r}"
-                except OSError:
-                    pass
+            for log_path in (self.last_out_log, Path(self.last_debug_log) if self.last_debug_log else None):
+                if log_path and os.path.exists(log_path):
+                    try:
+                        tail = Path(log_path).read_text(errors="replace")[-300:]
+                        hint += f"; {log_path.name}_tail={tail!r}"
+                    except OSError:
+                        pass
             self._proc = None
             self._pid = None
             raise RuntimeError("nfqws2 failed to start (exited immediately)" + hint)

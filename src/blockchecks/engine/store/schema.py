@@ -139,6 +139,8 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         # NULL = unknown (classic backend / legacy rows); 1 = APPLIED seen,
         # 0 = PASS without APPLIED (suspicious lua-bridge result).
         ("bridge_applied", "INTEGER"),
+        # SNI/хост, которым реально зондиовали (ggc-пул; пусто = домен как есть)
+        ("probe_host", "TEXT DEFAULT ''"),
     ):
         if col not in col_names:
             await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")

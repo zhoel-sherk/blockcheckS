@@ -423,6 +423,7 @@ class AsyncTestRunner:
                 result.throttled = data.get("throttled", False)
                 result.read_rate_bps = data.get("read_rate_bps", 0)
                 result.used_ip = data.get("used_ip") or ""
+                result.probe_host = data.get("resolve_name") or ""
                 result.error = data.get("error", "") or ""
 
                 if self.db:
@@ -559,6 +560,7 @@ class AsyncTestRunner:
         result.read_rate_bps = data.get("read_rate_bps", 0)
         result.error = data.get("error", "") or ""
         result.used_ip = data.get("used_ip") or ""
+        result.probe_host = data.get("resolve_name") or ""
         result.rst_in_ttl = int(data.get("bridge_rst_in_ttl") or 0)
         ba = data.get("bridge_applied")
         result.bridge_applied = None if ba is None else bool(ba)
@@ -621,6 +623,7 @@ class AsyncTestRunner:
             bridge_applied=result.bridge_applied,
             bridge_batch_id=result.bridge_batch_id,
             bridge_gen=result.bridge_gen,
+            probe_host=getattr(result, "probe_host", "") or "",
         )
         if status == "PASS":
             await _save_pass_strategy_data_block(

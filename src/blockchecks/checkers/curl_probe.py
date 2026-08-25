@@ -75,6 +75,7 @@ class CurlProbeRequest:
 
 @dataclass
 class CurlProbeResult:
+    resolve_name: str = ""  # SNI, которым реально зондиовали (ggc-пул)
     success: bool = False
     http_code: int = 0
     latency_ms: float = 0.0
@@ -86,6 +87,7 @@ class CurlProbeResult:
 
     def as_dict(self) -> dict:
         return {
+            "resolve_name": self.resolve_name,
             "success": self.success,
             "http_code": self.http_code,
             "latency_ms": self.latency_ms,
@@ -292,21 +294,37 @@ def prepare_ggc_probe(
     The signed googlevideo URLs expire in 6h, but the GGC-IP + SNI + Range
     pattern is valid indefinitely and yields different answers on bypass
     (CDN responds with any HTTP status) vs block (timeout / RST).
+
+    SNI управляется подборщиком: режимы synthetic/real/fixed и цепочка
+    резолва — в ``engine/ggc_pool``. ``resolve_name`` извне принудительно
+    фиксирует хост (legacy A/B).
     """
     from blockchecks.checkers.dns_secure import doh_query, pick_working_doh
-    from blockchecks.engine.config import GGC_FALLBACK_IP, GGC_HOST
+    from blockchecks.engine.config import GGC_FALLBACK_IP
+    from blockchecks.engine.ggc_pool import (
+        pick_target,
+        remember_ggc_ip,
+        resolve_ip_chain,
+    )
 
-    host = resolve_name or GGC_HOST
-    ip = resolved_ip
+    target = pick_target(domain)
+    host = resolve_name or target.host
+    ip = resolved_ip or target.ip_hint
     if not ip:
         try:
             ips, err, _ = doh_query(host, pick_working_doh(), timeout=DOH_TIMEOUT)
             if ips and not err:
                 ip = ips[0]
+                remember_ggc_ip(host, ip)
         except Exception:
             ip = None
     if not ip:
-        log.warning("%s", f"  WARNING: DoH failed for {host}; using GGC fallback {GGC_FALLBACK_IP}")
+        # Цепочка: dns.db провайдера → CACHE/ggc_ips.json → [google].fallback_ips/env
+        ip = resolve_ip_chain(host)
+    if not ip:
+        # Последний рубеж — известный живой GGC-IP: edge отвечает wildcard-серт.
+        # *.googlevideo.com на любой SNI этого домена.
+        log.warning("%s", f"  WARNING: no IP for {host}; using legacy fallback {GGC_FALLBACK_IP}")
         ip = GGC_FALLBACK_IP
 
     return (
@@ -610,6 +628,16 @@ def _classify_generic(
 
 
 def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResult:
+    """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
+    res = _run_curl_probe_inner(req, _gv_hop=_gv_hop)
+    if not res.resolve_name and req.resolve_name:
+        res.resolve_name = req.resolve_name
+    return res
+
+
+def _run_curl_probe_inner(
+    req: CurlProbeRequest, *, _gv_hop: int = 0
+) -> CurlProbeResult:
     """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
     import time
 

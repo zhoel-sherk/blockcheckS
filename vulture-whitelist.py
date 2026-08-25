@@ -203,3 +203,8 @@ HarvestCandidate.pass_rate
 HarvestCandidate.conf_path
 conn.row_factory
 HarvestCandidate.attempts
+
+# ggc_pool: зарезервировано для пер-доменных пулов / тестового API
+GgcTarget.ip_hint
+GgcTarget.pool_size
+pick_target.domain_hint

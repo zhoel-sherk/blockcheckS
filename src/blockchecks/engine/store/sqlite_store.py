@@ -157,8 +157,8 @@ class SqliteRunStore:
                                            (strategy_id,domain,status,http_code,latency_ms,
                                             gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
                                             resolved_ip,dns_verdict,doh_server,fail_phase,
-                                            bridge_applied,bridge_batch_id,bridge_gen)
-                                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                            bridge_applied,bridge_batch_id,bridge_gen,probe_host)
+                                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                         (
                                             sid,
                                             entry["domain"],
@@ -181,6 +181,7 @@ class SqliteRunStore:
                                             ),
                                             entry.get("bridge_batch_id") or 0,
                                             entry.get("bridge_gen") or 0,
+                                            entry.get("probe_host") or "",
                                         ),
                                     )
                                 for entry in udp_batch:
@@ -244,6 +245,7 @@ class SqliteRunStore:
         bridge_applied: bool | None = None,
         bridge_batch_id: int = 0,
         bridge_gen: int = 0,
+        probe_host: str = "",
     ) -> None:
         if self.batch_size > 0:
             self._tcp_pending.append(
@@ -264,6 +266,7 @@ class SqliteRunStore:
                     "doh_server": doh_server or "",
                     "fail_phase": fail_phase or "",
                     "bridge_applied": bridge_applied,
+                    "probe_host": probe_host or "",
                     "bridge_batch_id": int(bridge_batch_id or 0),
                     "bridge_gen": int(bridge_gen or 0),
                 }
@@ -280,8 +283,8 @@ class SqliteRunStore:
                    (strategy_id,domain,status,http_code,latency_ms,
                     gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
                     resolved_ip,dns_verdict,doh_server,fail_phase,
-                    bridge_applied,bridge_batch_id,bridge_gen)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    bridge_applied,bridge_batch_id,bridge_gen,probe_host)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     sid,
                     domain,
@@ -300,6 +303,7 @@ class SqliteRunStore:
                     None if bridge_applied is None else int(bridge_applied),
                     int(bridge_batch_id or 0),
                     int(bridge_gen or 0),
+                    probe_host or "",
                 ),
             )
             await db.commit()
