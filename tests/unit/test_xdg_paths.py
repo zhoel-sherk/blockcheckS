@@ -199,3 +199,27 @@ def test_cwd_db_migrate_enabled_default_off(monkeypatch):
     assert cwd_db_migrate_enabled({"migrate": True}) is True
     monkeypatch.setenv("BLOCKCHECKS_MIGRATE_CWD_DB", "1")
     assert cwd_db_migrate_enabled({}) is True
+
+
+def test_sudo_user_xdg_fallback(monkeypatch):
+    """sudo-запуск (euid=0) без явных XDG → XDG SUDO_USER, не /root."""
+    from blockchecks.engine import paths as pm
+
+    monkeypatch.setenv("BLOCKCHECKS_STATE_HOME", "")
+    monkeypatch.setenv("XDG_STATE_HOME", "")
+    monkeypatch.setattr(pm, "_sudo_user_home", lambda: Path("/home/zhoel"))
+    resolved = pm._resolve_xdg("BLOCKCHECKS_STATE_HOME", "XDG_STATE_HOME",
+                               Path("/root/.local/state"))
+    assert str(resolved).startswith("/home/zhoel/")
+    # явная XDG-переменная сильнее SUDO_USER
+    monkeypatch.setenv("XDG_STATE_HOME", "/custom/state")
+    assert str(pm._resolve_xdg("BLOCKCHECKS_STATE_HOME", "XDG_STATE_HOME",
+                               Path("/root/.local/state"))) == "/custom/state"
+
+
+def test_sudo_user_home_none_without_sudo(monkeypatch):
+    from blockchecks.engine import paths as pm
+
+    monkeypatch.setattr(pm.os, "geteuid", lambda: 1000)
+    monkeypatch.delenv("SUDO_USER", raising=False)
+    assert pm._sudo_user_home() is None

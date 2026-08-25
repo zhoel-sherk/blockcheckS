@@ -12,20 +12,62 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
+_XDG_KEY_SUFFIX = {
+    "BLOCKCHECKS_CONFIG_HOME": ".config",
+    "XDG_CONFIG_HOME": ".config",
+    "BLOCKCHECKS_DATA_HOME": ".local/share",
+    "XDG_DATA_HOME": ".local/share",
+    "BLOCKCHECKS_STATE_HOME": ".local/state",
+    "XDG_STATE_HOME": ".local/state",
+    "BLOCKCHECKS_CACHE_HOME": ".cache",
+    "XDG_CACHE_HOME": ".cache",
+}
+
+
+def _sudo_user_home() -> Path | None:
+    """HOME вызвавшего sudo-пользователя, когда мы запущены через ``sudo``.
+
+    ``sudo`` сбрасывает HOME на /root, а весь остальной инструментарий
+    (MCP, gc, harvest) смотрит в XDG реального юзера. Единообразие важнее:
+    euid==0 + SUDO_USER → home SUDO_USER.
+    """
+    if os.geteuid() != 0:
+        return None
+    user = os.environ.get("SUDO_USER", "").strip()
+    if not user or user == "root":
+        return None
+    import pwd
+
+    try:
+        return Path(pwd.getpwnam(user).pw_dir)
+    except KeyError:
+        return None
+
+
 def _resolve_xdg(
     primary_key: str,
     fallback_key: str,
     default: Path,
 ) -> Path:
     """Return *default* unless *primary_key* or *fallback_key* is a
-    non-empty absolute path in the environment (spec §3)."""
+    non-empty absolute path in the environment (spec §3).
+
+    Под ``sudo`` (euid==0, без явных XDG-переменных) default берётся из
+    home SUDO_USER — чтобы root-запуск писал туда же, куда смотрят
+    zhoel-инструменты."""
     for key in (primary_key, fallback_key):
         val = os.environ.get(key, "")
         if val:
             p = Path(val)
-            if not p.is_absolute():
-                continue
-            return p
+            if p.is_absolute():
+                # XDG_*_HOME заканчивается на blockcheckS-нейтральный корень;
+                # относительные значения игнорируем как раньше.
+                return p
+    home = _sudo_user_home()
+    if home is not None:
+        suffix = _XDG_KEY_SUFFIX.get(primary_key, "")
+        if suffix:
+            return home / suffix
     return default
 
 
