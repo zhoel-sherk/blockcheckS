@@ -6,10 +6,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import blockchecks.service.netns_pool as nsp
 from blockchecks.service.netns_pool import NetNsPool
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _reset_ip_forward_state():
+    nsp._ACTIVE_NS_COUNT = 0
+    nsp._IP_FORWARD_RESTORE = None
+    yield
+    nsp._ACTIVE_NS_COUNT = 0
+    nsp._IP_FORWARD_RESTORE = None
 
 @pytest.mark.asyncio
 async def test_create_seed_acquire_release_destroy():
@@ -142,3 +151,132 @@ def test_create_all_rollback_logs_destroy_failure(caplog):
         with pytest.raises(RuntimeError, match="netns add"):
             pool.create_all()
     assert any("rollback destroy failed" in r.message for r in caplog.records)
+
+
+def test_create_all_rollback_includes_name_before_create(caplog):
+    """RT-2: partial create rolls back names registered before ip netns add."""
+    pool = NetNsPool(size=1, base="bs-t")
+    destroyed: list[str] = []
+
+    def boom(*args, check=True):
+        if args[:3] == ("ip", "netns", "add"):
+            return MagicMock(returncode=0, stdout="", stderr="")
+        if args[:3] == ("ip", "link", "add"):
+            raise RuntimeError("veth add failed")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    def capture_destroy(name, *, track_lifecycle=True):
+        destroyed.append(name)
+        return True
+
+    with (
+        patch.object(pool, "_run", side_effect=boom),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch.object(pool, "_destroy_one", side_effect=capture_destroy),
+        patch("blockchecks.service.netns_pool.subprocess.run") as sprun,
+        patch("blockchecks.service.netns_pool.time.sleep"),
+        caplog.at_level("WARNING"),
+    ):
+        sprun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with pytest.raises(RuntimeError, match="veth add failed"):
+            pool.create_all()
+    assert destroyed == ["bs-t-0"]
+
+
+def test_destroy_all_keeps_names_until_teardown_finishes():
+    pool = NetNsPool(size=2, base="bs-t")
+    pool._created = True
+    pool._names = ["bs-t-0", "bs-t-1"]
+    seen_during_destroy: list[list[str]] = []
+
+    def capture_destroy(name, *, track_lifecycle=True):
+        seen_during_destroy.append(list(pool._names))
+        return True
+
+    with patch.object(pool, "_destroy_one", side_effect=capture_destroy):
+        pool.destroy_all()
+    assert seen_during_destroy == [["bs-t-0", "bs-t-1"], ["bs-t-0", "bs-t-1"]]
+    assert pool._names == []
+
+
+def test_run_destroy_logs_nonzero_rc(caplog):
+    pool = NetNsPool(size=1, base="bs-t")
+
+    def fail_delete(*args, check=True):
+        if args[:3] == ("ip", "netns", "delete"):
+            return MagicMock(returncode=1, stdout="", stderr="delete failed")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(pool, "_run", side_effect=fail_delete),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch("blockchecks.service.metrics.pkill_nfqws2_in_ns"),
+        caplog.at_level("WARNING"),
+    ):
+        pool._destroy_one("bs-t-0", track_lifecycle=False)
+    assert any("netns destroy rc=1" in r.message for r in caplog.records)
+
+
+def test_destroy_all_warns_on_leftovers(caplog):
+    pool = NetNsPool(size=2, base="bs-t")
+    pool._created = True
+    pool._names = ["bs-t-0", "bs-t-1"]
+
+    def mixed_destroy(name, *, track_lifecycle=True):
+        return name == "bs-t-0"
+
+    with (
+        patch.object(pool, "_destroy_one", side_effect=mixed_destroy),
+        caplog.at_level("WARNING"),
+    ):
+        pool.destroy_all()
+    assert any("1/2 namespaces may remain" in r.message for r in caplog.records)
+
+
+def test_ip_forward_saved_and_restored_on_last_destroy():
+    pool = NetNsPool(size=1, base="bs-t")
+    sysctl_cmds: list[tuple[str, ...]] = []
+
+    def fake_run(*args, check=True):
+        if args[:2] == ("sysctl", "-w"):
+            sysctl_cmds.append(tuple(args))
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(pool, "_run", side_effect=fake_run),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch.object(nsp, "_read_ip_forward", return_value="0"),
+        patch.object(nsp, "_write_ip_forward_restore"),
+        patch.object(nsp, "_clear_ip_forward_restore_marker"),
+        patch("blockchecks.service.netns_pool.subprocess.run") as sprun,
+        patch("blockchecks.service.netns_pool.time.sleep"),
+        patch("blockchecks.service.metrics.pkill_nfqws2_in_ns"),
+    ):
+        sprun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        pool.create_all()
+        pool.destroy_all()
+    assert ("sysctl", "-w", "net.ipv4.ip_forward=1") in sysctl_cmds
+    assert ("sysctl", "-w", "net.ipv4.ip_forward=0") in sysctl_cmds
+
+
+def test_ip_forward_not_saved_when_already_enabled():
+    pool = NetNsPool(size=1, base="bs-t")
+    sysctl_cmds: list[tuple[str, ...]] = []
+
+    def fake_run(*args, check=True):
+        if args[:2] == ("sysctl", "-w"):
+            sysctl_cmds.append(tuple(args))
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(pool, "_run", side_effect=fake_run),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch.object(nsp, "_read_ip_forward", return_value="1"),
+        patch("blockchecks.service.netns_pool.subprocess.run") as sprun,
+        patch("blockchecks.service.netns_pool.time.sleep"),
+        patch("blockchecks.service.metrics.pkill_nfqws2_in_ns"),
+    ):
+        sprun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        pool.create_all()
+        pool.destroy_all()
+    assert sysctl_cmds == []

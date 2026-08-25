@@ -133,6 +133,14 @@ if [ "$ORPHANS_ONLY" -eq 0 ]; then
   done < <(sudo iptables -t nat -S POSTROUTING 2>/dev/null | grep '10\.200\.' | sed 's/^-A POSTROUTING //' || true)
   echo "  shm blockchecks: $(sudo rm -rf /dev/shm/blockchecks 2>/dev/null; echo removed)"
   sudo rm -f "$STATE/run.lock" "$ROOT/run.lock"
+  if [ -f "$STATE/ip_forward.restore" ]; then
+    prev="$(tr -d '[:space:]' < "$STATE/ip_forward.restore")"
+    if [ -n "$prev" ]; then
+      echo "  restore ip_forward=$prev"
+      sysctl -w "net.ipv4.ip_forward=$prev" 2>/dev/null || true
+    fi
+    rm -f "$STATE/ip_forward.restore"
+  fi
 else
   echo "  orphans-only: leave NAT/shm/run.lock for live campaign"
 fi

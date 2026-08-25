@@ -15,6 +15,8 @@ import subprocess
 import threading
 import time
 import weakref
+from collections.abc import Callable
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +28,90 @@ _ACTIVE_POOLS: weakref.WeakSet[NetNsPool] = weakref.WeakSet()
 _ATEXIT_HOOK_INSTALLED = False
 _SIGNAL_HOOKS_INSTALLED = False
 _SUDO_AUTH_MARKERS = ("password is required", "a terminal is required")
+_IP_FORWARD_LOCK = threading.Lock()
+_IP_FORWARD_RESTORE: str | None = None
+_ACTIVE_NS_COUNT = 0
+_IP_FORWARD_PROC = Path("/proc/sys/net/ipv4/ip_forward")
+
+
+def _read_ip_forward() -> str | None:
+    try:
+        return _IP_FORWARD_PROC.read_text().strip()
+    except OSError as exc:
+        log.warning("cannot read %s: %s", _IP_FORWARD_PROC, exc)
+        return None
+
+
+def _ip_forward_restore_path() -> Path:
+    from blockchecks.engine.paths import STATE_DIR
+
+    return STATE_DIR / "ip_forward.restore"
+
+
+def _write_ip_forward_restore(value: str) -> None:
+    path = _ip_forward_restore_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value, encoding="utf-8")
+    except OSError as exc:
+        log.warning("cannot persist ip_forward restore marker %s: %s", path, exc)
+
+
+def _clear_ip_forward_restore_marker() -> None:
+    try:
+        _ip_forward_restore_path().unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning("cannot remove ip_forward restore marker: %s", exc)
+
+
+def _enable_ip_forward_locked(run: Callable[..., subprocess.CompletedProcess]) -> None:
+    """Enable ip_forward; caller must hold ``_IP_FORWARD_LOCK``."""
+    global _IP_FORWARD_RESTORE
+    current = _read_ip_forward()
+    if current is None:
+        return
+    if current == "1":
+        return
+    if _IP_FORWARD_RESTORE is None:
+        _IP_FORWARD_RESTORE = current
+        _write_ip_forward_restore(current)
+    run("sysctl", "-w", "net.ipv4.ip_forward=1", check=False)
+
+
+def _enable_ip_forward(run: Callable[..., subprocess.CompletedProcess]) -> None:
+    with _IP_FORWARD_LOCK:
+        _enable_ip_forward_locked(run)
+
+
+def _restore_ip_forward_if_idle(run: Callable[..., subprocess.CompletedProcess]) -> None:
+    """Restore saved ip_forward when the last tracked namespace is gone."""
+    global _IP_FORWARD_RESTORE, _ACTIVE_NS_COUNT
+    with _IP_FORWARD_LOCK:
+        if _ACTIVE_NS_COUNT > 0:
+            return
+        restore = _IP_FORWARD_RESTORE
+        if restore is None:
+            _clear_ip_forward_restore_marker()
+            return
+        _IP_FORWARD_RESTORE = None
+    run("sysctl", "-w", f"net.ipv4.ip_forward={restore}", check=False)
+    _clear_ip_forward_restore_marker()
+    log.debug("restored net.ipv4.ip_forward=%s", restore)
+
+
+def _track_ns_created(run: Callable[..., subprocess.CompletedProcess]) -> None:
+    global _ACTIVE_NS_COUNT
+    with _IP_FORWARD_LOCK:
+        if _ACTIVE_NS_COUNT == 0:
+            _enable_ip_forward_locked(run)
+        _ACTIVE_NS_COUNT += 1
+
+
+def _track_ns_destroyed(run: Callable[..., subprocess.CompletedProcess]) -> None:
+    global _ACTIVE_NS_COUNT
+    with _IP_FORWARD_LOCK:
+        _ACTIVE_NS_COUNT = max(0, _ACTIVE_NS_COUNT - 1)
+    _restore_ip_forward_if_idle(run)
 
 
 class NetNsPool:
@@ -149,6 +235,20 @@ class NetNsPool:
             raise RuntimeError(f"cmd failed: {' '.join(args)} → {(r.stderr or '')[:200]!r}")
         return r
 
+    def _run_destroy(self, ns_name: str, *args) -> int:
+        """Run a destroy command; log non-zero rc (including timeout rc=-1)."""
+        r = self._run(*args, check=False)
+        if r.returncode != 0:
+            detail = (r.stderr or r.stdout or "").strip()
+            log.warning(
+                "netns destroy rc=%s ns=%s cmd=%s%s",
+                r.returncode,
+                ns_name,
+                " ".join(args),
+                f" detail={detail[:200]!r}" if detail else "",
+            )
+        return r.returncode
+
     def _get_iface(self) -> str:
         """Find a working non-loopback interface (cached).
 
@@ -222,8 +322,6 @@ class NetNsPool:
         # Routing
         self._run("ip", "netns", "exec", name, "ip", "route", "add", "default", "via", host_ip)
 
-        # Enable forwarding
-        self._run("sysctl", "-w", "net.ipv4.ip_forward=1", check=False)
         # Allow forwarded traffic from veth pairs
         self._run("iptables", "-A", "FORWARD", "-i", veth_h, "-j", "ACCEPT", check=False)
         self._run("iptables", "-A", "FORWARD", "-o", veth_h, "-j", "ACCEPT", check=False)
@@ -265,10 +363,11 @@ class NetNsPool:
             raise RuntimeError(f"tee resolv.conf failed: {r.stderr[:200]}")
 
         self._names.append(name)
+        _track_ns_created(self._run)
         return name
 
-    def _destroy_one(self, name: str) -> None:
-        """Destroy one netns."""
+    def _destroy_one(self, name: str, *, track_lifecycle: bool = True) -> bool:
+        """Destroy one netns. Returns True when ``ip netns delete`` succeeds."""
         idx = int(name.rsplit("-", 1)[-1]) if "-" in name else 0
         veth_h, _veth_n = self._veth_names(name)
         out_iface = self._get_iface()
@@ -278,28 +377,33 @@ class NetNsPool:
         # metrics.pkill_nfqws2_in_ns).
         from blockchecks.service.metrics import pkill_nfqws2_in_ns
 
-        pkill_nfqws2_in_ns(name)
-        self._run("ip", "netns", "exec", name, "iptables", "-F", "OUTPUT", check=False)
-        self._run("ip", "netns", "delete", name, check=False)
-        self._run("ip", "link", "delete", veth_h, check=False)
-        self._run("iptables", "-D", "FORWARD", "-i", veth_h, "-j", "ACCEPT", check=False)
-        self._run("iptables", "-D", "FORWARD", "-o", veth_h, "-j", "ACCEPT", check=False)
-        self._run(
-            "iptables",
-            "-t",
-            "nat",
-            "-D",
-            "POSTROUTING",
-            "-s",
-            nat_subnet,
-            "-o",
-            out_iface,
-            "-j",
-            "MASQUERADE",
-            check=False,
-        )
-        dns_dir = f"/etc/netns/{name}"
-        self._run("rm", "-rf", dns_dir, check=False)
+        try:
+            pkill_nfqws2_in_ns(name)
+            self._run_destroy(name, "ip", "netns", "exec", name, "iptables", "-F", "OUTPUT")
+            netns_rc = self._run_destroy(name, "ip", "netns", "delete", name)
+            self._run_destroy(name, "ip", "link", "delete", veth_h)
+            self._run_destroy(name, "iptables", "-D", "FORWARD", "-i", veth_h, "-j", "ACCEPT")
+            self._run_destroy(name, "iptables", "-D", "FORWARD", "-o", veth_h, "-j", "ACCEPT")
+            self._run_destroy(
+                name,
+                "iptables",
+                "-t",
+                "nat",
+                "-D",
+                "POSTROUTING",
+                "-s",
+                nat_subnet,
+                "-o",
+                out_iface,
+                "-j",
+                "MASQUERADE",
+            )
+            dns_dir = f"/etc/netns/{name}"
+            self._run_destroy(name, "rm", "-rf", dns_dir)
+            return netns_rc == 0
+        finally:
+            if track_lifecycle:
+                _track_ns_destroyed(self._run)
 
     def _cleanup_ns(self, ns_name: str) -> None:
         """Best-effort cleanup inside a netns before returning to pool."""
@@ -321,12 +425,14 @@ class NetNsPool:
             created: list[str] = []
             try:
                 for i in range(self.size):
-                    created.append(self._create_one(i))
+                    name = f"{self.base}-{i}"
+                    created.append(name)
+                    self._create_one(i)
                 self._created = True
             except Exception:
                 for name in created:
                     try:
-                        self._destroy_one(name)
+                        self._destroy_one(name, track_lifecycle=name in self._names)
                     except Exception as destroy_exc:
                         log.warning(
                             "netns rollback destroy failed for %s: %s",
@@ -360,11 +466,25 @@ class NetNsPool:
                 return
             self._created = False
             names_to_destroy = list(self._names)
-            self._names.clear()
+        destroyed = 0
         for name in names_to_destroy:
-            self._destroy_one(name)
+            try:
+                if self._destroy_one(name):
+                    destroyed += 1
+            except Exception as exc:
+                log.warning("netns destroy_one failed for %s: %s", name, exc)
+        with self._lock:
+            self._names.clear()
         if names_to_destroy:
-            log.info("[netns] Pool destroyed")
+            leftovers = len(names_to_destroy) - destroyed
+            if leftovers:
+                log.warning(
+                    "netns destroy_all: %d/%d namespaces may remain on host",
+                    leftovers,
+                    len(names_to_destroy),
+                )
+            else:
+                log.info("[netns] Pool destroyed")
 
     async def acquire(self) -> str:
         """Get a free netns from the pool. Blocks if all busy."""
