@@ -859,6 +859,46 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_system_deps_args(bench)
 
+    hb = sub.add_parser(
+        "harvest-batch",
+        help="Export top PASS strategies → dpi-tester batch.txt + manifest (+ raw confs)",
+    )
+    hb.add_argument(
+        "-d",
+        "--db",
+        default=None,
+        help=f"State DB (default: {DEFAULT_DB_PATH})",
+    )
+    hb.add_argument(
+        "--out-dir",
+        default=None,
+        metavar="DIR",
+        help="Destination root (default: logs/harvest/harvest_<ts>)",
+    )
+    hb.add_argument(
+        "--top",
+        type=int,
+        default=20,
+        help="Max candidates (default: 20)",
+    )
+    hb.add_argument(
+        "--min-domains",
+        type=int,
+        default=2,
+        help="Min distinct PASS domains per strategy (default: 2)",
+    )
+    hb.add_argument(
+        "--proto",
+        default="tcp",
+        choices=["tcp", "udp", "quic"],
+        help="Strategy protocol family (default: tcp)",
+    )
+    hb.add_argument(
+        "--write-confs",
+        action="store_true",
+        help="Also emit self-contained raw nfqws2 confs (Tier-2 validation)",
+    )
+
     db = sub.add_parser(
         "data-block",
         help="Export XDG provider store to a git data_block checkout",
@@ -971,6 +1011,11 @@ def dispatch(args: argparse.Namespace) -> int:
 
         return cmd_data_block(a)
 
+    def _harvest_batch(a: argparse.Namespace) -> int:
+        from blockchecks.cli.commands.harvest_batch import cmd_harvest_batch
+
+        return cmd_harvest_batch(a)
+
     handlers: dict[str, Callable[[argparse.Namespace], int]] = {
         "tcp": cmd_tcp,
         "udp": cmd_udp,
@@ -981,6 +1026,7 @@ def dispatch(args: argparse.Namespace) -> int:
         "stop": _stop,
         "preflight": _preflight,
         "data-block": _data_block,
+        "harvest-batch": _harvest_batch,
     }
     handler = handlers.get(args.command)
     if handler is not None:

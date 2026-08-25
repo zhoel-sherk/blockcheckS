@@ -481,6 +481,14 @@ def _run_data_block(model: BaseModel) -> int:
     return cmd_data_block(ns)
 
 
+def _run_harvest_batch(model: BaseModel) -> int:
+    from blockchecks.cli.commands.harvest_batch import cmd_harvest_batch
+
+    ns = _to_namespace(model)
+    ns.command = "harvest-batch"
+    return cmd_harvest_batch(ns)
+
+
 def build_cli_root() -> type[BaseSettings]:
     from blockchecks.cli.user_config import apply_parser_defaults
 
@@ -526,6 +534,11 @@ def build_cli_root() -> type[BaseSettings]:
             "data-block",
             raw_blurbs,
             "Export XDG provider store to a git data_block checkout",
+        ),
+        "harvest-batch": _parser_blurb(
+            "harvest-batch",
+            raw_blurbs,
+            "Export top PASS strategies → dpi-tester batch.txt + manifest (+ confs)",
         ),
     }
 
@@ -577,6 +590,12 @@ def build_cli_root() -> type[BaseSettings]:
         _run_data_block,
         blurbs["data-block"],
     )
+    HarvestBatchCmd = _make_cmd_model(
+        "HarvestBatchCmd",
+        model_from_subparser("HarvestBatchArgs", subs["harvest-batch"]),
+        _run_harvest_batch,
+        blurbs["harvest-batch"],
+    )
 
     class BlockchecksCli(BaseSettings):
         """bs — lightspeed DPI strategy tester (CliApp)."""
@@ -611,6 +630,10 @@ def build_cli_root() -> type[BaseSettings]:
         data_block: CliSubCommand[DataBlockCmd] = Field(  # type: ignore[valid-type]
             alias="data-block",
             description=blurbs["data-block"],
+        )
+        harvest_batch: CliSubCommand[HarvestBatchCmd] = Field(  # type: ignore[valid-type]
+            alias="harvest-batch",
+            description=blurbs["harvest-batch"],
         )
 
         def cli_cmd(self) -> int:

@@ -1,3 +1,32 @@
+## 1.3.9 — harvest-batch export for external validation (2026-08-25)
+
+### bs harvest-batch: strategy candidates → dpi-tester / GP-access-control-plane
+
+New read-only CLI subcommand exporting the harvest of a finished campaign as
+validation-ready material:
+
+```
+bs harvest-batch -d logs/week_cov.db --top 20 --min-domains 2 [--proto tcp] [--write-confs]
+```
+
+- `harvest_<ts>/batch.txt` — lines `dom1,dom2,… | <lua-desync-core>` in
+  dpi-tester `run_batch()` format; `manifest.json` — schema
+  `blockchecks.harvest/v1` with per-candidate coverage/latency and per-domain
+  saturation metrics (`saturated >=85%` of top candidates pass a domain —
+  informative for ranking, valuable anyway for router configs).
+- `--write-confs` — self-contained raw nfqws2 `@file` bundles (conf +
+  blobs/lua via `write_export_bundle`) per candidate for Tier-2 full
+  validation of finalists.
+- Core module `src/blockchecks/harvest_batch.py` is pure/read-only (stdlib
+  sqlite3 `mode=ro`, window-function latest-row-per-pair), quarantine-aware,
+  ranks by domain coverage then latency — same policy as
+  `generate_router_config`. Digital-leading blob identifiers are renamed
+  (4pda→b4pda) BEFORE validity filtering, so strategies like
+  `multisplit:…seqovl_pattern=4pda` survive instead of being dropped
+  (unresolved: 1823→0 on live week_cov.db). Intended seam for future move to
+  GP-access-control-plane.
+- CLI wiring in both layers (argparse dispatch + pydantic CliApp model).
+
 ## 1.3.8 — TLS bypass classification, Discord redirect handling, MCP tools overhaul (2026-08-23)
 
 ### Bridge integrity: "PASS without APPLIED" root-caused & self-healing (2026-08-24)
