@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 
 from blockchecks.engine.config import PROJECT_DIR
+from blockchecks.engine.paths import USER_PRESETS_DIR
 from blockchecks.engine.preset_paths import RESERVED_DOMAIN_FILES, resolve_domain_preset
 
 
@@ -26,7 +27,8 @@ def auto_enable_gv_ggc(domains: list[str]) -> None:
 DOMAINS_PRESET_DIR = os.path.join(PROJECT_DIR, "presets", "domains")
 DEFAULT_DOMAINS_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage-tcp.txt")
 FULL_COVERAGE_FILE = os.path.join(DOMAINS_PRESET_DIR, "coverage.txt")
-DENYLIST_FILE = os.path.join(DOMAINS_PRESET_DIR, "denylist.txt")
+BUNDLED_DENYLIST_FILE = os.path.join(DOMAINS_PRESET_DIR, "denylist.txt")
+DENYLIST_FILE = str(USER_PRESETS_DIR / "domains" / "denylist.txt")
 
 
 @dataclass(frozen=True)
@@ -67,8 +69,20 @@ def read_domain_lines(path: str) -> list[str]:
 
 
 def load_denylist(path: str | None = None) -> list[DenylistEntry]:
-    """Parse denylist.txt — domain + optional # category comment."""
-    deny_path = path or DENYLIST_FILE
+    """Parse denylist.txt — domain + optional # category comment.
+
+    Default: bundled seed plus XDG user overlay (``CONFIG_DIR/presets/domains``).
+    """
+    if path:
+        return _parse_denylist_file(path)
+    merged: dict[str, DenylistEntry] = {}
+    for src in (BUNDLED_DENYLIST_FILE, DENYLIST_FILE):
+        for entry in _parse_denylist_file(src):
+            merged[entry.domain] = entry
+    return list(merged.values())
+
+
+def _parse_denylist_file(deny_path: str) -> list[DenylistEntry]:
     if not os.path.exists(deny_path):
         return []
     entries: list[DenylistEntry] = []

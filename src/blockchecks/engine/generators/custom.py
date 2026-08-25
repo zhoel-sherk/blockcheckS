@@ -21,8 +21,10 @@ class CustomListGenerator(StrategyGenerator):
         "udp_voice": "list_udp_voice.txt",
     }
 
-    def __init__(self, base_dir: str = "/opt/zapret2/blockcheck2.d/custom"):
-        self.base_dir = base_dir
+    def __init__(self, base_dir: str | None = None):
+        from blockchecks.engine.config import ZAPRET2_ROOT
+
+        self.base_dir = base_dir or os.path.join(ZAPRET2_ROOT, "blockcheck2.d", "custom")
 
     async def generate(
         self,

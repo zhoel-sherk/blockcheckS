@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from blockchecks.engine.adaptive_runner import persist_adaptive_weights
-from blockchecks.engine.paths import RUNTIME_LOGS_DIR
+from blockchecks.engine.paths import DEFAULT_OUT_DIR
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.store import RunStateStore
 from blockchecks.nfconf import export_configs
@@ -164,7 +164,7 @@ def write_run_summary(
     out_dir: str,
     payload: dict[str, Any],
 ) -> str:
-    base = out_dir or str(RUNTIME_LOGS_DIR)
+    base = out_dir or str(DEFAULT_OUT_DIR)
     os.makedirs(base, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
     path = os.path.join(base, f"run_summary_{ts}.json")

@@ -29,7 +29,9 @@ S4C_H="${WEEK_S4C_H:-8}"
 S5_H="${WEEK_S5_H:-24}"
 
 export BLOCKCHECKS_BLOBS="${BLOCKCHECKS_BLOBS:-$ROOT/blobs}"
-export BLOCKCHECKS_SETTINGS="${BLOCKCHECKS_SETTINGS:-$ROOT/../dpi-tester/settings.ini}"
+if [ -z "${BLOCKCHECKS_SETTINGS:-}" ] && [ -f "$ROOT/../dpi-tester/settings.ini" ]; then
+  export BLOCKCHECKS_SETTINGS="$ROOT/../dpi-tester/settings.ini"
+fi
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
 export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
 export PYTHONUNBUFFERED=1

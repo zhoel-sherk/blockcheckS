@@ -403,7 +403,8 @@ class ProbeBatchService:
         """
         try:
             age = session.bridge.heartbeat_age()
-        except Exception:
+        except Exception as exc:
+            log.warning("daemon heartbeat_age failed: %s", exc)
             return False
         if not isinstance(age, (int, float)):
             return False
@@ -419,7 +420,8 @@ class ProbeBatchService:
         while time.monotonic() < deadline:
             try:
                 age = session.bridge.heartbeat_age()
-            except Exception:
+            except Exception as exc:
+                log.debug("wait_heartbeat age failed: %s", exc)
                 age = None
             if isinstance(age, (int, float)) and age <= 1.0:
                 return True

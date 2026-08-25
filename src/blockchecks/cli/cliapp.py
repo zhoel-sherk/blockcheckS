@@ -489,6 +489,14 @@ def _run_harvest_batch(model: BaseModel) -> int:
     return cmd_harvest_batch(ns)
 
 
+def _run_gc(model: BaseModel) -> int:
+    from blockchecks.cli.commands.gc import cmd_gc
+
+    ns = _to_namespace(model)
+    ns.command = "gc"
+    return cmd_gc(ns)
+
+
 def build_cli_root() -> type[BaseSettings]:
     from blockchecks.cli.user_config import apply_parser_defaults
 
@@ -539,6 +547,11 @@ def build_cli_root() -> type[BaseSettings]:
             "harvest-batch",
             raw_blurbs,
             "Export top PASS strategies → dpi-tester batch.txt + manifest (+ confs)",
+        ),
+        "gc": _parser_blurb(
+            "gc",
+            raw_blurbs,
+            "Prune debug logs / summaries / harvest / caches (dry-run)",
         ),
     }
 
@@ -596,6 +609,12 @@ def build_cli_root() -> type[BaseSettings]:
         _run_harvest_batch,
         blurbs["harvest-batch"],
     )
+    GcCmd = _make_cmd_model(
+        "GcCmd",
+        model_from_subparser("GcArgs", subs["gc"]),
+        _run_gc,
+        blurbs["gc"],
+    )
 
     class BlockchecksCli(BaseSettings):
         """bs — lightspeed DPI strategy tester (CliApp)."""
@@ -635,6 +654,7 @@ def build_cli_root() -> type[BaseSettings]:
             alias="harvest-batch",
             description=blurbs["harvest-batch"],
         )
+        gc: CliSubCommand[GcCmd] = Field(description=blurbs["gc"])  # type: ignore[valid-type]
 
         def cli_cmd(self) -> int:
             global _CLI_EXIT_CODE
@@ -650,6 +670,7 @@ def main(argv: list[str] | None = None) -> int:
     from blockchecks.engine.paths import (
         apply_pycache_prefix,
         configure_logging,
+        cwd_db_migrate_enabled,
         ensure_dirs,
         migrate_legacy_state_db,
     )
@@ -661,15 +682,17 @@ def main(argv: list[str] | None = None) -> int:
     global _USER_CFG
     _USER_CFG = cfg
     paths_cfg = cfg.get("paths") if isinstance(cfg.get("paths"), dict) else {}
-    migrate_on = True if paths_cfg.get("migrate") is None else bool(paths_cfg.get("migrate"))
-    migrate_legacy_state_db(enabled=migrate_on)
+    raw = list(argv) if argv is not None else None
+    migrate_legacy_state_db(
+        enabled=cwd_db_migrate_enabled(paths_cfg)
+        or "--migrate-cwd-db" in (raw if raw is not None else sys.argv[1:])
+    )
 
     from blockchecks.cli.parser import build_parser
 
     probe = build_parser()
     apply_parser_defaults(probe, cfg)
 
-    raw = list(argv) if argv is not None else None
     cli_args = (
         expand_bare_nfqws2_debug(expand_bare_generate(normalize_cli_args(raw)))
         if raw is not None

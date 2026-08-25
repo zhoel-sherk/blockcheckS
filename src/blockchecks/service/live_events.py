@@ -17,10 +17,13 @@ durable results live in state.db).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR
+
+log = logging.getLogger(__name__)
 
 EVENTS_FILE = RUNTIME_LOGS_DIR / "events_live.jsonl"
 CURRENT_FILE = RUNTIME_LOGS_DIR / "current_probe.json"
@@ -32,8 +35,8 @@ def _rotate_if_needed() -> None:
     try:
         if EVENTS_FILE.is_file() and EVENTS_FILE.stat().st_size > _MAX_JOURNAL_BYTES:
             EVENTS_FILE.replace(EVENTS_FILE.with_suffix(".jsonl.old"))
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("live_events rotate failed: %s", exc)
 
 
 def _safe_int(v) -> int:
@@ -78,8 +81,8 @@ def write_probe(
         _rotate_if_needed()
         with EVENTS_FILE.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("live_events write_probe failed: %s", exc)
 
 
 def set_current(*, domain: str, strategy: str, ns: str, backend: str) -> None:
@@ -97,8 +100,8 @@ def set_current(*, domain: str, strategy: str, ns: str, backend: str) -> None:
         RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, CURRENT_FILE)
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("live_events set_current failed: %s", exc)
 
 
 def read_current() -> dict | None:

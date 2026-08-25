@@ -59,8 +59,9 @@ def _env_or(key, default: str) -> str:
 
 
 # External tool paths
-_DEFAULT_NFQWS2 = "/opt/zapret2/nfq2/nfqws2"
-_DEFAULT_LUA = "/opt/zapret2/lua"
+ZAPRET2_ROOT = _env_or("BLOCKCHECKS_ZAPRET2", _env_or("ZAPRET2_ROOT", "/opt/zapret2"))
+_DEFAULT_NFQWS2 = os.path.join(ZAPRET2_ROOT, "nfq2", "nfqws2")
+_DEFAULT_LUA = os.path.join(ZAPRET2_ROOT, "lua")
 _LUA_SCRIPT_NAMES = ("zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua")
 
 
@@ -70,7 +71,7 @@ def _default_blobs_dir() -> str:
         name.endswith(".bin") for name in os.listdir(REPO_BLOBS_DIR)
     ):
         return REPO_BLOBS_DIR
-    return "/opt/zapret2/blobs"
+    return os.path.join(ZAPRET2_ROOT, "blobs")
 
 
 NFQWS2_BIN = _env_or("BLOCKCHECKS_NFQWS2", _DEFAULT_NFQWS2)
@@ -99,9 +100,7 @@ PYTHON_BIN = _resolve_python()
 # yt-dlp binary (googlevideo URL fetch)
 YTDLP_BIN = _env_or("BLOCKCHECKS_YTDLP", "")
 
-DPI_TESTER_SETTINGS = _env_or(
-    "BLOCKCHECKS_SETTINGS", os.path.join(PROJECT_DIR, "../dpi-tester/settings.ini")
-)
+DPI_TESTER_SETTINGS = os.environ.get("BLOCKCHECKS_SETTINGS", "")
 
 # Blob directory — repo blobs/ by default (baked); override with BLOCKCHECKS_BLOBS
 BLOB_DIR = _env_or("BLOCKCHECKS_BLOBS", _default_blobs_dir())
@@ -458,6 +457,9 @@ def nfqws2_debug_conf_line(tag: str = "") -> tuple[str | None, str | None]:
         path = os.path.join(
             LOGS_DIR, f"nfqws2_{safe}_{os.getpid()}_{int(time.time() * 1000) % 1000000}.log"
         )
+        from blockchecks.engine.gc import prune_nfqws2_debug_logs
+
+        prune_nfqws2_debug_logs()
         return f"--debug=@{path}", path
     if v.lower() == "syslog":
         return "--debug=syslog", None

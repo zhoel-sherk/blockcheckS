@@ -19,10 +19,16 @@ from blockchecks.engine.conf_builder import (
     write_export_bundle,
     write_user_list,
 )
-from blockchecks.engine.config import BLOB_DIR
+from blockchecks.engine.config import BLOB_DIR, ZAPRET2_ROOT
 from blockchecks.engine.domain_loader import DEFAULT_DOMAINS_FILE, read_domain_lines
 from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR, expand_path
 from blockchecks.engine.store import RunStateStore, open_run_store
+
+_IP2NET_CANDIDATES = (
+    os.path.join(ZAPRET2_ROOT, "binaries", "linux-x86_64", "ip2net"),
+    os.path.join(ZAPRET2_ROOT, "ip2net", "ip2net"),
+)
+_IPSET_INLINE_LIMIT = 64  # > this many IPs → write a file instead of inline
 
 log = logging.getLogger(__name__)
 
@@ -93,14 +99,6 @@ async def collect_export_strategies(  # noqa: C901
         log.warning("%s", "  WARNING: no QUIC strategies in DB; using stock quic_initial")
         quic_strats = ["fake:blob=quic_initial:repeats=11"]
     return tcp_strats, udp_strats, quic_strats
-
-
-_IP2NET_CANDIDATES = (
-    "/opt/zapret2/binaries/linux-x86_64/ip2net",
-    "/opt/zapret2/ip2net/ip2net",
-)
-
-_IPSET_INLINE_LIMIT = 64  # > this many IPs → write a file instead of inline
 
 
 def _resolve_export_strategy(config: str | None, name: str) -> str | None:

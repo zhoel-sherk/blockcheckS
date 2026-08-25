@@ -109,6 +109,7 @@ Raspberry Pi 2: [install-rpi.md](install-rpi.md) и раздел [Память](
 | `bs stop` | снять `run.lock` | `bs stop --force` |
 | `bs data-block` | снимок XDG-провайдера в git `data_block/` | `bs data-block --out ./data_block --git` |
 | `bs harvest-batch` | топ PASS-стратегий → batch.txt + manifest (+ raw-конфы) для внешнего валидатора (dpi-tester); read-only к state.db | `bs harvest-batch -d logs/week_cov.db --top 20 --write-confs` |
+| `bs gc` | dry-run prune логов nfqws2 / run_summary / harvest / zapret2-dl / voice_cache_old (не трогает week_cov*) | `bs gc` / `bs gc --dry-run` / `bs gc --apply --max-age-days 14` |
 | `bc-nfconf` | конфиг роутера из уже готовой БД | `bc-nfconf --db state.db --out-dir out` |
 
 `bs scan` — TCP-only обёртка над `pair`: UDP и `--auto-discover` на scan

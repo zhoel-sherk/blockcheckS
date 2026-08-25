@@ -473,6 +473,11 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     parser.add_argument(
         "--resume", action="store_true", help="Resume prior run: skip domain×strategy in DB"
     )
+    parser.add_argument(
+        "--migrate-cwd-db",
+        action="store_true",
+        help="Copy ./state.db into XDG state.db if missing (off by default)",
+    )
 
     add_secure_dns_args(parser, include_preflight=True)
     add_ip_pin_args(parser)
@@ -680,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
     tcp.add_argument("-C", "--configs-dir")
     tcp.add_argument("-f", "--file")
     tcp.add_argument("--test", choices=["custom", "standard"])
-    tcp.add_argument("--test-dir", default="/opt/zapret2/blockcheck2.d")
+    tcp.add_argument("--test-dir", default=None, help="blockcheck2.d directory (default: $ZAPRET2/blockcheck2.d)")
     tcp.add_argument(
         "--protocol", default="tls12", choices=["http", "tls12", "tls13", "quic", "udp_voice"]
     )
@@ -873,7 +878,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--out-dir",
         default=None,
         metavar="DIR",
-        help="Destination root (default: logs/harvest/harvest_<ts>)",
+        help="Destination root (default: XDG export/harvest/harvest_<ts>)",
     )
     hb.add_argument(
         "--top",
@@ -897,6 +902,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--write-confs",
         action="store_true",
         help="Also emit self-contained raw nfqws2 confs (Tier-2 validation)",
+    )
+
+    gc = sub.add_parser(
+        "gc",
+        help="Prune debug logs, run summaries, harvest dirs, zapret2-dl, voice caches (dry-run)",
+    )
+    gc_mode = gc.add_mutually_exclusive_group()
+    gc_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually delete (default is dry-run)",
+    )
+    gc_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List deletions only (default; opposite of --apply)",
+    )
+    gc.add_argument(
+        "--max-age-days",
+        type=float,
+        default=14,
+        help="Age threshold for summaries/harvest/caches (default 14)",
+    )
+    gc.add_argument(
+        "--nfqws2-keep",
+        type=int,
+        default=50,
+        help="Newest nfqws2_*.log files to keep (default 50)",
     )
 
     db = sub.add_parser(
@@ -924,7 +957,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def dispatch(args: argparse.Namespace) -> int:
+def dispatch(args: argparse.Namespace) -> int:  # noqa: C901
     if getattr(args, "debug", False):
         from blockchecks.engine.log import set_debug_mode
 
@@ -1016,6 +1049,11 @@ def dispatch(args: argparse.Namespace) -> int:
 
         return cmd_harvest_batch(a)
 
+    def _gc(a: argparse.Namespace) -> int:
+        from blockchecks.cli.commands.gc import cmd_gc
+
+        return cmd_gc(a)
+
     handlers: dict[str, Callable[[argparse.Namespace], int]] = {
         "tcp": cmd_tcp,
         "udp": cmd_udp,
@@ -1027,6 +1065,7 @@ def dispatch(args: argparse.Namespace) -> int:
         "preflight": _preflight,
         "data-block": _data_block,
         "harvest-batch": _harvest_batch,
+        "gc": _gc,
     }
     handler = handlers.get(args.command)
     if handler is not None:
@@ -1062,13 +1101,12 @@ def _main_argparse(argv: list[str] | None = None) -> int:
     configure_logging()
     user_cfg = load_user_config()
     paths_cfg = user_cfg.get("paths") if isinstance(user_cfg.get("paths"), dict) else {}
-    migrate_on = True if paths_cfg.get("migrate") is None else bool(paths_cfg.get("migrate"))
-    from blockchecks.engine.paths import migrate_legacy_state_db
-
-    migrate_legacy_state_db(enabled=migrate_on)
-
     if argv is None:
         argv = sys.argv[1:]
+    from blockchecks.engine.paths import cwd_db_migrate_enabled, migrate_legacy_state_db
+
+    migrate_legacy_state_db(enabled=cwd_db_migrate_enabled(paths_cfg) or "--migrate-cwd-db" in argv)
+
     if len(argv) > 0 and argv[0] == "full":
         from blockchecks.main import main as full_main
 

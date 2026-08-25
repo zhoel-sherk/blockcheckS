@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from blockchecks.engine.config import ZAPRET2_ROOT
 from blockchecks.engine.paths import CONFIG_FILE
 
 try:
@@ -18,9 +19,9 @@ try:
 except ImportError:  # Python < 3.11
     import tomli as tomllib  # type: ignore[no-redef]
 
-_DEFAULT_NFQWS2 = "/opt/zapret2/nfq2/nfqws2"
-_DEFAULT_BLOBS = "/opt/zapret2/blobs"
-_DEFAULT_LUA = "/opt/zapret2/lua"
+_DEFAULT_NFQWS2 = os.path.join(ZAPRET2_ROOT, "nfq2", "nfqws2")
+_DEFAULT_BLOBS = os.path.join(ZAPRET2_ROOT, "blobs")
+_DEFAULT_LUA = os.path.join(ZAPRET2_ROOT, "lua")
 
 
 class BlockchecksSettings(BaseSettings):

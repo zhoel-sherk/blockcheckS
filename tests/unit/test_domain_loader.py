@@ -65,6 +65,22 @@ def test_coverage_tcp_lean_default():
     assert not result.skipped
 
 
+def test_load_denylist_merges_user_overlay(tmp_path: Path, monkeypatch):
+    from blockchecks.engine import domain_loader as dl
+
+    bundled = tmp_path / "bundled.txt"
+    bundled.write_text("evil.example  # bundled\nshared.example  # from-bundled\n")
+    user = tmp_path / "user" / "denylist.txt"
+    user.parent.mkdir()
+    user.write_text("shared.example  # from-user\nextra.example\n")
+    monkeypatch.setattr(dl, "BUNDLED_DENYLIST_FILE", str(bundled))
+    monkeypatch.setattr(dl, "DENYLIST_FILE", str(user))
+    entries = {e.domain: e.category for e in dl.load_denylist()}
+    assert entries["evil.example"] == "bundled"
+    assert entries["shared.example"] == "from-user"
+    assert entries["extra.example"] == ""
+
+
 def test_format_skip_summary():
     skipped = [
         DenylistEntry("googlevideo.com", "videoplayback apex"),

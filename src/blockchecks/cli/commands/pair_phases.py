@@ -884,7 +884,7 @@ async def finalize_pair_run(
     if aq_result:
         summary_payload["jobs_done"] = aq_result.done
         summary_payload["passed"] = aq_result.passed
-    write_run_summary(getattr(args, "out_dir", None) or "logs", summary_payload)
+    write_run_summary(getattr(args, "out_dir", None) or "", summary_payload)
 
     if tcp_passed <= 0:
         return 1

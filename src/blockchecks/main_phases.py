@@ -1297,7 +1297,7 @@ async def export_and_summarize(ctx: FullRunContext) -> int:
             "passes_before_half": ctx.aq_result.metrics.passes_before_half,
             "half_mark_jobs": ctx.aq_result.metrics.half_mark_jobs,
         }
-    summary_path = write_run_summary(getattr(ctx.args, "out_dir", None) or "logs", summary_payload)
+    summary_path = write_run_summary(getattr(ctx.args, "out_dir", None) or "", summary_payload)
     log.info("%s", f"  Run summary: {summary_path}")
 
     return run_exit_code(ctx.stop.is_set(), ctx.deadline, ctx.signal_interrupted)

@@ -11,15 +11,16 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from blockchecks.engine.config import ZAPRET2_ROOT
 from blockchecks.engine.fail_phase import FailPhase
 
 log = logging.getLogger(__name__)
 
 # Baked QUIC Initial blobs (prefer a real ClientHello for realistic DPI trigger).
 _QUIC_BLOB_CANDIDATES = (
-    Path("/opt/zapret2/blobs/quic_initial_www_google_com.bin"),
-    Path("/opt/zapret2/blobs/quic_initial.bin"),
-    Path("/opt/zapret2/blobs/quic_initial_dbankcloud_ru.bin"),
+    Path(ZAPRET2_ROOT) / "blobs" / "quic_initial_www_google_com.bin",
+    Path(ZAPRET2_ROOT) / "blobs" / "quic_initial.bin",
+    Path(ZAPRET2_ROOT) / "blobs" / "quic_initial_dbankcloud_ru.bin",
 )
 
 _ICMP_DEST_UNREACH = 3

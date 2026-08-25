@@ -105,7 +105,11 @@ def finalize_store_args(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
     if hasattr(args, "out_dir"):
         from blockchecks.engine.paths import resolve_user_output_dir
 
-        out_default = resolve_user_output_dir(kind="export")
+        paths_cfg = cfg.get("paths") if isinstance(cfg.get("paths"), dict) else {}
+        out_default = resolve_user_output_dir(
+            kind="export",
+            allow_legacy=bool(paths_cfg.get("legacy_export")),
+        )
         if args.out_dir is None:
             args.out_dir = resolve_store_path(None, cfg, "out_dir", out_default)
         else:

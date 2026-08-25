@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ def append_denylist(entries: list[dict], denylist_path: str | None = None) -> li
 
     path = denylist_path or str(DENYLIST_FILE)
     try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         existing: set[str] = set()
         try:
             with open(path, encoding="utf-8") as fh:

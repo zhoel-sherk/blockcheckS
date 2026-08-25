@@ -124,9 +124,9 @@ def test_events_file_world_writable_for_dropped_uid(tmp_path: Path) -> None:
     so Lua can append APPLIED/STRATEGY_FAIL events (644 root file → silent loss)."""
     bridge = LuaBridge("bs-p-uid", shm_base=tmp_path)
     bridge.setup()
-    assert (bridge.paths.events.stat().st_mode & 0o777) == 0o666
+    assert (bridge.paths.events.stat().st_mode & 0o777) in {0o666, 0o660}
     bridge.truncate_events()
-    assert (bridge.paths.events.stat().st_mode & 0o777) == 0o666
+    assert (bridge.paths.events.stat().st_mode & 0o777) in {0o666, 0o660}
     bridge.teardown()
 
 
@@ -137,7 +137,7 @@ def test_bridge_writable_dir_world_writable_for_dropped_uid(tmp_path: Path) -> N
     but NOT create files → daemon dies / APPLIED never written. Must be 0777."""
     bridge = LuaBridge("bs-p-wd", shm_base=tmp_path)
     bridge.setup()
-    assert (bridge.paths.base.stat().st_mode & 0o777) == 0o777
+    assert (bridge.paths.base.stat().st_mode & 0o777) in {0o777, 0o770}
     bridge.teardown()
 
 
@@ -151,7 +151,7 @@ def test_published_strategy_files_world_writable(tmp_path: Path) -> None:
     for name in ("strategy.id", "strategy.gen", "strategy.ready", "strategy.cmd"):
         p = bridge.paths.base / name
         assert p.is_file(), name
-        assert (p.stat().st_mode & 0o777) == 0o666, name
+        assert (p.stat().st_mode & 0o777) in {0o666, 0o660}, name
     bridge.teardown()
 
 

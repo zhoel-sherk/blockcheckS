@@ -82,17 +82,28 @@ def _dir_nonempty(path: Path) -> bool:
         return False
 
 
-def resolve_user_output_dir(*, kind: str = "export") -> Path:
-    """Return DATA_DIR export/shortlists, or legacy STATE_DIR path if still in use.
+def resolve_user_output_dir(*, kind: str = "export", allow_legacy: bool = False) -> Path:
+    """Return DATA_DIR export/shortlists.
 
-    Compat for 1.0.x installs that already wrote under ``~/.local/state/.../export``.
+    Legacy STATE_DIR/export is never chosen silently. Pass *allow_legacy* (or
+    config ``[paths] legacy_export = true``) to read the old location when the
+    new tree is empty. Always log when a nonempty legacy tree is ignored.
     """
     if kind == "shortlists":
         new, legacy = DEFAULT_SHORTLIST_DIR, _LEGACY_SHORTLIST_DIR
     else:
         new, legacy = DEFAULT_OUT_DIR, _LEGACY_OUT_DIR
-    if legacy.is_dir() and _dir_nonempty(legacy) and not _dir_nonempty(new):
+    legacy_hit = legacy.is_dir() and _dir_nonempty(legacy) and not _dir_nonempty(new)
+    if legacy_hit and allow_legacy:
+        log.warning("using legacy output dir %s (prefer %s)", legacy, new)
         return legacy
+    if legacy_hit:
+        log.warning(
+            "ignoring nonempty legacy output dir %s; writing to %s "
+            "(set [paths] legacy_export = true to opt in)",
+            legacy,
+            new,
+        )
     return new
 
 
@@ -117,18 +128,14 @@ def ensure_dirs() -> None:
         DEFAULT_OUT_DIR,
         DEFAULT_SHORTLIST_DIR,
         RUNTIME_LOGS_DIR,
-        USER_DATA_PRESETS_DIR,  # reserved for runtime-imported presets
         CACHE_DIR,
-        BLOB_CACHE_DIR,
         PYCACHE_DIR,
-        _LEGACY_OUT_DIR,  # still create for compat readers
-        _LEGACY_SHORTLIST_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
         reclaim_sudo_ownership(path)
     # Sensitive dirs: state + runtime logs hold probe results / lock files;
     # restrict to owner (0700) so other local users can't read raw DPI data.
-    for path in (STATE_DIR, RUNTIME_LOGS_DIR, BLOB_CACHE_DIR):
+    for path in (STATE_DIR, RUNTIME_LOGS_DIR):
         try:
             path.chmod(0o700)
         except OSError:
@@ -248,15 +255,28 @@ def configure_logging(*, level: str | int | None = None, console: str = "stdout"
     _configure(level=level, console=console)
 
 
+def cwd_db_migrate_enabled(paths_cfg: dict | None = None) -> bool:
+    """True only when explicitly requested — never auto-ingest cwd/state.db."""
+    env = os.environ.get("BLOCKCHECKS_MIGRATE_CWD_DB", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    if isinstance(paths_cfg, dict) and "migrate" in paths_cfg:
+        return bool(paths_cfg.get("migrate"))
+    return False
+
+
 def migrate_legacy_state_db(
     *,
     cwd: Path | None = None,
-    enabled: bool = True,
+    enabled: bool = False,
 ) -> Path | None:
     """Copy ``./state.db`` → XDG DEFAULT_DB_PATH when the XDG db is missing.
 
-    Controlled by *enabled* (config ``[paths] migrate = true`` default).
-    Returns destination path if a copy was performed, else None.
+    Off by default: a foreign cwd ``state.db`` must not be pulled into XDG.
+    Enable with ``--migrate-cwd-db``, env ``BLOCKCHECKS_MIGRATE_CWD_DB=1``,
+    or config ``[paths] migrate = true``.
     """
     if not enabled:
         return None

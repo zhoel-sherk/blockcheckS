@@ -5,7 +5,7 @@ import logging
 
 from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
-from blockchecks.engine.config import CONFIGS_DIR, SECURE_DNS_DEFAULT
+from blockchecks.engine.config import CONFIGS_DIR, SECURE_DNS_DEFAULT, ZAPRET2_ROOT
 from blockchecks.engine.run_deadline import RunDeadline, parse_time_limit_seconds
 from blockchecks.engine.strategy_loader import StrategyLoader
 from blockchecks.engine.test_runner import TestRunner
@@ -40,7 +40,13 @@ def cmd_tcp(args):
         (
             "custom",
             lambda: (
-                (loader.from_custom_dir(args.test_dir, args.protocol), "string")
+                (
+                    loader.from_custom_dir(
+                        args.test_dir or f"{ZAPRET2_ROOT}/blockcheck2.d",
+                        args.protocol,
+                    ),
+                    "string",
+                )
                 if args.test == "custom"
                 else None
             ),

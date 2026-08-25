@@ -183,7 +183,7 @@ def resolve_nfqws2_bin() -> str | None:
         return which
 
     for candidate in (
-        "/opt/zapret2/nfq2/nfqws2",
+        os.path.join(cfg.ZAPRET2_ROOT, "nfq2", "nfqws2"),
         str(VENDOR_BIN_LINK),
         str(VENDOR_ROOT / "nfq2" / "nfqws2"),
     ):

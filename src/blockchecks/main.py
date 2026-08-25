@@ -127,10 +127,12 @@ def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
     ensure_dirs()
     cfg = user_config if user_config is not None else load_user_config()
     paths_cfg = cfg.get("paths") if isinstance(cfg.get("paths"), dict) else {}
-    migrate_on = True if paths_cfg.get("migrate") is None else bool(paths_cfg.get("migrate"))
-    from blockchecks.engine.paths import migrate_legacy_state_db
+    from blockchecks.engine.paths import cwd_db_migrate_enabled, migrate_legacy_state_db
 
-    migrate_legacy_state_db(enabled=migrate_on)
+    migrate_legacy_state_db(
+        enabled=cwd_db_migrate_enabled(paths_cfg)
+        or "--migrate-cwd-db" in (argv if argv is not None else sys.argv[1:])
+    )
     p = build_arg_parser(cfg)
     args = p.parse_args(argv)
     from blockchecks.cli.profiles import flags_present_in_argv

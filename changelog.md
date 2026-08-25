@@ -1,4 +1,15 @@
-## 1.3.9 — harvest-batch export for external validation (2026-08-25)
+## 1.3.9 — harvest-batch, host hygiene, bridge integrity (2026-08-25)
+
+### Host hygiene (P0–P2)
+
+- `bs gc` (default dry-run): prune aged `run_summary_*`, harvest dirs, zapret2-dl tarballs, `bs_voice_cache_old_*`; keep last 50 `nfqws2_*.log`. Never deletes `week_cov*`.
+- `scripts/cleanup_env.sh --orphans-only [--exclude-prefix=…]`: rmdir `/etc/netns/<ns>` after `ip netns del`; skip `run.lock` pid. Full script remains between-campaigns only (host `pkill -9 nfqws2`).
+- No silent legacy export fallback: `resolve_user_output_dir` stays on DATA; `[paths] legacy_export = true` to opt in. `ensure_dirs` no longer mkdir `STATE/export`, blob-cache, or `STATE/presets`.
+- `./state.db` → XDG migrate is **off** unless `--migrate-cwd-db` / `BLOCKCHECKS_MIGRATE_CWD_DB=1` / `[paths] migrate = true`.
+- Denylist auto-append writes `~/.config/blockcheckS/presets/domains/denylist.txt` (bundled file is seed-only).
+- Single zapret2 root: `BLOCKCHECKS_ZAPRET2` / `ZAPRET2_ROOT` (`config.ZAPRET2_ROOT`). `BLOCKCHECKS_SETTINGS` has no implicit `../dpi-tester/settings.ini` default.
+- Lua IPC prefers `setfacl u:nobody` + 0770/0660; logs a warning if it must fall back to 0777/0666. Do not chmod live `/dev/shm/blockchecks/bs-p-*` mid-campaign.
+- Silent `except` in live_events / MCP offline nfconf / heartbeat now `log.warning`.
 
 ### bs harvest-batch: strategy candidates → dpi-tester / GP-access-control-plane
 
@@ -26,8 +37,6 @@ bs harvest-batch -d logs/week_cov.db --top 20 --min-domains 2 [--proto tcp] [--w
   (unresolved: 1823→0 on live week_cov.db). Intended seam for future move to
   GP-access-control-plane.
 - CLI wiring in both layers (argparse dispatch + pydantic CliApp model).
-
-## 1.3.8 — TLS bypass classification, Discord redirect handling, MCP tools overhaul (2026-08-23)
 
 ### Bridge integrity: "PASS without APPLIED" root-caused & self-healing (2026-08-24)
 
@@ -82,10 +91,6 @@ Supporting changes:
 - Diagnostics script: `dev/diag_bridge_boot.py` (boot-race harness), WARN lines
   carry raw-event tails for post-mortem.
 
----
-
-## 1.3.8 — TLS bypass classification, Discord redirect handling, MCP tools overhaul (2026-08-23)
-
 ### Quarantine ordering fix: seeded domains never reached the queue (2026-08-25, hotfix)
 
 - `build_adaptive_queue` snapshotted `exclude_domains` BEFORE
@@ -136,7 +141,7 @@ Post-audit quality sprint (mechanics of the run itself):
 
 ---
 
-## 1.3.8 — original release notes (2026-08-23)
+## 1.3.8 — TLS bypass classification, Discord redirect handling, MCP tools overhaul (2026-08-23)
 
 
 - **TLS bypass classification fix**: Added `_TLS_BYPASS_PROOF_STATUSES` (401, 403, 404)

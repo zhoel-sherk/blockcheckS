@@ -7,7 +7,7 @@ import logging
 import time
 from pathlib import Path
 
-from blockchecks.engine.paths import DEFAULT_DB_PATH
+from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ def cmd_harvest_batch(args: argparse.Namespace) -> int:
     )
 
     db_path = getattr(args, "db", None) or DEFAULT_DB_PATH
-    out_dir = Path(getattr(args, "out_dir", None) or Path("logs/harvest")).expanduser()
+    out_dir = Path(getattr(args, "out_dir", None) or (DEFAULT_OUT_DIR / "harvest")).expanduser()
     ts = time.strftime("%Y%m%d_%H%M%S")
     dest = out_dir / f"harvest_{ts}"
     dest.mkdir(parents=True, exist_ok=True)

@@ -9,12 +9,12 @@ import os
 import re
 from collections.abc import Iterable
 
-from blockchecks.engine.config import BLOB_DIR, PROJECT_DIR, REPO_BLOBS_DIR
+from blockchecks.engine.config import BLOB_DIR, PROJECT_DIR, REPO_BLOBS_DIR, ZAPRET2_ROOT
 
 log = logging.getLogger(__name__)
 
-FAKE_FILES_DIR = os.environ.get("BLOCKCHECKS_FAKE_FILES", "/opt/zapret2/files/fake")
-_OPT_BLOBS = "/opt/zapret2/blobs"
+FAKE_FILES_DIR = os.environ.get("BLOCKCHECKS_FAKE_FILES", os.path.join(ZAPRET2_ROOT, "files", "fake"))
+_OPT_BLOBS = os.path.join(ZAPRET2_ROOT, "blobs")
 
 # Alias → filename (under blobs dir or files/fake)
 BLOB_ALIAS_MAP: dict[str, str] = {

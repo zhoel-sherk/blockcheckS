@@ -209,7 +209,7 @@ flowchart TB
 - q200 = TCP 443 (и HTTP :80 в http-фазе), q201 = UDP voice.
 - `--parallel N` = размер пула + semaphore. На Xeon сначала поднимать parallel; на Pi2 — `1` (макс. 2).
 - nftables vmap / SO_MARK (host-mode) — **не** нужны для `parallel > 4` в текущей модели; это отдельный бэклог ([todo.md](todo.md)).
-- Cleanup: `pkill` nfqws2 в ns, снять iptables `-D` (никогда `-F OUTPUT`), вернуть veth. Хостовый сброс: `scripts/cleanup_env.sh`.
+- Cleanup: `pkill` nfqws2 в ns, снять iptables `-D` (никогда `-F OUTPUT`), вернуть veth. Хостовый сброс: `scripts/cleanup_env.sh` (полный — только между кампаниями; `--orphans-only` во время прогона). `NetNsPool._destroy_one` уже `rm -rf /etc/netns/<ns>`.
 
 `Firewall` трекает правила, чтобы teardown был точечный.
 

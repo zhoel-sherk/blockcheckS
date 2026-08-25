@@ -104,6 +104,7 @@ def test_root_help_includes_subcommand_blurbs():
     assert "Single TCP strategy test" in help_text
     assert "triage.toml" in help_text or "preflight" in help_text.lower()
     assert "data-block" in help_text.lower() or "data_block" in help_text.lower()
+    assert "gc" in help_text.lower()
 
 
 @pytest.mark.unit
@@ -113,6 +114,15 @@ def test_data_block_export_parses():
     sub = get_subcommand(model, is_required=True)
     assert sub.git is True
     assert sub.out == "/tmp/db"
+
+
+@pytest.mark.unit
+def test_gc_parses_dry_run():
+    Root = build_cli_root()
+    model = Root(_cli_parse_args=["gc", "--max-age-days", "7"])
+    sub = get_subcommand(model, is_required=True)
+    assert sub.max_age_days == 7.0
+    assert sub.apply is False
 
 
 @pytest.mark.unit

@@ -85,10 +85,10 @@ def test_migrate_legacy_state_db(tmp_path, monkeypatch):
         lambda: dest.parent.mkdir(parents=True, exist_ok=True),
     )
     monkeypatch.setattr("blockchecks.engine.paths.reclaim_sudo_ownership", lambda p: None)
-    assert migrate_legacy_state_db(cwd=tmp_path) == dest
+    assert migrate_legacy_state_db(cwd=tmp_path, enabled=True) == dest
     assert dest.read_bytes() == b"sqlite"
     # second call no-op
-    assert migrate_legacy_state_db(cwd=tmp_path) is None
+    assert migrate_legacy_state_db(cwd=tmp_path, enabled=True) is None
 
 
 @pytest.mark.unit

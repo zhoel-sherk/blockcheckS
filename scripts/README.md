@@ -49,8 +49,10 @@ python3 scripts/gen_presets_manifest.py check
 ## Сброс хоста
 
 `cleanup_env.sh` убивает leftover nfqws2 / netns / veth / shm IPC / `run.lock`.
-Нужен `sudo`. Его же вызывают integration-тесты и смоки из `dev/`.
+Нужен `sudo`. **Не** запускать во время живой кампании (убивает `bs full` и все netns).
+Orphan-only (не трогает `run.lock` и prefix живых ns):
 
 ```bash
-sudo bash scripts/cleanup_env.sh
+sudo bash scripts/cleanup_env.sh --orphans-only --exclude-prefix=bs-p-7403
+sudo bash scripts/cleanup_env.sh   # полный reset BETWEEN campaigns
 ```

@@ -37,13 +37,15 @@ def test_ensure_dirs_creates_tree(tmp_path, monkeypatch):
     assert (tmp_path / "config" / "presets" / "ipset").is_dir()
     assert (tmp_path / "data" / "data_block" / "providers").is_dir()
     assert (tmp_path / "cache" / "pycache").is_dir()
+    assert not (tmp_path / "cache" / "blob-cache").exists()
+    assert not (tmp_path / "state" / "export").exists()
+    assert not (tmp_path / "state" / "presets").exists()
     # sensitive dirs must be 0700 (owner-only)
     import stat as _stat
 
     for d in (
         tmp_path / "state",
         tmp_path / "state" / "logs",
-        tmp_path / "cache" / "blob-cache",
     ):
         assert (_stat.S_IMODE(d.stat().st_mode) & 0o777) == 0o700, d
 
@@ -74,9 +76,10 @@ def test_resolve_user_output_dir_legacy_compat(tmp_path, monkeypatch):
     (legacy / "old.conf").write_text("x")
     monkeypatch.setattr(paths, "DEFAULT_OUT_DIR", new_export)
     monkeypatch.setattr(paths, "_LEGACY_OUT_DIR", legacy)
-    assert paths.resolve_user_output_dir(kind="export") == legacy
-    (new_export / "new.conf").write_text("y")
     assert paths.resolve_user_output_dir(kind="export") == new_export
+    assert paths.resolve_user_output_dir(kind="export", allow_legacy=True) == legacy
+    (new_export / "new.conf").write_text("y")
+    assert paths.resolve_user_output_dir(kind="export", allow_legacy=True) == new_export
 
 
 @pytest.mark.unit
@@ -184,3 +187,15 @@ def test_apply_pycache_prefix_reclaims_tree_when_root(tmp_path, monkeypatch):
     paths.apply_pycache_prefix()
     assert str(pyc) in called
     assert str(nested) in called
+
+
+@pytest.mark.unit
+def test_cwd_db_migrate_enabled_default_off(monkeypatch):
+    monkeypatch.delenv("BLOCKCHECKS_MIGRATE_CWD_DB", raising=False)
+    from blockchecks.engine.paths import cwd_db_migrate_enabled
+
+    assert cwd_db_migrate_enabled(None) is False
+    assert cwd_db_migrate_enabled({}) is False
+    assert cwd_db_migrate_enabled({"migrate": True}) is True
+    monkeypatch.setenv("BLOCKCHECKS_MIGRATE_CWD_DB", "1")
+    assert cwd_db_migrate_enabled({}) is True

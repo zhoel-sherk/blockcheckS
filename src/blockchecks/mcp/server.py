@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -11,8 +12,10 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
-from blockchecks.engine.config import PROJECT_DIR
+from blockchecks.engine.config import PROJECT_DIR, ZAPRET2_ROOT
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR, STATE_DIR
+
+log = logging.getLogger(__name__)
 
 mcp = FastMCP("blockcheckS Network Orchestrator & Debugger")
 
@@ -239,8 +242,8 @@ async def generate_router_config(
         )
         if response.get("ok"):
             return response.get("data", {}).get("config_content", "")
-    except Exception:
-        pass  # Fall back to offline generation from database
+    except Exception as exc:
+        log.warning("generate_router_config daemon unavailable (%s); offline fallback", exc)
 
     # Offline generation
     from blockchecks.engine.conf_builder import build_keenetic_conf, build_raw_conf
@@ -275,15 +278,17 @@ async def generate_router_config(
                        LIMIT 2"""
                 ).fetchall()
                 udp_strats = [r[0] for r in udp_rows]
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as err:
+                log.warning("generate_router_config UDP query failed: %s", err)
             con.close()
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as err:
+            log.warning("generate_router_config DB read failed: %s", err)
 
     if not tcp_strats:
+        log.warning("generate_router_config: no TCP PASS rows; using stock fake stun")
         tcp_strats = ["fake:blob=stun:repeats=6:tcp_ts=-1000"]
     if not udp_strats:
+        log.warning("generate_router_config: no UDP PASS rows; using stock discord_udp")
         udp_strats = ["fake:blob=discord_udp:repeats=6"]
 
     if target_clean == "keenetic":
@@ -382,8 +387,8 @@ async def get_series_status() -> dict[str, Any]:
 
         t0 = datetime.fromisoformat(started)
         uptime_h = round((datetime.now().astimezone() - t0.astimezone()).total_seconds() / 3600, 2)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("get_series_status started_at parse failed: %s", exc)
 
     payload: dict[str, Any] = {
         "active": True,
@@ -1001,12 +1006,12 @@ async def dbg_dump_pool_state() -> dict[str, Any]:
     return response.get("data", {})
 
 
-_ZAPRET2_DIR = Path("/opt/zapret2")
+_ZAPRET2_DIR = Path(ZAPRET2_ROOT)
 
 
 def _zapret2_dir() -> Path | None:
-    """Resolve zapret2 root: env ZAPRET2_ROOT → /opt/zapret2 → None."""
-    env = os.getenv("ZAPRET2_ROOT", "").strip()
+    """Resolve zapret2 root: BLOCKCHECKS_ZAPRET2 / ZAPRET2_ROOT → default → None."""
+    env = (os.getenv("BLOCKCHECKS_ZAPRET2") or os.getenv("ZAPRET2_ROOT") or "").strip()
     if env and os.path.isdir(env):
         return Path(env)
     return _ZAPRET2_DIR if _ZAPRET2_DIR.is_dir() else None
@@ -1148,7 +1153,8 @@ async def get_ipset_status() -> dict[str, Any]:
             r = subprocess_run(["ipset", "list", "-name"], timeout=3)
             if r.returncode == 0:
                 tables = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
-        except Exception:
+        except Exception as exc:
+            log.warning("ipset list failed: %s", exc)
             tables = []
     return {"scripts": scripts, "kernel_tables": tables}
 

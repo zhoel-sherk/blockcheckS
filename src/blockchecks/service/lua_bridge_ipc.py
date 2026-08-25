@@ -3,13 +3,54 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from blockchecks.engine.config import SHM_BASE
+
+log = logging.getLogger(__name__)
+_world_warned: set[str] = set()
+
+
+def _ipc_relax_for_nobody(path: Path, *, is_dir: bool) -> None:
+    """Let nfqws2 (setuid nobody) write IPC without world-writable dirs if ACL works."""
+    mode = 0o770 if is_dir else 0o660
+    try:
+        os.chmod(path, mode)
+    except OSError as exc:
+        log.warning("IPC chmod %s failed: %s", path, exc)
+        return
+    spec = "u:nobody:rwx" if is_dir else "u:nobody:rw"
+    try:
+        proc = subprocess.run(
+            ["setfacl", "-m", spec, str(path)],
+            check=False,
+            capture_output=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("IPC setfacl %s failed (%s); falling back to world-writable", path, exc)
+        proc = None
+    if proc is not None and proc.returncode == 0:
+        return
+    world = 0o777 if is_dir else 0o666
+    try:
+        os.chmod(path, world)
+    except OSError as exc:
+        log.warning("IPC world-chmod %s failed: %s", path, exc)
+        return
+    key = str(path.parent if not is_dir else path)
+    if key not in _world_warned:
+        _world_warned.add(key)
+        log.warning(
+            "IPC %s is world-writable (no POSIX ACL for nobody); unsafe on multi-user hosts",
+            path,
+        )
 
 
 @dataclass(frozen=True)
@@ -113,7 +154,7 @@ class LuaBridge:
         # able to chdir + create staging files here. 0o755 (root:root) lets it
         # chdir but NOT create .staging / strategy.* files → the daemon dies or
         # the bridge never sees APPLIED. World-writable dir fixes both.
-        os.chmod(self.paths.base, 0o777)
+        _ipc_relax_for_nobody(self.paths.base, is_dir=True)
         self._init_events()
 
     def _init_events(self) -> None:
@@ -122,7 +163,7 @@ class LuaBridge:
         # by Python as root — make it world-writable or Lua's io.open("a")
         # returns nil and the strategy-selection events are silently lost.
         self.paths.events.write_text("", encoding="utf-8")
-        os.chmod(self.paths.events, 0o666)
+        _ipc_relax_for_nobody(self.paths.events, is_dir=False)
 
     def teardown(self) -> None:
         shutil.rmtree(self.paths.base, ignore_errors=True)
@@ -144,15 +185,15 @@ class LuaBridge:
         committed first, every intermediate state fails the fence and readers
         keep their previous consistent snapshot instead.
         """
-        os.chmod(self.paths.base, 0o777)
+        _ipc_relax_for_nobody(self.paths.base, is_dir=True)
         if self.paths.events.is_file():
-            os.chmod(self.paths.events, 0o666)
+            _ipc_relax_for_nobody(self.paths.events, is_dir=False)
 
         staging = self.paths.base / f".staging.{gen}"
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir(parents=True, exist_ok=True)
-        os.chmod(staging, 0o777)
+        _ipc_relax_for_nobody(staging, is_dir=True)
 
         staged_files: dict[str, Path] = {
             "strategy.id": staging / "strategy.id",
@@ -167,7 +208,7 @@ class LuaBridge:
         staged_files["strategy.ready"].write_text(f"{gen}\n", encoding="utf-8")
 
         for src in staged_files.values():
-            os.chmod(src, 0o666)
+            _ipc_relax_for_nobody(src, is_dir=False)
 
         # Commit payload first; strategy.ready is the publish fence for Lua.
         for name in ("strategy.gen", "strategy.cmd", "strategy.id"):
@@ -175,12 +216,12 @@ class LuaBridge:
             if src is not None and src.is_file():
                 dst = self.paths.base / name
                 os.replace(src, dst)
-                os.chmod(dst, 0o666)
+                _ipc_relax_for_nobody(dst, is_dir=False)
 
         ready_src = staged_files["strategy.ready"]
         ready_dst = self.paths.base / "strategy.ready"
         os.replace(ready_src, ready_dst)
-        os.chmod(ready_dst, 0o666)
+        _ipc_relax_for_nobody(ready_dst, is_dir=False)
 
         shutil.rmtree(staging, ignore_errors=True)
 

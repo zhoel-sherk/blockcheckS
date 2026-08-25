@@ -186,6 +186,13 @@ quarantine_domain  # DAO API — campaign quarantine persistence
 domain_pass_rows  # DAO API — quarantine seeding on resume
 get_live_events  # MCP tool (@mcp.tool() registration is invisible to vulture)
 heartbeat_age  # LuaBridge API used by batch_service freshness gate
+cwd_db_migrate_enabled
+ZAPRET2_ROOT
+BUNDLED_DENYLIST_FILE
+cmd_gc
+prune_nfqws2_debug_logs
+_ipc_relax_for_nobody
+_world_warned
 
 # harvest_batch: dataclass fields сериализуются через asdict(); row_factory — stdlib
 HarvestCandidate.pass_rate

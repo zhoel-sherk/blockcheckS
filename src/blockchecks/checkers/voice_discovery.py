@@ -102,6 +102,8 @@ def load_token() -> str | None:
 def _load_guild_channel() -> tuple[str, str]:
     import configparser as cp
 
+    if not DPI_TESTER_SETTINGS or not os.path.exists(DPI_TESTER_SETTINGS):
+        return ("", "")
     cfg = cp.ConfigParser(
         interpolation=None,
         delimiters=("=",),
