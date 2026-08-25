@@ -31,6 +31,7 @@ def cmd_harvest_batch(args: argparse.Namespace) -> int:
         proto=getattr(args, "proto", "tcp"),
         top=int(getattr(args, "top", 20)),
         min_domains=int(getattr(args, "min_domains", 2)),
+        exclude_quarantined=bool(getattr(args, "exclude_quarantined", False)),
     )
     if not result.candidates:
         log.error("%s", "  ERROR: no candidates matched filters (check --min-domains/--top)")
@@ -60,7 +61,11 @@ def cmd_harvest_batch(args: argparse.Namespace) -> int:
     log.info("%s", f"  harvest → {dest}")
     log.info("%s", f"  candidates: {len(result.candidates)}, "
                    f"batch.txt + manifest.json{confs_info}")
+    quarantine_info = ""
+    if result.quarantined_excluded:
+        quarantine_info = (
+            f", quarantined excluded: {len(result.quarantined_excluded)}"
+        )
     log.info("%s", f"  domains: {len(result.domains_meta)} "
-                   f"(saturated ≥85%: {sat}), "
-                   f"quarantined excluded: {len(result.quarantined_excluded)}")
+                   f"(saturated ≥85%: {sat}){quarantine_info}")
     return 0

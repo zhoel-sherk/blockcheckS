@@ -72,23 +72,36 @@ def _connect_ro(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def _resolve_strategy_string(config_path: str) -> str | None:
+def _resolve_strategy_string(config_path: str, *, context: str = "") -> str | None:
     """config_path → строка --lua-desync-ядра; .conf-пути разворачиваются.
 
     Blob-идентификаторы с ведущей цифрой переименовываются (4pda→b4pda),
     как в конф-генераторах — nfqws2 фатально падает на 'bad identifier'.
     """
     text = (config_path or "").strip()
+    ctx = f" ({context})" if context else ""
     if not text:
+        log.warning("harvest: skip unresolved strategy%s: empty config_path", ctx)
         return None
     if looks_like_conf_path(text):
-        strat = next(iter(filter_export_strategies(
-            [c for c in lua_desync_cores_from_conf(text) if c]
-        )), None)
+        cores = [c for c in lua_desync_cores_from_conf(text) if c]
+        if not cores:
+            log.warning(
+                "harvest: skip unresolved strategy%s: no lua-desync cores in conf %r",
+                ctx,
+                text,
+            )
+            return None
+        strat = next(iter(filter_export_strategies(cores)), None)
+        if not strat:
+            log.warning(
+                "harvest: skip unresolved strategy%s: conf %r failed export filter",
+                ctx,
+                text,
+            )
+            return None
     else:
         strat = text
-    if not strat:
-        return None
     # переименование ДО валидации: цифро-ведущий blob сам по себе не повод
     # отбрасывать рабочую стратегию (nfqws2-совместимое имя = b<name>)
     renames = {
@@ -98,7 +111,14 @@ def _resolve_strategy_string(config_path: str) -> str | None:
     if renames:
         strat = apply_blob_renames(strat, renames)
     kept = filter_export_strategies([strat])
-    return kept[0] if kept else None
+    if not kept:
+        log.warning(
+            "harvest: skip unresolved strategy%s: %r failed export filter",
+            ctx,
+            text[:120],
+        )
+        return None
+    return kept[0]
 
 
 def collect_harvest_candidates(
@@ -107,15 +127,24 @@ def collect_harvest_candidates(
     proto: str = "tcp",
     top: int = 20,
     min_domains: int = 2,
-    statuses: Iterable[str] = ("PASS", "THROTTLED"),
+    statuses: Iterable[str] = ("PASS",),
+    exclude_quarantined: bool = False,
 ) -> HarvestResult:
     """Latest row per strategy×domain → сгруппированные кандидаты.
 
     Ранжирование: покрытие (число доменов) ↓, avg latency ↑ — как в
-    generate_router_config. Карантинные домены исключаются целиком.
+    generate_router_config. Только PASS с bridge_applied≠0 (NULL = не applied).
+    Карантин исключается только при ``exclude_quarantined=True``.
     """
     status_list = [s.upper() for s in statuses] or ["PASS"]
     placeholders = ",".join("?" for _ in status_list)
+    quarantine_clause = (
+        """
+              AND l.domain NOT IN
+                  (SELECT domain FROM quarantined WHERE domain IS NOT NULL)"""
+        if exclude_quarantined
+        else ""
+    )
     conn = _connect_ro(db_path)
     try:
         quarantined = {
@@ -127,6 +156,7 @@ def collect_harvest_candidates(
             f"""
             WITH latest AS (
                 SELECT t.strategy_id, t.domain, t.status, t.latency_ms,
+                       t.bridge_applied,
                        ROW_NUMBER() OVER (
                            PARTITION BY t.strategy_id, t.domain ORDER BY t.id DESC
                        ) AS rn
@@ -139,13 +169,19 @@ def collect_harvest_candidates(
             FROM latest l
             JOIN strategies s ON s.id = l.strategy_id
             WHERE l.rn = 1 AND l.status IN ({placeholders})
-              AND l.domain NOT IN
-                  (SELECT domain FROM quarantined WHERE domain IS NOT NULL)
+              AND l.bridge_applied IS NOT 0{quarantine_clause}
             """,
             (proto, *status_list),
         ).fetchall()
     finally:
         conn.close()
+
+    if exclude_quarantined and quarantined:
+        log.info(
+            "harvest: excluded %d quarantined domain(s): %s",
+            len(quarantined),
+            ", ".join(sorted(quarantined)),
+        )
 
     grouped: dict[int, dict[str, Any]] = {}
     for r in rows:
@@ -164,7 +200,9 @@ def collect_harvest_candidates(
     for g in grouped.values():
         if len(g["domains"]) < min_domains:
             continue
-        strat = _resolve_strategy_string(g["config_path"] or "")
+        strat = _resolve_strategy_string(
+            g["config_path"] or "", context=g["name"] or "unknown"
+        )
         if not strat:
             skipped += 1
             continue
@@ -198,16 +236,21 @@ def collect_harvest_candidates(
         }
         for d, n in sorted(share.items(), key=lambda kv: -kv[1])
     ]
+    quarantine_note = (
+        f", {len(quarantined)} quarantined excluded"
+        if exclude_quarantined and quarantined
+        else ""
+    )
     log.info(
         "%s",
         f"harvest: {len(cands)} candidates "
         f"(of {total_before_top} with >={min_domains} domains), "
-        f"{skipped} unresolved, {len(quarantined)} quarantined excluded",
+        f"{skipped} unresolved{quarantine_note}",
     )
     return HarvestResult(
         candidates=cands,
         domains_meta=domains_meta,
-        quarantined_excluded=sorted(quarantined),
+        quarantined_excluded=sorted(quarantined) if exclude_quarantined else [],
         skipped_unresolved=skipped,
     )
 

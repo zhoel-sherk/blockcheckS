@@ -30,7 +30,8 @@ CREATE TABLE tcp_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy_id INTEGER REFERENCES strategies(id),
     domain TEXT, status TEXT, http_code INTEGER, latency_ms REAL,
-    content_valid INTEGER, error TEXT, fail_phase TEXT, timestamp TEXT
+    content_valid INTEGER, error TEXT, fail_phase TEXT, timestamp TEXT,
+    bridge_applied INTEGER
 );
 CREATE TABLE quarantined (domain TEXT PRIMARY KEY, reason TEXT, failed INTEGER,
                           created TEXT);
@@ -51,11 +52,20 @@ def db(tmp_path: Path) -> Path:
         conn.commit()
         return int(cur.lastrowid)  # type: ignore[arg-type]
 
-    def res(sid: int, domain: str, status: str, ms: float, ts: str) -> None:
+    def res(
+        sid: int,
+        domain: str,
+        status: str,
+        ms: float,
+        ts: str,
+        *,
+        bridge_applied: int | None = 1,
+    ) -> None:
         conn.execute(
-            "INSERT INTO tcp_results(strategy_id, domain, status, latency_ms, timestamp)"
-            " VALUES (?,?,?,?,?)",
-            (sid, domain, status, ms, ts),
+            "INSERT INTO tcp_results(strategy_id, domain, status, latency_ms,"
+            " timestamp, bridge_applied)"
+            " VALUES (?,?,?,?,?,?)",
+            (sid, domain, status, ms, ts, bridge_applied),
         )
 
     s1 = strat("fake_a", "fake:blob=stun:repeats=6")
@@ -63,23 +73,28 @@ def db(tmp_path: Path) -> Path:
         res(s1, dom, "FAIL", 900.0, "2026-08-25T00:00:00")  # старее и по id
         res(s1, dom, "PASS", ms, "2026-08-25T01:00:00")
 
-    # THROTTLED учитывается по умолчанию
+    # THROTTLED не входит в дефолтную выборку (только PASS)
     s2 = strat("fake_b", "fake:blob=google:repeats=5")
     res(s2, "a.com", "THROTTLED", 200.0, "2026-08-25T01:00:00")
     res(s2, "b.com", "THROTTLED", 210.0, "2026-08-25T01:00:00")
+
+    # PASS без bridge_applied — не кандидат
+    s2b = strat("no_bridge", "fake:blob=google:repeats=7")
+    res(s2b, "a.com", "PASS", 150.0, "2026-08-25T01:00:00", bridge_applied=0)
+    res(s2b, "b.com", "PASS", 160.0, "2026-08-25T01:00:00", bridge_applied=None)
 
     # один домен — отфильтрован min_domains=2
     s3 = strat("solo", "fake:solo")
     res(s3, "a.com", "PASS", 50.0, "2026-08-25T01:00:00")
 
-    # карантинный домен исключается целиком (у s4 остаются 2 домена)
+    # карантинный домен: по умолчанию не исключается; --exclude-quarantined — да
     conn.execute(
         "INSERT INTO quarantined VALUES ('dead.com', '0 PASS', 500, '2026-08-25')"
     )
     s4 = strat("fake_c", "fake:blob=max_ru:repeats=4")
     res(s4, "x.com", "PASS", 300.0, "2026-08-25T01:00:00")
     res(s4, "y.com", "PASS", 310.0, "2026-08-25T01:00:00")
-    res(s4, "dead.com", "FAIL", 2000.0, "2026-08-25T01:00:00")
+    res(s4, "dead.com", "PASS", 320.0, "2026-08-25T01:00:00")
 
     # стратегия-путь .conf → разворачивается в ядро
     conf = tmp_path / "strat.conf"
@@ -119,23 +134,34 @@ def test_min_domains_and_quarantine(db: Path) -> None:
     r = collect_harvest_candidates(db, top=10, min_domains=2)
     names = [c.strategy for c in r.candidates]
     assert all("solo" not in n for n in names)
-    assert "dead.com" not in render_batch_txt(r)
-    assert r.quarantined_excluded == ["dead.com"]
+    assert "dead.com" in render_batch_txt(r)
+    assert r.quarantined_excluded == []
 
-
-def test_throttled_included_and_status_filter(db: Path) -> None:
-    r = collect_harvest_candidates(db, top=10, min_domains=2)
-    assert any(c.strategy == "fake:blob=google:repeats=5" for c in r.candidates)
-    r_pass_only = collect_harvest_candidates(
-        db, top=10, min_domains=2, statuses=("PASS",)
+    r_ex = collect_harvest_candidates(
+        db, top=10, min_domains=2, exclude_quarantined=True
     )
-    assert all(c.strategy != "fake:blob=google:repeats=5" for c in r_pass_only.candidates)
+    assert "dead.com" not in render_batch_txt(r_ex)
+    assert r_ex.quarantined_excluded == ["dead.com"]
 
 
-def test_conf_path_resolved_and_broken_counted(db: Path) -> None:
+def test_throttled_excluded_by_default_and_status_filter(db: Path) -> None:
+    r = collect_harvest_candidates(db, top=10, min_domains=2)
+    assert all(c.strategy != "fake:blob=google:repeats=5" for c in r.candidates)
+    assert all(c.strategy != "fake:blob=google:repeats=7" for c in r.candidates)
+    r_throttled = collect_harvest_candidates(
+        db, top=10, min_domains=2, statuses=("THROTTLED",)
+    )
+    assert any(c.strategy == "fake:blob=google:repeats=5" for c in r_throttled.candidates)
+
+
+def test_conf_path_resolved_and_broken_counted(db: Path, caplog) -> None:
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="blockchecks.harvest_batch")
     r = collect_harvest_candidates(db, top=10, min_domains=2)
     assert any(c.strategy == "fake:blob=b4pda:repeats=3" for c in r.candidates)
     assert r.skipped_unresolved == 1
+    assert any("broken_conf" in rec.message for rec in caplog.records)
 
 
 def test_render_batch_txt_format(db: Path) -> None:
@@ -177,8 +203,9 @@ def test_digital_leading_blob_renamed(db: Path) -> None:
     sid = int(cur.lastrowid or 0)
     for dom in ("m1.com", "m2.com"):
         conn.execute(
-            "INSERT INTO tcp_results(strategy_id,domain,status,latency_ms,timestamp)"
-            " VALUES (?,?,?,50.0,'2026-08-25T01:00:00')",
+            "INSERT INTO tcp_results(strategy_id,domain,status,latency_ms,timestamp,"
+            " bridge_applied)"
+            " VALUES (?,?,?,50.0,'2026-08-25T01:00:00',1)",
             (sid, dom, "PASS"),
         )
     conn.commit()
