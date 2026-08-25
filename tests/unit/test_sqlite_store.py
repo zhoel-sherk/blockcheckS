@@ -153,16 +153,36 @@ async def test_dao_get_completed_tcp_keys(tmp_path):
     await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
     await store.log_tcp("s2", "b.com", "FAIL", 10.0, 0, config_path="fake:2")
     await store.log_tcp("s3", "c.com", "PASS", 10.0, 200, config_path="fake:3", proto="quic")
+    await store.log_tcp("s4", "d.com", "THROTTLED", 10.0, 206, config_path="fake:4")
+    await store.log_tcp("s5", "e.com", "SKIPPED", 0.0, 0, config_path="fake:5")
     await store.flush()
 
     keys = await store.get_completed_tcp_keys()
     assert ("s1", "a.com") in keys
-    assert ("s2", "b.com") in keys
+    assert ("s4", "d.com") in keys
+    assert ("s2", "b.com") not in keys
+    assert ("s5", "e.com") not in keys
     # quic proto excluded by default (tcp only)
     assert ("s3", "c.com") not in keys
 
     keys_q = await store.get_completed_tcp_keys(proto="quic")
     assert ("s3", "c.com") in keys_q
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dao_get_completed_tcp_keys_latest_row_only(tmp_path):
+    store = open_run_store(tmp_path / "latest.db")
+    await store.init()
+    await store.log_tcp("s1", "retry.com", "FAIL", 10.0, 0, config_path="fake:1")
+    await store.log_tcp("s1", "retry.com", "PASS", 20.0, 200, config_path="fake:1")
+    await store.log_tcp("s2", "stale.com", "PASS", 10.0, 200, config_path="fake:2")
+    await store.log_tcp("s2", "stale.com", "FAIL", 20.0, 0, config_path="fake:2")
+    await store.flush()
+
+    keys = await store.get_completed_tcp_keys()
+    assert ("s1", "retry.com") in keys
+    assert ("s2", "stale.com") not in keys
 
 
 @pytest.mark.unit

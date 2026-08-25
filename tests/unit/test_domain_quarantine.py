@@ -84,6 +84,33 @@ def test_quarantine_from_args() -> None:
 
 
 @pytest.mark.unit
+def test_record_throttled_status_counts_as_pass() -> None:
+    q = DomainQuarantine(QuarantineConfig(min_attempts=3))
+    assert q.record("slow.example", False, status="THROTTLED") is None
+    assert q.record("slow.example", False, status="THROTTLED") is None
+    assert q.record("slow.example", False, status="FAIL") is None
+    assert "slow.example" not in q.quarantined
+    assert q.stats["slow.example"].passed == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_domain_pass_rows_counts_throttled_as_pass(temp_db) -> None:
+    await temp_db.log_tcp("s1", "slow.example", "THROTTLED", 100.0, 206, config_path="fake:1")
+    await temp_db.log_tcp("s2", "slow.example", "FAIL", 100.0, 0, config_path="fake:2")
+    await temp_db.log_tcp("s3", "dead.example", "FAIL", 100.0, 0, config_path="fake:3")
+    await temp_db.flush()
+
+    by_domain = {d: (total, passed) for d, total, passed in await temp_db.domain_pass_rows()}
+    assert by_domain["slow.example"] == (2, 1)
+    assert by_domain["dead.example"] == (1, 0)
+
+    q = DomainQuarantine(QuarantineConfig(min_attempts=1))
+    assert q.seed_from_rows(await temp_db.domain_pass_rows()) == ["dead.example"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_store_quarantine_roundtrip(temp_db) -> None:
     await temp_db.quarantine_domain(
         "router.discord.media", reason="0 PASS in 300 attempts", failed=300

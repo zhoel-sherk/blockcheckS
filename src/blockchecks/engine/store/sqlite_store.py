@@ -380,12 +380,17 @@ class SqliteRunStore:
         ]
 
     async def domain_pass_rows(self) -> list[tuple[str, int, int]]:
-        """Bulk (domain, total_attempts, total_passed) for quarantine seeding."""
+        """Bulk (domain, total_attempts, total_passed) for quarantine seeding.
+
+        ``total_passed`` counts rows whose status is PASS or THROTTLED (working
+        probes), matching latest-row working semantics elsewhere in the store.
+        """
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             cur = await db.execute(
-                "SELECT domain, COUNT(*), SUM(status='PASS') FROM tcp_results "
-                "GROUP BY domain"
+                f"SELECT domain, COUNT(*), "
+                f"SUM(CASE WHEN status IN {_WORKING_STATUSES} THEN 1 ELSE 0 END) "
+                f"FROM tcp_results GROUP BY domain"
             )
             rows = await cur.fetchall()
         return [(r[0], int(r[1] or 0), int(r[2] or 0)) for r in rows]
@@ -593,14 +598,25 @@ class SqliteRunStore:
             return await row.fetchone() is not None
 
     async def get_completed_tcp_keys(self, proto: str = "tcp") -> set[tuple[str, str]]:
-        """All (strategy_name, domain) pairs already in tcp_results — bulk resume skip."""
+        """(strategy_name, domain) pairs whose *latest* row is working — resume skip.
+
+        Only latest-row PASS/THROTTLED count as completed. FAIL, SKIPPED, and other
+        non-working statuses are excluded so resume can retry infrastructure failures
+        and never-probed rows (SKIPPED).
+        """
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
-                """SELECT DISTINCT s.name, t.domain
+                f"""SELECT s.name, t.domain
                    FROM tcp_results t
                    JOIN strategies s ON t.strategy_id = s.id
-                   WHERE s.proto=?""",
+                   WHERE s.proto=?
+                     AND t.id = (
+                       SELECT t2.id FROM tcp_results t2
+                       WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+                       ORDER BY t2.id DESC LIMIT 1
+                     )
+                     AND t.status IN {_WORKING_STATUSES}""",
                 (proto,),
             )
             return {(r[0], r[1]) for r in await rows.fetchall()}

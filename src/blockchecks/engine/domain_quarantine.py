@@ -21,6 +21,9 @@ log = logging.getLogger(__name__)
 #: Fallback when no explicit threshold is provided (--quarantine-min).
 DEFAULT_MIN_ATTEMPTS = 300
 
+#: Statuses that prove a domain is reachable (same as store latest-row working).
+_WORKING_PROBE_STATUSES = frozenset({"PASS", "THROTTLED"})
+
 
 @dataclass(slots=True)
 class _DomainStats:
@@ -64,13 +67,20 @@ class DomainQuarantine:
                 newly.append(domain)
         return newly
 
-    def record(self, domain: str, passed: bool) -> str | None:
-        """Account one probe result; return domain name if just quarantined."""
+    def record(self, domain: str, passed: bool, *, status: str | None = None) -> str | None:
+        """Account one probe result; return domain name if just quarantined.
+
+        When ``status`` is provided, PASS and THROTTLED count as success (working
+        probes). Otherwise ``passed`` is used as-is for backward compatibility.
+        """
         if not self.config.enabled or domain in self.quarantined:
             return None
         st = self.stats.setdefault(domain, _DomainStats())
         st.attempts += 1
-        if passed:
+        counts_pass = (
+            status in _WORKING_PROBE_STATUSES if status is not None else passed
+        )
+        if counts_pass:
             st.passed += 1
             return None
         if st.attempts < self.config.min_attempts or st.passed:
