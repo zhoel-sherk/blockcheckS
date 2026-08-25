@@ -311,6 +311,41 @@ async def _make_job(
 
 
 @pytest.mark.unit
+async def test_bridge_worker_accounts_partial_batch_as_skipped():
+    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+    from blockchecks.engine.results import TcpTestResult
+
+    queue = MagicMock()
+    jobs = [await _make_job(domain=f"d{i}") for i in range(3)]
+    pops = iter([jobs[0], jobs[1], jobs[2], None])
+    queue.pop = MagicMock(side_effect=lambda **kw: next(pops))
+
+    runner = MagicMock()
+    runner._run_probe_batch = AsyncMock(
+        return_value=[
+            TcpTestResult(item=jobs[0].item, domain=jobs[0].domain, success=True),
+            TcpTestResult(item=jobs[1].item, domain=jobs[1].domain, success=False),
+        ]
+    )
+
+    stats = _RunStats()
+    await _bridge_worker(
+        runner,
+        queue,
+        stats,
+        timeout=5.0,
+        bridge_batch=3,
+        stop_event=None,
+        on_progress=None,
+        active_domains=set(),
+        domain_lock=asyncio.Lock(),
+    )
+    assert stats.done == 3
+    assert stats.passed == 1
+    assert stats.skipped == 1
+
+
+@pytest.mark.unit
 async def test_bridge_worker_flushes_full_batch():
     from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
 

@@ -15,8 +15,10 @@ from blockchecks.engine.adaptive_queue import (
     ScanWeights,
 )
 from blockchecks.engine.generators.base import StrategyItem
+from blockchecks.engine.results import TcpTestResult
 from blockchecks.engine.store import RunStateStore
 from blockchecks.service.batch_scheduler import BatchJobAccumulator
+from blockchecks.service.batch_service import STOPPED_BEFORE_PROBE
 
 log = logging.getLogger(__name__)
 
@@ -221,6 +223,11 @@ async def _bridge_worker(  # noqa: C901
                 queue.excluded_domains.add(domain := newly)
                 await _persist_quarantine(runner, quarantine, domain)
 
+    async def _account_skipped(job: AdaptiveJob) -> None:
+        queue.mark_done(job, passed=False)
+        stats.skipped += 1
+        stats.done += 1
+
     async def flush() -> None:
         nonlocal acc
         jobs = acc.flush()
@@ -228,10 +235,27 @@ async def _bridge_worker(  # noqa: C901
             return
         items = [j.item for j in jobs]
         domains = [j.domain for j in jobs]
-        results = await runner._run_probe_batch(
-            items, domains[0], timeout, "lua_bridge", domains=domains, stop_event=stop_event
+        results = list(
+            await runner._run_probe_batch(
+                items, domains[0], timeout, "lua_bridge", domains=domains, stop_event=stop_event
+            )
         )
-        for job, result in zip(jobs, results, strict=False):
+        while len(results) < len(jobs):
+            job = jobs[len(results)]
+            results.append(
+                TcpTestResult(
+                    item=job.item,
+                    domain=job.domain,
+                    success=False,
+                    error=STOPPED_BEFORE_PROBE,
+                )
+            )
+        for job, result in zip(jobs, results, strict=True):
+            if result.error == STOPPED_BEFORE_PROBE:
+                await _account_skipped(job)
+                if on_progress:
+                    on_progress(stats.done, stats.skipped, stats.passed)
+                continue
             ok = bool(result.success)
             await _account(job, ok)
             if on_progress:

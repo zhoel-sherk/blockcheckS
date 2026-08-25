@@ -19,19 +19,48 @@ async def test_runner_test_tcp_success(mock_runner):
     assert r.http_code == 200
 
 
-async def test_runner_test_tcp_wssize_retry(mock_runner, monkeypatch):
-    """On FAIL with try_wssize, retries with wssize extra."""
-    mock_runner.try_wssize = True
+async def test_runner_test_tcp_logs_used_ip(mock_runner, monkeypatch):
+    """ST-3: DB row uses result.used_ip when retry-on-next-IP succeeds."""
+    logged: list[str] = []
+    original_log = mock_runner.db.log_tcp
+
+    async def capture_log(*args, **kwargs):
+        logged.append(kwargs.get("resolved_ip") or "")
+        return await original_log(*args, **kwargs)
+
+    monkeypatch.setattr(mock_runner.db, "log_tcp", capture_log)
     monkeypatch.setattr(
         "blockchecks.engine.async_runner._run_tcp_check",
-        lambda *a, **k: (
-            {"success": False, "http_code": 0}
-            if not any("wssize" in str(x) for x in a)
-            else {"success": True, "http_code": 200}
-        ),
+        lambda *a, **k: {
+            "success": True,
+            "http_code": 200,
+            "latency_ms": 10.0,
+            "content_len": 100,
+            "content_ok": True,
+            "used_ip": "2.2.2.2",
+        },
     )
     r = await mock_runner.test_tcp(_item(), "discord.com", timeout=5.0)
+    assert r.used_ip == "2.2.2.2"
+    assert logged == ["2.2.2.2"]
+
+
+async def test_runner_test_tcp_wssize_retry(mock_runner, monkeypatch):
+    """On FAIL with try_wssize, retries with wssize extra and capped timeout."""
+    mock_runner.try_wssize = True
+    timeouts: list[float] = []
+
+    def fake_tcp(*a, **k):
+        if len(a) > 3:
+            timeouts.append(a[3])
+        if not any("wssize" in str(x) for x in a):
+            return {"success": False, "http_code": 0}
+        return {"success": True, "http_code": 200}
+
+    monkeypatch.setattr("blockchecks.engine.async_runner._run_tcp_check", fake_tcp)
+    r = await mock_runner.test_tcp(_item(), "discord.com", timeout=5.0)
     assert r.success is True
+    assert timeouts == [5.0, 1.5]
 
 
 async def test_runner_test_tcp_domains(mock_runner, monkeypatch):

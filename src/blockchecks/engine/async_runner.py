@@ -26,7 +26,6 @@ from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW, status_tag
 
 log = logging.getLogger(__name__)
 
-
 # Auto-pin: known-good strategy plus a short budget to probe candidate
 # IPs at startup. Pinned IPs override DoH order against per-IP throttling.
 PIN_STRATEGY = "fake:blob=stun:repeats=6:tcp_ts=-1000"
@@ -65,6 +64,19 @@ from blockchecks.engine.results import (
     UdpTestResult,
     tcp_results_from_details,
 )
+from blockchecks.engine.wssize_retry import WSSIZE_RETRY
+from blockchecks.service.batch_service import PROBE_SKIP_ERRORS
+
+
+def _tcp_row_status(result: TcpTestResult) -> str:
+    if result.error in PROBE_SKIP_ERRORS:
+        return "SKIPPED"
+    if result.throttled:
+        return "THROTTLED"
+    if result.success:
+        return "PASS"
+    return "FAIL"
+
 
 __all__ = [
     "AsyncTestRunner",
@@ -389,25 +401,26 @@ class AsyncTestRunner:
                     self.quick_break,
                     resolved_ips=ip_candidates,
                 )
-                if (
-                    not data.get("success")
-                    and self.try_wssize
-                    and protocol == "tls12"
-                    and "wssize" not in item.strategy
+                if WSSIZE_RETRY.should_retry(
+                    data,
+                    try_wssize=self.try_wssize,
+                    protocol=protocol,
+                    strategy=item.strategy,
+                    is_config=item.is_config,
                 ):
                     data = await asyncio.to_thread(
                         _run_tcp_check,
                         ns_name,
                         item.strategy,
                         domain,
-                        min(timeout, 1.5),
+                        WSSIZE_RETRY.retry_timeout(timeout),
                         item.is_config,
                         self.python,
                         self.disable_ech,
                         resolved_ip,
                         self.repeats,
                         self.parallel_repeats,
-                        "wssize:wsize=1:scale=6",
+                        WSSIZE_RETRY.cmd,
                         protocol,
                         settle_max,
                         None,
@@ -427,12 +440,7 @@ class AsyncTestRunner:
                 result.error = data.get("error", "") or ""
 
                 if self.db:
-                    if result.throttled:
-                        status = "THROTTLED"
-                    elif result.success:
-                        status = "PASS"
-                    else:
-                        status = "FAIL"
+                    status = _tcp_row_status(result)
                     await self.db.log_tcp(
                         item.label,
                         domain,
@@ -443,7 +451,7 @@ class AsyncTestRunner:
                         error=result.error,
                         read_rate_bps=result.read_rate_bps,
                         config_path=item.strategy,
-                        resolved_ip=resolved_ip or "",
+                        resolved_ip=result.used_ip if result.used_ip else (resolved_ip or ""),
                         dns_verdict=dns_verdict,
                         doh_server=doh_server,
                         proto=proto_db,
@@ -602,12 +610,7 @@ class AsyncTestRunner:
             return
         protocol = getattr(item, "protocol", "tls12") or "tls12"
         proto_db = "http" if protocol == "http" else "tcp"
-        if result.throttled:
-            status = "THROTTLED"
-        elif result.success:
-            status = "PASS"
-        else:
-            status = "FAIL"
+        status = _tcp_row_status(result)
         await self.db.log_tcp(
             item.label,
             domain,
@@ -684,25 +687,26 @@ class AsyncTestRunner:
                 )
                 for domain in domains:
                     data = data_map.get(domain, {})
-                    if (
-                        not data.get("success")
-                        and self.try_wssize
-                        and protocol == "tls12"
-                        and "wssize" not in item.strategy
+                    if WSSIZE_RETRY.should_retry(
+                        data,
+                        try_wssize=self.try_wssize,
+                        protocol=protocol,
+                        strategy=item.strategy,
+                        is_config=item.is_config,
                     ):
                         data = await asyncio.to_thread(
                             _run_tcp_check,
                             ns_name,
                             item.strategy,
                             domain,
-                            timeout,
+                            WSSIZE_RETRY.retry_timeout(timeout),
                             item.is_config,
                             self.python,
                             self.disable_ech,
                             resolved_ips.get(domain),
                             self.repeats,
                             self.parallel_repeats,
-                            "wssize:wsize=1:scale=6",
+                            WSSIZE_RETRY.cmd,
                             protocol,
                             settle_max,
                             None,

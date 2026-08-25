@@ -32,6 +32,10 @@ log = logging.getLogger(__name__)
 #: the adaptive/bridge workers on an empty pool queue.
 ACQUIRE_NS_TIMEOUT = 30.0
 
+STOPPED_BEFORE_PROBE = "stopped before probe"
+POOL_ACQUIRE_TIMEOUT = "pool acquire timeout"
+PROBE_SKIP_ERRORS = frozenset({STOPPED_BEFORE_PROBE, POOL_ACQUIRE_TIMEOUT})
+
 
 def _debug_env() -> str:
     """Current nfqws2 --debug env value ('' when disabled)."""
@@ -61,13 +65,15 @@ class ProbeBatchService:
         # Do not acquire a namespace when a graceful stop is already requested —
         # otherwise a stopped run hangs waiting for a busy pool.
         if stop_event is not None and stop_event.is_set():
-            return self._empty_stopped_result(ctx)
+            return await self._finalize_batch(ctx, self._empty_stopped_result(ctx))
         # Bound the acquisition: if every netns is busy (e.g. a hung batch holds
         # the pool), wait_for lets us bail out instead of deadlocking the stop.
         try:
             ns = await asyncio.wait_for(self.deps.acquire_ns(), timeout=ACQUIRE_NS_TIMEOUT)
-        except asyncio.TimeoutError:
-            return self._empty_stopped_result(ctx)
+        except TimeoutError:
+            return await self._finalize_batch(
+                ctx, self._empty_stopped_result(ctx, error=POOL_ACQUIRE_TIMEOUT)
+            )
         try:
             domains = ctx.item_domains()
             resolved_by_domain: dict[str, tuple[str | None, str, str]] = {}
@@ -76,7 +82,9 @@ class ProbeBatchService:
                 resolved_by_domain[d] = await self.deps.resolve_domain_dns(d)
                 ip_lists_by_domain[d] = self.deps.resolve_domain_ips(d)
             if stop_event is not None and stop_event.is_set():
-                return self._empty_stopped_result(ctx)
+                return await self._finalize_batch(
+                    ctx, self._empty_stopped_result(ctx), resolved_by_domain
+                )
             wall_start = time.monotonic()
             sync_task: asyncio.Task | None = None
             try:
@@ -113,23 +121,43 @@ class ProbeBatchService:
                 )
             result.batch_wall_ms = (time.monotonic() - wall_start) * 1000
             result.batch_fill_ratio = len(ctx.items) / max(1, self.config.batch_size)
-            for item, dom, probe_result in zip(ctx.items, domains, result.results, strict=False):
-                resolved_ip, dns_verdict, doh_server = resolved_by_domain[dom]
-                await self.deps.log_tcp_result(
-                    item,
-                    dom,
-                    probe_result,
-                    resolved_ip=resolved_ip,
-                    dns_verdict=dns_verdict,
-                    doh_server=doh_server,
-                )
-            self._log_batch(ctx, ns, result)
-            return result
+            return await self._finalize_batch(ctx, result, resolved_by_domain, ns=ns)
         finally:
             await self.deps.release_ns(ns)
 
+    async def _finalize_batch(
+        self,
+        ctx: BatchContext,
+        result: BatchProbeResult,
+        resolved_by_domain: dict[str, tuple[str | None, str, str]] | None = None,
+        *,
+        ns: str | None = None,
+    ) -> BatchProbeResult:
+        domains = ctx.item_domains()
+        result.results = self._pad_unprobed_results(ctx, result.results)
+        empty_dns: tuple[str | None, str, str] = (None, "", "")
+        for item, dom, probe_result in zip(ctx.items, domains, result.results, strict=True):
+            resolved_ip, dns_verdict, doh_server = (resolved_by_domain or {}).get(
+                dom, empty_dns
+            )
+            await self.deps.log_tcp_result(
+                item,
+                dom,
+                probe_result,
+                resolved_ip=resolved_ip,
+                dns_verdict=dns_verdict,
+                doh_server=doh_server,
+            )
+        if ns is not None:
+            self._log_batch(ctx, ns, result)
+        return result
+
     @staticmethod
-    def _empty_stopped_result(ctx: BatchContext) -> BatchProbeResult:
+    def _empty_stopped_result(
+        ctx: BatchContext,
+        *,
+        error: str = STOPPED_BEFORE_PROBE,
+    ) -> BatchProbeResult:
         """Empty result when a stop was requested before the batch started."""
         from blockchecks.engine.results import TcpTestResult
 
@@ -138,9 +166,9 @@ class ProbeBatchService:
                 item=item,
                 domain=dom,
                 success=False,
-                error="stopped before probe",
+                error=error,
             )
-            for item, dom in zip(ctx.items, ctx.item_domains(), strict=False)
+            for item, dom in zip(ctx.items, ctx.item_domains(), strict=True)
         ]
         return BatchProbeResult(
             results=results,
@@ -149,6 +177,26 @@ class ProbeBatchService:
             batch_wall_ms=0,
             batch_fill_ratio=0,
         )
+
+    @staticmethod
+    def _pad_unprobed_results(ctx: BatchContext, results: list) -> list:
+        """Append SKIPPED placeholders for batch tail aborted by stop_event."""
+        from blockchecks.engine.results import TcpTestResult
+
+        domains = ctx.item_domains()
+        if len(results) >= len(ctx.items):
+            return results
+        out = list(results)
+        for item, dom in zip(ctx.items[len(out) :], domains[len(out) :], strict=True):
+            out.append(
+                TcpTestResult(
+                    item=item,
+                    domain=dom,
+                    success=False,
+                    error=STOPPED_BEFORE_PROBE,
+                )
+            )
+        return out
 
     def _run_batch_sync(
         self,
@@ -211,7 +259,7 @@ class ProbeBatchService:
             data = self._maybe_wssize_retry(
                 item,
                 ctx,
-                min(timeout_i, 1.5),
+                timeout_i,
                 ns_name,
                 resolved_ip,
                 protocol,
@@ -227,8 +275,13 @@ class ProbeBatchService:
                 ns=ns_name,
                 backend="classic",
                 status=(
-                    "THROTTLED" if result.throttled
-                    else ("PASS" if result.success else "FAIL")
+                    "SKIPPED"
+                    if result.error in PROBE_SKIP_ERRORS
+                    else (
+                        "THROTTLED"
+                        if result.throttled
+                        else ("PASS" if result.success else "FAIL")
+                    )
                 ),
                 http_code=result.http_code,
                 latency_ms=result.latency_ms,
@@ -378,8 +431,13 @@ class ProbeBatchService:
                     ns=ns_name,
                     backend="lua_bridge",
                     status=(
-                        "THROTTLED" if result.throttled
-                        else ("PASS" if result.success else "FAIL")
+                        "SKIPPED"
+                        if result.error in PROBE_SKIP_ERRORS
+                        else (
+                            "THROTTLED"
+                            if result.throttled
+                            else ("PASS" if result.success else "FAIL")
+                        )
                     ),
                     http_code=result.http_code,
                     latency_ms=result.latency_ms,
@@ -506,25 +564,27 @@ class ProbeBatchService:
         *,
         ip_lists: list[str] | None = None,
     ) -> dict:
-        if (
-            not data.get("success")
-            and self.deps.try_wssize
-            and protocol == "tls12"
-            and not item.is_config
-            and "wssize" not in item.strategy
+        from blockchecks.engine.wssize_retry import WSSIZE_RETRY
+
+        if WSSIZE_RETRY.should_retry(
+            data,
+            try_wssize=self.deps.try_wssize,
+            protocol=protocol,
+            strategy=item.strategy,
+            is_config=item.is_config,
         ):
             return self.deps.run_tcp_check(
                 ns_name,
                 item.strategy,
                 ctx.domain,
-                timeout_i,
+                WSSIZE_RETRY.retry_timeout(timeout_i),
                 item.is_config,
                 self.deps.python,
                 self.deps.disable_ech,
                 resolved_ip,
                 self.deps.repeats,
                 self.deps.parallel_repeats,
-                "wssize:wsize=1:scale=6",
+                WSSIZE_RETRY.cmd,
                 protocol,
                 settle_max,
                 None,

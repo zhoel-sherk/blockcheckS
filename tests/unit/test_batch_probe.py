@@ -15,6 +15,8 @@ from blockchecks.service.batch_models import (
 )
 from blockchecks.service.batch_scheduler import BatchJobAccumulator, BatchScheduler
 from blockchecks.service.batch_service import (
+    POOL_ACQUIRE_TIMEOUT,
+    STOPPED_BEFORE_PROBE,
     ProbeBatchService,
     warn_fanout_bridge_once,
 )
@@ -677,10 +679,25 @@ async def test_run_batch_stop_event_skips_acquire() -> None:
     """A graceful stop must not acquire a netns or run any probe."""
     import asyncio
 
+    from blockchecks.engine.async_runner import _tcp_row_status
+    from blockchecks.engine.results import TcpTestResult
+
+    statuses: list[str] = []
+
+    async def log_result(item, dom, probe_result, **kw):
+        statuses.append(_tcp_row_status(probe_result))
+
     acquired = []
     deps = _minimal_deps(
         acquire_ns=AsyncMock(side_effect=lambda: acquired.append(1) or "bs-p-0"),
         release_ns=AsyncMock(),
+        tcp_result_from_data=lambda item, domain, data: TcpTestResult(
+            item=item,
+            domain=domain,
+            success=bool(data.get("success")),
+            error=data.get("error") or "",
+        ),
+        log_tcp_result=log_result,
     )
     svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
     ctx = BatchContext(
@@ -695,7 +712,8 @@ async def test_run_batch_stop_event_skips_acquire() -> None:
     assert not acquired, "acquire_ns must not be called when stopped"
     assert len(result.results) == 2
     assert all(not r.success for r in result.results)
-    assert all(getattr(r, "error", "") == "stopped before probe" for r in result.results)
+    assert all(r.error == STOPPED_BEFORE_PROBE for r in result.results)
+    assert statuses == ["SKIPPED", "SKIPPED"]
 
 
 @pytest.mark.unit
@@ -720,3 +738,44 @@ async def test_run_batch_acquire_timeout_returns_empty() -> None:
         result = await svc.run_batch(ctx, timeout=5.0)
     assert len(result.results) == 1
     assert not result.results[0].success
+    assert result.results[0].error == POOL_ACQUIRE_TIMEOUT
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio(loop_scope="package")
+async def test_run_batch_mid_stop_pads_skipped_tail() -> None:
+    """Items after stop_event break are padded as stopped-before-probe."""
+    import asyncio
+
+    from blockchecks.engine.results import TcpTestResult
+
+    stop = asyncio.Event()
+    calls = {"n": 0}
+
+    def run_tcp_check(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            stop.set()
+        return {"success": True, "http_code": 200}
+
+    deps = _minimal_deps(
+        run_tcp_check=run_tcp_check,
+        tcp_result_from_data=lambda item, domain, data: TcpTestResult(
+            item=item,
+            domain=domain,
+            success=bool(data.get("success")),
+            error=data.get("error") or "",
+        ),
+    )
+    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
+    ctx = BatchContext(
+        ns_name="",
+        items=[_item("a"), _item("b"), _item("c")],
+        domain="discord.com",
+        batch_id=2,
+    )
+    result = await svc.run_batch(ctx, timeout=5.0, stop_event=stop)
+    assert len(result.results) == 3
+    assert result.results[0].success is True
+    assert result.results[1].error == STOPPED_BEFORE_PROBE
+    assert result.results[2].error == STOPPED_BEFORE_PROBE
