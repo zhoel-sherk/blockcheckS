@@ -242,41 +242,69 @@ class Nfqws2Manager:
         else:
             args = ["sudo", "-n"] + args
 
-        out_fh, out_path = open_out_capture(self.ns_name or "host")
-        self.last_out_log = out_path
-        try:
-            self._proc = subprocess.Popen(
-                args,
-                stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
-                # Never PIPE: unread buffer blocks a chatty/debug nfqws2.
-                # Init/errors go to --debug=@file when enabled; bind errors
-                # (nfq_create_queue) go to stdout — captured in out-file.
-                stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
-                start_new_session=True,
-            )
-        finally:
-            if out_fh is not None:
-                out_fh.close()
-                _prune_out_logs()
-        self._pid = self._proc.pid
-        if self.ns_name:
-            wait_nfqws2_ready(self.ns_name)
-        else:
-            time.sleep(0.1)
-        _reclaim_debug_log(self.last_debug_log)
+        # Bind-retry (тот же маркер, что в start_daemon): ядро освобождает
+        # NFQUEUE-сокет после pkill с задержкой → первый запуск может упасть
+        # с nfq_create_queue(): Operation not permitted.
+        max_bind_attempts = 4
+        last_err: RuntimeError | None = None
+        for attempt in range(1, max_bind_attempts + 1):
+            out_fh, out_path = open_out_capture(self.ns_name or "host")
+            self.last_out_log = out_path
+            try:
+                self._proc = subprocess.Popen(
+                    args,
+                    stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
+                    # Never PIPE: unread buffer blocks a chatty/debug nfqws2.
+                    # Init/errors go to --debug=@file when enabled; bind errors
+                    # (nfq_create_queue) go to stdout — captured in out-file.
+                    stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            finally:
+                if out_fh is not None:
+                    out_fh.close()
+                    _prune_out_logs()
+            self._pid = self._proc.pid
+            if self.ns_name:
+                wait_nfqws2_ready(self.ns_name)
+            else:
+                time.sleep(0.1)
+            _reclaim_debug_log(self.last_debug_log)
 
-        if self._proc.poll() is not None:
-            hint = ""
-            for log_path in (self.last_out_log, Path(self.last_debug_log) if self.last_debug_log else None):
+            if self._proc.poll() is None:
+                last_err = None
+                break
+            tail_txt = ""
+            for log_path in (
+                self.last_out_log,
+                Path(self.last_debug_log) if self.last_debug_log else None,
+            ):
                 if log_path and os.path.exists(log_path):
                     try:
-                        tail = Path(log_path).read_text(errors="replace")[-300:]
-                        hint += f"; {log_path.name}_tail={tail!r}"
+                        tail_txt += Path(log_path).read_text(errors="replace")[-300:]
                     except OSError:
                         pass
+            bind_busy = (
+                "Operation not permitted" in tail_txt
+                and "nfq_create_queue" in tail_txt
+            )
             self._proc = None
             self._pid = None
-            raise RuntimeError("nfqws2 failed to start (exited immediately)" + hint)
+            if not bind_busy or attempt == max_bind_attempts:
+                last_err = RuntimeError(
+                    "nfqws2 failed to start (exited immediately)"
+                    + (f"; out_tail={tail_txt!r}" if tail_txt else "")
+                )
+                break
+            backoff = min(2.0 * attempt, 6.0)
+            log.warning(
+                "%s",
+                f"  [nfqws2] {self.ns_name or 'host'}: queue busy after stop "
+                f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
+            )
+            time.sleep(backoff)
+        if last_err is not None:
+            raise last_err
 
     def start_config(self, config_path: str) -> None:
         """Start nfqws2 using a pre-built .conf file."""

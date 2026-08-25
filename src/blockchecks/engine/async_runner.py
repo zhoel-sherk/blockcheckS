@@ -521,6 +521,7 @@ class AsyncTestRunner:
                         dns_verdict=dns_verdict,
                         doh_server=doh_server,
                         proto="quic",
+                        probe_host=getattr(result, "probe_host", "") or "",
                     )
             except Exception as e:
                 result.error = str(e)[:200]
