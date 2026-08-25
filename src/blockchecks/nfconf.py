@@ -40,15 +40,23 @@ async def collect_export_strategies(  # noqa: C901
     limit: int,
     domains: list[str] | None = None,
     common_only: bool = True,
+    allow_stock_fallback: bool = False,
 ) -> tuple[list[str], list[str], list[str]]:
     """Pick TCP/UDP/QUIC strategy strings for export."""
     tcp_strats: list[str] = []
-    if common_only and domains and len(domains) > 1:
+    want_common = common_only and domains and len(domains) > 1
+    if want_common:
         for row in await db.get_common_tcp(domains, limit=limit):
             cfg = await db.get_strategy_config(row["strategy"], "tcp")
             if resolved := _resolve_export_strategy(cfg, row["strategy"]):
                 tcp_strats.append(resolved)
-    if not tcp_strats:
+        if not tcp_strats:
+            log.warning(
+                "common_only: no TCP strategies common to all %d domains; "
+                "skipping per-domain fallback (--no-common-only for best-per-domain export)",
+                len(domains),
+            )
+    elif not tcp_strats:
         covered = await db.get_best_by_coverage(limit=limit)
         if covered:
             for row in covered:
@@ -86,8 +94,11 @@ async def collect_export_strategies(  # noqa: C901
             if resolved := _resolve_export_strategy(cfg, row["strategy"]):
                 udp_strats.append(resolved)
     if not udp_strats:
-        log.warning("%s", "  WARNING: no UDP strategies in DB; using stock discord_udp")
-        udp_strats = ["fake:blob=discord_udp:repeats=6"]
+        if allow_stock_fallback:
+            log.warning("no UDP strategies in DB; using stock discord_udp")
+            udp_strats = ["fake:blob=discord_udp:repeats=6"]
+        else:
+            log.warning("no UDP strategies in DB; export will have empty UDP list")
 
     # QUIC: best HTTP/3 strategies from state.db
     quic_strats: list[str] = []
@@ -96,8 +107,11 @@ async def collect_export_strategies(  # noqa: C901
         if resolved := _resolve_export_strategy(cfg, row["strategy"]):
             quic_strats.append(resolved)
     if not quic_strats:
-        log.warning("%s", "  WARNING: no QUIC strategies in DB; using stock quic_initial")
-        quic_strats = ["fake:blob=quic_initial:repeats=11"]
+        if allow_stock_fallback:
+            log.warning("no QUIC strategies in DB; using stock quic_initial")
+            quic_strats = ["fake:blob=quic_initial:repeats=11"]
+        else:
+            log.warning("no QUIC strategies in DB; export will have empty QUIC list")
     return tcp_strats, udp_strats, quic_strats
 
 
@@ -222,6 +236,7 @@ async def export_configs(
     domains_file: str | None = None,
     timestamp: str | None = None,
     common_only: bool = True,
+    allow_stock_fallback: bool = False,
     use_ipset: bool = False,
     use_all_providers: bool = True,
 ) -> dict:
@@ -248,7 +263,12 @@ async def export_configs(
         domains = [domain]
 
     tcp_s, udp_s, quic_s = await collect_export_strategies(
-        db, domain=domain, limit=limit, domains=domains, common_only=common_only
+        db,
+        domain=domain,
+        limit=limit,
+        domains=domains,
+        common_only=common_only,
+        allow_stock_fallback=allow_stock_fallback,
     )
 
     ts = timestamp or time.strftime("%Y%m%d_%H%M%S")
@@ -365,6 +385,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="With --ipset: use only the current host provider's dns.db",
     )
+    p.add_argument(
+        "--allow-stock-fallback",
+        action="store_true",
+        help="Use built-in UDP/QUIC stock strategies when DB has no entries",
+    )
     args = p.parse_args(argv)
     from blockchecks.engine.log import configure_logging
 
@@ -381,10 +406,18 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode,
             domains_file=args.domains_file,
             common_only=not args.no_common_only,
+            allow_stock_fallback=args.allow_stock_fallback,
             use_ipset=args.ipset,
             use_all_providers=not args.no_all_providers,
         )
     )
+    if not args.allow_stock_fallback and (not result["udp"] or not result["quic"]):
+        missing = [label for label, items in (("UDP", result["udp"]), ("QUIC", result["quic"])) if not items]
+        log.error(
+            "missing %s strategies in DB; use --allow-stock-fallback for built-in defaults",
+            ", ".join(missing),
+        )
+        return 1
     log.info("%s", f"  keenetic: {result['keenetic']}")
     log.info("%s", f"  raw:      {result['raw']}")
     log.info("%s", f"  user.list:{result['user_list']}")

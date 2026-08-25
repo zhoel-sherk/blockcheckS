@@ -42,14 +42,33 @@ def test_collect_common_tcp():
     db.get_best_tcp.assert_not_called()
 
 
-def test_collect_coverage_fallback():
+def test_collect_common_only_empty_intersection_no_fallback():
     db = _store()
     db.get_best_by_coverage = AsyncMock(return_value=[{"strategy": "fake:b"}])
     db.get_strategy_config = AsyncMock(return_value=None)
     tcp, _, _ = asyncio.run(
         collect_export_strategies(db, domain="d.com", limit=3, domains=["a.com", "b.com"])
     )
+    assert tcp == []
+    db.get_best_by_coverage.assert_not_called()
+    db.get_best_tcp.assert_not_called()
+
+
+def test_collect_coverage_fallback_when_not_common_only():
+    db = _store()
+    db.get_best_by_coverage = AsyncMock(return_value=[{"strategy": "fake:b"}])
+    db.get_strategy_config = AsyncMock(return_value=None)
+    tcp, _, _ = asyncio.run(
+        collect_export_strategies(
+            db,
+            domain="d.com",
+            limit=3,
+            domains=["a.com", "b.com"],
+            common_only=False,
+        )
+    )
     assert tcp == ["fake:b"]
+    db.get_common_tcp.assert_not_called()
 
 
 def test_collect_skips_label_when_config_missing():
@@ -57,7 +76,13 @@ def test_collect_skips_label_when_config_missing():
     db.get_best_by_coverage = AsyncMock(return_value=[{"strategy": "std_fake_stun_r6"}])
     db.get_strategy_config = AsyncMock(return_value=None)
     tcp, _, _ = asyncio.run(
-        collect_export_strategies(db, domain="d.com", limit=3, domains=["a.com", "b.com"])
+        collect_export_strategies(
+            db,
+            domain="d.com",
+            limit=3,
+            domains=["a.com", "b.com"],
+            common_only=False,
+        )
     )
     assert tcp == []
 
@@ -76,15 +101,31 @@ def test_collect_udp_from_pairs():
     assert "fake:udp1" in udp_strats[1]
 
 
-def test_collect_udp_fallback_default():
+def test_collect_udp_empty_without_stock_fallback():
     db = _store()
     _, udp, _ = asyncio.run(collect_export_strategies(db, domain="d.com", limit=3))
+    assert udp == []
+
+
+def test_collect_udp_stock_fallback_when_allowed():
+    db = _store()
+    _, udp, _ = asyncio.run(
+        collect_export_strategies(db, domain="d.com", limit=3, allow_stock_fallback=True)
+    )
     assert udp == ["fake:blob=discord_udp:repeats=6"]
 
 
-def test_collect_quic_fallback_default():
+def test_collect_quic_empty_without_stock_fallback():
     db = _store()
     _, _, quic = asyncio.run(collect_export_strategies(db, domain="d.com", limit=3))
+    assert quic == []
+
+
+def test_collect_quic_stock_fallback_when_allowed():
+    db = _store()
+    _, _, quic = asyncio.run(
+        collect_export_strategies(db, domain="d.com", limit=3, allow_stock_fallback=True)
+    )
     assert quic == ["fake:blob=quic_initial:repeats=11"]
 
 
@@ -172,6 +213,42 @@ def test_main_returns_zero(tmp_path, monkeypatch):
         ),
     ):
         rc = main(["--limit", "1"])
+    assert rc == 0
+
+
+def test_main_returns_nonzero_when_udp_quic_empty():
+    with patch(
+        "blockchecks.nfconf.export_configs",
+        new=AsyncMock(
+            return_value={
+                "keenetic": "k",
+                "raw": "r",
+                "user_list": "u",
+                "tcp": ["a"],
+                "udp": [],
+                "quic": [],
+            }
+        ),
+    ):
+        rc = main(["--limit", "1"])
+    assert rc == 1
+
+
+def test_main_allows_empty_udp_quic_with_stock_flag():
+    with patch(
+        "blockchecks.nfconf.export_configs",
+        new=AsyncMock(
+            return_value={
+                "keenetic": "k",
+                "raw": "r",
+                "user_list": "u",
+                "tcp": ["a"],
+                "udp": ["fake:blob=discord_udp:repeats=6"],
+                "quic": ["fake:blob=quic_initial:repeats=11"],
+            }
+        ),
+    ):
+        rc = main(["--limit", "1", "--allow-stock-fallback"])
     assert rc == 0
 
 
