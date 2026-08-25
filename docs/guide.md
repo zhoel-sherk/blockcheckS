@@ -406,8 +406,26 @@ BLOCKCHECKS_GV_GGC=1 sudo bs tcp -d googlevideo.com ...
 `Server: gws|scone|gvs`; заглушка ТСПУ: `nginx|nts`. Редирект должен остаться
 на `*.googlevideo.com` / `*.google.com`.
 
-Переменные: `BLOCKCHECKS_GGC_HOST`, `BLOCKCHECKS_GGC_IP`, `BLOCKCHECKS_PROXY`.
-Код: `prepare_ggc_probe()` в `checkers/curl_probe.py`.
+### SNI-пул под управлением подборщика (1.3.9)
+
+SNI больше не захардкожен: каждая проба берёт хост из пула
+(`engine/ggc_pool.py`), выбор пишется в `tcp_results.probe_host`.
+
+| `BLOCKCHECKS_GGC_MODE` | Хост | Резолв | Когда |
+|---|---|---|---|
+| `synthetic` *(default)* | генерация `rr{N}---sn-{code}` с точной мимикрией формата (включая дефисы `sn-1-ien4`, суффиксы `-30ze`) | IP из цепочки ниже — у синтетики DNS NXDOMAIN by design | боевые прогоны |
+| `real` | живые узлы из `CACHE/ggc_real_hosts.json`, TTL ≤6ч (харвестер: `dev/ggc_harvest_real.py`, yt-dlp) | DoH обычный | тесты/A-B |
+| `fixed` | `BLOCKCHECKS_GGC_HOST` как есть | как было | legacy базлайн |
+
+Цепочка IP: per-host `dns.db` → `[google] fallback_ips` / `BLOCKCHECKS_GGC_IPS`
+→ кэш резолва `CACHE/ggc_ips.json` (пополается каждым удачным DoH) →
+legacy-константа. **Не доверяйте старым константам узлов**: `rr5---sn-5goeenes`
+давно NXDOMAIN, а `74.125.108.234` мёртв — проверяйте через DoH.
+
+Переменные: `BLOCKCHECKS_GGC_MODE`, `BLOCKCHECKS_GGC_IPS`,
+`BLOCKCHECKS_GGC_REAL_POOL`, `BLOCKCHECKS_GGC_HOST` (только fixed),
+`BLOCKCHECKS_GGC_IP` (только legacy), `BLOCKCHECKS_PROXY`.
+Код: `prepare_ggc_probe()` в `checkers/curl_probe.py`, пул в `engine/ggc_pool.py`.
 
 ### QUIC / HTTP/3
 

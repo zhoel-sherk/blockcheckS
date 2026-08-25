@@ -11,6 +11,26 @@
 - Lua IPC prefers `setfacl u:nobody` + 0770/0660; logs a warning if it must fall back to 0777/0666. Do not chmod live `/dev/shm/blockchecks/bs-p-*` mid-campaign.
 - Silent `except` in live_events / MCP offline nfconf / heartbeat now `log.warning`.
 
+### GGC under selector control + nfqws2 stdout capture (2026-08-25, вечер)
+
+- **SNI-пул googlevideo** (`engine/ggc_pool.py`, `BLOCKCHECKS_GGC_MODE`):
+  `synthetic` (основной; точная мимикрия формата rrN---sn-<code>, вкл. дефисы
+  `sn-1-ien4` и суффиксы `-30ze`, no-repeat окно), `real` (yt-dlp харвестер
+  `dev/ggc_harvest_real.py`, TTL 6ч), `fixed` (legacy базлайн).
+- **Цепочка IP** вместо мёртвого хардкода: per-host dns.db → `[google]
+  fallback_ips`/`BLOCKCHECKS_GGC_IPS` → кэш `CACHE/ggc_ips.json` → legacy.
+  Обнаружено: старые константы мертвы (`rr5---sn-5goeenes` = NXDOMAIN по
+  Cloudflare DoH; `74.125.108.234` не отвечает) — детектор ходил в труп.
+- `tcp_results.probe_host` (авто-миграция) — SNI каждой пробы для GROUP BY.
+- **nfqws2 stdout capture** (#300): bind-ошибки печатаются в stdout, не в
+  `--debug=@file`; оба пути запуска пишут `logs/nfqws2_out_<tag>_<ts>.log`
+  (глоба gc keep-50). Живой репро: мгновенный рестарт на той же очереди →
+  `nfq_create_queue(): Operation not permitted` в захвате. Итог дня: смерти
+  демонов происходят ПОСЛЕ успешного bind, без вывода и без следов в ядре
+  (не OOM/segfault) — гипотезы см. AGENTS.md.
+- `paths._resolve_xdg`: под sudo (euid=0+SUDO_USER) XDG резолвится в home
+  реального юзера — root-запуски больше не прячут run.lock/логи в /root.
+
 ### bs harvest-batch: strategy candidates → dpi-tester / GP-access-control-plane
 
 New read-only CLI subcommand exporting the harvest of a finished campaign as

@@ -99,3 +99,11 @@ fallbacks = "fallbacks.txt"
 # Bearer token for the `bs serve` HTTP bridge (--http-port). Required for any
 # /api/* route except /api/health. Also read from env BLOCKCHECKS_HTTP_TOKEN.
 # token = "change-me"
+
+[google]
+# GGC-детектор googlevideo: SNI-пул под управлением подборщика.
+# Режим: synthetic (по умолчанию) | real | fixed. Env: BLOCKCHECKS_GGC_MODE.
+# mode = "synthetic"
+# Явные fallback-IP живых Google edge (приоритет выше кэша резолва,
+# ниже per-host dns.db). Также env BLOCKCHECKS_GGC_IPS="ip1,ip2".
+# fallback_ips = ["64.233.161.198", "108.177.14.147"]

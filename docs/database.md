@@ -37,6 +37,7 @@ erDiagram
     text doh_server
     int bridge_batch_id
     int bridge_gen
+    text probe_host
   }
   udp_results {
     int id PK
