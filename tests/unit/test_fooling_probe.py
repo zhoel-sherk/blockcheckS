@@ -15,6 +15,8 @@ def test_ssl35_is_not_viable():
     assert is_fooling_viable("SSL error code 35", 0) is False
     assert is_fooling_viable("WRONG_VERSION_NUMBER", 0) is False
     assert is_fooling_viable("", 200) is True
+    assert is_fooling_viable("", 403) is True
+    assert is_fooling_viable("", 401) is True
 
 
 def test_re_ssl35_requires_explicit_35_or_wrong_version():

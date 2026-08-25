@@ -58,14 +58,17 @@ async def maybe_write_best_config_data_block() -> None:
 
         store = ProviderStore(get_provider_dir())
         if not store.strategies_db.is_file():
+            log.info("%s", "  [data_block] best_config skipped: no strategies.db")
             return
         rows = await store.pass_strategies(approved_only=True)
         if not rows:
             rows = await store.pass_strategies()
         if not rows:
+            log.info("%s", "  [data_block] best_config skipped: no PASS strategies")
             return
         tcp, udp = rank_pass_strategies_for_export(rows)
         if not tcp and not udp:
+            log.info("%s", "  [data_block] best_config skipped: empty rank")
             return
         comment = f"blockcheckS best_config ({_now()}) domains={len(rows)}"
         content = build_keenetic_conf(

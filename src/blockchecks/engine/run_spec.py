@@ -159,7 +159,11 @@ class RunSpec:
             pair_max=int(getattr(args, "pair_max", 200) or 200),
             zero_pass_warn=int(getattr(args, "zero_pass_warn", 10) or 10),
             no_quarantine=bool(getattr(args, "no_quarantine", False)),
-            quarantine_min=int(getattr(args, "quarantine_min", 0) or 300),
+            quarantine_min=(
+                300
+                if (qmin := getattr(args, "quarantine_min", None)) is None
+                else int(qmin)
+            ),
             quarantine_auto_denylist=bool(
                 getattr(args, "quarantine_auto_denylist", False)
             ),

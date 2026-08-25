@@ -399,12 +399,13 @@ def test_keenetic_skips_ip_ttl_outside_byte():
     assert "circular:" in conf.split("NFQWS_ARGS=", 1)[1].split("NFQWS_ARGS_QUIC", 1)[0]
 
 
-def test_keenetic_skips_digit_blob_alias():
+def test_keenetic_renames_digit_blob_alias():
     conf = build_keenetic_conf(
         tcp_strategies=["fake:blob=4pda:repeats=2", "fake:blob=stun:repeats=6"],
         udp_strategies=[],
     )
     assert "blob=4pda" not in _working(conf)
+    assert "blob=b4pda" in _working(conf)
     assert "blob=stun" in _working(conf)
 
 
@@ -413,7 +414,7 @@ def test_filter_export_keeps_inline_hex_blobs():
     assert filter_export_strategies(["dupfake:blob=stun+max_ru:repeats=6"]) == [
         "dupfake:blob=stun+max_ru:repeats=6"
     ]
-    assert filter_export_strategies(["fake:blob=4pda"]) == []
+    assert filter_export_strategies(["fake:blob=4pda"]) == ["fake:blob=b4pda"]
     assert filter_export_strategies(["fake:blob=bad-name"]) == []
 
 

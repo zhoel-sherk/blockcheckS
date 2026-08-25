@@ -48,13 +48,14 @@ def fooling_strategy(suffix: str, *, blob: str = "stun", repeats: int = 6) -> st
 
 def is_fooling_viable(error: str, http_code: int = 0) -> bool:
     """SSL 35 / wrong_version mean the fooling itself was rejected."""
-    if not error and http_code in (200, 204, 101):
+    viable_http = (200, 204, 206, 101, 401, 403, 404)
+    if not error and http_code in viable_http:
         return True
     blob = f"{error} {http_code}"
     if re_ssl35(blob):
         return False
     phase = classify_fail_phase(error, http_code)
-    return phase.value in ("pass",) or http_code in (200, 204, 101)
+    return phase.value in ("pass",) or http_code in viable_http
 
 
 def re_ssl35(text: str) -> bool:

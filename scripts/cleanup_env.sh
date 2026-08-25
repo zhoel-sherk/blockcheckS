@@ -43,6 +43,17 @@ if [ -f "$STATE/run.lock" ]; then
   lock_pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid") or "")' "$STATE/run.lock" 2>/dev/null || true)"
 fi
 
+if [ "$ORPHANS_ONLY" -eq 1 ] && [ -z "$EXCLUDE_PREFIX" ]; then
+  if [ -n "$lock_pid" ]; then
+    # NetNsPool base is bs-p-{pid%10000:04d}
+    EXCLUDE_PREFIX="$(python3 -c 'import sys; print(f"bs-p-{int(sys.argv[1]) % 10000:04d}-")' "$lock_pid")"
+    echo "  orphans-only: auto exclude-prefix=$EXCLUDE_PREFIX (from run.lock pid=$lock_pid)"
+  else
+    echo "ERROR: --orphans-only requires --exclude-prefix=bs-p-<pid%10000>- or a live run.lock" >&2
+    exit 2
+  fi
+fi
+
 is_protected() {
   local ns="$1"
   [ -n "$EXCLUDE_PREFIX" ] && [[ "$ns" == "$EXCLUDE_PREFIX"* ]] && return 0

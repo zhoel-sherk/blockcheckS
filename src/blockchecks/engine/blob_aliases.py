@@ -101,6 +101,9 @@ def resolve_blob_path(name: str, blobs_dir: str | None = None) -> str | None:
             path = os.path.join(base, mapped)
             if os.path.isfile(path):
                 return path
+    orig = name[1:] if name.startswith("b") and name[1:] in BLOB_ALIAS_MAP else ""
+    if orig:
+        return resolve_blob_path(orig, blobs_dir)
 
     for base in search_bases:
         if not os.path.isdir(base):
@@ -233,7 +236,8 @@ def blob_export_filename(name: str) -> str | None:
     """Filename under prefix/blobs for *name*, or None if built-in / hex."""
     if name in _BUILTIN_BLOBS or name == "0x00000000":
         return None
-    return BLOB_ALIAS_MAP.get(name) or f"{name}.bin"
+    orig = name[1:] if name.startswith("b") and name[1:] in BLOB_ALIAS_MAP else name
+    return BLOB_ALIAS_MAP.get(orig) or BLOB_ALIAS_MAP.get(name) or f"{orig}.bin"
 
 
 def blob_export_cli_line(name: str, prefix: str) -> str | None:
@@ -241,4 +245,6 @@ def blob_export_cli_line(name: str, prefix: str) -> str | None:
     fname = blob_export_filename(name)
     if not fname:
         return None
-    return f"--blob={name}:@{prefix}/blobs/{fname}"
+    orig = name[1:] if name.startswith("b") and name[1:] in BLOB_ALIAS_MAP else name
+    ident = safe_blob_name(orig) if orig in BLOB_ALIAS_MAP else name
+    return f"--blob={ident}:@{prefix}/blobs/{fname}"

@@ -683,9 +683,9 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
                             "%s", f"  [quarantine] DB persist skipped for {dom} ({exc})"
                         )
                         break
-            ctx.quarantine = quarantine
         except Exception as exc:
             log.warning("%s", f"  [quarantine] seed skipped ({exc})")
+    ctx.quarantine = quarantine
     progress.done = skipped
     progress.report()
     log.info("%s", f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
@@ -693,9 +693,6 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     def _progress(d: int, s: int, p: int):
         progress.done, progress.skipped, progress.passed = d, s, p
         progress.report()
-
-    quarantine = None
-    from blockchecks.engine.domain_quarantine import quarantine_from_args
 
     ctx.aq_result = None
     try:
@@ -1173,11 +1170,9 @@ async def run_pairs_phase(
             labels = {c["strategy"] for c in covered}
             selected = [i for i in ctx.tcp_items if i.label in labels or i.strategy in labels]
             details = [
-                by_status.get(
-                    i.label,
-                    {"name": i.label, "status": "PASS", "latency_ms": 0},
-                )
+                row
                 for i in selected
+                if (row := by_status.get(i.label) or by_status.get(i.strategy))
             ]
         by_label = {i.label: i for i in ctx.tcp_items}
         for i in ctx.tcp_items:

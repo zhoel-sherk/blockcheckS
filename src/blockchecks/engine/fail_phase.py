@@ -116,13 +116,14 @@ _PHASE_PATTERNS: tuple[tuple[FailPhase, re.Pattern], ...] = (
 )
 
 
-_PASS_HTTP = frozenset({200, 204, 206})
+# TLS handshake to origin (empty/small 401/403/404) is a Fryazino bypass proof.
+_PASS_HTTP = frozenset({200, 204, 206, 401, 403, 404})
 
 
 def classify_fail_phase(error: str, http_code: int = 0) -> FailPhase:
     """Map a probe error string to a structured failure phase.
 
-    Empty error with 200/204/206 → PASS; other HTTP → ``http_<code>``.
+    Empty error with 200/204/206 or TLS-bypass 401/403/404 → PASS; other HTTP → ``http_<code>``.
     """
     if not error:
         if http_code in _PASS_HTTP:

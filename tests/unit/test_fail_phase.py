@@ -77,7 +77,9 @@ def test_classify_empty_and_http():
     assert classify_fail_phase("", 200).value == "pass"
     assert classify_fail_phase("", 204).value == "pass"
     assert classify_fail_phase("", 206).value == "pass"
-    assert classify_fail_phase("", 403).value == "http_403"
+    assert classify_fail_phase("", 403).value == "pass"
+    assert classify_fail_phase("", 401).value == "pass"
+    assert classify_fail_phase("", 404).value == "pass"
     assert classify_fail_phase("", 0).value == "unknown"
     assert classify_fail_phase("random gibberish").value == "other"
 

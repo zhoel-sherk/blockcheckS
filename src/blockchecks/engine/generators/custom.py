@@ -79,7 +79,7 @@ class ConfigFileGenerator(StrategyGenerator):
                 line = raw.strip()
                 if line.startswith("--lua-desync="):
                     out.append(line[len("--lua-desync=") :])
-        return "\n".join(out)
+        return "\\n".join(out)
 
     def _validate_or_skip(self, path: str, label: str) -> bool:
         """Static-validate the config payload; skip (loudly) on errors.

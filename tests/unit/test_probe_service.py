@@ -21,7 +21,7 @@ def test_classify_fail_phase_maps_errors():
     assert classify_fail_phase("curl: (35) Recv failure: Connection reset") == "tls_rst_at_sni"
     assert classify_fail_phase("curl: (6) Could not resolve host") == "dns_resolve"
     assert classify_fail_phase("suspicious redirect 301 to https://x.com") == "http_redirect"
-    assert classify_fail_phase("", 403) == "http_403"
+    assert classify_fail_phase("", 403) == "pass"
     assert classify_fail_phase("") == "unknown"
     # Phase 3 stream-stall taxonomy
     assert classify_fail_phase("stalled at 16kb") == "data_stall_16k"

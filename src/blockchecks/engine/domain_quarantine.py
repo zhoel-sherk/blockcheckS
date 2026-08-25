@@ -149,6 +149,10 @@ def quarantine_from_args(args) -> QuarantineConfig | None:
         return None
     return QuarantineConfig(
         enabled=True,
-        min_attempts=int(getattr(args, "quarantine_min", 0) or DEFAULT_MIN_ATTEMPTS),
+        min_attempts=(
+            DEFAULT_MIN_ATTEMPTS
+            if (raw := getattr(args, "quarantine_min", None)) is None
+            else int(raw)
+        ),
         auto_denylist=bool(getattr(args, "quarantine_auto_denylist", False)),
     )

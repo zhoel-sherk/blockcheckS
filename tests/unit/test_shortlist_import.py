@@ -87,10 +87,14 @@ def test_seed_state_db_passes(tmp_path):
     db.log_udp = AsyncMock()
     with patch("blockchecks.shortlist_import.open_run_store", return_value=db):
         db.init = AsyncMock()
+        db.flush = AsyncMock()
+        db.close = AsyncMock()
         count = _run(seed_state_db(_shortlist(), "x.db"))
     assert count == 2  # 1 tcp + 1 udp
     db.log_tcp.assert_awaited_once()
     db.log_udp.assert_awaited_once()
+    db.flush.assert_awaited_once()
+    db.close.assert_awaited_once()
 
 
 def test_seed_state_db_mark_pass_false():
@@ -118,6 +122,8 @@ def test_import_shortlist_seeds_db(tmp_path):
     db.log_tcp = AsyncMock()
     db.log_udp = AsyncMock()
     db.init = AsyncMock()
+    db.flush = AsyncMock()
+    db.close = AsyncMock()
     with (
         patch("blockchecks.shortlist_import.write_shortlist_presets", return_value={}),
         patch("blockchecks.shortlist_import.open_run_store", return_value=db),

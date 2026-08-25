@@ -21,6 +21,7 @@ from blockchecks.engine.blob_aliases import (
     blob_export_filename,
     extract_blob_names,
     resolve_blob_path,
+    safe_blob_name,
 )
 from blockchecks.engine.config import (
     BLOB_DIR,
@@ -211,24 +212,38 @@ def _blob_export_ok(n: str) -> bool:
 
 
 def filter_export_strategies(strategies: list[str]) -> list[str]:
-    """Drop unreadable / path-only rows and cores with TTL outside 0–255."""
-    return [s for s in strategies if _keep_export_strategy(s)]
+    """Drop unreadable / path-only rows; rename digit-leading blob ids first."""
+    out: list[str] = []
+    for s in strategies:
+        if kept := _keep_export_strategy(_rename_export_blobs(s)):
+            out.append(kept)
+    return out
 
 
-def _keep_export_strategy(strat: str) -> bool:
+def _rename_export_blobs(strat: str) -> str:
+    """4pda→b4pda in export text (nfqws2 fatal on leading-digit identifiers)."""
+    renames = {
+        name: safe_blob_name(name)
+        for name in extract_blob_names(strat)
+        if name != safe_blob_name(name) and not _HEX_BLOB_RE.match(name)
+    }
+    return apply_blob_renames(strat, renames) if renames else strat
+
+
+def _keep_export_strategy(strat: str) -> str | None:
     parts = strategy_parts_for_export(strat)
     if not parts:
-        return False
+        return None
     cores = [p for p in parts if not p.startswith("--")]
     if any(not core_ttl_ok(c) for c in cores):
         log.warning("export: skip strategy with ip_ttl/ip6_ttl outside 0-255: %r", strat[:80])
-        return False
+        return None
     blobs = [m.group(1) for c in cores for m in _BLOB_EXPORT_RE.finditer(c)]
     bad = [n for n in blobs if not _blob_export_ok(n)]
     if bad:
         log.warning("export: skip strategy with non-lua blob name %s: %r", bad, strat[:80])
-        return False
-    return True
+        return None
+    return strat
 
 
 def desync_cli_lines(strategies: list[str]) -> list[str]:

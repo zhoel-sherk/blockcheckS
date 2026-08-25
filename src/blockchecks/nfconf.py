@@ -13,9 +13,9 @@ from pathlib import Path
 
 from blockchecks.engine.conf_builder import (
     DEFAULT_KEENETIC_PREFIX,
-    _keep_export_strategy,
     build_keenetic_conf,
     build_raw_conf,
+    filter_export_strategies,
     write_export_bundle,
     write_user_list,
 )
@@ -102,12 +102,11 @@ async def collect_export_strategies(  # noqa: C901
 
 
 def _resolve_export_strategy(config: str | None, name: str) -> str | None:
-    """Return exportable strategy text; skip DB labels when config is missing."""
-    if config:
-        return config if _keep_export_strategy(config) else None
-    if ":" in name and _keep_export_strategy(name):
-        return name
-    return None
+    text = config if config else (name if ":" in name else "")
+    if not text:
+        return None
+    kept = filter_export_strategies([text])
+    return kept[0] if kept else None
 
 
 def _find_ip2net() -> str | None:

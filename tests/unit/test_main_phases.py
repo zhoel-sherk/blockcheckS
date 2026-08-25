@@ -796,11 +796,12 @@ def test_tcp_adaptive():
             "blockchecks.main_phases.build_adaptive_queue",
             new=AsyncMock(return_value=([MagicMock()], 0)),
         ),
-        patch("blockchecks.main_phases.run_adaptive_tcp", new=AsyncMock(return_value=aq)),
+        patch("blockchecks.main_phases.run_adaptive_tcp", new=AsyncMock(return_value=aq)) as run_tcp,
         patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
         patch("blockchecks.main_phases.persist_adaptive_weights", new=AsyncMock()),
     ):
         asyncio.run(_run_tcp_adaptive(ctx, progress))
+    assert run_tcp.await_args.kwargs.get("quarantine") is not None
     ctx.aq_result = aq
 
 

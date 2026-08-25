@@ -77,66 +77,69 @@ async def seed_state_db(
     db = open_run_store(db_path)
     await db.init()
     count = 0
-    domains = shortlist.get("domains") or ["discord.com"]
-    primary = domains[0]
+    try:
+        domains = shortlist.get("domains") or ["discord.com"]
+        primary = domains[0]
 
-    for row in shortlist.get("tcp") or []:
-        if not isinstance(row, dict):
-            continue
-        label = str(row.get("label") or f"import_tcp_{count}")
-        strat = str(row.get("strategy", "")).strip()
-        if not strat:
-            continue
-        pass_domains = row.get("domains_pass") or [primary]
-        for dom in pass_domains:
-            await db.log_tcp(
+        for row in shortlist.get("tcp") or []:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("label") or f"import_tcp_{count}")
+            strat = str(row.get("strategy", "")).strip()
+            if not strat:
+                continue
+            pass_domains = row.get("domains_pass") or [primary]
+            for dom in pass_domains:
+                await db.log_tcp(
+                    label,
+                    dom,
+                    "PASS",
+                    float(row.get("avg_latency_ms") or row.get("latency_ms") or 0.0),
+                    200,
+                    config_path=strat,
+                )
+                count += 1
+
+        for row in shortlist.get("udp") or []:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("label") or f"import_udp_{count}")
+            strat = str(row.get("strategy", "")).strip()
+            if not strat:
+                continue
+            target = str(row.get("target") or "voice")
+            await db.log_udp(
                 label,
-                dom,
-                "PASS",
-                float(row.get("avg_latency_ms") or row.get("latency_ms") or 0.0),
-                200,
-                config_path=strat,
-            )
-            count += 1
-
-    for row in shortlist.get("udp") or []:
-        if not isinstance(row, dict):
-            continue
-        label = str(row.get("label") or f"import_udp_{count}")
-        strat = str(row.get("strategy", "")).strip()
-        if not strat:
-            continue
-        target = str(row.get("target") or "voice")
-        await db.log_udp(
-            label,
-            target,
-            "PASS",
-            float(row.get("latency_ms") or 0.0),
-            config_path=strat,
-        )
-        count += 1
-
-    for row in shortlist.get("quic") or []:
-        if not isinstance(row, dict):
-            continue
-        label = str(row.get("label") or f"import_quic_{count}")
-        strat = str(row.get("strategy", "")).strip()
-        if not strat:
-            continue
-        pass_domains = row.get("domains_pass") or [primary]
-        for dom in pass_domains:
-            await db.log_tcp(
-                label,
-                dom,
+                target,
                 "PASS",
                 float(row.get("latency_ms") or 0.0),
-                200,
                 config_path=strat,
-                proto="quic",
             )
             count += 1
 
-    return count
+        for row in shortlist.get("quic") or []:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("label") or f"import_quic_{count}")
+            strat = str(row.get("strategy", "")).strip()
+            if not strat:
+                continue
+            pass_domains = row.get("domains_pass") or [primary]
+            for dom in pass_domains:
+                await db.log_tcp(
+                    label,
+                    dom,
+                    "PASS",
+                    float(row.get("latency_ms") or 0.0),
+                    200,
+                    config_path=strat,
+                    proto="quic",
+                )
+                count += 1
+        return count
+    finally:
+        await db.flush()
+        await db.close()
 
 
 async def import_shortlist_async(

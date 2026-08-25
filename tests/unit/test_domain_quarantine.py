@@ -69,6 +69,14 @@ def test_quarantine_from_args() -> None:
     cfg = quarantine_from_args(Args())
     assert cfg is not None and cfg.min_attempts == 150 and cfg.auto_denylist
 
+    class Zero:
+        no_quarantine = False
+        quarantine_min = 0
+        quarantine_auto_denylist = False
+
+    z = quarantine_from_args(Zero())
+    assert z is not None and z.min_attempts == 0
+
     class Off:
         no_quarantine = True
 
