@@ -319,6 +319,7 @@ scan = [
 pair = [
     "src/blockchecks/cli/commands/pair.py",
     "src/blockchecks/cli/commands/pair_phases.py",
+    "src/blockchecks/cli/parser.py",
 ]
 composite = ["src/blockchecks/checkers/composite_runner.py", "src/blockchecks/cli/parser.py"]
 bench-settle = ["src/blockchecks/cli/commands/bench_settle.py"]
@@ -331,6 +332,8 @@ preflight = [
     "src/blockchecks/cli/parser.py",
 ]
 data-block = ["src/blockchecks/cli/commands/data_block.py"]
+harvest-batch = ["src/blockchecks/cli/commands/harvest_batch.py"]
+gc = ["src/blockchecks/cli/commands/gc.py"]
 
 [tool.blockchecks.settings]
 env_prefix = "BLOCKCHECKS_"

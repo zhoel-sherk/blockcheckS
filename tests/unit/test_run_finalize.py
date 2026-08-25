@@ -97,7 +97,7 @@ def test_write_run_summary_none_dir(tmp_path, monkeypatch):
     import blockchecks.engine.run_finalize as rf
 
     fake = tmp_path / "logs"
-    monkeypatch.setattr(rf, "RUNTIME_LOGS_DIR", fake)
+    monkeypatch.setattr(rf, "DEFAULT_OUT_DIR", fake)
     path = write_run_summary(None, {"a": 1})
     assert Path(path).is_file()
 

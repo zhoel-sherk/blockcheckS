@@ -15,6 +15,8 @@ from blockchecks.harvest_batch import (
     write_confs,
 )
 
+pytestmark = pytest.mark.unit
+
 SCHEMA_SQL = """
 CREATE TABLE strategies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -139,6 +139,8 @@ def main(argv: list[str] | None = None, user_config: dict | None = None) -> int:
 
     args._explicit_cli = flags_present_in_argv(argv if argv is not None else sys.argv[1:])
     finalize_store_args(args, cfg)
+    if getattr(args, "migrate_cwd_db", False):
+        migrate_legacy_state_db(enabled=True)
     validate_time_limit_args(p, args)
     deps_rc = ensure_system_deps_or_exit(args)
     if deps_rc:

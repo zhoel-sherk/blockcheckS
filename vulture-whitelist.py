@@ -22,6 +22,8 @@ has_fresh_url  # unused function (src/blockchecks/checkers/youtube_url.py:178)
 model_config  # unused variable (src/blockchecks/cli/cliapp.py:515)
 bench_settle  # unused variable (src/blockchecks/cli/cliapp.py:531)
 data_block  # unused variable (src/blockchecks/cli/cliapp.py:611)
+harvest_batch  # unused variable (CliApp field; pydantic consumes it)
+gc  # unused variable (CliApp field; pydantic consumes it)
 _.cli_cmd  # unused method (src/blockchecks/cli/cliapp.py:540)
 _.load_dns_records  # unused method (src/blockchecks/data_block/store.py:168)
 total_enqueued  # unused variable (src/blockchecks/engine/adaptive_queue.py:102)
@@ -102,6 +104,8 @@ _._fam_udp_multiblob  # unused method (src/blockchecks/engine/generators/familie
 TLS_MOD_NONE  # unused variable (src/blockchecks/engine/generators/flowseal.py:28)
 _.generate_pairs  # unused method (src/blockchecks/engine/matrix_generator.py:232)
 subprocess_env  # unused function (src/blockchecks/engine/paths.py:311)
+USER_DATA_PRESETS_DIR  # reserved; not mkdir'd until a reader exists
+BLOB_CACHE_DIR  # reserved; not mkdir'd until a reader exists
 baseline_ok  # unused variable (src/blockchecks/engine/preflight.py:101)
 run_preflight  # unused function (src/blockchecks/engine/preflight.py:204)
 run_prolog  # unused function (src/blockchecks/engine/preflight.py:206)

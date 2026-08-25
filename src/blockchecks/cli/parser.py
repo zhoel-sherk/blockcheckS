@@ -1125,6 +1125,8 @@ def _main_argparse(argv: list[str] | None = None) -> int:
 
     args._explicit_cli = flags_present_in_argv(argv)
     finalize_store_args(args, user_cfg)
+    if getattr(args, "migrate_cwd_db", False):
+        migrate_legacy_state_db(enabled=True)
     from blockchecks.engine.run_deadline import validate_time_limit_args
 
     validate_time_limit_args(parser, args)
