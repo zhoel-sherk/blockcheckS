@@ -94,12 +94,14 @@ def test_write_run_summary(tmp_path):
 
 
 def test_write_run_summary_none_dir(tmp_path, monkeypatch):
-    import blockchecks.engine.run_finalize as rf
+    import blockchecks.engine.paths as paths_mod
 
     fake = tmp_path / "logs"
-    monkeypatch.setattr(rf, "DEFAULT_OUT_DIR", fake)
+    # патчим канонический источник: run_finalize читает его лениво
+    monkeypatch.setattr(paths_mod, "DEFAULT_OUT_DIR", fake)
     path = write_run_summary(None, {"a": 1})
     assert Path(path).is_file()
+    assert str(fake) in path
 
 
 # ── finalize_db_and_weights ───────────────────────────────────────────
