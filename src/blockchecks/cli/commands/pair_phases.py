@@ -669,6 +669,39 @@ async def _run_pair_matrix_multi_ep(
     return all_pairs
 
 
+async def _seed_quarantine_from_db(db, quarantine, queue, qcfg) -> None:
+    """Pre-seed quarantine from campaign DB and re-sync AQ hard exclusions."""
+    if qcfg is None or db is None or quarantine is None:
+        return
+    try:
+        rows = await db.domain_pass_rows()
+        seeded = quarantine.seed_from_rows(rows)
+        if hasattr(queue, "excluded_domains"):
+            queue.excluded_domains |= quarantine.exclude_domains()
+        if seeded:
+            log.warning(
+                "%s",
+                f"  [quarantine] pre-seeded {len(seeded)} dead domains from DB "
+                f"(0 PASS in >= {qcfg.min_attempts} attempts): "
+                f"{', '.join(sorted(seeded))}",
+            )
+            for dom in seeded:
+                info = quarantine.quarantined.get(dom) or {}
+                try:
+                    await db.quarantine_domain(
+                        dom,
+                        reason=info.get("reason", ""),
+                        failed=info.get("attempts", 0),
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "%s", f"  [quarantine] DB persist skipped for {dom} ({exc})"
+                    )
+                    break
+    except Exception as exc:
+        log.warning("%s", f"  [quarantine] seed skipped ({exc})")
+
+
 async def run_adaptive_pair_phase(
     args,
     runner: AsyncTestRunner,
@@ -702,6 +735,13 @@ async def run_adaptive_pair_phase(
     if getattr(args, "resume", False):
         completed_tcp = await db.get_completed_tcp_keys()
 
+    from blockchecks.engine.domain_quarantine import DomainQuarantine, quarantine_from_args
+
+    quarantine = None
+    qcfg = quarantine_from_args(args)
+    if qcfg is not None:
+        quarantine = DomainQuarantine(qcfg)
+
     queue, skipped = await build_adaptive_queue(
         tcp_items,
         domains_to_test,
@@ -710,7 +750,9 @@ async def run_adaptive_pair_phase(
         load_weights=not getattr(args, "no_adaptive_weights", False),
         resume_check=_resume_job if getattr(args, "resume", False) else None,
         triage=getattr(args, "triage", None),
+        quarantine=quarantine,
     )
+    await _seed_quarantine_from_db(db, quarantine, queue, qcfg)
     log.info("%s", f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
     aq_result = await run_adaptive_tcp(
         runner,
@@ -722,6 +764,7 @@ async def run_adaptive_pair_phase(
         lua_bridge=resolve_probe_backend(args) == "lua_bridge",
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
         workers=max(1, int(getattr(args, "parallel", 4) or 4)),
+        quarantine=quarantine,
     )
     tcp_passed = aq_result.passed
     primary = domains_to_test[0]
@@ -788,10 +831,28 @@ async def run_standard_pair_phase(
     pairs: list = []
     tcp_passed = 0
 
+    completed_tcp: set[tuple[str, str]] = set()
+    if getattr(args, "resume", False):
+        db = getattr(runner, "db", None)
+        get_keys = getattr(db, "get_completed_tcp_keys", None) if db is not None else None
+        if asyncio.iscoroutinefunction(get_keys):
+            completed_tcp = await get_keys()
+
+    async def _resume_done(label: str, dom: str) -> bool:
+        return (label, dom) in completed_tcp
+
+    resume_check = _resume_done if completed_tcp else None
+
     for domain in domains_to_test:
         if stop_event.is_set():
             break
-        log.info("%s", f"\n  {CYAN}[TCP Phase]{RESET} {domain}: {len(tcp_items)} strategies...")
+        pending_count = sum(1 for i in tcp_items if (i.label, domain) not in completed_tcp)
+        resume_skip = len(tcp_items) - pending_count
+        log.info(
+            "%s",
+            f"\n  {CYAN}[TCP Phase]{RESET} {domain}: {pending_count} strategies"
+            + (f" (+{resume_skip} resume skip)" if resume_skip else ""),
+        )
         if use_family_gates:
             tcp_results, _, _, _ = await run_tcp_with_family_gates(
                 runner,
@@ -800,9 +861,14 @@ async def run_standard_pair_phase(
                 scan_level=scan_level,
                 timeout=args.timeout,
                 stop_event=stop_event,
+                resume_check=resume_check,
             )
         else:
-            tcp_results = await runner.test_batch_tcp(tcp_items, domain, args.timeout)
+            pending_items = [i for i in tcp_items if (i.label, domain) not in completed_tcp]
+            if pending_items:
+                tcp_results = await runner.test_batch_tcp(pending_items, domain, args.timeout)
+            else:
+                tcp_results = []
         all_tcp_results.extend(tcp_results)
         domain_passed = sum(1 for r in tcp_results if r.success)
         tcp_passed += domain_passed

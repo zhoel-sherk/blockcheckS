@@ -621,6 +621,131 @@ def test_run_adaptive_pair_phase(caplog):
     assert "backend=classic" in caplog.text
 
 
+def test_run_adaptive_pair_phase_passes_quarantine():
+    args = _args()
+    runner = AsyncMock()
+    aq_result = MagicMock()
+    aq_result.passed = 1
+    aq_result.weights = {}
+    aq_result.done = 1
+    m = MagicMock()
+    m.time_to_first_pass = None
+    m.fanout_enqueued = 0
+    aq_result.metrics = m
+    db = MagicMock()
+    db.get_completed_tcp_keys = AsyncMock(return_value=set())
+    db.domain_pass_rows = AsyncMock(return_value=[])
+    quarantine = MagicMock()
+    quarantine.exclude_domains.return_value = set()
+    with (
+        patch(
+            "blockchecks.engine.domain_quarantine.quarantine_from_args",
+            return_value=MagicMock(min_attempts=300),
+        ),
+        patch(
+            "blockchecks.engine.domain_quarantine.DomainQuarantine",
+            return_value=quarantine,
+        ),
+        patch(
+            "blockchecks.cli.commands.pair_phases.build_adaptive_queue",
+            new=AsyncMock(return_value=([MagicMock()], 0)),
+        ) as build_q,
+        patch(
+            "blockchecks.cli.commands.pair_phases.run_adaptive_tcp",
+            new=AsyncMock(return_value=aq_result),
+        ) as run_aq,
+        patch(
+            "blockchecks.cli.commands.pair_phases.resolve_probe_backend",
+            return_value="classic",
+        ),
+        patch(
+            "blockchecks.cli.commands.pair_phases.persist_adaptive_weights",
+            new=AsyncMock(),
+        ),
+    ):
+        asyncio.run(
+            run_adaptive_pair_phase(
+                args,
+                runner,
+                db,
+                [_item("s1")],
+                [],
+                ["youtube.com"],
+                "1.2.3.4",
+                50004,
+                False,
+                None,
+                "fp",
+                asyncio.Event(),
+                2,
+                "tls12",
+                [],
+            )
+        )
+    assert build_q.await_args.kwargs["quarantine"] is quarantine
+    assert run_aq.await_args.kwargs["quarantine"] is quarantine
+
+
+def test_run_standard_pair_phase_resume_skips_completed():
+    args = _args(tcp_only=True, resume=True)
+    runner = AsyncMock()
+    runner.db = MagicMock()
+    runner.db.get_completed_tcp_keys = AsyncMock(return_value={("s1", "youtube.com")})
+    runner.test_batch_tcp = AsyncMock(return_value=[_result("s2", True)])
+    phase = asyncio.run(
+        run_standard_pair_phase(
+            args,
+            runner,
+            [_item("s1"), _item("s2")],
+            [],
+            ["youtube.com"],
+            "1.2.3.4",
+            50004,
+            False,
+            None,
+            "fp",
+            asyncio.Event(),
+            "fast",
+            False,
+            set(),
+        )
+    )
+    runner.test_batch_tcp.assert_awaited_once()
+    pending = runner.test_batch_tcp.await_args.args[0]
+    assert [i.label for i in pending] == ["s2"]
+    assert phase.tcp_passed == 1
+
+
+def test_run_standard_pair_phase_resume_all_skipped():
+    args = _args(tcp_only=True, resume=True)
+    runner = AsyncMock()
+    runner.db = MagicMock()
+    runner.db.get_completed_tcp_keys = AsyncMock(
+        return_value={("s1", "youtube.com"), ("s2", "youtube.com")}
+    )
+    runner.test_batch_tcp = AsyncMock()
+    phase = asyncio.run(
+        run_standard_pair_phase(
+            args,
+            runner,
+            [_item("s1"), _item("s2")],
+            [],
+            ["youtube.com"],
+            "1.2.3.4",
+            50004,
+            False,
+            None,
+            "fp",
+            asyncio.Event(),
+            "fast",
+            False,
+            set(),
+        )
+    )
+    runner.test_batch_tcp.assert_not_called()
+    assert phase.tcp_passed == 0
+
+
 # ── discover_voice_endpoints / register_stop_handlers / configs_dir ──
 
 

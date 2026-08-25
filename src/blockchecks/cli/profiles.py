@@ -35,7 +35,7 @@ _UNSET = object()
 # argparse/CliApp values used when the user did not pass the flag.
 # ``max`` / ``scan_level`` are mode-dependent (full vs scan/pair).
 _UNSET_VALUES: dict[str, frozenset[Any]] = {
-    "max": frozenset({0, 100}),
+    "max": frozenset({100}),
     "scan_level": frozenset({"fast", "full"}),
     "timeout": frozenset({3.0}),
     "curl_parallel": frozenset({1}),

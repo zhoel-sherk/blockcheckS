@@ -55,3 +55,18 @@ def test_no_profile_is_noop():
     args = SimpleNamespace(max=7)
     apply_profile(args)
     assert args.max == 7
+
+
+def test_profile_keeps_explicit_max_zero():
+    args = SimpleNamespace(profile="smoke", max=0, _explicit_cli={"max"})
+    apply_profile(args)
+    assert args.max == 0
+    assert args.scan_level == "fast"
+    assert args.quick is True
+
+
+def test_profile_max_zero_without_explicit_cli_is_unset_for_scan_default():
+    """Scan/pair default max=100 is still treated as unset; smoke caps to 20."""
+    args = SimpleNamespace(profile="smoke", max=100)
+    apply_profile(args)
+    assert args.max == 20
