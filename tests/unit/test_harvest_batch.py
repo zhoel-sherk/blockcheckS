@@ -216,3 +216,12 @@ def test_digital_leading_blob_renamed(db: Path) -> None:
         for c in r.candidates
     ), [c.strategy for c in r.candidates]
 
+
+def test_harvest_cli_exclude_quarantined_flag() -> None:
+    from blockchecks.cli.parser import build_parser
+
+    ns = build_parser().parse_args(["harvest-batch", "--exclude-quarantined"])
+    assert ns.exclude_quarantined is True
+    ns = build_parser().parse_args(["harvest-batch"])
+    assert ns.exclude_quarantined is False
+

@@ -903,6 +903,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also emit self-contained raw nfqws2 confs (Tier-2 validation)",
     )
+    hb.add_argument(
+        "--exclude-quarantined",
+        action="store_true",
+        help="Drop domains currently in the quarantined table (default: keep them)",
+    )
 
     gc = sub.add_parser(
         "gc",
