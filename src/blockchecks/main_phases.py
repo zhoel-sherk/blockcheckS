@@ -657,6 +657,10 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         try:
             rows = await ctx.db.domain_pass_rows()
             seeded = quarantine.seed_from_rows(rows)
+            # Re-sync hard exclusions: build_adaptive_queue snapshotted
+            # exclude_domains BEFORE seeding filled the quarantine object.
+            if hasattr(queue, "excluded_domains"):
+                queue.excluded_domains |= quarantine.exclude_domains()
             if seeded:
                 log.warning(
                     "%s",

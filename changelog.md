@@ -57,6 +57,15 @@ Supporting changes:
 
 ## 1.3.8 — TLS bypass classification, Discord redirect handling, MCP tools overhaul (2026-08-23)
 
+### Quarantine ordering fix: seeded domains never reached the queue (2026-08-25, hotfix)
+
+- `build_adaptive_queue` snapshotted `exclude_domains` BEFORE
+  `seed_from_rows` filled the quarantine object — DB-seeded dead domains
+  kept being probed (~40% of probes in week_cov S1 restart). Fixed by
+  re-syncing `queue.excluded_domains` after seeding; verified live:
+  quarantined-probe share dropped to 0, PASS attribution clean
+  (0 "without APPLIED" in fresh window), all 4 daemons stable.
+
 ### Run-mechanics audit follow-up: heartbeat, live observability, curl_cffi 0.16.1 (2026-08-25)
 
 Post-audit quality sprint (mechanics of the run itself):
