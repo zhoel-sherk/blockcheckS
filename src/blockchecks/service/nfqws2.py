@@ -76,8 +76,8 @@ def open_out_capture(tag: str):
     that message was lost, making daemon deaths look silent (zapret2#300).
     Files match the ``nfqws2_*.log`` gc glob, so retention applies.
 
-    Returns an opened binary file or None on failure; caller must close it
-    after Popen (the child keeps its inherited fd).
+    Returns ``(fh, path)``; fh=None on failure. Caller must close fh after
+    Popen (the child keeps its inherited fd).
     """
     from blockchecks.engine.paths import RUNTIME_LOGS_DIR
 
@@ -89,10 +89,10 @@ def open_out_capture(tag: str):
         # дочерний процесс (stdout демона), закрывает вызывающий после Popen.
         fh = open(path, "ab", buffering=0)  # noqa: SIM115
         fh.write(f"=== nfqws2 launch tag={tag} {ts}\n".encode())
-        return fh
+        return fh, path
     except OSError as exc:
         log.warning("%s", f"  WARNING: out-capture disabled for {tag}: {exc}")
-        return None
+        return None, None
 
 
 def _prune_out_logs() -> None:
@@ -150,21 +150,50 @@ def start_daemon(
             get_nfqws2_bin(),
             f"@{tmp_conf}",
         ]
-        out_fh = open_out_capture(ns_name)
-        try:
-            subprocess.Popen(
-                cmd,
-                stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
-                stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
-            )
-        finally:
-            if out_fh is not None:
-                out_fh.close()
+        # Ядро освобождает NFQUEUE-сокет после pkill с задержкой; при раннем
+        # ребуте новый демон умирает с nfq_create_queue(): Operation not
+        # permitted (zapret2#300). Ретраим бинд с backoff — stdout-захват
+        # даёт надёжный маркер именно этой причины.
+        max_bind_attempts = 5
+        settle = 0.0
+        from blockchecks.service.nfqws2_settle import nfqws2_count_in_ns
+
+        procs_before = nfqws2_count_in_ns(ns_name)
+        for attempt in range(1, max_bind_attempts + 1):
+            out_fh, out_path = open_out_capture(ns_name)
+            try:
+                subprocess.Popen(
+                    cmd,
+                    stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
+                    stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
+                )
+            finally:
+                if out_fh is not None:
+                    out_fh.close()
                 _prune_out_logs()
-        settle = wait_nfqws2_ready(
-            ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
-        )
-        _reclaim_debug_log(dbg_path)
+            settle = wait_nfqws2_ready(
+                ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
+            )
+            _reclaim_debug_log(dbg_path)
+            alive = nfqws2_count_in_ns(ns_name) > procs_before
+            if alive or attempt == max_bind_attempts:
+                break
+            if out_path.exists():
+                try:
+                    tail_txt = out_path.read_text(errors="replace")[:400]
+                except OSError:
+                    tail_txt = ""
+                if "Operation not permitted" in tail_txt and "nfq_create_queue" in tail_txt:
+                    backoff = min(2.0 * attempt, 6.0)
+                    log.warning(
+                        "%s",
+                        f"  [nfqws2] {ns_name}: queue 200 busy after pkill "
+                        f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
+                    )
+                    time.sleep(backoff)
+                else:
+                    break  # иная причина старта — ретрай бинда не поможет
+        _prune_out_logs()
         return settle
     finally:
         # Daemon has read @config into memory by settle; do not leak /tmp/bs_nfq_*
@@ -203,8 +232,8 @@ class Nfqws2Manager:
         else:
             args = ["sudo", "-n"] + args
 
-        out_fh = open_out_capture(self.ns_name or "host")
-        self.last_out_log = None
+        out_fh, out_path = open_out_capture(self.ns_name or "host")
+        self.last_out_log = out_path
         try:
             self._proc = subprocess.Popen(
                 args,
@@ -219,11 +248,6 @@ class Nfqws2Manager:
             if out_fh is not None:
                 out_fh.close()
                 _prune_out_logs()
-                from blockchecks.engine.paths import RUNTIME_LOGS_DIR
-
-                matches = sorted(RUNTIME_LOGS_DIR.glob(f"nfqws2_out_{self.ns_name or 'host'}_*.log"))
-                if matches:
-                    self.last_out_log = matches[-1]
         self._pid = self._proc.pid
         if self.ns_name:
             wait_nfqws2_ready(self.ns_name)

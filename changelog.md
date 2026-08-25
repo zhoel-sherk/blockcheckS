@@ -28,6 +28,11 @@
   `nfq_create_queue(): Operation not permitted` в захвате. Итог дня: смерти
   демонов происходят ПОСЛЕ успешного bind, без вывода и без следов в ядре
   (не OOM/segfault) — гипотезы см. AGENTS.md.
+- **bind-retry для nfqws2** (#300 финал): pkill освобождает NFQUEUE-сокет с
+  задержкой >2с — ребут умирал с `nfq_create_queue(): Operation not permitted`
+  (видно только благодаря stdout-захвату). start_daemon детектит причину по
+  out-capture и ретраит бинд до 5 раз с backoff. Живой эффект: week-yt прогон
+  после фикса 486/865 PASS (56%) против 0/11000 до него.
 - `paths._resolve_xdg`: под sudo (euid=0+SUDO_USER) XDG резолвится в home
   реального юзера — root-запуски больше не прячут run.lock/логи в /root.
 
