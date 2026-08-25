@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# GV-1 smoke: googlevideo.com videoplayback probe via bs full (needs sudo + nfqws2 + yt-dlp).
+# GV-1 smoke: googlevideo.com videoplayback probe via bs full (needs sudo + nfqws2).
+# GGC binary probe is the default; yt-dlp only as fallback via BLOCKCHECKS_GV_GGC=0.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PY="${PWD}/.venv/bin/python"

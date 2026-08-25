@@ -20,7 +20,10 @@ fi
 echo "=== blockcheckS release smoke ($TS) ==="
 echo "bs=$BS py=$PY"
 
-sudo "$BS" full \
+# Внешний timeout: fan-out известен выходами за внутренний --max-timem,
+# зависший процесс оставлял бы netns без teardown.
+REL_TIMEOUT="${REL_TIMEOUT:-1080}"
+timeout --kill-after=20s "${REL_TIMEOUT}" sudo "$BS" full \
   --fan-out \
   --allow-dns-hijack \
   --domains-file presets/domains/benchmark.txt \

@@ -14,12 +14,12 @@ UDP_CONF="${UDP_CONF:-configs/udp_voice__fake_r6.conf}"
 DISCOVER_N="${DISCOVER_N:-2}"
 echo "=== Voice UDP smoke $(date -Is) ===" | tee "$LOG"
 echo "config=$UDP_CONF discover-dns=$DISCOVER_N" | tee -a "$LOG"
+RC=0
 sudo env PYTHONPATH="${PWD}/src" "$PY" -m blockchecks.bs udp \
   -c "$UDP_CONF" \
   --discover-dns "$DISCOVER_N" \
   --timeout 5 \
-  --skip-deps-check 2>&1 | tee -a "$LOG"
-RC=${PIPESTATUS[0]}
+  --skip-deps-check 2>&1 | tee -a "$LOG" || RC=${PIPESTATUS[0]}
 # Optional full-voice pair probe when Discord token settings exist
 SETTINGS="${DPI_TESTER_SETTINGS:-}"
 if [[ -z "$SETTINGS" ]]; then

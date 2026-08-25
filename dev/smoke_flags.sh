@@ -27,7 +27,7 @@ sudo -n "$BS" stop --force >/dev/null 2>&1 || true
 
 # ── A. CLI surface (no sudo) ──────────────────────────────────
 log A "CLI help / presets / invalid flags"
-for cmd in "" tcp udp scan pair full composite bench-settle stop serve mcp preflight data-block; do
+for cmd in "" tcp udp scan pair full composite bench-settle stop serve mcp preflight data-block gc harvest-batch; do
   if timeout 8 "$BS" ${cmd:+$cmd} -h >/dev/null 2>"$DIR/help_${cmd:-root}.err"; then
     ok "help ${cmd:-bs}"
   else
