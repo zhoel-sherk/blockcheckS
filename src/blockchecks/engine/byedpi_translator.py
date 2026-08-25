@@ -14,7 +14,7 @@ from blockchecks.engine.blob_aliases import resolve_blob_path
 # Translation quality
 
 #: FULL — 1:1 semantic match with byedpi argv.
-#: PARTIAL — close but not bit-identical (repeats, ttl-vs-tcp_ts, etc.).
+#: PARTIAL — close but not bit-identical (repeats, droppable foolings, etc.).
 #: NONE — untranslatable (returns None from translate()).
 TRANSLATION_FULL = "full"
 TRANSLATION_PARTIAL = "partial"
@@ -41,7 +41,6 @@ _UNMAPPED_FOOLINGS = frozenset(
         "tcp_flags_unset",
         "tcp_flags_set",
         "ip_autottl",
-        "ip6_",
         "ipfrag",
         "tcpseg",
         "padencap",
@@ -51,8 +50,12 @@ _UNMAPPED_FOOLINGS = frozenset(
         "wssize",
         "circular",
         "dup",
+        "tcp_ts",
     }
 )
+
+#: Unmapped when the option *name* starts with any of these prefixes (token boundary).
+_UNMAPPED_FOOLING_PREFIXES = ("ip6_",)
 
 #: Foolings with no ciadpi equivalent but droppable — family still translates
 #: (the desync core works without them). Dropped with a PARTIAL note.
@@ -133,22 +136,44 @@ def _blob_argv(blob_name: str) -> list[str]:
     return []
 
 
-def _fooling_argv(line: str) -> tuple[list[str], list[str]]:
-    """Map tcp_md5 / tcp_ts foolings → byedpi flags; drop tcp_ack/tcp_ts_up.
+def _desync_option_names(line: str) -> frozenset[str]:
+    """Top-level nfqws2 desync option names (split on ``:`` / ``=``, not substrings)."""
+    names: set[str] = set()
+    for row in line.splitlines():
+        row = row.strip()
+        if not row:
+            continue
+        for segment in row.split(":"):
+            seg = segment.strip().lower()
+            if not seg:
+                continue
+            names.add(seg.split("=", 1)[0] if "=" in seg else seg)
+    return frozenset(names)
 
-    Returns (argv, notes). tcp_ts maps to --ttl (different mechanism: fake
-    packet expires before server), tcp_md5 maps to --md5sig. tcp_ack and
-    tcp_ts_up have no ciadpi equivalent and are dropped (PARTIAL).
+
+def _has_unmapped_fooling(line: str) -> bool:
+    names = _desync_option_names(line)
+    return any(
+        name in _UNMAPPED_FOOLINGS
+        or any(name.startswith(prefix) for prefix in _UNMAPPED_FOOLING_PREFIXES)
+        for name in names
+    )
+
+
+def _fooling_argv(line: str) -> tuple[list[str], list[str]]:
+    """Map tcp_md5 fooling → byedpi flags; drop tcp_ack/tcp_ts_up.
+
+    Returns (argv, notes). tcp_md5 maps to --md5sig. tcp_ack and tcp_ts_up
+    have no ciadpi equivalent and are dropped (PARTIAL). tcp_ts* is
+    untranslatable (checked before family translators).
     """
+    names = _desync_option_names(line)
     argv: list[str] = []
     notes: list[str] = []
-    if "tcp_md5" in line:
+    if "tcp_md5" in names:
         argv.append("--md5sig")
-    elif "tcp_ts" in line:
-        argv.extend(["--ttl", "8"])
-        notes.append("tcp_ts→--ttl 8 (different mechanism)")
     for bad in _DROPPABLE_FOOLINGS:
-        if bad in line:
+        if bad in names:
             notes.append(f"{bad} unsupported — dropped")
     return argv, notes
 
@@ -157,7 +182,7 @@ def _fooling_argv(line: str) -> tuple[list[str], list[str]]:
 
 
 def _translate_fake(line: str) -> Translation:
-    """fake:blob=X:repeats=N[:tcp_ts|tcp_md5] → -f -1 -l @blob [-t 8|--md5sig]."""
+    """fake:blob=X:repeats=N[:tcp_md5] → -f -1 -l @blob [--md5sig]."""
     argv = ["-f", "-1"]
     blob = _first_match(line, _BLOB_RE)
     if blob:
@@ -170,7 +195,7 @@ def _translate_fake(line: str) -> Translation:
 
 
 def _translate_hostfakesplit(line: str) -> Translation:
-    """hostfakesplit[:disorder_after]:nofake2[:tcp_ts|tcp_md5] → --split 1+sm ..."""
+    """hostfakesplit[:disorder_after]:nofake2[:tcp_md5] → --split 1+sm ..."""
     argv = ["--split", "1+sm"]
     if "disorder_after" in line or "disorder" in line:
         argv.extend(["--disorder", "1+sm"])
@@ -278,10 +303,8 @@ def translate(strategy: str) -> Translation | None:
     if not line:
         return None
 
-    low = line.lower()
-    for bad in _UNMAPPED_FOOLINGS:
-        if bad in low:
-            return None
+    if _has_unmapped_fooling(line):
+        return None
 
     family = _family_of(line)
     if family is None:
@@ -304,3 +327,8 @@ def supported_families() -> frozenset[str]:
 def is_supported(strategy: str) -> bool:
     """True when strategy can be translated (not SKIP)."""
     return translate(strategy) is not None
+
+
+def can_translate(strategy: str) -> bool:
+    """Alias for :func:`is_supported` (harvest / external validators)."""
+    return is_supported(strategy)

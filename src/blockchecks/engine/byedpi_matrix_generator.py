@@ -50,11 +50,11 @@ NATIVE_HTTP_ONLY = frozenset({"-M h -a1", "-M h,d -a1"})
 # Dual-fake needs two nfqws2 rawsends; ciadpi takes one -l fake-data, so it is omitted.
 
 TRANSLATED_SEEDS = [
-    "fake:blob=stun:repeats=6:tcp_ts=-1000",
-    "fake:blob=max_ru:repeats=6:tcp_ts=-1000",
-    "fake:blob=google:repeats=6:tcp_ts=-1000",
-    "fake:blob=4pda:repeats=6:tcp_ts=-1000",
-    "hostfakesplit:nofake2:tcp_ts=-1000",
+    "fake:blob=stun:repeats=6",
+    "fake:blob=max_ru:repeats=6",
+    "fake:blob=google:repeats=6",
+    "fake:blob=4pda:repeats=6",
+    "hostfakesplit:nofake2",
     "hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up",
     "fakedsplit:pos=1:pattern=stun:repeats=1",
     "fakedsplit:pos=midsld:pattern=google:repeats=1",

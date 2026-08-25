@@ -7,19 +7,17 @@ import pytest
 from blockchecks.engine.byedpi_translator import (
     TRANSLATION_FULL,
     TRANSLATION_PARTIAL,
+    can_translate,
     translate,
 )
 
 pytestmark = pytest.mark.unit
 
 
-def test_fake_ts_argv():
-    t = translate("fake:blob=stun:repeats=6:tcp_ts=-1000")
-    assert t is not None
-    assert t.argv[:2] == ["-f", "-1"]
-    assert "--ttl" in t.argv and "8" in t.argv
-    assert t.quality == TRANSLATION_PARTIAL
-    assert any("repeats" in n for n in t.notes)
+def test_tcp_ts_untranslatable():
+    assert translate("fake:blob=stun:repeats=6:tcp_ts=-1000") is None
+    assert translate("hostfakesplit:nofake2:tcp_ts=-1000") is None
+    assert not can_translate("fake:blob=stun:repeats=6:tcp_ts=-1000")
 
 
 def test_fake_md5_argv():
@@ -29,22 +27,24 @@ def test_fake_md5_argv():
 
 
 def test_fake_blob_uses_real_path():
-    t = translate("fake:blob=stun:repeats=6:tcp_ts=-1000")
+    t = translate("fake:blob=stun:repeats=6")
+    assert t is not None
     assert any(a == "-l" for a in t.argv)
     lp = t.argv[t.argv.index("-l") + 1]
     assert lp.endswith("stun.bin")
 
 
-def test_hostfakesplit_ts():
-    t = translate("hostfakesplit:nofake2:tcp_ts=-1000")
+def test_hostfakesplit_without_tcp_ts():
+    t = translate("hostfakesplit:nofake2")
     assert t is not None
-    assert t.argv[:3] == ["--split", "1+sm", "--ttl"]
+    assert t.argv[:2] == ["--split", "1+sm"]
 
 
 def test_hostfakesplit_disorder_drops_ack():
     t = translate("hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up")
     assert t is not None
     assert t.argv[:4] == ["--split", "1+sm", "--disorder", "1+sm"]
+    assert "--ttl" not in t.argv
     assert any("tcp_ack" in n and "dropped" in n for n in t.notes)
     assert any("tcp_ts_up" in n and "dropped" in n for n in t.notes)
     assert t.quality == TRANSLATION_PARTIAL
@@ -104,8 +104,30 @@ def test_seqovl_skip():
     assert translate("multisplit:pos=1:seqovl=68") is None
 
 
-def test_quic_skip():
-    assert translate("fake:blob=quic_initial:repeats=11") is None
+def test_quic_blob_not_skipped():
+    t = translate("fake:blob=quic_initial:repeats=11")
+    assert t is not None
+    assert t.argv[:2] == ["-f", "-1"]
+
+
+def test_dupsid_in_tls_mod_not_skipped():
+    t = translate(
+        "fake:blob=google:repeats=6:tls_mod=rnd,dupsid,sni=www.google.com"
+    )
+    assert t is not None
+    assert t.argv[:2] == ["-f", "-1"]
+
+
+def test_dup_token_still_skips():
+    assert translate("fake:blob=stun:repeats=6:dup") is None
+
+
+def test_quic_token_still_skips():
+    assert translate("fake:blob=stun:repeats=6:quic") is None
+
+
+def test_ip6_fooling_still_skips():
+    assert translate("fake:blob=stun:repeats=6:ip6_hopbyhop") is None
 
 
 def test_unknown_family_skip():
@@ -115,7 +137,7 @@ def test_unknown_family_skip():
 
 def test_translate_multi_line_dual_fake_first_line_only():
     # Dual-fake ALT2 needs two nfqws2 rawsends; ciadpi takes one -l.
-    dual = "fake:blob=stun:repeats=6:tcp_ts=-1000\nfake:blob=max_ru:repeats=6:tcp_ts=-1000"
+    dual = "fake:blob=stun:repeats=6\nfake:blob=max_ru:repeats=6"
     t = translate(dual)
     assert t is not None
     # Only the first line's blob is present (single -l).
