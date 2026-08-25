@@ -371,8 +371,18 @@ def build_probe_request(
     )
 
 
+_ech_warned = False
+
+
 def _apply_ech_off(session: curl_cffi.Session) -> str | None:
-    """Disable ECH via low-level setopt; return error string on total failure."""
+    """Disable ECH via low-level setopt; best-effort, никогда не фейлит пробу.
+
+    Вшитый libcurl может не знать CURLOPT_ECH (10325 появился в curl 8.8):
+    тогда клиент в принципе не предлагает ECH — цель «выключить ECH» уже
+    достигнута дефолтом. Ошибка setopt НЕ должна абортировать пробу
+    (25.08: убила 100% googlevideo/static попыток).
+    """
+    global _ech_warned
     try:
         session.curl.setopt(curl_cffi.CurlOpt.ECH, "")
         return None
@@ -382,7 +392,14 @@ def _apply_ech_off(session: curl_cffi.Session) -> str | None:
         session.curl.setopt(CURLOPT_ECH, "")
         return None
     except Exception as e:
-        return f"ech_setopt:{e!s}"[:100]
+        if not _ech_warned:
+            _ech_warned = True
+            log.warning(
+                "ECH disable unsupported by bundled libcurl (%s) — "
+                "continuing without ECH-off (client never offers ECH anyway)",
+                str(e)[:80],
+            )
+        return None
 
 
 def _ggc_redirect_is_google(location: str) -> bool:

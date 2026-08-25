@@ -826,3 +826,46 @@ def test_googlevideo_follow_keeps_resolved_ip():
     assert follow is not None
     assert follow.resolved_ip == "9.9.9.9"
     assert follow.resolve_name == "rr2---sn-y.googlevideo.com"
+
+
+def test_apply_ech_off_unsupported_libcurl_is_best_effort(monkeypatch):
+    """libcurl без CURLOPT_ECH → warning + None (проба НЕ абортируется)."""
+
+    from blockchecks.checkers import curl_probe as cp
+
+    class FakeSession:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+        class curl:  # noqa: N801
+            @staticmethod
+            def setopt(opt, val):
+                raise RuntimeError("Failed to setopt 10325, bad argument")
+
+    sess = FakeSession()
+    assert cp._apply_ech_off(sess) is None
+    assert not sess.closed, "сессия не должна закрываться — проба продолжается"
+
+
+def test_open_curl_session_gg_no_ech_error(monkeypatch):
+    """gv-запрос с нерабочим ECH-off открывает сессию, а не возвращает error."""
+    from blockchecks.checkers.curl_probe import (
+        CurlProbeRequest,
+        _open_curl_session,
+    )
+
+    req = CurlProbeRequest(
+        domain="googlevideo.com",
+        resolved_ip="198.51.100.9",
+        resolve_name="rr1---sn-x.googlevideo.com",
+        curl_url="https://rr1---sn-x.googlevideo.com/videoplayback?ip=198.51.100.9",
+        disable_ech=True,
+        googlevideo=True,
+        ggc=True,
+    )
+    out = _open_curl_session(req)
+    if hasattr(out, "error"):  # CurlProbeResult = аборт; не должно случиться
+        raise AssertionError(f"probe aborted: {out.error!r}")
+    out.close()
