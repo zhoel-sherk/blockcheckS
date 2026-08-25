@@ -426,7 +426,7 @@ def _make_full_db(path):
     con.execute(
         "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, "
         "domain TEXT, status TEXT, http_code INTEGER, latency_ms REAL, "
-        "timestamp TEXT, fail_phase TEXT)"
+        "timestamp TEXT, fail_phase TEXT, probe_host TEXT DEFAULT '')"
     )
     con.executemany(
         "INSERT INTO strategies (name, proto) VALUES (?,?)",

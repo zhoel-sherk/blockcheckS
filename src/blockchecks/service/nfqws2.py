@@ -64,8 +64,8 @@ def _reclaim_debug_log(dbg_path: str | None) -> None:
         from blockchecks.engine.paths import reclaim_sudo_ownership
 
         reclaim_sudo_ownership(Path(dbg_path))
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("nfqws2 debug log reclaim failed (%s): %s", dbg_path, exc)
 
 
 def open_out_capture(tag: str):
@@ -101,8 +101,8 @@ def _prune_out_logs() -> None:
         from blockchecks.engine.gc import prune_nfqws2_debug_logs
 
         prune_nfqws2_debug_logs()
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("nfqws2 out-log prune failed: %s", exc)
 
 
 def start_daemon(
@@ -175,24 +175,34 @@ def start_daemon(
                 ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
             )
             _reclaim_debug_log(dbg_path)
-            alive = nfqws2_count_in_ns(ns_name) > procs_before
+            # Liveness: /proc-сканирование слепо к root-owned процессам при
+            # user-запуске (readlink ns/net → EPERM), поэтому первичный
+            # маркер — строка "setting copy_packet mode" в stdout-захвате;
+            # /proc-count используется только как дополнительный сигнал.
+            try:
+                out_txt = (
+                    out_path.read_text(errors="replace")[:2000]
+                    if out_path is not None and out_path.exists()
+                    else ""
+                )
+            except OSError:
+                out_txt = ""
+            alive = (
+                "setting copy_packet mode" in out_txt
+                or nfqws2_count_in_ns(ns_name) > procs_before
+            )
             if alive or attempt == max_bind_attempts:
                 break
-            if out_path.exists():
-                try:
-                    tail_txt = out_path.read_text(errors="replace")[:400]
-                except OSError:
-                    tail_txt = ""
-                if "Operation not permitted" in tail_txt and "nfq_create_queue" in tail_txt:
-                    backoff = min(2.0 * attempt, 6.0)
-                    log.warning(
-                        "%s",
-                        f"  [nfqws2] {ns_name}: queue 200 busy after pkill "
-                        f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
-                    )
-                    time.sleep(backoff)
-                else:
-                    break  # иная причина старта — ретрай бинда не поможет
+            if "Operation not permitted" in out_txt and "nfq_create_queue" in out_txt:
+                backoff = min(2.0 * attempt, 6.0)
+                log.warning(
+                    "%s",
+                    f"  [nfqws2] {ns_name}: queue 200 busy after pkill "
+                    f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
+                )
+                time.sleep(backoff)
+            else:
+                break  # иная причина старта — ретрай бинда не поможет
         _prune_out_logs()
         return settle
     finally:

@@ -9,6 +9,10 @@ class NetnsGoneError(RuntimeError):
     """Netns was destroyed while in use by another process."""
 
 
+class IptablesError(RuntimeError):
+    """NFQUEUE rule missing — probes would bypass nfqws2 (false PASS)."""
+
+
 def _check_netns_exists(ns_name: str) -> None:
     import subprocess as sp
 
@@ -95,7 +99,9 @@ def _bridge_iptables_add(ns_name: str, dport: str, protocol: str = "tls12") -> N
             f"  [iptables] {ns_name}: -A NFQUEUE/{qnum} FAILED rc={add.returncode} "
             f"stderr={add.stderr.strip()!r} stdout={add.stdout.strip()!r}",
         )
-        return
+        raise IptablesError(
+            f"{ns_name}: iptables -A NFQUEUE/{qnum} failed rc={add.returncode}"
+        )
     # Верификация: правило обязано существовать после успешного -A
     verify = sp.run(
         base
@@ -121,4 +127,7 @@ def _bridge_iptables_add(ns_name: str, dport: str, protocol: str = "tls12") -> N
             "%s",
             f"  [iptables] {ns_name}: rule MISSING right after -A "
             f"(rc={verify.returncode}) — что-то сбрасывает таблицу",
+        )
+        raise IptablesError(
+            f"{ns_name}: iptables -C NFQUEUE/{qnum} failed after -A"
         )

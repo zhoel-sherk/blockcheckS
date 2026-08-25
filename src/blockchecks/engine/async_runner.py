@@ -447,6 +447,7 @@ class AsyncTestRunner:
                         dns_verdict=dns_verdict,
                         doh_server=doh_server,
                         proto=proto_db,
+                        probe_host=result.probe_host,
                     )
             except Exception as e:
                 result.error = str(e)[:200]

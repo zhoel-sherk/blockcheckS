@@ -48,6 +48,24 @@ def test_bridge_session_boot(session, tmp_path):
 
 
 @pytest.mark.unit
+def test_bridge_session_boot_iptables_fail_leaves_not_ready(session, tmp_path):
+    from blockchecks.service.lua_netns import IptablesError
+
+    with (
+        patch("blockchecks.service.lua_session._check_netns_exists"),
+        patch("blockchecks.service.lua_session.write_bridge_conf", return_value="/tmp/new.conf"),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.1),
+        patch(
+            "blockchecks.service.lua_session._bridge_iptables_add",
+            side_effect=IptablesError("nfq"),
+        ),
+        pytest.raises(IptablesError),
+    ):
+        session.boot()
+    assert session.iptables_ready is False
+
+
+@pytest.mark.unit
 def test_bridge_session_shutdown(session):
     session.iptables_ready = True
     with (

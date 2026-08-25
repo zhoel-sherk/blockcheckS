@@ -96,6 +96,13 @@ def test_expand_path_tilde(tmp_path):
 
 
 @pytest.mark.unit
+def test_expand_path_tilde_under_sudo(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "_sudo_user_home", lambda: Path("/home/zhoel"))
+    p = paths.expand_path("~/.local/state/blockcheckS/state.db", default=tmp_path / "d.db")
+    assert p == Path("/home/zhoel/.local/state/blockcheckS/state.db").resolve()
+
+
+@pytest.mark.unit
 def test_reclaim_sudo_ownership_chowns_when_root(tmp_path, monkeypatch):
     target = tmp_path / "state.db"
     target.write_text("x")

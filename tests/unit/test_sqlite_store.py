@@ -56,6 +56,24 @@ async def test_log_tcp_persists_fail_phase(tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_log_tcp_and_get_best_tcp_probe_host(tmp_path):
+    store = open_run_store(tmp_path / "ph.db")
+    await store.init()
+    await store.log_tcp(
+        "s1",
+        "googlevideo.com",
+        "PASS",
+        80.0,
+        200,
+        config_path="fake:blob=stun",
+        probe_host="rr4---sn-xjvho9k.googlevideo.com",
+    )
+    rows = await store.get_best_tcp("googlevideo.com", limit=5)
+    assert rows[0]["probe_host"] == "rr4---sn-xjvho9k.googlevideo.com"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_migration_adds_fail_phase_column(tmp_path):
     import sqlite3
 
@@ -78,6 +96,32 @@ async def test_migration_adds_fail_phase_column(tmp_path):
     con = sqlite3.connect(tmp_path / "old.db")
     cols = [r[1] for r in con.execute("PRAGMA table_info(tcp_results)")]
     assert "fail_phase" in cols
+    con.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_migration_adds_probe_host_column(tmp_path):
+    import sqlite3
+
+    con = sqlite3.connect(tmp_path / "old_ph.db")
+    con.execute(
+        """CREATE TABLE tcp_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER, domain TEXT, status TEXT,
+            http_code INTEGER, latency_ms REAL, gateway_ws_ms REAL,
+            content_valid INTEGER, read_rate_bps REAL, error TEXT,
+            timestamp TEXT, fail_phase TEXT)"""
+    )
+    con.commit()
+    con.close()
+
+    store = open_run_store(tmp_path / "old_ph.db")
+    await store.init()
+
+    con = sqlite3.connect(tmp_path / "old_ph.db")
+    cols = [r[1] for r in con.execute("PRAGMA table_info(tcp_results)")]
+    assert "probe_host" in cols
     con.close()
 
 

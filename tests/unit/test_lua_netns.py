@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from blockchecks.service.lua_netns import (
+    IptablesError,
     NetnsGoneError,
     _bridge_iptables_add,
     _check_netns_exists,
@@ -49,17 +50,39 @@ def test_netns_tcp_probe_cleanup():
     assert run.call_count == 1
 
 
+def _ok_run(*_a, **_k):
+    r = MagicMock()
+    r.returncode = 0
+    r.stdout = ""
+    r.stderr = ""
+    return r
+
+
 def test_bridge_iptables_add_tcp():
-    with patch("subprocess.run") as run, patch("blockchecks.service.lua_netns._check_netns_exists"):
+    with patch("subprocess.run", side_effect=_ok_run) as run, patch(
+        "blockchecks.service.lua_netns._check_netns_exists"
+    ):
         _bridge_iptables_add("bs-p-0", "443", "tls12")
-    # flush + add = 2 calls
-    assert run.call_count == 2
+    assert run.call_count == 3  # flush + add + -C verify
     args = run.call_args_list[1].args[0]
     assert "-p" in args and "tcp" in args
 
 
 def test_bridge_iptables_add_quic():
-    with patch("subprocess.run") as run, patch("blockchecks.service.lua_netns._check_netns_exists"):
+    with patch("subprocess.run", side_effect=_ok_run) as run, patch(
+        "blockchecks.service.lua_netns._check_netns_exists"
+    ):
         _bridge_iptables_add("bs-p-0", "443", "quic")
     args = run.call_args_list[1].args[0]
     assert "udp" in args
+
+
+def test_bridge_iptables_add_raises_when_add_fails():
+    flush = _ok_run()
+    add = MagicMock(returncode=1, stdout="", stderr="iptables: No chain")
+    with (
+        patch("subprocess.run", side_effect=[flush, add]),
+        patch("blockchecks.service.lua_netns._check_netns_exists"),
+        pytest.raises(IptablesError, match="NFQUEUE"),
+    ):
+        _bridge_iptables_add("bs-p-0", "443", "tls12")

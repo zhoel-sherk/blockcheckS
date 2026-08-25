@@ -194,6 +194,7 @@ cwd_db_migrate_enabled
 ZAPRET2_ROOT
 BUNDLED_DENYLIST_FILE
 cmd_gc
+IptablesError  # raised by lua_netns when NFQUEUE rule is missing
 prune_nfqws2_debug_logs
 _ipc_relax_for_nobody
 _world_warned

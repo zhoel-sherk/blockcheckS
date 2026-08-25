@@ -77,6 +77,16 @@ def current_mode() -> str:
     env = os.environ.get(MODE_ENV, "").strip().lower()
     if env in MODES:
         return env
+    try:
+        from blockchecks.engine.settings import _load_user_toml
+
+        google = (_load_user_toml() or {}).get("google")
+        if isinstance(google, dict):
+            mode = str(google.get("mode") or "").strip().lower()
+            if mode in MODES:
+                return mode
+    except Exception as exc:
+        log.warning("GGC mode from config.toml failed: %s", exc)
     return "synthetic"
 
 
@@ -199,8 +209,8 @@ def configured_fallback_ips() -> list[str]:
         google = (_load_user_toml() or {}).get("google")
         if isinstance(google, dict) and isinstance(google.get("fallback_ips"), list):
             return [str(ip) for ip in google["fallback_ips"]]
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("GGC fallback_ips from config.toml failed: %s", exc)
     return []
 
 
@@ -211,7 +221,8 @@ def resolve_ip_chain(host: str) -> str | None:
         from blockchecks.data_block.store import ProviderStore
 
         recs = ProviderStore(get_provider_dir()).load_dns_records_sync()
-    except Exception:
+    except Exception as exc:
+        log.warning("GGC dns.db lookup failed for %s: %s", host, exc)
         recs = {}
     ips, _src = recs.get(host, ([], ""))
     if ips:

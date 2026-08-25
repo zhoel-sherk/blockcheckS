@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture()
 def pool_env(tmp_path: Path, monkeypatch):
@@ -18,6 +20,9 @@ def pool_env(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("BLOCKCHECKS_GGC_MODE", raising=False)
     monkeypatch.delenv("BLOCKCHECKS_GGC_IPS", raising=False)
     monkeypatch.delenv("BLOCKCHECKS_GGC_REAL_POOL", raising=False)
+    monkeypatch.setattr(
+        "blockchecks.engine.settings._load_user_toml", lambda path=None: {}
+    )
 
     from blockchecks.engine import ggc_pool as g
     from blockchecks.engine import paths as paths_mod
@@ -49,6 +54,9 @@ def test_synthetic_format_mimics_real(pool_env) -> None:
 
 def test_no_immediate_repeat(pool_env) -> None:
     g, _ = pool_env
+    import random
+
+    random.seed(0)
     keys = []
     for _ in range(20):
         h = g.generate_synthetic_host()
@@ -68,17 +76,15 @@ def test_real_pool_ttl_and_garbage(pool_env) -> None:
     assert g.load_real_pool() == ["rr5---sn-5goeenes.googlevideo.com"]
 
 
-def test_modes(pool_env) -> None:
+def test_modes(pool_env, monkeypatch) -> None:
     g, cache = pool_env
-    import os
-
-    os.environ["BLOCKCHECKS_GGC_MODE"] = "fixed"
+    monkeypatch.setenv("BLOCKCHECKS_GGC_MODE", "fixed")
     t = g.pick_target()
     assert t.mode == "fixed" and t.host.endswith("googlevideo.com")
 
     (cache / "ggc_real_hosts.json").write_text(json.dumps(
         {"timestamp": time.time(), "hosts": ["rr2---sn-a5mek7k.googlevideo.com"]}))
-    os.environ["BLOCKCHECKS_GGC_MODE"] = "real"
+    monkeypatch.setenv("BLOCKCHECKS_GGC_MODE", "real")
     t = g.pick_target()
     assert t.host == "rr2---sn-a5mek7k.googlevideo.com" and t.pool_size == 1
 
@@ -87,7 +93,7 @@ def test_modes(pool_env) -> None:
     t = g.pick_target()
     assert t.mode == "synthetic" or t.host.startswith("rr")
 
-    os.environ["BLOCKCHECKS_GGC_MODE"] = "synthetic"
+    monkeypatch.setenv("BLOCKCHECKS_GGC_MODE", "synthetic")
     assert g.pick_target().mode == "synthetic"
 
 
@@ -121,11 +127,19 @@ def test_remember_ggc_ip_roundtrip(pool_env) -> None:
     assert g.cached_ips() == ["203.0.113.5"]
 
 
-def test_pick_target_never_raises(pool_env) -> None:
+def test_pick_target_never_raises(pool_env, monkeypatch) -> None:
     g, _ = pool_env
     for mode in ("synthetic", "real", "fixed"):
-        import os
-
-        os.environ["BLOCKCHECKS_GGC_MODE"] = mode
+        monkeypatch.setenv("BLOCKCHECKS_GGC_MODE", mode)
         t = g.pick_target()
         assert t.host and t.mode == mode
+
+
+def test_current_mode_reads_toml_when_env_unset(pool_env, monkeypatch) -> None:
+    g, _ = pool_env
+    monkeypatch.delenv("BLOCKCHECKS_GGC_MODE", raising=False)
+    monkeypatch.setattr(
+        "blockchecks.engine.settings._load_user_toml",
+        lambda path=None: {"google": {"mode": "fixed"}},
+    )
+    assert g.current_mode() == "fixed"

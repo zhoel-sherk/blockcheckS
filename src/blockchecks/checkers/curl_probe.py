@@ -316,10 +316,11 @@ def prepare_ggc_probe(
             if ips and not err:
                 ip = ips[0]
                 remember_ggc_ip(host, ip)
-        except Exception:
+        except Exception as exc:
+            log.warning("GGC DoH for %s failed: %s", host, exc)
             ip = None
     if not ip:
-        # Цепочка: dns.db провайдера → CACHE/ggc_ips.json → [google].fallback_ips/env
+        # Цепочка: dns.db → [google].fallback_ips/env → CACHE/ggc_ips.json
         ip = resolve_ip_chain(host)
     if not ip:
         # Последний рубеж — известный живой GGC-IP: edge отвечает wildcard-серт.

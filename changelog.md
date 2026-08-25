@@ -33,6 +33,11 @@
   (видно только благодаря stdout-захвату). start_daemon детектит причину по
   out-capture и ретраит бинд до 5 раз с backoff. Живой эффект: week-yt прогон
   после фикса 486/865 PASS (56%) против 0/11000 до него.
+- Follow-up (аудит): `[google].mode` читается из config.toml; `~/` в `[paths]`
+  под sudo → home SUDO_USER; classic `test_tcp()` пишет `probe_host`;
+  `get_best_tcp` / MCP `query_strategies` отдают колонку; `test_ggc_pool.py` в CI S1.
+- Follow-up (runtime): `_bridge_iptables_add` снова abort boot (`IptablesError`)
+  если `-A`/`-C` NFQUEUE не встали — иначе heartbeat живой, а трафик queue-bypass.
 - `paths._resolve_xdg`: под sudo (euid=0+SUDO_USER) XDG резолвится в home
   реального юзера — root-запуски больше не прячут run.lock/логи в /root.
 

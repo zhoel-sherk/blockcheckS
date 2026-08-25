@@ -150,10 +150,19 @@ def resolve_user_output_dir(*, kind: str = "export", allow_legacy: bool = False)
 
 
 def expand_path(value: str | Path | None, *, default: Path) -> Path:
-    """Expand ~ and env vars; fall back to default when value is empty."""
+    """Expand ~ and env vars; fall back to default when value is empty.
+
+    Under ``sudo`` (euid==0, SUDO_USER set), ``~/…`` follows SUDO_USER home
+    so ``[paths] db = "~/.local/state/…"`` does not split to ``/root``.
+    """
     if value is None or (isinstance(value, str) and not value.strip()):
         return default.expanduser().resolve()
-    return Path(os.path.expandvars(os.path.expanduser(str(value)))).resolve()
+    raw = os.path.expandvars(str(value))
+    home = _sudo_user_home()
+    if home is not None and (raw == "~" or raw.startswith("~/")):
+        rest = raw[2:] if raw.startswith("~/") else ""
+        return (home / rest).resolve()
+    return Path(os.path.expanduser(raw)).resolve()
 
 
 def ensure_dirs() -> None:

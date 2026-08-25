@@ -162,6 +162,11 @@ def apply_settings_env(settings: BlockchecksSettings | None = None) -> Blockchec
     os.environ.setdefault("BLOCKCHECKS_UNBLOCKED_DOM", s.unblocked_dom)
     os.environ.setdefault("BLOCKCHECKS_CURL_PARALLEL", str(s.curl_parallel))
     os.environ.setdefault("BLOCKCHECKS_WALL_SLACK", str(s.wall_slack))
+    google = _load_user_toml().get("google")
+    if isinstance(google, dict):
+        mode = str(google.get("mode") or "").strip().lower()
+        if mode in ("synthetic", "real", "fixed"):
+            os.environ.setdefault("BLOCKCHECKS_GGC_MODE", mode)
     _apply_doh_catalog(s)
     return s
 

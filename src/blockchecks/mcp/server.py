@@ -679,7 +679,7 @@ async def query_strategies(
             placeholders = ",".join("?" for _ in statuses)
             if proto_key == "tcp":
                 rows = cur.execute(
-                    f"""SELECT s.name, t.latency_ms, t.http_code, t.status, t.timestamp, t.fail_phase
+                    f"""SELECT s.name, t.latency_ms, t.http_code, t.status, t.timestamp, t.fail_phase, t.probe_host
                         FROM strategies s
                         JOIN tcp_results t ON t.strategy_id = s.id
                         WHERE s.proto='tcp' AND t.domain=? AND t.status IN ({placeholders})
@@ -694,7 +694,7 @@ async def query_strategies(
                 )
             else:
                 rows = cur.execute(
-                    f"""SELECT s.name, u.latency_ms, NULL as http_code, u.status, u.timestamp, u.error as fail_phase
+                    f"""SELECT s.name, u.latency_ms, NULL as http_code, u.status, u.timestamp, u.error as fail_phase, '' as probe_host
                         FROM strategies s
                         JOIN udp_results u ON u.strategy_id = s.id
                         WHERE s.proto='udp' AND u.target=? AND u.status IN ({placeholders})
@@ -707,7 +707,15 @@ async def query_strategies(
                         LIMIT ?""",
                     (domain, *statuses, domain, limit),
                 )
-            cols = ["strategy", "latency_ms", "http_code", "status", "timestamp", "fail_phase"]
+            cols = [
+                "strategy",
+                "latency_ms",
+                "http_code",
+                "status",
+                "timestamp",
+                "fail_phase",
+                "probe_host",
+            ]
             return [dict(zip(cols, r)) for r in rows.fetchall()]
         except sqlite3.Error as err:
             return [{"error": str(err)}]
