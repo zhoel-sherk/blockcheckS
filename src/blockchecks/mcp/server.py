@@ -408,10 +408,9 @@ async def get_series_status() -> dict[str, Any]:
         ("--repeats", "repeats"),
         ("--max", "max"),
     ):
-        if flag in argv:
-            i = argv.index(flag)
-            if i + 1 < len(argv):
-                payload[dest] = argv[i + 1]
+        val = _argv_flag_value(argv, flag)
+        if val is not None:
+            payload[dest] = val
     payload["backend"] = "classic" if "--classic" in argv else "lua_bridge"
     # Adaptive queue is ON by default (1.3.1+): it is disabled only by an
     # explicit --no-adaptive. The legacy "--adaptive"/"--fan-out" flags are
@@ -438,6 +437,19 @@ async def get_series_status() -> dict[str, Any]:
 
     payload["debug"] = debug_status()
     return payload
+
+
+def _argv_flag_value(argv: list[str], flag: str) -> str | None:
+    """Return the value after *flag*, or None when absent or next token is a flag."""
+    if flag not in argv:
+        return None
+    i = argv.index(flag)
+    if i + 1 >= len(argv):
+        return None
+    nxt = argv[i + 1]
+    if nxt.startswith("-"):
+        return None
+    return nxt
 
 
 def _resolve_db_path(db_path: str | None) -> Path | None:
@@ -514,7 +526,8 @@ def _read_db_progress(db_path: Path) -> dict[str, Any]:
         quarantined: list[dict[str, Any]] = []
         try:
             for d, reason, failed, created in cur.execute(
-                "SELECT domain, reason, failed, created FROM quarantined ORDER BY created"
+                "SELECT domain, reason, failed, created FROM quarantined "
+                "ORDER BY created LIMIT 100"
             ).fetchall():
                 quarantined.append(
                     {

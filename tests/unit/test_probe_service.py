@@ -223,3 +223,76 @@ def test_find_strategy_populates_top_strategies(tmp_path, monkeypatch):
         assert captured["workers"] == 2
 
     asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_handle_triage_probe_under_lock_no_deadlock():
+    """QA-1: fooling_probe_fn must not re-acquire service._lock (asyncio.Lock is not reentrant)."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from blockchecks.engine.fail_phase import FailPhase
+    from blockchecks.engine.triage import TriageProfile
+    from blockchecks.service.probe_service import ProbeService
+
+    runner = MagicMock()
+    runner.test_tcp = AsyncMock(return_value=MagicMock(success=True, error="", http_code=200))
+    svc = ProbeService(pool_size=2)
+    svc.started = True
+    svc.runner = runner
+    server = ProbeServer(svc, socket_path="/tmp/bs_triage_deadlock.sock")
+
+    report = MagicMock(triage=TriageProfile(handshake_phase=FailPhase.PASS))
+
+    async def fake_preflight(domains, opts):
+        assert callable(opts.fooling_probe_fn)
+        await asyncio.wait_for(opts.fooling_probe_fn("fake:repeats=6"), timeout=4.0)
+        return report
+
+    async def run():
+        with patch(
+            "blockchecks.engine.preflight.run_preflight_async",
+            new=AsyncMock(side_effect=fake_preflight),
+        ):
+            resp = await asyncio.wait_for(
+                server._handle_triage({"domain": "youtube.com"}),
+                timeout=5.0,
+            )
+        assert resp["status"] == "ok"
+        runner.test_tcp.assert_awaited()
+
+    asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_read_http_request_rejects_oversized_content_length():
+    from blockchecks.service.server import HTTP_MAX_BODY_BYTES, HttpRequestRejected
+
+    async def run():
+        oversize = HTTP_MAX_BODY_BYTES + 1
+        raw = (
+            f"POST /api/probe HTTP/1.1\r\nContent-Length: {oversize}\r\n\r\n"
+        ).encode()
+        reader = asyncio.StreamReader()
+        reader.feed_data(raw)
+        reader.feed_eof()
+        with pytest.raises(HttpRequestRejected) as exc:
+            await ProbeServer._read_http_request(reader)
+        assert exc.value.status_code == 413
+
+    asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_read_http_request_rejects_negative_content_length():
+    from blockchecks.service.server import HttpRequestRejected
+
+    async def run():
+        raw = b"POST /api/probe HTTP/1.1\r\nContent-Length: -1\r\n\r\n"
+        reader = asyncio.StreamReader()
+        reader.feed_data(raw)
+        reader.feed_eof()
+        with pytest.raises(HttpRequestRejected) as exc:
+            await ProbeServer._read_http_request(reader)
+        assert exc.value.status_code == 400
+
+    asyncio.run(run())

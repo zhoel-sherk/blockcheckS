@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -21,6 +22,16 @@ SOCKET_PATH = STATE_DIR / "blockchecks.sock"
 
 SSE_HEARTBEAT_SECONDS = 15.0
 HTTP_HEADER_READ_TIMEOUT = 30.0
+HTTP_MAX_BODY_BYTES = 1 << 20  # 1 MiB — reject before readexactly (QA-4)
+
+
+class HttpRequestRejected(Exception):
+    """HTTP request rejected before body read (status_code, message)."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        self.status_code = status_code
+        self.message = message
+        super().__init__(message)
 
 
 def _triage_fail_phase(t) -> str:
@@ -279,9 +290,9 @@ class ProbeServer:
             if runner is not None:
 
                 async def probe(strategy: str) -> tuple[bool, str, int]:
+                    # Caller (_handle_triage) already holds service._lock — do not re-enter.
                     item = StrategyItem(label="preflight_diag", strategy=strategy)
-                    async with self.service._lock:
-                        r = await runner.test_tcp(item, domain, timeout=min(opts.timeout, 5.0))
+                    r = await runner.test_tcp(item, domain, timeout=min(opts.timeout, 5.0))
                     return bool(r.success), r.error or "", int(r.http_code or 0)
 
                 opts.fooling_probe_fn = probe
@@ -738,7 +749,7 @@ class ProbeServer:
             return None
         method, path, _ = parts
         authorization: str | None = None
-        content_length = 0
+        content_length: int | None = None
         while True:
             line = await reader.readline()
             if line in (b"\r\n", b"\n", b""):
@@ -747,10 +758,17 @@ class ProbeServer:
             if low.startswith("authorization:"):
                 authorization = line.decode("utf-8", "replace").split(":", 1)[1].strip()
             elif low.startswith("content-length:"):
+                raw = low.split(":", 1)[1].strip()
                 try:
-                    content_length = int(low.split(":", 1)[1].strip())
+                    content_length = int(raw)
                 except ValueError:
-                    content_length = 0
+                    raise HttpRequestRejected(400, "invalid Content-Length") from None
+        if content_length is None:
+            content_length = 0
+        if content_length < 0:
+            raise HttpRequestRejected(400, "negative Content-Length")
+        if content_length > HTTP_MAX_BODY_BYTES:
+            raise HttpRequestRejected(413, "Content-Length exceeds limit")
         body = b""
         if content_length > 0:
             body = await asyncio.wait_for(
@@ -865,6 +883,7 @@ class ProbeServer:
                 400: "Bad Request",
                 401: "Unauthorized",
                 404: "Not Found",
+                413: "Payload Too Large",
                 423: "Locked",
             }.get(status_code, "OK")
             writer.write(
@@ -881,7 +900,15 @@ class ProbeServer:
         async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             sse_stream = False
             try:
-                request = await self._read_http_request(reader)
+                try:
+                    request = await self._read_http_request(reader)
+                except HttpRequestRejected as exc:
+                    await _send_json(
+                        writer,
+                        {"status": "error", "ok": False, "error": exc.message},
+                        exc.status_code,
+                    )
+                    return
                 if request is None:
                     return
                 method, path, authorization, body = request
@@ -892,7 +919,8 @@ class ProbeServer:
                     return
 
                 # Everything else requires a Bearer token.
-                if _authorization_token(authorization) != token:
+                provided = _authorization_token(authorization)
+                if not provided or not hmac.compare_digest(provided, token):
                     await _send_json(
                         writer,
                         {"status": "error", "ok": False, "error": "unauthorized"},

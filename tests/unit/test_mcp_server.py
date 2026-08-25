@@ -865,3 +865,27 @@ async def test_get_series_status_adaptive_default_on(tmp_path, monkeypatch):
     _patch_run_control(monkeypatch, info_off)
     result = await get_series_status()
     assert result["adaptive"] is False
+
+
+def test_argv_flag_value_skips_boolean_flag():
+    from blockchecks.mcp.server import _argv_flag_value
+
+    argv = ["full", "--max", "--resume", "--db", "run.db"]
+    assert _argv_flag_value(argv, "--max") is None
+    assert _argv_flag_value(argv, "--db") == "run.db"
+
+
+async def test_get_series_status_max_not_resume(tmp_path, monkeypatch):
+    db = tmp_path / "run_resume.db"
+    _make_state_db(db)
+    from blockchecks.mcp.server import get_series_status
+
+    info = _make_active_info(
+        db,
+        cwd=str(tmp_path),
+        argv=["full", "--db", str(db), "--max", "--resume"],
+    )
+    _patch_run_control(monkeypatch, info)
+
+    result = await get_series_status()
+    assert "max" not in result
