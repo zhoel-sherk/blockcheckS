@@ -73,8 +73,8 @@ def _ipc_relax_for_nobody(path: Path, *, is_dir: bool) -> None:
         _world_warned.add(key)
         log.warning(
             "IPC %s is world-writable (no ACL for overflow-uid %d); unsafe on multi-user hosts",
-            NFQWS2_OVERFLOW_UID,
             path,
+            NFQWS2_OVERFLOW_UID,
         )
 
 

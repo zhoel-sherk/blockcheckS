@@ -23,6 +23,10 @@ def pool_env(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         "blockchecks.engine.settings._load_user_toml", lambda path=None: {}
     )
+    monkeypatch.setattr(
+        "blockchecks.data_block.store.ProviderStore.load_dns_records_sync",
+        lambda self: {},
+    )
 
     from blockchecks.engine import ggc_pool as g
     from blockchecks.engine import paths as paths_mod
@@ -33,6 +37,7 @@ def pool_env(tmp_path: Path, monkeypatch):
         g, "real_pool_path", lambda: cache / "ggc_real_hosts.json", raising=False
     )
     monkeypatch.setattr(paths_mod, "CACHE_DIR", cache, raising=False)
+    g._ROTATION["i"] = 0
     yield g, cache
 
 
@@ -115,10 +120,34 @@ def test_ip_chain_order(pool_env, monkeypatch) -> None:
     assert g.resolve_ip_chain(host) == "10.9.8.7"
     assert g.cached_ips() == ["10.9.8.7"]
 
-    # env-список поверх кэша
+    # env-список поверх кэша — голова стабильна (ротация только last-resort)
     monkeypatch.setenv("BLOCKCHECKS_GGC_IPS", "1.2.3.4, 5.6.7.8")
     assert g.configured_fallback_ips() == ["1.2.3.4", "5.6.7.8"]
     assert g.resolve_ip_chain("rr98---sn-zzzz9.googlevideo.com") == "1.2.3.4"
+
+
+def test_dns_db_tier_beats_cache_and_env(pool_env, monkeypatch) -> None:
+    g, cache = pool_env
+    host = "rr5---sn-5goeenes.googlevideo.com"
+    monkeypatch.setattr(
+        "blockchecks.data_block.store.ProviderStore.load_dns_records_sync",
+        lambda self: {host: (["198.51.100.7"], "doh")},
+    )
+    monkeypatch.setenv("BLOCKCHECKS_GGC_IPS", "1.2.3.4")
+    (cache / "ggc_ips.json").write_text(
+        json.dumps({"ips": {host: {"ip": "10.9.8.7", "ts": time.time()}}})
+    )
+    assert g.resolve_ip_chain(host) == "198.51.100.7"
+    assert g.resolve_ip_chain("rr98---sn-zzzz9.googlevideo.com") == "1.2.3.4"
+
+
+def test_last_resort_rotates(pool_env) -> None:
+    g, _ = pool_env
+    unknown = "rr99---sn-unknown0.googlevideo.com"
+    n = len(g.DEFAULT_LAST_RESORT_IPS)
+    got = [g.resolve_ip_chain(unknown) for _ in range(n + 1)]
+    assert got == g.DEFAULT_LAST_RESORT_IPS + [g.DEFAULT_LAST_RESORT_IPS[0]]
+    assert "74.125.108.234" not in got
 
 
 def test_remember_ggc_ip_roundtrip(pool_env) -> None:

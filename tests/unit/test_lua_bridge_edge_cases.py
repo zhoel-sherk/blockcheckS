@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 from blockchecks.service.lua_bridge_ipc import BridgeEvent, BridgePaths, LuaBridge
 
@@ -173,3 +175,21 @@ class TestTornReadPublish:
         got2 = lb.drain_events(since_gen=3)
         assert len(got2) == 3
         lb.teardown()
+
+
+def test_world_writable_warning_includes_path_and_uid(tmp_path, caplog, monkeypatch):
+    from blockchecks.service import lua_bridge_ipc as ipc
+
+    ipc._world_warned.clear()
+    path = tmp_path / "shm"
+    path.mkdir()
+    monkeypatch.setattr(ipc.os, "chmod", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        ipc.sp, "run", lambda *_a, **_k: SimpleNamespace(returncode=1, stderr="")
+    )
+    with caplog.at_level(logging.WARNING, logger=ipc.log.name):
+        ipc._ipc_relax_for_nobody(path, is_dir=True)
+    msg = " ".join(r.getMessage() for r in caplog.records)
+    assert str(path) in msg
+    assert str(ipc.NFQWS2_OVERFLOW_UID) in msg
+    assert "world-writable" in msg

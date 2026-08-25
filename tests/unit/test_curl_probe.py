@@ -73,6 +73,36 @@ def test_prepare_googlevideo_probe_ok(monkeypatch):
     assert req.resolved_ip == "1.2.3.4"
 
 
+def test_prepare_ggc_probe_uses_dns_db_when_doh_empty(monkeypatch):
+    from blockchecks.checkers.curl_probe import prepare_ggc_probe
+    from blockchecks.engine.ggc_pool import GgcTarget
+
+    host = "rr7---sn-a5mek7k.googlevideo.com"
+    monkeypatch.setattr(
+        "blockchecks.engine.ggc_pool.pick_target",
+        lambda domain_hint=None: GgcTarget(host=host, mode="synthetic"),
+    )
+    monkeypatch.setattr(
+        "blockchecks.checkers.dns_secure.doh_query",
+        lambda *a, **k: ([], "nxdomain", None),
+    )
+    monkeypatch.setattr(
+        "blockchecks.checkers.dns_secure.pick_working_doh",
+        lambda: "https://dns.example/dns-query",
+    )
+    monkeypatch.setattr(
+        "blockchecks.data_block.store.ProviderStore.load_dns_records_sync",
+        lambda self: {host: (["198.51.100.9"], "doh")},
+    )
+    monkeypatch.delenv("BLOCKCHECKS_GGC_IPS", raising=False)
+    req, err = prepare_ggc_probe("googlevideo.com")
+    assert err is None
+    assert req.resolved_ip == "198.51.100.9"
+    assert req.resolve_name == host
+    assert req.ggc is True
+    assert "/videoplayback" in (req.curl_url or "")
+
+
 def test_run_curl_probe_googlevideo_request_shape():
     """googlevideo probe must set Range header and disable ECH via setopt (not options=)."""
     from blockchecks.engine.config import CURLOPT_ECH

@@ -292,3 +292,31 @@ def test_reclaim_debug_log(tmp_path):
         _reclaim_debug_log(str(tmp_path / "dbg.log"))
     rc.assert_called_once()
     _reclaim_debug_log(None)  # no-op
+
+
+def test_open_out_capture_writes_header(tmp_path, monkeypatch):
+    import blockchecks.service.nfqws2 as nfq
+
+    monkeypatch.setattr("blockchecks.engine.paths.RUNTIME_LOGS_DIR", tmp_path)
+    fh, path = nfq.open_out_capture("ns-t")
+    assert fh is not None and path is not None
+    fh.close()
+    assert path.parent == tmp_path
+    assert path.name.startswith("nfqws2_out_ns-t_")
+    assert b"tag=ns-t" in path.read_bytes()
+
+
+def test_open_out_capture_disabled_on_oserror(monkeypatch, caplog):
+    import logging
+
+    import blockchecks.service.nfqws2 as nfq
+
+    class _NoDir:
+        def mkdir(self, *a, **k):
+            raise OSError("denied")
+
+    monkeypatch.setattr("blockchecks.engine.paths.RUNTIME_LOGS_DIR", _NoDir())
+    with caplog.at_level(logging.WARNING):
+        fh, path = nfq.open_out_capture("ns-x")
+    assert fh is None and path is None
+    assert "out-capture disabled" in caplog.text
