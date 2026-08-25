@@ -148,6 +148,38 @@ def test_scan_weights_seed_from_triage():
     assert w.trait.get("fool:badsum") == 0.1
 
 
+def test_scan_weights_seed_from_triage_idempotent_on_resume():
+    """Persisted weights must not double on repeated seed_from_triage (ENG-3)."""
+    from blockchecks.engine.triage import TriageProfile
+
+    w = ScanWeights()
+    w.family["fake"] = 5.0
+    profile = TriageProfile(
+        silent_drop_after_sni=True,
+        viable_foolings=["tcp_ts=-1000"],
+        viable_blobs=["stun"],
+    )
+    w.seed_from_triage(profile)
+    assert w.family["fake"] == 5.0
+    w.seed_from_triage(profile)
+    assert w.family["fake"] == 5.0
+    assert w.trait.get("fool:tcp_ts", 0) <= 64.0
+
+
+def test_mark_done_rebuilds_heap_after_boost():
+    """Bridge mode: boost_pass must affect subsequent pop() ordering (ENG-3)."""
+    low = StrategyItem(label="low", strategy="oob:urp=b")
+    high = StrategyItem(label="high", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue.build([low, high], ["discord.com"], epsilon=0.0, seed=1)
+    q.configure_heap_rebuild(1)
+    first = q.pop()
+    assert first is not None
+    q.mark_done(first, passed=True)
+    second = q.pop()
+    assert second is not None
+    assert second.item.label == "high"
+
+
 def test_scan_weights_seed_pos_and_blob_aliases():
     from blockchecks.engine.triage import TriageProfile
 

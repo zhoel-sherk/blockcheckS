@@ -114,8 +114,8 @@ async def _apply_provider_weights(
         fam = classify_strategy_family(item)
         blobs = extract_blob_hints(strat)
         traits = strategy_traits(strat)
-        weights.boost_pass(fam, blobs, traits)
-        boosted += 1
+        if weights.boost_provider_once(strat, fam, blobs, traits):
+            boosted += 1
     if boosted:
         log.info("%s", f"  [AQ] provider-preflight: boosted {boosted} approved strategies")
 
@@ -208,6 +208,7 @@ async def _bridge_worker(  # noqa: C901
     flushed (or a single fanout job runs).
     """
     acc = BatchJobAccumulator(bridge_batch)
+    queue.configure_heap_rebuild(bridge_batch)
     active_domains = active_domains or set()
     domain_lock = domain_lock or asyncio.Lock()
 
@@ -370,7 +371,12 @@ async def run_adaptive_tcp(
         if quarantine is not None:
             dead = quarantine.exclude_domains()
             if dead:
+                quarantined_jobs = [j for j in batch if j.domain in dead]
                 batch = [j for j in batch if j.domain not in dead]
+                for job in quarantined_jobs:
+                    queue.mark_done(job, passed=False)
+                    skipped += 1
+                    done += 1
                 if not batch:
                     continue
 

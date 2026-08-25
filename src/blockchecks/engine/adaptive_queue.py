@@ -161,28 +161,63 @@ class ScanWeights:
     family_boost: float = 1.0
     blob_boost: float = 0.5
     trait_boost: float = 0.4
+    #: Strategy keys already boosted from provider pass_strategies this process.
+    _provider_boosted: set[str] = field(default_factory=set, repr=False, compare=False)
+
+    _TRIAGE_FAMILY_SEED = 2.0
+    _TRIAGE_FOOL_SEED = 0.8
+    _TRIAGE_BLOB_SEED = 0.5
+    _TRIAGE_POS_SEED = 0.4
 
     def seed_from_triage(self, profile) -> None:
-        """Cold-start family/blob/trait weights from a preflight TriageProfile."""
+        """Cold-start family/blob/trait weights from a preflight TriageProfile.
+
+        Idempotent across resume: persisted or prior seeds are not re-multiplied;
+        new keys get a one-time capped seed (max 64, same as boost_pass).
+        """
         if profile is None:
             return
         from blockchecks.engine.blob_filter import aliases_for_class
         from blockchecks.engine.family_registry import dead_fooling_tokens, families_for_profile
 
         for fam in families_for_profile(profile):
-            self.family[fam] = self.family.get(fam, 1.0) * 2.0
+            if fam not in self.family:
+                self.family[fam] = min(self._TRIAGE_FAMILY_SEED, _MAX_WEIGHT)
+            else:
+                self.family[fam] = min(self.family[fam], _MAX_WEIGHT)
         for tok in dead_fooling_tokens(profile):
             self.trait[f"fool:{tok}"] = 0.1
         for fool in profile.viable_foolings:
             key = fool.split("=", 1)[0]
-            self.trait[f"fool:{key}"] = self.trait.get(f"fool:{key}", 0.0) + 0.8
+            trait_key = f"fool:{key}"
+            if trait_key not in self.trait:
+                self.trait[trait_key] = min(self._TRIAGE_FOOL_SEED, _MAX_WEIGHT)
+            else:
+                self.trait[trait_key] = min(self.trait[trait_key], _MAX_WEIGHT)
         for blob in profile.viable_blobs:
-            self.blob[blob] = self.blob.get(blob, 0.0) + 0.5
+            if blob not in self.blob:
+                self.blob[blob] = min(self._TRIAGE_BLOB_SEED, _MAX_WEIGHT)
+            else:
+                self.blob[blob] = min(self.blob[blob], _MAX_WEIGHT)
             for alias in aliases_for_class(blob):
-                self.blob[alias] = self.blob.get(alias, 0.0) + 0.5
+                if alias not in self.blob:
+                    self.blob[alias] = min(self._TRIAGE_BLOB_SEED, _MAX_WEIGHT)
+                else:
+                    self.blob[alias] = min(self.blob[alias], _MAX_WEIGHT)
         if profile.split_mode:
             trait_key = _SPLIT_POS_TRAITS.get(profile.split_mode, f"pos:{profile.split_mode}")
-            self.trait[trait_key] = self.trait.get(trait_key, 0.0) + 0.4
+            if trait_key not in self.trait:
+                self.trait[trait_key] = min(self._TRIAGE_POS_SEED, _MAX_WEIGHT)
+            else:
+                self.trait[trait_key] = min(self.trait[trait_key], _MAX_WEIGHT)
+
+    def boost_provider_once(self, strategy_key: str, family: str, blobs: list[str], traits: list[str]) -> bool:
+        """Apply provider preflight boost at most once per strategy per process."""
+        if strategy_key in self._provider_boosted:
+            return False
+        self._provider_boosted.add(strategy_key)
+        self.boost_pass(family, blobs, traits)
+        return True
 
     def get(self, family: str, blobs: list[str], traits: list[str]) -> float:
         score = self.family.get(family, 1.0)
@@ -312,6 +347,8 @@ class AdaptiveJobQueue:
         #: exclusions never fall through the "everything excluded" fallback.
         self.excluded_domains: set[str] = set()
         self.metrics = AdaptiveMetrics()
+        self._heap_rebuild_every: int = 0
+        self._heap_rebuild_counter: int = 0
 
     def __len__(self) -> int:
         return len(self._pending)
@@ -384,6 +421,19 @@ class AdaptiveJobQueue:
                 return job
         return None
 
+    def configure_heap_rebuild(self, every: int) -> None:
+        """Rebuild priority heap every *every* mark_done calls (bridge mode)."""
+        self._heap_rebuild_every = max(0, int(every))
+        self._heap_rebuild_counter = 0
+
+    def _maybe_rebuild_heap(self) -> None:
+        if self._heap_rebuild_every <= 0:
+            return
+        self._heap_rebuild_counter += 1
+        if self._heap_rebuild_counter >= self._heap_rebuild_every:
+            self._rebuild_heap()
+            self._heap_rebuild_counter = 0
+
     def mark_done(self, job: AdaptiveJob, *, passed: bool) -> int:
         """Mark job complete; on PASS boost strategy genetics + fan-out (AQ2/AQ4)."""
         self._done.add(job.key)
@@ -392,6 +442,7 @@ class AdaptiveJobQueue:
         if not passed:
             return 0
         self.weights.boost_pass(job.family, job.blobs, job.traits)
+        self._maybe_rebuild_heap()
         return self.fanout_on_pass(job)
 
     def fanout_on_pass(self, job: AdaptiveJob) -> int:

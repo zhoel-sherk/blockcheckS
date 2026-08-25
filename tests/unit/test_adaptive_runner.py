@@ -269,9 +269,9 @@ async def test_apply_provider_weights_boosts():
         ]
     )
     weights = MagicMock()
-    weights.boost_pass = MagicMock()
+    weights.boost_provider_once = MagicMock(return_value=True)
     await _apply_provider_weights(store, weights, ["discord.com"])
-    weights.boost_pass.assert_called_once()
+    weights.boost_provider_once.assert_called_once()
 
 
 @pytest.mark.unit
@@ -283,9 +283,9 @@ async def test_apply_provider_weights_skips_other_domain():
         return_value=[{"domain": "youtube.com", "strategy": "fake:blob=stun"}]
     )
     weights = MagicMock()
-    weights.boost_pass = MagicMock()
+    weights.boost_provider_once = MagicMock(return_value=True)
     await _apply_provider_weights(store, weights, ["discord.com"])
-    weights.boost_pass.assert_not_called()
+    weights.boost_provider_once.assert_not_called()
 
 
 @pytest.mark.unit
@@ -295,9 +295,9 @@ async def test_apply_provider_weights_skips_missing_strategy():
     store = MagicMock()
     store.pass_strategies = AsyncMock(return_value=[{"domain": "discord.com", "strategy": ""}])
     weights = MagicMock()
-    weights.boost_pass = MagicMock()
+    weights.boost_provider_once = MagicMock(return_value=True)
     await _apply_provider_weights(store, weights, ["discord.com"])
-    weights.boost_pass.assert_not_called()
+    weights.boost_provider_once.assert_not_called()
 
 
 async def _make_job(
@@ -482,6 +482,57 @@ async def test_classic_aq_b2_logs_backend(caplog):
         await run_adaptive_tcp(runner, queue, curl_parallel=4)
     assert "backend=classic" in caplog.text
     assert runner.batch_backends == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_apply_provider_weights_idempotent():
+    """Provider boosts apply at most once per strategy per process (ENG-3)."""
+    from blockchecks.engine.adaptive_queue import ScanWeights
+    from blockchecks.engine.adaptive_runner import _apply_provider_weights
+
+    store = MagicMock()
+    store.pass_strategies = AsyncMock(
+        return_value=[
+            {"domain": "discord.com", "strategy": "fake:blob=stun:repeats=6:tcp_ts=-1000"}
+        ]
+    )
+    weights = ScanWeights()
+    await _apply_provider_weights(store, weights, ["discord.com"])
+    first_fake = weights.family.get("fake", 1.0)
+    await _apply_provider_weights(store, weights, ["discord.com"])
+    assert weights.family.get("fake", 1.0) == first_fake
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_classic_quarantine_filtered_jobs_mark_done():
+    """Classic AQ: quarantine-filtered pop_batch jobs are not silently dropped (ENG-6.1)."""
+    items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
+    domains = ["discord.com", "youtube.com"]
+    queue = AdaptiveJobQueue.build(items, domains, epsilon=0.0)
+
+    class FakeQuarantine:
+        def __init__(self):
+            self._dead = {"youtube.com"}
+
+        def exclude_domains(self):
+            return set(self._dead)
+
+        def record(self, domain, ok):
+            return None
+
+    runner = _FakeRunner()
+    result = await run_adaptive_tcp(
+        runner,
+        queue,
+        curl_parallel=2,
+        quarantine=FakeQuarantine(),
+    )
+    assert result.done == 2
+    assert result.skipped == 1
+    assert result.passed == 1
+    assert len(queue) == 0
 
 
 @pytest.mark.asyncio
