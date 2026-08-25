@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import shutil
-import subprocess
+import subprocess as sp
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,23 +17,47 @@ log = logging.getLogger(__name__)
 _world_warned: set[str] = set()
 
 
+#: uid, под которым nfqws2 работает внутри ns (setuid overflow-uid; см. лог
+#: демона «Running as UID=2147483647»). НЕ совпадает с системным nobody!
+NFQWS2_OVERFLOW_UID = int(
+    os.environ.get("BLOCKCHECKS_NFQWS2_UID", "2147483647")
+)
+
+
 def _ipc_relax_for_nobody(path: Path, *, is_dir: bool) -> None:
-    """Let nfqws2 (setuid nobody) write IPC without world-writable dirs if ACL works."""
+    """Дать nfqws2 (setuid overflow-uid) доступ к IPC без world-writable.
+
+    Урок 25.08: ACL для системного `nobody` бесполезен — демон работает под
+    overflow-uid 2147483647. Если setfacl недоступен/не сработал — честный
+    фолбэк 0777/0666 (старое рабочее поведение).
+    """
     mode = 0o770 if is_dir else 0o660
     try:
         os.chmod(path, mode)
     except OSError as exc:
-        log.warning("IPC chmod %s failed: %s", path, exc)
-        return
-    spec = "u:nobody:rwx" if is_dir else "u:nobody:rw"
+        # Каталог мог создать сам демон (overflow-uid) раньше питоновского
+        # setup — мы не владелец, обычный chmod недоступен. Чиним через sudo.
+        log.warning("IPC chmod %s failed (%s) — retrying via sudo", path, exc)
+        fix = sp.run(
+            ["sudo", "-n", "chmod", "-R", "a+rwX" if is_dir else "a+rw", str(path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        if fix.returncode != 0:
+            log.warning(
+                "IPC sudo-chmod %s failed rc=%d stderr=%r",
+                path, fix.returncode, fix.stderr.strip()[:200],
+            )
+            return
+    perm = "rwx" if is_dir else "rw"
+    spec = f"u:{NFQWS2_OVERFLOW_UID}:{perm},u:nobody:{perm}"
     try:
-        proc = subprocess.run(
+        proc = sp.run(
             ["setfacl", "-m", spec, str(path)],
             check=False,
             capture_output=True,
             timeout=2,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, sp.TimeoutExpired) as exc:
         log.warning("IPC setfacl %s failed (%s); falling back to world-writable", path, exc)
         proc = None
     if proc is not None and proc.returncode == 0:

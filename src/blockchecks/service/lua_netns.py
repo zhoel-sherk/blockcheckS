@@ -43,24 +43,36 @@ def _netns_tcp_probe_cleanup(ns_name: str) -> None:
 
 
 def _bridge_iptables_add(ns_name: str, dport: str, protocol: str = "tls12") -> None:
+    import logging
     import subprocess as sp
 
+    _log = logging.getLogger("blockchecks.lua_netns")
     is_quic = protocol == "quic"
     _check_netns_exists(ns_name)
-    sp.run(
-        ["sudo", "ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT"],
+    qnum = NFQUEUE_UDP if is_quic else NFQUEUE_TCP
+    base = [
+        "sudo",
+        "ip",
+        "netns",
+        "exec",
+        ns_name,
+        "iptables",
+    ]
+    flush = sp.run(
+        base + ["-F", "OUTPUT"],
         capture_output=True,
-        check=False,
+        text=True,
         timeout=15,
     )
-    sp.run(
+    if flush.returncode != 0:
+        _log.warning(
+            "%s",
+            f"  [iptables] {ns_name}: -F OUTPUT failed rc={flush.returncode} "
+            f"stderr={flush.stderr.strip()!r}",
+        )
+    add = sp.run(
         [
-            "sudo",
-            "ip",
-            "netns",
-            "exec",
-            ns_name,
-            "iptables",
+            *base,
             "-A",
             "OUTPUT",
             "-p",
@@ -70,10 +82,43 @@ def _bridge_iptables_add(ns_name: str, dport: str, protocol: str = "tls12") -> N
             "-j",
             "NFQUEUE",
             "--queue-num",
-            str(NFQUEUE_UDP if is_quic else NFQUEUE_TCP),
+            str(qnum),
             "--queue-bypass",
         ],
         capture_output=True,
-        check=True,
+        text=True,
         timeout=15,
     )
+    if add.returncode != 0:
+        _log.warning(
+            "%s",
+            f"  [iptables] {ns_name}: -A NFQUEUE/{qnum} FAILED rc={add.returncode} "
+            f"stderr={add.stderr.strip()!r} stdout={add.stdout.strip()!r}",
+        )
+        return
+    # Верификация: правило обязано существовать после успешного -A
+    verify = sp.run(
+        base
+        + [
+            "-C",
+            "OUTPUT",
+            "-p",
+            "udp" if is_quic else "tcp",
+            "--dport",
+            dport,
+            "-j",
+            "NFQUEUE",
+            "--queue-num",
+            str(qnum),
+            "--queue-bypass",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if verify.returncode != 0:
+        _log.warning(
+            "%s",
+            f"  [iptables] {ns_name}: rule MISSING right after -A "
+            f"(rc={verify.returncode}) — что-то сбрасывает таблицу",
+        )
