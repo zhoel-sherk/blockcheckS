@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from blockchecks.service.nfqws2_settle import (
     nfqws2_running_in_ns,
     wait_nfqws2_ready,
@@ -187,3 +189,57 @@ def test_wait_nfqws2_bind_proof_pid(tmp_path):
         patch("blockchecks.service.nfqws2_settle.time.sleep"),
     ):
         assert wait_nfqws2_bind_proof("bs-p0", launched_pid=123, within=0.5) is True
+
+
+@pytest.mark.parametrize(
+    ("out_txt", "expected"),
+    [
+        ("nfq_create_queue(): Operation not permitted\n", True),
+        ("nfq_create_queue(): some other error\n", False),
+        ("Operation not permitted\n", False),
+        ("SSL error code 35\n", False),
+        ("setting copy_packet mode\n", False),
+        ("", False),
+    ],
+)
+def test_nfqws2_out_shows_bind_busy(out_txt, expected):
+    from blockchecks.service.nfqws2_settle import nfqws2_out_shows_bind_busy
+
+    assert nfqws2_out_shows_bind_busy(out_txt) is expected
+
+
+@pytest.mark.parametrize(
+    ("out_txt", "drain_ok", "succeeded", "attempt", "max_attempts", "expected"),
+    [
+        ("nfq_create_queue(): Operation not permitted\n", True, False, 1, 5, (True, "queue busy")),
+        ("", False, False, 1, 5, (True, "pkill drain incomplete")),
+        ("SSL error code 35\n", True, False, 1, 5, (False, None)),
+        ("nfq_create_queue(): Operation not permitted\n", True, True, 1, 5, (False, None)),
+        ("nfq_create_queue(): Operation not permitted\n", True, False, 5, 5, (False, None)),
+        ("nfq_create_queue(): Operation not permitted\n", True, False, 3, 5, (True, "queue busy")),
+    ],
+)
+def test_nfqws2_bind_retry_should_continue(
+    out_txt, drain_ok, succeeded, attempt, max_attempts, expected
+):
+    from blockchecks.service.nfqws2_settle import nfqws2_bind_retry_should_continue
+
+    assert (
+        nfqws2_bind_retry_should_continue(
+            out_txt,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            drain_ok=drain_ok,
+            succeeded=succeeded,
+        )
+        == expected
+    )
+
+
+def test_nfqws2_bind_retry_backoff():
+    from blockchecks.service.nfqws2_settle import nfqws2_bind_retry_backoff
+
+    assert nfqws2_bind_retry_backoff(1) == 2.0
+    assert nfqws2_bind_retry_backoff(2) == 4.0
+    assert nfqws2_bind_retry_backoff(3) == 6.0
+    assert nfqws2_bind_retry_backoff(10) == 6.0

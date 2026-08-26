@@ -22,6 +22,8 @@ from blockchecks.engine.config import (
 from blockchecks.service.nfqws2_settle import (
     NFQWS2_BIND_MARKER,
     _wait_nfqws2_gone,
+    nfqws2_bind_retry_backoff,
+    nfqws2_bind_retry_should_continue,
     nfqws2_count_in_ns,
     nfqws2_out_shows_bind,
     nfqws2_pid_in_ns,
@@ -223,22 +225,22 @@ def start_daemon(
             alive = NFQWS2_BIND_MARKER in out_txt or (
                 launched_pid is not None and nfqws2_pid_in_ns(launched_pid, ns_name)
             )
-            if alive or attempt == max_bind_attempts:
-                break
-            bind_busy = (
-                "Operation not permitted" in out_txt and "nfq_create_queue" in out_txt
+            should_retry, reason = nfqws2_bind_retry_should_continue(
+                out_txt,
+                attempt=attempt,
+                max_attempts=max_bind_attempts,
+                drain_ok=drain_ok,
+                succeeded=alive,
             )
-            if bind_busy or not drain_ok:
-                backoff = min(2.0 * attempt, 6.0)
-                reason = "queue busy" if bind_busy else "pkill drain incomplete"
-                log.warning(
-                    "%s",
-                    f"  [nfqws2] {ns_name}: {reason} after pkill "
-                    f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
-                )
-                time.sleep(backoff)
-            else:
-                break  # иная причина старта — ретрай бинда не поможет
+            if not should_retry:
+                break
+            backoff = nfqws2_bind_retry_backoff(attempt)
+            log.warning(
+                "%s",
+                f"  [nfqws2] {ns_name}: {reason} after pkill "
+                f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
+            )
+            time.sleep(backoff)
         _prune_out_logs()
         return settle
     finally:
@@ -345,22 +347,24 @@ class Nfqws2Manager:
                         tail_txt += Path(log_path).read_text(errors="replace")[-300:]
                     except OSError:
                         pass
-            bind_busy = (
-                "Operation not permitted" in tail_txt
-                and "nfq_create_queue" in tail_txt
+            should_retry, reason = nfqws2_bind_retry_should_continue(
+                tail_txt,
+                attempt=attempt,
+                max_attempts=max_bind_attempts,
+                succeeded=False,
             )
             self._proc = None
             self._pid = None
-            if not bind_busy or attempt == max_bind_attempts:
+            if not should_retry:
                 last_err = RuntimeError(
                     "nfqws2 failed to start (exited immediately)"
                     + (f"; out_tail={tail_txt!r}" if tail_txt else "")
                 )
                 break
-            backoff = min(2.0 * attempt, 6.0)
+            backoff = nfqws2_bind_retry_backoff(attempt)
             log.warning(
                 "%s",
-                f"  [nfqws2] {self.ns_name or 'host'}: queue busy after stop "
+                f"  [nfqws2] {self.ns_name or 'host'}: {reason} after stop "
                 f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
             )
             time.sleep(backoff)

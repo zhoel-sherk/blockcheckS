@@ -59,6 +59,40 @@ def nfqws2_out_shows_bind(out_path: Path | str | None) -> bool:
     return NFQWS2_BIND_MARKER in text
 
 
+def nfqws2_out_shows_bind_busy(out_txt: str) -> bool:
+    """True when stdout capture shows NFQUEUE bind conflict (retryable, zapret2#300)."""
+    return "Operation not permitted" in out_txt and "nfq_create_queue" in out_txt
+
+
+def nfqws2_bind_retry_backoff(attempt: int) -> float:
+    """Seconds to wait before the next bind attempt (linear cap at 6s)."""
+    return min(2.0 * attempt, 6.0)
+
+
+def nfqws2_bind_retry_should_continue(
+    out_txt: str,
+    *,
+    attempt: int,
+    max_attempts: int,
+    drain_ok: bool = True,
+    succeeded: bool = False,
+) -> tuple[bool, str | None]:
+    """Whether to retry nfqws2 launch after a failed bind.
+
+    Retry only for NFQUEUE bind conflicts (``nfq_create_queue(): Operation not
+    permitted``) or incomplete pkill drain — not for SSL/config parse failures.
+
+    Returns ``(should_retry, reason)`` where *reason* is suitable for log.warning.
+    """
+    if succeeded or attempt >= max_attempts:
+        return False, None
+    if nfqws2_out_shows_bind_busy(out_txt):
+        return True, "queue busy"
+    if not drain_ok:
+        return True, "pkill drain incomplete"
+    return False, None
+
+
 def wait_nfqws2_bind_proof(
     ns_name: str,
     *,
