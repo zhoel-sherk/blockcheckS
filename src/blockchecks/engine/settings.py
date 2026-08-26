@@ -145,6 +145,11 @@ def load_settings(*, config_path: str | None = None) -> BlockchecksSettings:
 
 
 def clear_settings_cache() -> None:
+    """Public invalidate for :func:`load_settings` ``lru_cache``.
+
+    Call after ``BLOCKCHECKS_*`` env or ``config.toml`` changes so the next
+    :func:`load_settings` read picks up fresh values (tests, ``user_config``).
+    """
     load_settings.cache_clear()
 
 

@@ -284,13 +284,23 @@ def cdn_family(ip: str) -> str | None:
     )
 
 
-def clear_ipset_cache() -> None:
+def clear_ipset_caches() -> None:
+    """Public invalidate for all ipset catalog ``lru_cache`` readers.
+
+    Call after env/TOML/overlay changes so file-backed catalogs reload (tests,
+    :func:`apply_ipset_fallbacks`).
+    """
     sinkhole_nets.cache_clear()
     cgnat_nets.cache_clear()
     cdn_families.cache_clear()
     expect_families.cache_clear()
     fallbacks.cache_clear()
     _ipset_toml.cache_clear()
+
+
+def clear_ipset_cache() -> None:
+    """Backward-compatible alias for :func:`clear_ipset_caches`."""
+    clear_ipset_caches()
 
 
 @lru_cache(maxsize=1)

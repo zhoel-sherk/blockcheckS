@@ -11,15 +11,6 @@ from tests.unit._quality_config import tool_section
 pytestmark = pytest.mark.unit
 
 
-@pytest.fixture(autouse=True)
-def _clear_settings(monkeypatch):
-    from blockchecks.engine import settings as settings_mod
-
-    settings_mod.clear_settings_cache()
-    yield
-    settings_mod.clear_settings_cache()
-
-
 def test_settings_policy_required_fields():
     from blockchecks.engine.settings import BlockchecksSettings
 
@@ -53,6 +44,18 @@ def test_settings_env_override(monkeypatch):
     s = BlockchecksSettings()
     assert s.pool == 2
     assert s.secure_dns is False
+
+
+def test_load_settings_sees_env_after_clear(monkeypatch):
+    from blockchecks.engine.settings import clear_settings_cache, load_settings
+
+    monkeypatch.setenv("BLOCKCHECKS_POOL", "7")
+    clear_settings_cache()
+    assert load_settings().pool == 7
+    monkeypatch.setenv("BLOCKCHECKS_POOL", "3")
+    assert load_settings().pool == 7
+    clear_settings_cache()
+    assert load_settings().pool == 3
 
 
 def test_settings_toml_secure_dns(tmp_path: Path, monkeypatch):

@@ -126,6 +126,19 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "integration: needs linux+sudo+nfqws2")
 
 
+@pytest.fixture(autouse=True)
+def _reset_engine_caches():
+    """QA-7: drop settings/ipset lru_cache between tests (pytest-randomly order)."""
+    from blockchecks.engine.ipset_catalog import clear_ipset_caches
+    from blockchecks.engine.settings import clear_settings_cache
+
+    clear_settings_cache()
+    clear_ipset_caches()
+    yield
+    clear_settings_cache()
+    clear_ipset_caches()
+
+
 @pytest.fixture
 def operator_logs(tmp_path, monkeypatch, capsys):
     """Attach INFO operator handlers so capsys sees log.info output.
@@ -138,14 +151,19 @@ def operator_logs(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", tmp_path)
     root = logging.getLogger("blockchecks")
+    saved_handlers = list(root.handlers)
     for handler in list(root.handlers):
         root.removeHandler(handler)
         handler.close()
-    configure_logging(level=logging.INFO)
-    yield
-    for handler in list(root.handlers):
-        root.removeHandler(handler)
-        handler.close()
+    try:
+        configure_logging(level=logging.INFO)
+        yield
+    finally:
+        for handler in list(root.handlers):
+            root.removeHandler(handler)
+            handler.close()
+        for handler in saved_handlers:
+            root.addHandler(handler)
 
 
 @pytest.fixture

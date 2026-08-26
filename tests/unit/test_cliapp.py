@@ -422,12 +422,13 @@ def test_run_full_delegates_and_guards_nesting():
     rf.assert_awaited_once_with(ns)
 
     # nested guard
-    ca._FULL_RUN_ACTIVE = True
+    prev_active = ca._FULL_RUN_ACTIVE
     try:
+        ca._FULL_RUN_ACTIVE = True
         rc2 = ca._run_full(MagicMock())
         assert rc2 == 2
     finally:
-        ca._FULL_RUN_ACTIVE = False
+        ca._FULL_RUN_ACTIVE = prev_active
 
 
 @pytest.mark.unit

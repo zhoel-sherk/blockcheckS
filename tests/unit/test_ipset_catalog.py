@@ -11,13 +11,6 @@ from blockchecks.engine import ipset_catalog as cat
 pytestmark = pytest.mark.unit
 
 
-@pytest.fixture(autouse=True)
-def _clear_catalog():
-    cat.clear_ipset_cache()
-    yield
-    cat.clear_ipset_cache()
-
-
 def test_bundled_sinkhole_contains_rfc1918():
     nets = cat.sinkhole_nets()
     addr = ipaddress.ip_address("10.1.2.3")
