@@ -10,13 +10,27 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from blockchecks.engine.paths import CACHE_DIR, DATA_DIR, DEFAULT_OUT_DIR, RUNTIME_LOGS_DIR
+from blockchecks.engine.paths import (
+    CACHE_DIR,
+    DATA_DIR,
+    DEFAULT_OUT_DIR,
+    RUNTIME_LOGS_DIR,
+    STATE_DIR,
+)
 
 log = logging.getLogger(__name__)
 
 NFQWS2_LOG_KEEP = 50
 DEFAULT_MAX_AGE_DAYS = 14
 _PROTECTED_SUBSTR = ("week_cov",)
+_TMP_DIR = Path("/tmp")
+_SHM_BLOCKCHECKS = Path("/dev/shm/blockchecks")
+_TMP_NFQWS2_GLOBS = (
+    "bs_nfq_*.conf",
+    "bs_hostlist_*",
+    "bs_nfqws2_*.conf",
+    "bs_discover_udp_*",
+)
 
 
 @dataclass
@@ -90,6 +104,53 @@ def prune_nfqws2_debug_logs(log_dir: Path | None = None, keep: int = NFQWS2_LOG_
     if deleted:
         log.info("pruned %d nfqws2 debug logs (keep=%d)", len(deleted), keep)
     return deleted
+
+
+def _has_live_run_lock() -> bool:
+    try:
+        from blockchecks.service.run_control import read_active_run
+
+        return read_active_run() is not None
+    except Exception as exc:
+        log.warning("gc run.lock probe failed: %s", exc)
+        return False
+
+
+def _scan_tmp_nfqws2_artifacts(add, *, max_age_days: float) -> None:
+    if not _TMP_DIR.is_dir():
+        return
+    for pattern in _TMP_NFQWS2_GLOBS:
+        for p in _TMP_DIR.glob(pattern):
+            if p.is_file() and _age_ok(p, max_age_days):
+                add(p, "tmp_nfqws2_artifact")
+
+
+def _scan_shm_staging(add, *, max_age_days: float, live_run: bool) -> None:
+    if live_run or not _SHM_BLOCKCHECKS.is_dir():
+        return
+    for p in _SHM_BLOCKCHECKS.rglob(".staging.*"):
+        if p.is_dir() and _age_ok(p, max_age_days):
+            add(p, "shm_staging_age")
+
+
+def _scan_jsonl_old(add, logs_dir: Path) -> None:
+    if not logs_dir.is_dir():
+        return
+    for p in logs_dir.glob("*.jsonl.old"):
+        if p.is_file():
+            add(p, "events_live_old")
+
+
+def _scan_sqlite_wal_shm(add, roots: list[Path], *, max_age_days: float) -> None:
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for pattern in ("*.db-wal", "*.db-shm", "*-wal", "*-shm"):
+            for p in root.glob(pattern):
+                if not p.is_file() or not _age_ok(p, max_age_days):
+                    continue
+                reason = "sqlite_wal" if p.name.endswith("-wal") else "sqlite_shm"
+                add(p, reason)
 
 
 def _scan_log_root(
@@ -175,6 +236,13 @@ def collect_gc(
     for p in CACHE_DIR.glob("bs_voice_cache_old_*"):
         if p.is_file() and _age_ok(p, max_age_days):
             _add(p, "voice_cache_old")
+
+    live_run = _has_live_run_lock()
+    _scan_tmp_nfqws2_artifacts(_add, max_age_days=max_age_days)
+    _scan_shm_staging(_add, max_age_days=max_age_days, live_run=live_run)
+    _scan_jsonl_old(_add, RUNTIME_LOGS_DIR)
+    wal_roots = list(dict.fromkeys([STATE_DIR, DATA_DIR, *search]))
+    _scan_sqlite_wal_shm(_add, wal_roots, max_age_days=max_age_days)
     return plan
 
 

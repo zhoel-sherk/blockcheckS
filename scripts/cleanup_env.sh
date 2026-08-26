@@ -131,6 +131,8 @@ if [ "$ORPHANS_ONLY" -eq 0 ]; then
     # shellcheck disable=SC2086
     sudo iptables -t nat -D POSTROUTING $rule 2>/dev/null || true
   done < <(sudo iptables -t nat -S POSTROUTING 2>/dev/null | grep '10\.200\.' | sed 's/^-A POSTROUTING //' || true)
+  echo "  /tmp nfqws2 leftovers"
+  sudo rm -f /tmp/bs_nfq_*.conf /tmp/bs_hostlist_* /tmp/bs_nfqws2_*.conf /tmp/bs_discover_udp_* 2>/dev/null || true
   echo "  shm blockchecks: $(sudo rm -rf /dev/shm/blockchecks 2>/dev/null; echo removed)"
   sudo rm -f "$STATE/run.lock" "$ROOT/run.lock"
   if [ -f "$STATE/ip_forward.restore" ]; then

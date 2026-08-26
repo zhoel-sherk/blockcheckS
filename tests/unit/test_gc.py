@@ -76,3 +76,60 @@ def test_collect_gc_and_dry_run(tmp_path: Path, monkeypatch) -> None:
     apply_gc(plan, dry_run=False)
     assert not old.exists()
     assert not harvest.exists()
+
+
+@pytest.mark.unit
+def test_collect_gc_tmp_shm_wal(tmp_path: Path, monkeypatch) -> None:
+  logs = tmp_path / "logs"
+  logs.mkdir()
+  (logs / "events_live.1234.jsonl.old").write_text("x")
+  state = tmp_path / "state"
+  state.mkdir()
+  (state / "state.db-wal").write_text("wal")
+  (state / "state.db-shm").write_text("shm")
+  os.utime(state / "state.db-wal", (1, 1))
+  os.utime(state / "state.db-shm", (1, 1))
+
+  tmp_dir = tmp_path / "tmp"
+  tmp_dir.mkdir()
+  (tmp_dir / "bs_nfq_abc.conf").write_text("c")
+  (tmp_dir / "bs_hostlist_abc.txt").write_text("h")
+  os.utime(tmp_dir / "bs_nfq_abc.conf", (1, 1))
+  os.utime(tmp_dir / "bs_hostlist_abc.txt", (1, 1))
+
+  shm = tmp_path / "shm" / "blockchecks" / "bs-p-0001-ns0"
+  staging = shm / ".staging.42"
+  staging.mkdir(parents=True)
+  (staging / "strategy.id").write_text("1")
+  os.utime(staging, (1, 1))
+
+  monkeypatch.setattr("blockchecks.engine.gc._TMP_DIR", tmp_dir)
+  monkeypatch.setattr("blockchecks.engine.gc._SHM_BLOCKCHECKS", tmp_path / "shm" / "blockchecks")
+  monkeypatch.setattr("blockchecks.engine.gc.RUNTIME_LOGS_DIR", logs)
+  monkeypatch.setattr("blockchecks.engine.gc.STATE_DIR", state)
+  monkeypatch.setattr("blockchecks.engine.gc.DATA_DIR", tmp_path / "data")
+  monkeypatch.setattr("blockchecks.engine.gc.CACHE_DIR", tmp_path / "cache")
+  monkeypatch.setattr("blockchecks.engine.gc._has_live_run_lock", lambda: False)
+
+  plan = collect_gc(max_age_days=0, roots=[logs])
+  reasons = {i.reason for i in plan.deletes}
+  assert "events_live_old" in reasons
+  assert "sqlite_wal" in reasons
+  assert "sqlite_shm" in reasons
+  assert "tmp_nfqws2_artifact" in reasons
+  assert "shm_staging_age" in reasons
+
+
+@pytest.mark.unit
+def test_collect_gc_skips_shm_when_live_run(tmp_path: Path, monkeypatch) -> None:
+  shm = tmp_path / "shm" / "blockchecks" / "orphan"
+  staging = shm / ".staging.1"
+  staging.mkdir(parents=True)
+  (staging / "x").write_text("y")
+  os.utime(staging, (1, 1))
+
+  monkeypatch.setattr("blockchecks.engine.gc._SHM_BLOCKCHECKS", tmp_path / "shm" / "blockchecks")
+  monkeypatch.setattr("blockchecks.engine.gc._has_live_run_lock", lambda: True)
+
+  plan = collect_gc(max_age_days=0, roots=[])
+  assert not any(i.reason == "shm_staging_age" for i in plan.deletes)

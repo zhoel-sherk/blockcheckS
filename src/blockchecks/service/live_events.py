@@ -1,12 +1,12 @@
 """Live per-probe journal + current-probe heartbeat for running campaigns.
 
-Two small files under the XDG state logs dir:
+Per-process journal under the XDG state logs dir:
 
-* ``events_live.jsonl`` — one JSON line per finished probe
+* ``events_live.<pid>.jsonl`` — one JSON line per finished probe
   ``{ts, domain, strategy, ns, backend, status, http, ms, applied}``.
-  Written by the batch/classic probe loops so a campaign can be watched
-  physically in real time: ``tail -f`` or MCP ``get_live_events``.
-* ``current_probe.json`` — what is being probed right now (atomic rename),
+  Legacy ``events_live.jsonl`` remains a reader fallback when no suffixed file
+  matches run.lock / newest scan.
+* ``current_probe.<pid>.json`` — what is being probed right now (atomic rename),
   surfaced via MCP ``get_series_status`` → ``live``.
 
 Rotation: when the journal exceeds ~32 MB it is replaced with a fresh file
@@ -20,23 +20,93 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR
 
 log = logging.getLogger(__name__)
 
+# Legacy unsuffixed paths (reader fallback; tests may monkeypatch these).
 EVENTS_FILE = RUNTIME_LOGS_DIR / "events_live.jsonl"
 CURRENT_FILE = RUNTIME_LOGS_DIR / "current_probe.json"
 
 _MAX_JOURNAL_BYTES = 32 * 1024 * 1024
 
 
-def _rotate_if_needed() -> None:
+def _events_name(pid: int | str) -> str:
+    return f"events_live.{int(pid)}.jsonl"
+
+
+def _current_name(pid: int | str) -> str:
+    return f"current_probe.{int(pid)}.json"
+
+
+def writer_events_path() -> Path:
+    """Journal path for the current writer process."""
+    return RUNTIME_LOGS_DIR / _events_name(os.getpid())
+
+
+def writer_current_path() -> Path:
+    """Current-probe snapshot for the current writer process."""
+    return RUNTIME_LOGS_DIR / _current_name(os.getpid())
+
+
+def _suffixed_events_candidates() -> list[Path]:
+    if not RUNTIME_LOGS_DIR.is_dir():
+        return []
+    return [p for p in RUNTIME_LOGS_DIR.glob("events_live.*.jsonl") if p.is_file()]
+
+
+def latest_events_path() -> Path:
+    """Active journal: run.lock pid, else newest suffixed file, else legacy."""
     try:
-        if EVENTS_FILE.is_file() and EVENTS_FILE.stat().st_size > _MAX_JOURNAL_BYTES:
-            EVENTS_FILE.replace(EVENTS_FILE.with_suffix(".jsonl.old"))
+        from blockchecks.service.run_control import read_active_run
+
+        info = read_active_run()
+        if info is not None:
+            locked = RUNTIME_LOGS_DIR / _events_name(info.pid)
+            if locked.is_file():
+                return locked
+    except Exception as exc:
+        log.warning("latest_events_path run.lock probe failed: %s", exc)
+
+    candidates = _suffixed_events_candidates()
+    if candidates:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    if EVENTS_FILE.is_file():
+        return EVENTS_FILE
+    return writer_events_path()
+
+
+def latest_current_path() -> Path:
+    """Active current-probe file: run.lock pid, else newest suffixed, else legacy."""
+    try:
+        from blockchecks.service.run_control import read_active_run
+
+        info = read_active_run()
+        if info is not None:
+            locked = RUNTIME_LOGS_DIR / _current_name(info.pid)
+            if locked.is_file():
+                return locked
+    except Exception as exc:
+        log.warning("latest_current_path run.lock probe failed: %s", exc)
+
+    if not RUNTIME_LOGS_DIR.is_dir():
+        return CURRENT_FILE
+    candidates = [p for p in RUNTIME_LOGS_DIR.glob("current_probe.*.json") if p.is_file()]
+    if candidates:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    if CURRENT_FILE.is_file():
+        return CURRENT_FILE
+    return writer_current_path()
+
+
+def _rotate_if_needed(path: Path) -> None:
+    try:
+        if path.is_file() and path.stat().st_size > _MAX_JOURNAL_BYTES:
+            path.replace(path.with_name(path.name + ".old"))
     except OSError as exc:
-        log.warning("live_events rotate failed: %s", exc)
+        log.warning("live_events rotate failed (%s): %s", path, exc)
 
 
 def _safe_int(v) -> int:
@@ -76,10 +146,11 @@ def write_probe(
         "ms": round(_safe_float(latency_ms)),
         "applied": applied if isinstance(applied, bool) else None,
     }
+    path = writer_events_path()
     try:
         RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        _rotate_if_needed()
-        with EVENTS_FILE.open("a", encoding="utf-8") as fh:
+        _rotate_if_needed(path)
+        with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception as exc:
         log.warning("live_events write_probe failed: %s", exc)
@@ -95,27 +166,30 @@ def set_current(*, domain: str, strategy: str, ns: str, backend: str) -> None:
         "ns": ns,
         "backend": backend,
     }
-    tmp = CURRENT_FILE.with_suffix(".tmp")
+    path = writer_current_path()
+    tmp = path.with_suffix(".tmp")
     try:
         RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, CURRENT_FILE)
+        os.replace(tmp, path)
     except OSError as exc:
         log.warning("live_events set_current failed: %s", exc)
 
 
 def read_current() -> dict | None:
     """Current probe snapshot for API consumers (None if absent/stale file)."""
+    path = latest_current_path()
     try:
-        return json.loads(CURRENT_FILE.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
 
 def tail_events(limit: int = 50, domain: str | None = None) -> list[dict]:
     """Last *limit* probe records, newest last; optional exact-domain filter."""
+    path = latest_events_path()
     try:
-        with EVENTS_FILE.open("r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8") as fh:
             lines = fh.readlines()
     except OSError:
         return []

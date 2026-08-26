@@ -360,7 +360,7 @@ async def get_live_events(
                                      domain=domain.strip() or None)
     return {
         "ok": True,
-        "path": str(live_events.EVENTS_FILE),
+        "path": str(live_events.latest_events_path()),
         "count": len(events),
         "events": events,
     }

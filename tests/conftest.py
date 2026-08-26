@@ -164,6 +164,7 @@ def _live_events_tmp(monkeypatch, tmp_path):
     real state-dir journal/current-probe files."""
     import blockchecks.service.live_events as le
 
+    monkeypatch.setattr(le, "RUNTIME_LOGS_DIR", tmp_path)
     monkeypatch.setattr(le, "EVENTS_FILE", tmp_path / "events_live.jsonl")
     monkeypatch.setattr(le, "CURRENT_FILE", tmp_path / "current_probe.json")
     yield

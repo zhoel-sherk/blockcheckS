@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -40,10 +41,7 @@ def test_heartbeat_age_missing_and_stale(tmp_path) -> None:
 
 @pytest.mark.unit
 def test_live_events_write_read_filter(tmp_path, monkeypatch) -> None:
-    ev = tmp_path / "events_live.jsonl"
-    cur = tmp_path / "current_probe.json"
-    monkeypatch.setattr(live_events, "EVENTS_FILE", ev)
-    monkeypatch.setattr(live_events, "CURRENT_FILE", cur)
+    monkeypatch.setattr(live_events, "RUNTIME_LOGS_DIR", tmp_path)
 
     live_events.set_current(
         domain="discord.com", strategy="std_fake", ns="bs-p-0", backend="lua_bridge"
@@ -51,6 +49,7 @@ def test_live_events_write_read_filter(tmp_path, monkeypatch) -> None:
     cur_data = live_events.read_current()
     assert cur_data is not None and cur_data["domain"] == "discord.com"
     assert cur_data["backend"] == "lua_bridge"
+    assert live_events.writer_current_path().is_file()
 
     for i in range(3):
         live_events.write_probe(
@@ -75,10 +74,25 @@ def test_live_events_write_read_filter(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.unit
+def test_live_events_suffix_and_latest_path(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(live_events, "RUNTIME_LOGS_DIR", tmp_path)
+    legacy = tmp_path / "events_live.jsonl"
+    legacy.write_text('{"domain":"legacy","status":"PASS"}\n', encoding="utf-8")
+    suffixed = tmp_path / "events_live.9999.jsonl"
+    suffixed.write_text('{"domain":"newest","status":"PASS"}\n', encoding="utf-8")
+    os.utime(suffixed, (10, 10))
+    os.utime(legacy, (1, 1))
+
+    assert live_events.latest_events_path() == suffixed
+    recs = live_events.tail_events()
+    assert len(recs) == 1 and recs[0]["domain"] == "newest"
+
+
+@pytest.mark.unit
 def test_live_events_empty_and_torn_lines(tmp_path, monkeypatch) -> None:
-    ev = tmp_path / "events_live.jsonl"
-    monkeypatch.setattr(live_events, "EVENTS_FILE", ev)
+    monkeypatch.setattr(live_events, "RUNTIME_LOGS_DIR", tmp_path)
     assert live_events.tail_events() == []
+    ev = live_events.writer_events_path()
     ev.write_text('{"domain":"a.com","status":"PASS"}\nTORN LINE\n', encoding="utf-8")
     recs = live_events.tail_events()
     assert len(recs) == 1 and recs[0]["domain"] == "a.com"
