@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 
 import pytest
@@ -305,3 +306,82 @@ async def test_save_triage_snapshot(tmp_path):
     con.close()
     assert row[0] == "youtube.com"
     assert "silent_drop" in row[1]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_migration_adds_idx_tcp_domain(tmp_path):
+    store = open_run_store(tmp_path / "idx.db")
+    await store.init()
+    con = sqlite3.connect(tmp_path / "idx.db")
+    names = {
+        r[1]
+        for r in con.execute("PRAGMA index_list(tcp_results)").fetchall()
+    }
+    con.close()
+    assert "idx_tcp_domain" in names
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_batch_flush_per_row_timestamps(tmp_path, monkeypatch):
+    stamps = ["2026-08-26T10:00:01", "2026-08-26T10:00:02"]
+    store = open_run_store(tmp_path / "ts.db", batch_size=500)
+    await store.init()
+
+    def _stamp():
+        return stamps.pop(0)
+
+    monkeypatch.setattr(store, "_row_timestamp", _stamp)
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store.log_tcp("s2", "b.com", "PASS", 20.0, 200, config_path="fake:2")
+    await store.flush()
+
+    con = sqlite3.connect(tmp_path / "ts.db")
+    rows = con.execute(
+        "SELECT domain, timestamp FROM tcp_results ORDER BY id"
+    ).fetchall()
+    con.close()
+    assert rows == [("a.com", "2026-08-26T10:00:01"), ("b.com", "2026-08-26T10:00:02")]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_timer_flush_drains_pending(tmp_path, monkeypatch):
+    store = open_run_store(tmp_path / "timer.db", batch_size=500, flush_interval_sec=10)
+    store._flush_interval = 0.05
+    await store.init()
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    assert store._tcp_pending
+
+    await asyncio.sleep(0.12)
+    assert not store._tcp_pending
+
+    con = sqlite3.connect(tmp_path / "timer.db")
+    count = con.execute("SELECT COUNT(*) FROM tcp_results").fetchone()[0]
+    con.close()
+    assert count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_strategy_cache_one_ensure_per_strategy(tmp_path, monkeypatch):
+    store = open_run_store(tmp_path / "cache.db", batch_size=500)
+    await store.init()
+    calls = {"n": 0}
+    orig = store.ensure_strategy
+
+    async def _counting(*args, **kwargs):
+        calls["n"] += 1
+        return await orig(*args, **kwargs)
+
+    monkeypatch.setattr(store, "ensure_strategy", _counting)
+    for i in range(5):
+        await store.log_tcp(f"s{i}", "a.com", "PASS", 10.0, 200, config_path=f"fake:{i}")
+    await store.flush()
+    assert calls["n"] == 5
+
+    for i in range(5):
+        await store.log_tcp("same", f"d{i}.com", "PASS", 10.0, 200, config_path="fake:same")
+    await store.flush()
+    assert calls["n"] == 6

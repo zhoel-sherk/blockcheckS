@@ -35,21 +35,30 @@ def fingerprint_mismatch(checkpoint_fp: str | None, current_fp: str) -> bool:
 
 
 _WORKING_STATUSES = "('PASS','THROTTLED')"
+_DEFAULT_FLUSH_INTERVAL_SEC = 15.0
 
 
 class SqliteRunStore:
     """Closed DAO for blockcheckS run state (SQLite backend)."""
 
-    def __init__(self, db_path: str | Path, batch_size: int = 0):
+    def __init__(
+        self,
+        db_path: str | Path,
+        batch_size: int = 0,
+        flush_interval_sec: float = _DEFAULT_FLUSH_INTERVAL_SEC,
+    ):
         self._path = Path(db_path).expanduser().resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         reclaim_sudo_ownership(self._path.parent)
         if self._path.exists():
             reclaim_sudo_ownership(self._path)
         self.batch_size = max(0, int(batch_size or 0))
+        self._flush_interval = max(10.0, min(30.0, float(flush_interval_sec)))
         self._tcp_pending: list[dict] = []
         self._udp_pending: list[dict] = []
         self._flush_lock = asyncio.Lock()
+        self._pending_since: float | None = None
+        self._flush_timer_task: asyncio.Task[None] | None = None
 
     @property
     def path(self) -> Path:
@@ -66,8 +75,62 @@ class SqliteRunStore:
         reclaim_sudo_ownership(self._path)
 
     async def close(self) -> None:
+        if self._flush_timer_task is not None:
+            self._flush_timer_task.cancel()
+            try:
+                await self._flush_timer_task
+            except asyncio.CancelledError:
+                pass
+            self._flush_timer_task = None
         await self.flush()
         reclaim_sudo_ownership(self._path)
+
+    def _row_timestamp(self) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    def _mark_pending(self) -> None:
+        if self._pending_since is None:
+            self._pending_since = time.monotonic()
+        self._ensure_flush_timer()
+
+    def _clear_pending_clock(self) -> None:
+        self._pending_since = None
+
+    def _ensure_flush_timer(self) -> None:
+        if self.batch_size <= 0 or self._flush_timer_task is not None:
+            return
+        self._flush_timer_task = asyncio.create_task(self._flush_timer_loop())
+
+    async def _flush_timer_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._flush_interval)
+                if self._tcp_pending or self._udp_pending:
+                    await self.flush()
+        except asyncio.CancelledError:
+            raise
+
+    async def _ensure_strategy_cached(
+        self,
+        cache: dict[tuple[str, str], int],
+        name: str,
+        proto: str,
+        config_path: str,
+        db: aiosqlite.Connection,
+    ) -> int:
+        key = (name, proto)
+        sid = cache.get(key)
+        if sid is not None:
+            return sid
+        sid = await self.ensure_strategy(name, proto, config_path, db=db)
+        cache[key] = sid
+        return sid
+
+    async def _maybe_flush_by_age(self) -> None:
+        if self._pending_since is None:
+            return
+        if time.monotonic() - self._pending_since >= self._flush_interval:
+            await self.flush()
 
     @staticmethod
     async def _apply_pragmas(db: aiosqlite.Connection) -> None:
@@ -144,13 +207,14 @@ class SqliteRunStore:
                             await SqliteRunStore._apply_pragmas(db)
                             await db.execute("BEGIN IMMEDIATE")
                             try:
-                                ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+                                strategy_cache: dict[tuple[str, str], int] = {}
                                 for entry in tcp_batch:
-                                    sid = await self.ensure_strategy(
+                                    sid = await self._ensure_strategy_cached(
+                                        strategy_cache,
                                         entry["strategy"],
                                         entry["proto"],
                                         entry["config_path"],
-                                        db=db,
+                                        db,
                                     )
                                     await db.execute(
                                         """INSERT INTO tcp_results
@@ -168,7 +232,7 @@ class SqliteRunStore:
                                             entry["gateway_ms"],
                                             entry["content_valid"],
                                             entry["error"],
-                                            ts,
+                                            entry.get("timestamp") or self._row_timestamp(),
                                             entry["read_rate_bps"],
                                             entry["resolved_ip"],
                                             entry["dns_verdict"],
@@ -185,11 +249,12 @@ class SqliteRunStore:
                                         ),
                                     )
                                 for entry in udp_batch:
-                                    sid = await self.ensure_strategy(
+                                    sid = await self._ensure_strategy_cached(
+                                        strategy_cache,
                                         entry["strategy"],
                                         "udp",
                                         entry["config_path"],
-                                        db=db,
+                                        db,
                                     )
                                     await db.execute(
                                         """INSERT INTO udp_results
@@ -201,7 +266,7 @@ class SqliteRunStore:
                                             entry["status"],
                                             entry["latency_ms"],
                                             entry["error"],
-                                            ts,
+                                            entry.get("timestamp") or self._row_timestamp(),
                                         ),
                                     )
                                 await db.commit()
@@ -223,6 +288,7 @@ class SqliteRunStore:
                 self._tcp_pending[:0] = tcp_batch
                 self._udp_pending[:0] = udp_batch
                 raise last_err
+            self._clear_pending_clock()
         reclaim_sudo_ownership(self._path)
 
     async def log_tcp(
@@ -260,6 +326,7 @@ class SqliteRunStore:
                     "gateway_ms": gateway_ms,
                     "content_valid": int(content_valid),
                     "error": error,
+                    "timestamp": self._row_timestamp(),
                     "read_rate_bps": float(read_rate_bps or 0.0),
                     "resolved_ip": resolved_ip or "",
                     "dns_verdict": dns_verdict or "",
@@ -271,13 +338,16 @@ class SqliteRunStore:
                     "bridge_gen": int(bridge_gen or 0),
                 }
             )
+            self._mark_pending()
             if len(self._tcp_pending) >= self.batch_size:
                 await self.flush()
+            else:
+                await self._maybe_flush_by_age()
             return
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             sid = await self.ensure_strategy(strategy, proto, config_path or strategy, db=db)
-            ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+            ts = self._row_timestamp()
             await db.execute(
                 """INSERT INTO tcp_results
                    (strategy_id,domain,status,http_code,latency_ms,
@@ -327,15 +397,19 @@ class SqliteRunStore:
                     "status": status,
                     "latency_ms": latency_ms,
                     "error": error,
+                    "timestamp": self._row_timestamp(),
                 }
             )
+            self._mark_pending()
             if len(self._udp_pending) >= self.batch_size:
                 await self.flush()
+            else:
+                await self._maybe_flush_by_age()
             return
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             sid = await self.ensure_strategy(strategy, "udp", config_path or strategy, db=db)
-            ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+            ts = self._row_timestamp()
             await db.execute(
                 """INSERT INTO udp_results
                    (strategy_id,target,status,latency_ms,error,timestamp)

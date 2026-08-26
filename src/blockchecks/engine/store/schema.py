@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 CREATE INDEX IF NOT EXISTS idx_tcp_status ON tcp_results(status);
 CREATE INDEX IF NOT EXISTS idx_tcp_strat_domain ON tcp_results(strategy_id, domain);
 CREATE INDEX IF NOT EXISTS idx_tcp_strat_dom_id ON tcp_results(strategy_id, domain, id DESC);
+CREATE INDEX IF NOT EXISTS idx_tcp_domain ON tcp_results(domain, strategy_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_udp_status ON udp_results(status);
 CREATE INDEX IF NOT EXISTS idx_udp_strat ON udp_results(strategy_id);
 CREATE INDEX IF NOT EXISTS idx_pair_overall ON pair_results(overall);
@@ -179,6 +180,7 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         f"""
         CREATE INDEX IF NOT EXISTS idx_tcp_strat_domain ON tcp_results(strategy_id, domain);
         CREATE INDEX IF NOT EXISTS idx_tcp_strat_dom_id ON tcp_results(strategy_id, domain, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_tcp_domain ON tcp_results(domain, strategy_id, id DESC);
         {pair_strat_idx}
         CREATE INDEX IF NOT EXISTS idx_udp_strat ON udp_results(strategy_id);
         CREATE INDEX IF NOT EXISTS idx_pair_domain ON pair_results(domain);

@@ -91,16 +91,22 @@ class RunStateStore(Protocol):
 
 
 DEFAULT_DB_BATCH = 500
+DEFAULT_FLUSH_INTERVAL_SEC = 15.0
 
 
 def open_run_store(
     db_path: str | Path | None = None,
     *,
     batch_size: int = 0,
+    flush_interval_sec: float = DEFAULT_FLUSH_INTERVAL_SEC,
 ) -> SqliteRunStore:
     """Open the default SQLite run state store."""
     path = expand_path(db_path, default=DEFAULT_DB_PATH)
-    return SqliteRunStore(path, batch_size=batch_size)
+    return SqliteRunStore(
+        path,
+        batch_size=batch_size,
+        flush_interval_sec=flush_interval_sec,
+    )
 
 
 __all__ = [
@@ -112,6 +118,7 @@ __all__ = [
     "matrix_fingerprint",
     "open_run_store",
     "DEFAULT_DB_BATCH",
+    "DEFAULT_FLUSH_INTERVAL_SEC",
 ]
 
 StateDB: type[SqliteRunStore] = SqliteRunStore  # Alias
