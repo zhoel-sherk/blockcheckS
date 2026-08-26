@@ -143,8 +143,10 @@ def test_teardown_all_bridge_shm_no_scope_warns(tmp_path, caplog):
 
 @pytest.mark.unit
 def test_teardown_all_bridge_shm_missing(tmp_path):
-    teardown_all_bridge_shm(tmp_path / "nope", pid=os.getpid())
-    assert True
+    """teardown несуществующего каталога — no-op без исключений."""
+    missing = tmp_path / "nope"
+    teardown_all_bridge_shm(missing, pid=os.getpid())
+    assert not missing.exists(), "не должен создаваться при teardown"
 
 
 @pytest.mark.unit

@@ -675,7 +675,9 @@ async def test_get_zapret2_config_missing_dir():
 
     result = await ms.get_zapret2_config()
     # Without /opt/zapret2 on CI, must degrade gracefully.
-    assert "error" in result or "path" in result
+    assert isinstance(result, dict)
+    # валидный ответ: либо ошибка, либо структура с path
+    assert ("error" in result) != ("path" in result), result
 
 
 async def test_get_zapret2_config_rejects_traversal(tmp_path, monkeypatch):
