@@ -57,19 +57,11 @@ class BridgeSession:
         return settle
 
     def shutdown(self) -> None:
-        import subprocess as sp
-
         from blockchecks.service.metrics import pkill_nfqws2_in_ns
 
         pkill_nfqws2_in_ns(self.ns_name)
-        if self.iptables_ready:
-            sp.run(
-                ["sudo", "ip", "netns", "exec", self.ns_name, "iptables", "-F", "OUTPUT"],
-                capture_output=True,
-                check=False,
-                timeout=15,
-            )
-            self.iptables_ready = False
+        # NFQUEUE rules persist in the pool namespace (NsFirewall attach-once).
+        self.iptables_ready = False
         if self.conf_path:
             try:
                 os.unlink(self.conf_path)

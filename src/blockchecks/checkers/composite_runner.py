@@ -8,7 +8,6 @@ import asyncio
 import logging
 import os
 import re
-import subprocess as sp
 import time
 
 from blockchecks.checkers.curl_probe import CurlProbeRequest, worker_wall_timeout
@@ -20,6 +19,7 @@ from blockchecks.engine.async_runner import (
 from blockchecks.engine.config import NFQUEUE_TCP, NFQUEUE_UDP
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
 from blockchecks.service.nfqws2 import start_daemon
+from blockchecks.service.ns_firewall import get_ns_firewall
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 from blockchecks.terminal import CYAN, GREEN, RED, RESET
 
@@ -87,55 +87,9 @@ async def run(
         await asyncio.to_thread(start_daemon, ns_name, config_abs)
         await asyncio.sleep(0.5)
 
-        # Add iptables rules inside the netns
-        sp.run(
-            [
-                "sudo",
-                "ip",
-                "netns",
-                "exec",
-                ns_name,
-                "iptables",
-                "-A",
-                "OUTPUT",
-                "-p",
-                "tcp",
-                "--dport",
-                "443",
-                "-j",
-                "NFQUEUE",
-                "--queue-num",
-                str(NFQUEUE_TCP),
-                "--queue-bypass",
-            ],
-            capture_output=True,
-            timeout=5,
-        )
-        sp.run(
-            [
-                "sudo",
-                "ip",
-                "netns",
-                "exec",
-                ns_name,
-                "iptables",
-                "-A",
-                "OUTPUT",
-                "-p",
-                "udp",
-                "-m",
-                "multiport",
-                "--dports",
-                "50000:50100",
-                "-j",
-                "NFQUEUE",
-                "--queue-num",
-                str(NFQUEUE_UDP),
-                "--queue-bypass",
-            ],
-            capture_output=True,
-            timeout=5,
-        )
+        fw = get_ns_firewall(ns_name)
+        fw.attach(proto="tcp", port="443", queue=NFQUEUE_TCP)
+        fw.attach(proto="udp", port="50000:50100", queue=NFQUEUE_UDP, multiport=True)
 
         # Test all domains sequentially (sharing one nfqws2) via JSON worker
         for domain in domains:

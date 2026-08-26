@@ -379,7 +379,9 @@ class NetNsPool:
 
         try:
             pkill_nfqws2_in_ns(name)
-            self._run_destroy(name, "ip", "netns", "exec", name, "iptables", "-F", "OUTPUT")
+            from blockchecks.service.ns_firewall import drop_ns_firewall
+
+            drop_ns_firewall(name)
             netns_rc = self._run_destroy(name, "ip", "netns", "delete", name)
             self._run_destroy(name, "ip", "link", "delete", veth_h)
             self._run_destroy(name, "iptables", "-D", "FORWARD", "-i", veth_h, "-j", "ACCEPT")
@@ -412,7 +414,7 @@ class NetNsPool:
 
         pkill_nfqws2_in_ns(ns_name)
         LuaBridge(ns_name).teardown()
-        self._run("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT", check=False)
+        # NFQUEUE rules stay attached for pool reuse (PERF-6 / NsFirewall).
 
     # Public API
 

@@ -68,13 +68,9 @@ def test_bridge_session_boot_iptables_fail_leaves_not_ready(session, tmp_path):
 @pytest.mark.unit
 def test_bridge_session_shutdown(session):
     session.iptables_ready = True
-    with (
-        patch("subprocess.run") as m_run,
-        patch("blockchecks.service.lua_session.os.unlink"),
-    ):
+    with patch("blockchecks.service.lua_session.os.unlink"):
         session.shutdown()
     assert session.iptables_ready is False
-    assert m_run.call_count == 1  # iptables -F; pkill is PID-scoped now
     session.bridge.teardown.assert_called_once()
 
 

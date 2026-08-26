@@ -55,7 +55,11 @@ def test_run_invalid_domain_records_fail(tmp_path):
     pool.acquire = AsyncMock(return_value="ns1")
     pool.release = AsyncMock()
     runner.pool = pool
-    with patch("blockchecks.checkers.composite_runner.AsyncTestRunner", return_value=runner):
+    with (
+        patch("blockchecks.checkers.composite_runner.AsyncTestRunner", return_value=runner),
+        patch("blockchecks.checkers.composite_runner.get_ns_firewall") as get_fw,
+    ):
+        get_fw.return_value = MagicMock()
         rc = asyncio.run(run(str(conf), ["not a domain", "discord.com"]))
     # invalid domain → no worker call; valid domain → worker call
     assert rc == 1  # both invalid/worker-fail → no passes
@@ -79,11 +83,13 @@ def test_run_success(tmp_path):
             "blockchecks.checkers.composite_runner.invoke_curl_probe_worker",
             return_value=data,
         ),
-        patch("blockchecks.checkers.composite_runner.sp.run") as sp_run,
+        patch("blockchecks.checkers.composite_runner.get_ns_firewall") as get_fw,
     ):
-        sp_run.return_value = MagicMock()
+        fw = MagicMock()
+        get_fw.return_value = fw
         rc = asyncio.run(run(str(conf), ["discord.com"], timeout=3.0))
     assert rc == 0
+    assert fw.attach.call_count == 2
     runner.start.assert_awaited_once()
     runner.stop.assert_awaited_once()
     pool.acquire.assert_awaited_once()
