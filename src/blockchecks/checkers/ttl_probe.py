@@ -77,14 +77,15 @@ def probe_ttl(ip: str, port: int = 443, timeout: float = 2.0) -> TtlProbeResult:
                 res.server_ttl = ttl
                 res.server_hops = hops_from_ttl(ttl)
             elif rst and res.dpi_ttl is None:
-                # RST before SYN-ACK often indicates a middlebox; origin RST is cheaper
-                # to distinguish only after we know server TTL (same hop count → origin).
-                if res.server_hops is not None and hops_from_ttl(ttl) == res.server_hops:
+                rst_hops = hops_from_ttl(ttl)
+                origin_rst = (
+                    res.server_hops is not None and rst_hops == res.server_hops
+                )
+                # Same hop as SYN-ACK → origin RST, not DPI. No SYN-ACK yet, or a
+                # different hop count → treat as middlebox.
+                if not origin_rst:
                     res.dpi_ttl = ttl
-                    res.dpi_hops = hops_from_ttl(ttl)
-                elif res.server_ttl is None:
-                    res.dpi_ttl = ttl
-                    res.dpi_hops = hops_from_ttl(ttl)
+                    res.dpi_hops = rst_hops
             if res.server_ttl is not None and res.dpi_ttl is not None:
                 break
     finally:

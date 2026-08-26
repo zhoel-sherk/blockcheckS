@@ -54,26 +54,26 @@ class StrategyLoader:
             log.warning("config file is empty: %s", p)
             return [str(p)]
 
-        has_lua_desync = False
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("--lua-desync="):
-                has_lua_desync = True
-                desync = line.split("=", 1)[1].strip()
-                if desync:
-                    for issue in validate_strategy(desync).issues:
-                        if issue.severity == "error":
-                            log.warning(
-                                "config %s lua-desync validation (%s): %s",
-                                p,
-                                issue.code,
-                                issue.message,
-                            )
-
-        if not has_lua_desync:
+        desyncs = [
+            line.split("=", 1)[1].strip()
+            for raw in text.splitlines()
+            if (line := raw.strip()).startswith("--lua-desync=")
+        ]
+        if not desyncs:
             log.warning("config has no --lua-desync lines: %s", p)
+        for desync in desyncs:
+            if not desync:
+                continue
+            errors = (
+                i for i in validate_strategy(desync).issues if i.severity == "error"
+            )
+            for issue in errors:
+                log.warning(
+                    "config %s lua-desync validation (%s): %s",
+                    p,
+                    issue.code,
+                    issue.message,
+                )
 
         return [str(p)]
 
