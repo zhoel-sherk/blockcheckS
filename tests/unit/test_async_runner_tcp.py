@@ -25,10 +25,10 @@ def test_run_tcp_check_success_path():
         sudo_cmds.append(args)
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05) as daemon,
-        patch("blockchecks.engine.in_ns_workers._sudo", side_effect=fake_sudo),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05) as daemon,
+        patch("blockchecks.engine.nfqws_config._sudo", side_effect=fake_sudo),
         patch(
-            "blockchecks.engine.in_ns_workers._invoke_curl_probe_worker",
+            "blockchecks.service.probe.invoke_curl_probe_worker",
             return_value=dict(worker_payload),
         ) as worker,
         patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
@@ -66,10 +66,10 @@ def test_run_tcp_check_success_path():
 
 def test_run_tcp_check_worker_failure():
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.01),
-        patch("blockchecks.engine.in_ns_workers._sudo"),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.01),
+        patch("blockchecks.engine.nfqws_config._sudo"),
         patch(
-            "blockchecks.engine.in_ns_workers._invoke_curl_probe_worker",
+            "blockchecks.service.probe.invoke_curl_probe_worker",
             return_value={
                 "success": False,
                 "http_code": 0,
@@ -93,7 +93,7 @@ def test_run_tcp_check_gv_prepare_error_short_circuits():
             return_value=(None, {"error": "gv_url_unavailable", "success": False}),
         ),
         patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=True),
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon") as daemon,
+        patch("blockchecks.service.nfqws2.start_daemon") as daemon,
     ):
         data = _run_tcp_check("bs-p0", "fake:x", "googlevideo.com", 5.0)
 
@@ -115,10 +115,10 @@ def test_run_tcp_check_retry_on_next_ip():
         return {"success": True, "http_code": 200, "latency_ms": 50}
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
-            "blockchecks.engine.in_ns_workers._invoke_curl_probe_worker",
+            "blockchecks.service.probe.invoke_curl_probe_worker",
             side_effect=fake_worker,
         ),
         patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
@@ -140,10 +140,10 @@ def test_run_tcp_check_all_ips_fail():
     from blockchecks.engine.async_runner import _run_tcp_check
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
-            "blockchecks.engine.in_ns_workers._invoke_curl_probe_worker",
+            "blockchecks.service.probe.invoke_curl_probe_worker",
             return_value={"success": False, "http_code": 0, "error": "timeout"},
         ),
         patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
@@ -171,10 +171,10 @@ def test_run_tcp_check_config_path():
         f.write("--qnum=200\n")
     try:
         with (
-            patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05) as daemon,
-            patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+            patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05) as daemon,
+            patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
             patch(
-                "blockchecks.engine.in_ns_workers._invoke_curl_probe_worker",
+                "blockchecks.service.probe.invoke_curl_probe_worker",
                 return_value={"success": True, "http_code": 200},
             ),
             patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
@@ -198,8 +198,8 @@ def test_run_quic_check_success():
     from blockchecks.engine.async_runner import _run_quic_check
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
             return_value=MagicMock(
@@ -215,8 +215,8 @@ def test_run_quic_check_bad_json():
     from blockchecks.engine.async_runner import _run_quic_check
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch("blockchecks.engine.in_ns_workers.sp.run", return_value=MagicMock(stdout="oops")),
     ):
         data = _run_quic_check("bs-p0", "fake:blob=quic_initial:repeats=11", "discord.com", 5.0)
@@ -228,10 +228,10 @@ def test_run_tcp_check_multi_success():
 
     worker_payload = {"discord.com": {"success": True, "http_code": 200}}
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
-            "blockchecks.engine.in_ns_workers._invoke_curl_probe_worker",
+            "blockchecks.service.probe.invoke_curl_probe_worker",
             side_effect=[worker_payload, {"success": True, "http_code": 200}],
         ),
         patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
@@ -275,8 +275,8 @@ def test_run_udp_check_success():
     from blockchecks.engine.async_runner import _run_udp_check
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
             return_value=MagicMock(

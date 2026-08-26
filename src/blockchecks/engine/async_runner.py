@@ -7,40 +7,23 @@ import logging
 import os
 
 from blockchecks.checkers.dns_secure import DnsRunCache
-from blockchecks.engine.config import (
-    BLOB_DIR,
-    PIN_TIMEOUT,
-    PYTHON_BIN,
-)
-from blockchecks.engine.fail_phase import FailPhase
-from blockchecks.engine.in_ns_workers import RETRY_IP_TIMEOUT
+from blockchecks.engine.config import BLOB_DIR, PYTHON_BIN  # noqa: F401
+from blockchecks.engine.dns_pin_service import DnsPinService, pin_candidate_l3_ok
+from blockchecks.engine.in_ns_workers import RETRY_IP_TIMEOUT  # noqa: F401
 from blockchecks.engine.matrix_generator import StrategyItem
+from blockchecks.engine.probe_result_logger import ProbeResultLogger, tcp_row_status
 from blockchecks.engine.settle_profile import SettleProfile
 from blockchecks.engine.store import RunStateStore
 from blockchecks.service.batch_models import BatchContext, BatchProbeConfig, RunnerProbeDeps
 from blockchecks.service.batch_scheduler import BatchScheduler
 from blockchecks.service.batch_service import ProbeBatchService
 from blockchecks.service.netns_pool import NetNsPool
-from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon
+from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon  # noqa: F401
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW, status_tag
 
 log = logging.getLogger(__name__)
 
-# Auto-pin: known-good strategy plus a short budget to probe candidate
-# IPs at startup. Pinned IPs override DoH order against per-IP throttling.
-PIN_STRATEGY = "fake:blob=stun:repeats=6:tcp_ts=-1000"
-PIN_SETTLE_MAX = 0.5
-_L3_SKIP_PIN = frozenset({FailPhase.L4_SYN_DROP, FailPhase.ICMP_BLOCK})
-# Budget for retry-on-next-IP attempts after the first failed IP (keeps
-# throttled-IP worst case from N×timeout, see per-IP throttling).
-
-
-def _pin_candidate_l3_ok(ip: str) -> bool:
-    """False when SYN is dropped or ICMP-filtered — skip expensive stun L7."""
-    from blockchecks.checkers.l3_probe import probe_l3
-
-    return probe_l3(ip, 443, timeout=min(PIN_TIMEOUT, 1.5), use_raw=True).phase not in _L3_SKIP_PIN
-
+_pin_candidate_l3_ok = pin_candidate_l3_ok
 
 from blockchecks.engine.conf_builder import add_blobs_from_strategy, split_cli_args
 from blockchecks.engine.in_ns_workers import (
@@ -52,7 +35,7 @@ from blockchecks.engine.in_ns_workers import (
     _run_udp_check,
     _save_pass_strategy_data_block,
 )
-from blockchecks.engine.nfqws_config import (
+from blockchecks.engine.nfqws_config import (  # noqa: F401
     _build_inline_nfqws_lines,
     _build_quic_nfqws_lines,
     _sudo,
@@ -65,18 +48,6 @@ from blockchecks.engine.results import (
     tcp_results_from_details,
 )
 from blockchecks.engine.wssize_retry import WSSIZE_RETRY
-from blockchecks.service.batch_service import PROBE_SKIP_ERRORS
-
-
-def _tcp_row_status(result: TcpTestResult) -> str:
-    if result.error in PROBE_SKIP_ERRORS:
-        return "SKIPPED"
-    if result.throttled:
-        return "THROTTLED"
-    if result.success:
-        return "PASS"
-    return "FAIL"
-
 
 __all__ = [
     "AsyncTestRunner",
@@ -86,22 +57,9 @@ __all__ = [
     "TcpTestResult",
     "UdpTestResult",
     "tcp_results_from_details",
-    "_run_tcp_check",
-    "_run_tcp_check_multi",
-    "_run_quic_check",
-    "_run_udp_check",
-    "_save_pass_strategy_data_block",
-    "_is_quic_dropped",
-    "_quic_fallback_variants",
-    "_add_blobs_from_strategy",
-    "_build_inline_nfqws_lines",
-    "_build_quic_nfqws_lines",
-    "_split_cli_args",
-    "_sudo",
-    "_nfqws2_daemon",
-    "RETRY_IP_TIMEOUT",
-    "BLOB_DIR",
 ]
+
+_tcp_row_status = tcp_row_status
 
 # Private names kept as aliases.
 _add_blobs_from_strategy = add_blobs_from_strategy
@@ -165,6 +123,19 @@ class AsyncTestRunner:
         self._probe_gen = 0
         self._batch_id = 0
         self.memory_monitor = None
+        self._result_logger = ProbeResultLogger(db)
+        self._dns_pin = (
+            DnsPinService(
+                dns_cache=dns_cache,
+                pinned_path=self.pinned_path,
+                python_path=self.python,
+                disable_ech=self.disable_ech,
+                acquire_ns=self.pool.acquire,
+                release_ns=self.pool.release,
+            )
+            if dns_cache is not None
+            else None
+        )
 
     def ensure_memory_monitor(self):
         """Lazily create the shared MemoryMonitor for bridge runs."""
@@ -257,102 +228,23 @@ class AsyncTestRunner:
         """Create netns pool, seed the Queue, and auto-pin working IPs."""
         await asyncio.to_thread(self.pool.create_all)
         await self.pool.seed()
-        if self.auto_pin and self.dns_cache:
+        if self.auto_pin and self._dns_pin is not None:
             await self._auto_pin_ips()
 
     async def _auto_pin_ips(self) -> None:
-        """Probe DoH/pinned IPs with the known-good fake strategy; pin first PASS.
+        if self._dns_pin is not None:
+            import blockchecks.engine.async_runner as ar
 
-        The provider hosts file (or ``--fixed-ip`` file) is loaded, its pinned
-        domains probed, and only *changed* IPs are written back — so the file
-        stays clean in git unless a pinned address actually started failing.
-        """
-        from blockchecks.checkers.ip_pin import load_pins, merge_pins, save_pins
-
-        file_pins = load_pins(self.pinned_path) if self.pinned_path else {}
-        pins = dict(self.dns_cache.pins())
-        pins = merge_pins(file_pins, pins)
-        self.dns_cache.set_pins(pins)
-
-        domains = [d for d in self.dns_cache.domains() if d]
-        if not domains:
-            return
-
-        updates: dict[str, str] = {}
-        for domain in domains:
-            ips = self.dns_cache.candidates(domain)
-            if not ips:
-                continue
-            existing = pins.get(domain)
-            candidates = []
-            if existing:
-                candidates.append(existing)
-            for ip in ips:
-                if ip not in candidates:
-                    candidates.append(ip)
-            picked = None
-            for ip in candidates:
-                if not _pin_candidate_l3_ok(ip):
-                    continue
-                if await self._probe_pin_ip(domain, ip):
-                    picked = ip
-                    break
-            if picked:
-                updates[domain] = picked
-                if self.dns_cache.pinned_ip(domain) != picked:
-                    self.dns_cache.add_pin(domain, picked)
-                tag = "file" if existing == picked else "auto"
-                log.info("%s", f"  {CYAN}[dns] pinned {domain} -> {picked} ({tag}){RESET}")
-            elif existing:
-                # No candidate passed — keep the old pin as a best-effort target
-                # rather than dropping it (a stale pin still beats a DoH rotate
-                # onto a throttled IP).
-                self.dns_cache.add_pin(domain, existing)
-                log.info(
-                    "%s",
-                    f"  {YELLOW}[dns] pin kept for {domain} -> {existing} "
-                    f"(no working fallback){RESET}",
-                )
-
-        if self.pinned_path:
-            merged = merge_pins(file_pins, updates)
-            if merged != file_pins:
-                try:
-                    save_pins(self.pinned_path, merged)
-                    log.info("%s", f"  {CYAN}[dns] saved pinned IPs -> {self.pinned_path}{RESET}")
-                except OSError as e:
-                    log.info(
-                        "%s", f"  {YELLOW}[dns] cannot save pins {self.pinned_path}: {e}{RESET}"
-                    )
-            else:
-                log.info("%s", f"  {CYAN}[dns] pins unchanged -> {self.pinned_path}{RESET}")
+            self._dns_pin.pinned_path = self.pinned_path
+            await self._dns_pin.auto_pin_ips(
+                probe=self._probe_pin_ip,
+                l3_ok=ar._pin_candidate_l3_ok,
+            )
 
     async def _probe_pin_ip(self, domain: str, ip: str) -> bool:
-        """Return True when ``fake:blob=stun`` passes to *domain* via *ip*."""
-        ns = await self.pool.acquire()
-        try:
-            data = await asyncio.to_thread(
-                _run_tcp_check,
-                ns,
-                PIN_STRATEGY,
-                domain,
-                PIN_TIMEOUT,
-                False,
-                self.python,
-                self.disable_ech,
-                ip,
-                1,
-                False,
-                "",
-                "tls12",
-                PIN_SETTLE_MAX,
-                None,
-                "fast",
-                False,
-            )
-            return bool(data.get("success"))
-        finally:
-            await self.pool.release(ns)
+        if self._dns_pin is None:
+            return False
+        return await self._dns_pin.probe_pin_ip(domain, ip)
 
     async def stop(self):
         """Drain queue then destroy netns pool."""
@@ -379,7 +271,6 @@ class AsyncTestRunner:
                         dns_verdict = audit.verdict
                         doh_server = audit.doh_server or self.dns_cache.doh_server
                 protocol = getattr(item, "protocol", "tls12") or "tls12"
-                proto_db = "http" if protocol == "http" else "tcp"
                 ip_candidates = self._resolve_domain_ips(domain)
                 data = await asyncio.to_thread(
                     _run_tcp_check,
@@ -439,24 +330,14 @@ class AsyncTestRunner:
                 result.probe_host = data.get("resolve_name") or ""
                 result.error = data.get("error", "") or ""
 
-                if self.db:
-                    status = _tcp_row_status(result)
-                    await self.db.log_tcp(
-                        item.label,
-                        domain,
-                        status,
-                        result.latency_ms,
-                        result.http_code,
-                        content_valid=result.content_valid,
-                        error=result.error,
-                        read_rate_bps=result.read_rate_bps,
-                        config_path=item.strategy,
-                        resolved_ip=result.used_ip if result.used_ip else (resolved_ip or ""),
-                        dns_verdict=dns_verdict,
-                        doh_server=doh_server,
-                        proto=proto_db,
-                        probe_host=result.probe_host,
-                    )
+                await self._result_logger.log_tcp_probe(
+                    item,
+                    domain,
+                    result,
+                    resolved_ip=resolved_ip,
+                    dns_verdict=dns_verdict,
+                    doh_server=doh_server,
+                )
             except Exception as e:
                 result.error = str(e)[:200]
             finally:
@@ -515,23 +396,14 @@ class AsyncTestRunner:
                             f"— trying fallback: {variant[:40]}...{RESET}",
                         )
 
-                if self.db:
-                    status = "PASS" if result.success else "FAIL"
-                    await self.db.log_tcp(
-                        item.label,
-                        domain,
-                        status,
-                        result.latency_ms,
-                        result.http_code,
-                        content_valid=True,
-                        error=result.error,
-                        config_path=item.strategy,
-                        resolved_ip=resolved_ip or "",
-                        dns_verdict=dns_verdict,
-                        doh_server=doh_server,
-                        proto="quic",
-                        probe_host=getattr(result, "probe_host", "") or "",
-                    )
+                await self._result_logger.log_quic_result(
+                    item,
+                    domain,
+                    result,
+                    resolved_ip=resolved_ip,
+                    dns_verdict=dns_verdict,
+                    doh_server=doh_server,
+                )
             except Exception as e:
                 result.error = str(e)[:200]
             finally:
@@ -606,39 +478,14 @@ class AsyncTestRunner:
         dns_verdict: str,
         doh_server: str,
     ) -> None:
-        if not self.db:
-            return
-        protocol = getattr(item, "protocol", "tls12") or "tls12"
-        proto_db = "http" if protocol == "http" else "tcp"
-        status = _tcp_row_status(result)
-        await self.db.log_tcp(
-            item.label,
+        await self._result_logger.log_tcp_result(
+            item,
             domain,
-            status,
-            result.latency_ms,
-            result.http_code,
-            content_valid=result.content_valid,
-            error=result.error,
-            read_rate_bps=result.read_rate_bps,
-            config_path=item.strategy,
-            resolved_ip=(result.used_ip or resolved_ip or ""),
+            result,
+            resolved_ip=resolved_ip,
             dns_verdict=dns_verdict,
             doh_server=doh_server,
-            proto=proto_db,
-            fail_phase=result.fail_phase,
-            bridge_applied=result.bridge_applied,
-            bridge_batch_id=result.bridge_batch_id,
-            bridge_gen=result.bridge_gen,
-            probe_host=getattr(result, "probe_host", "") or "",
         )
-        if status == "PASS":
-            await _save_pass_strategy_data_block(
-                item.strategy,
-                domain,
-                protocol=proto_db,
-                latency_ms=result.latency_ms,
-                http_code=result.http_code,
-            )
 
     async def test_tcp_domains(
         self,
@@ -754,23 +601,7 @@ class AsyncTestRunner:
                 result.latency_ms = data.get("latency_ms", 0)
                 result.error = data.get("detail", "") or ""
 
-                if self.db:
-                    await self.db.log_udp(
-                        item.label,
-                        target,
-                        "PASS" if result.success else "FAIL",
-                        result.latency_ms,
-                        result.error,
-                        config_path=item.strategy,
-                    )
-                if result.success:
-                    await _save_pass_strategy_data_block(
-                        item.strategy,
-                        target,
-                        protocol="udp",
-                        latency_ms=result.latency_ms,
-                        http_code=0,
-                    )
+                await self._result_logger.log_udp_result(item, target, result)
             except Exception as e:
                 result.error = str(e)[:200]
             finally:
