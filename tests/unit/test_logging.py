@@ -84,6 +84,53 @@ def test_set_debug_mode_flips_logger_and_env(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
+def test_sigusr1_toggle_defers_io_until_apply(tmp_path, monkeypatch):
+    """toggle_debug_mode is signal-safe: no env/logger mutation until apply."""
+    import threading
+
+    import blockchecks.engine.log as log_mod
+    from blockchecks.engine.log import (
+        apply_pending_debug_toggle,
+        configure_logging,
+        debug_status,
+        set_debug_mode,
+        toggle_debug_mode,
+    )
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    monkeypatch.setattr("blockchecks.engine.log.RUNTIME_LOGS_DIR", logs_dir)
+    monkeypatch.setattr(paths, "RUNTIME_LOGS_DIR", logs_dir)
+    monkeypatch.delenv("BLOCKCHECKS_NFQWS2_DEBUG", raising=False)
+    monkeypatch.delenv("BLOCKCHECKS_LOG_LEVEL", raising=False)
+    log_mod._pending_debug_toggle = False
+    log_mod._debug_watcher_started = False
+    log_mod._debug_watcher_wake = threading.Event()
+    orig_start = threading.Thread.start
+
+    def _guarded_start(self) -> None:
+        if self.name == "blockchecks-debug-toggle":
+            return
+        orig_start(self)
+
+    monkeypatch.setattr(threading.Thread, "start", _guarded_start)
+    _clear_blockchecks_logger()
+    configure_logging(level=logging.INFO)
+    set_debug_mode(False)
+    assert debug_status()["enabled"] is False
+
+    toggle_debug_mode()
+    assert debug_status()["enabled"] is False
+    assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "") == ""
+
+    applied = apply_pending_debug_toggle()
+    assert applied is not None
+    assert applied["enabled"] is True
+    assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") == "1"
+    _clear_blockchecks_logger()
+
+
+@pytest.mark.unit
 def test_log_tail_offset_and_rotation(tmp_path, monkeypatch):
     from blockchecks.engine.log import log_tail
 

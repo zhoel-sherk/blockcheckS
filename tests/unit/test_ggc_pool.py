@@ -38,6 +38,7 @@ def pool_env(tmp_path: Path, monkeypatch):
     )
     monkeypatch.setattr(paths_mod, "CACHE_DIR", cache, raising=False)
     g._ROTATION["i"] = 0
+    g._STATE.last_codes.clear()
     yield g, cache
 
 
@@ -175,3 +176,17 @@ def test_current_mode_reads_toml_when_env_unset(pool_env, monkeypatch) -> None:
         lambda path=None: {"google": {"mode": "fixed"}},
     )
     assert g.current_mode() == "fixed"
+
+
+def test_remember_ggc_ip_concurrent_writes(pool_env) -> None:
+    """Concurrent cache writes must not lose entries (ENG-5)."""
+    import concurrent.futures
+
+    g, cache = pool_env
+    hosts = [f"rr{i}---sn-xjvho{i}k.googlevideo.com" for i in range(24)]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda i: g.remember_ggc_ip(hosts[i], f"203.0.113.{i}"), range(24)))
+
+    data = json.loads((cache / "ggc_ips.json").read_text(encoding="utf-8"))
+    assert len(data["ips"]) == 24

@@ -533,12 +533,10 @@ def arm_stop_handlers(ctx: FullRunContext) -> Callable[[], None]:
         ctx.stop.set()
 
     def _debug(*_a):
-        """SIGUSR1: toggle Python DEBUG + nfqws2 --debug (next probe)."""
+        """SIGUSR1: request debug toggle (applied off-handler)."""
         from blockchecks.engine.log import toggle_debug_mode
 
-        st = toggle_debug_mode()
-        on = "ON" if st["enabled"] else "OFF"
-        log.info("%s", f"  {YELLOW}[debug] SIGUSR1 — debug {on} on next probe{RESET}")
+        toggle_debug_mode()
 
     handlers = (
         (signal.SIGINT, _stop),

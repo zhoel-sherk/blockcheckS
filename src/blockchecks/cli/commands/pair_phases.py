@@ -297,9 +297,7 @@ def register_stop_handlers(
     def _toggle_debug():
         from blockchecks.engine.log import toggle_debug_mode
 
-        st = toggle_debug_mode()
-        on = "ON" if st["enabled"] else "OFF"
-        log.info("%s", f"  [debug] SIGUSR1 — debug {on} on next probe")
+        toggle_debug_mode()
 
     handlers = (
         (signal.SIGINT, _request_stop),

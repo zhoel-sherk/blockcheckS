@@ -25,6 +25,7 @@ import json
 import os
 import random
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,6 +68,7 @@ DEFAULT_LAST_RESORT_IPS = [
     "64.233.161.99",
 ]
 _ROTATION = {"i": 0}
+_LOCK = threading.Lock()
 
 
 @dataclass
@@ -126,10 +128,11 @@ def generate_synthetic_host() -> str:
         n = random.randint(1, 60)
         code = generate_sn_code()
         key = f"{n}:{code}"
-        if key not in _STATE.last_codes:
-            _STATE.last_codes.append(key)
-            _STATE.last_codes = _STATE.last_codes[-_NO_REPEAT:]
-            return f"rr{n}---sn-{code}.googlevideo.com"
+        with _LOCK:
+            if key not in _STATE.last_codes:
+                _STATE.last_codes.append(key)
+                _STATE.last_codes = _STATE.last_codes[-_NO_REPEAT:]
+                return f"rr{n}---sn-{code}.googlevideo.com"
     return f"rr1---sn-{generate_sn_code()}.googlevideo.com"
 
 
@@ -171,39 +174,51 @@ def ips_cache_path() -> Path:
     return CACHE_DIR / IPS_CACHE_NAME
 
 
+def _read_ips_cache_entries() -> dict[str, dict]:
+    try:
+        data = json.loads(ips_cache_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data.get("ips", {}) if isinstance(data.get("ips"), dict) else {}
+
+
+def _write_ips_cache(entries: dict[str, dict]) -> None:
+    path = ips_cache_path()
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"ips": entries}, indent=0), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def remember_ggc_ip(host: str, ip: str) -> None:
     """Кэшировать успешный резолв любого ggc-хоста (подключаемый список IP)."""
     if not ip or not is_ggc_host(host):
         return
     try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        try:
-            data = json.loads(ips_cache_path().read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = {"ips": {}}
-        entries = {k: v for k, v in data.get("ips", {}).items()
-                   if time.time() - float(v.get("ts", 0)) < IPS_TTL_SEC}
-        entries[host] = {"ip": ip, "ts": time.time()}
-        # держим не более 256 свежих записей
-        trimmed = dict(sorted(entries.items(), key=lambda kv: -kv[1]["ts"])[:256])
-        ips_cache_path().write_text(
-            json.dumps({"ips": trimmed}, indent=0), encoding="utf-8"
-        )
+        with _LOCK:
+            entries = {
+                k: v
+                for k, v in _read_ips_cache_entries().items()
+                if time.time() - float(v.get("ts", 0)) < IPS_TTL_SEC
+            }
+            entries[host] = {"ip": ip, "ts": time.time()}
+            # держим не более 256 свежих записей
+            trimmed = dict(sorted(entries.items(), key=lambda kv: -kv[1]["ts"])[:256])
+            _write_ips_cache(trimmed)
     except OSError as exc:
         log.warning("%s", f"  ggc: ips-cache write failed: {exc}")
 
 
 def cached_ips() -> list[str]:
     """Свежие уникальные IP из кэша резолва (новые вперёд)."""
-    try:
-        data = json.loads(ips_cache_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
+    with _LOCK:
+        entries = _read_ips_cache_entries()
     now = time.time()
     seen: set[str] = set()
     out: list[str] = []
-    for _, entry in sorted(data.get("ips", {}).items(),
-                           key=lambda kv: -float(kv[1].get("ts", 0))):
+    for _, entry in sorted(
+        entries.items(), key=lambda kv: -float(kv[1].get("ts", 0))
+    ):
         ip = str(entry.get("ip", ""))
         if ip and float(entry.get("ts", 0)) >= now - IPS_TTL_SEC and ip not in seen:
             seen.add(ip)
@@ -228,9 +243,10 @@ def configured_fallback_ips() -> list[str]:
 
 def _rotate_last_resort() -> str:
     """Round-robin только по last-resort: мёртвый head не залипает навсегда."""
-    i = _ROTATION["i"] % len(DEFAULT_LAST_RESORT_IPS)
-    _ROTATION["i"] += 1
-    return DEFAULT_LAST_RESORT_IPS[i]
+    with _LOCK:
+        i = _ROTATION["i"] % len(DEFAULT_LAST_RESORT_IPS)
+        _ROTATION["i"] += 1
+        return DEFAULT_LAST_RESORT_IPS[i]
 
 
 def resolve_ip_chain(host: str) -> str | None:
@@ -277,13 +293,10 @@ def pick_target(domain_hint: str | None = None) -> GgcTarget:  # noqa: ARG001
         log.warning("%s", "  ggc: mode=real but pool empty/expired — synthetic fallback")
     host = generate_synthetic_host()
     ip_hint = None
-    try:
-        data = json.loads(ips_cache_path().read_text(encoding="utf-8"))
-        entry = data.get("ips", {}).get(host)
-        if entry and time.time() - float(entry.get("ts", 0)) < IPS_TTL_SEC:
-            ip_hint = str(entry.get("ip"))
-    except (OSError, ValueError):
-        pass
+    with _LOCK:
+        entry = _read_ips_cache_entries().get(host)
+    if entry and time.time() - float(entry.get("ts", 0)) < IPS_TTL_SEC:
+        ip_hint = str(entry.get("ip"))
     return GgcTarget(host=host, mode=current_mode(), ip_hint=ip_hint)
 
 

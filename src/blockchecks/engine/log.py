@@ -7,6 +7,7 @@ import logging.handlers
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR, ensure_dirs, reclaim_sudo_ownership
@@ -24,6 +25,11 @@ _FILE_FMT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 _saved_python_level: int | None = None
 _saved_nfq: str | None = None
 _console_stream: str = "stdout"
+_pending_debug_toggle = False
+_debug_apply_lock = threading.Lock()
+_debug_watcher_started = False
+_debug_watcher_wake = threading.Event()
+_applying_debug_toggle = False
 
 
 class OperatorFormatter(logging.Formatter):
@@ -59,6 +65,15 @@ class _MaxLevelFilter(logging.Filter):
         return record.levelno <= self.max_level
 
 
+class _DeferredDebugFilter(logging.Filter):
+    """Apply a pending SIGUSR1 debug toggle before each log record is emitted."""
+
+    def filter(self, _record: logging.LogRecord) -> bool:
+        if not _applying_debug_toggle:
+            apply_pending_debug_toggle()
+        return True
+
+
 def _parse_level(level: str | int | None) -> int:
     if isinstance(level, int):
         return level
@@ -71,8 +86,54 @@ def _parse_level(level: str | int | None) -> int:
 
 
 def toggle_debug_mode() -> dict:
-    """Flip debug on/off. Safe to call from a signal handler (no I/O wait)."""
-    return set_debug_mode(not bool(debug_status()["enabled"]))
+    """Request debug flip from a signal handler (no I/O; applied asynchronously)."""
+    global _pending_debug_toggle
+    _pending_debug_toggle = True
+    _debug_watcher_wake.set()
+    return debug_status()
+
+
+def apply_pending_debug_toggle() -> dict | None:
+    """Apply a deferred SIGUSR1 toggle. Safe outside the signal handler."""
+    global _pending_debug_toggle, _applying_debug_toggle
+    with _debug_apply_lock:
+        if not _pending_debug_toggle:
+            return None
+        _pending_debug_toggle = False
+        enabled = not bool(debug_status()["enabled"])
+        status = set_debug_mode(enabled)
+    _applying_debug_toggle = True
+    try:
+        on = "ON" if enabled else "OFF"
+        logging.getLogger(LOGGER_NAME).info(
+            "%s", f"  [debug] SIGUSR1 — debug {on} on next probe"
+        )
+    finally:
+        _applying_debug_toggle = False
+    return status
+
+
+def _debug_toggle_watcher() -> None:
+    while True:
+        _debug_watcher_wake.wait(timeout=1.0)
+        _debug_watcher_wake.clear()
+        while apply_pending_debug_toggle() is not None:
+            pass
+
+
+def _ensure_debug_watcher() -> None:
+    global _debug_watcher_started
+    if _debug_watcher_started:
+        return
+    with _debug_apply_lock:
+        if _debug_watcher_started:
+            return
+        threading.Thread(
+            target=_debug_toggle_watcher,
+            name="blockchecks-debug-toggle",
+            daemon=True,
+        ).start()
+        _debug_watcher_started = True
 
 
 def python_log_path() -> Path:
@@ -143,9 +204,11 @@ def configure_logging(
     root = logging.getLogger(LOGGER_NAME)
     if root.handlers:
         apply_log_level(log_level)
+        _ensure_debug_watcher()
         return
     ensure_dirs()
     _silence_third_party()
+    _ensure_debug_watcher()
     root.setLevel(log_level)
     root.propagate = False
 
@@ -158,6 +221,7 @@ def configure_logging(
         )
         fh.setLevel(log_level)
         fh.setFormatter(file_fmt)
+        fh.addFilter(_DeferredDebugFilter())
         root.addHandler(fh)
         reclaim_sudo_ownership(path)
     except OSError:
@@ -168,16 +232,19 @@ def configure_logging(
         err = _FlushStreamHandler(sys.stderr)
         err.setLevel(log_level)
         err.setFormatter(op_fmt)
+        err.addFilter(_DeferredDebugFilter())
         root.addHandler(err)
         return
     out = _FlushStreamHandler(sys.stdout)
     out.setLevel(log_level)
     out.setFormatter(op_fmt)
     out.addFilter(_MaxLevelFilter(logging.INFO))
+    out.addFilter(_DeferredDebugFilter())
     root.addHandler(out)
     err = _FlushStreamHandler(sys.stderr)
     err.setLevel(logging.WARNING)
     err.setFormatter(op_fmt)
+    err.addFilter(_DeferredDebugFilter())
     root.addHandler(err)
 
 
