@@ -164,6 +164,7 @@ max_nesting = 5
 max_elif = 3
 nest_exempt_parts = ["/generators/"]
 target_dirs = ["src"]
+cq016_baseline = 12
 
 [tool.vulture]
 paths = ["src/blockchecks", "vulture-whitelist.py"]

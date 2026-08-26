@@ -1,4 +1,4 @@
-"""AST checks for nesting, elif chains, any/all, mutable defaults, and bare except.
+"""AST checks for nesting, elif chains, any/all, mutable defaults, bare except, and swallow.
 
 Skip with ``# noqa: CQ001`` or ``# noqa: CQ`` on the line (or the previous line).
 generators/ expanders skip nest/elif. Run: ``pytest -m quality``.
@@ -29,9 +29,14 @@ CQ_COLLAPSE = "CQ004"
 CQ_ANYALL = "CQ007"
 CQ_MUTABLE = "CQ008"
 CQ_BARE_EXC = "CQ009"
+CQ_SWALLOW = "CQ016"
 CQ_NEEDLESS_BOOL = "CQ010"
 CQ_FLAG_LOOP = "CQ011"
 CQ_PRINT = "CQ015"
+
+_LOG_CALL_ATTRS = frozenset(
+    {"debug", "info", "warning", "warn", "error", "critical", "exception", "log"}
+)
 
 _PRINT_ALLOW_NAMES = frozenset(
     {
@@ -179,6 +184,7 @@ class CodeQualityVisitor(ast.NodeVisitor):
 
     def visit_Try(self, node: ast.Try) -> None:
         self._check_bare_except(node)
+        self._check_exception_swallow(node)
         # Nested try is often intentional cleanup — not counted.
         self._visit_stmts(node.body)
         for handler in node.handlers:
@@ -293,6 +299,37 @@ class CodeQualityVisitor(ast.NodeVisitor):
             if handler.type is None:
                 self._emit(CQ_BARE_EXC, handler, "bare `except:` — name the exception type")
 
+    def _check_exception_swallow(self, node: ast.Try) -> None:
+        for handler in node.handlers:
+            if handler.type is None:
+                continue
+            has_log_or_raise = _body_has_log_or_raise(handler.body)
+            if has_log_or_raise:
+                continue
+            if not _is_swallow_body(handler.body):
+                continue
+            catches_base = _type_includes_name(handler.type, "BaseException")
+            catches_exc = _type_includes_name(handler.type, "Exception")
+            catches_cancelled = _type_includes_name(handler.type, "CancelledError")
+            if catches_base:
+                self._emit(
+                    CQ_SWALLOW,
+                    handler,
+                    "silent `except BaseException` — re-raise asyncio.CancelledError",
+                )
+            elif catches_cancelled:
+                self._emit(
+                    CQ_SWALLOW,
+                    handler,
+                    "swallowed asyncio.CancelledError — must re-raise",
+                )
+            elif catches_exc:
+                self._emit(
+                    CQ_SWALLOW,
+                    handler,
+                    "silent `except Exception` — log or narrow the type",
+                )
+
     def _check_mutable_defaults(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         for default in (*node.args.defaults, *node.args.kw_defaults):
             if default is None:
@@ -314,6 +351,54 @@ class CodeQualityVisitor(ast.NodeVisitor):
                 t.id.startswith(("has_", "found")) or t.id.endswith("_found")
             ):
                 self._func_flags[t.id] = node.lineno
+
+
+def _type_includes_name(node: ast.expr, name: str) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id == name
+    if isinstance(node, ast.Attribute):
+        return node.attr == name
+    if isinstance(node, ast.Tuple):
+        return any(_type_includes_name(elt, name) for elt in node.elts)
+    return False
+
+
+def _is_swallow_body(stmts: list[ast.stmt]) -> bool:
+    if not stmts:
+        return True
+    if len(stmts) != 1:
+        return False
+    stmt = stmts[0]
+    if isinstance(stmt, ast.Pass):
+        return True
+    if isinstance(stmt, ast.Continue):
+        return True
+    return (
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and stmt.value.value is Ellipsis
+    )
+
+
+def _is_logging_call(node: ast.Call) -> bool:
+    func = node.func
+    if not isinstance(func, ast.Attribute):
+        return False
+    if func.attr not in _LOG_CALL_ATTRS:
+        return False
+    if isinstance(func.value, ast.Name):
+        return True
+    return isinstance(func.value, ast.Attribute) and func.value.attr == "logging"
+
+
+def _body_has_log_or_raise(stmts: list[ast.stmt]) -> bool:
+    for stmt in stmts:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Raise):
+                return True
+            if isinstance(node, ast.Call) and _is_logging_call(node):
+                return True
+    return False
 
 
 def iter_python_files() -> list[Path]:
@@ -350,6 +435,7 @@ def test_ast_code_quality(file_path: Path) -> None:
     except SyntaxError as exc:
         pytest.fail(f"SyntaxError in {file_path.relative_to(PROJECT_ROOT)}: {exc}")
 
+    findings = [f for f in findings if f.code != CQ_SWALLOW]
     if not findings:
         return
 
@@ -362,6 +448,50 @@ def test_ast_code_quality(file_path: Path) -> None:
         ]
     )
     pytest.fail(report)
+
+
+@pytest.mark.unit
+@pytest.mark.quality
+def test_cq016_swallow_baseline_cap() -> None:
+    """CQ016 is capped — fail only when new silent Exception/BaseException handlers appear."""
+    cap = int(_AST_CFG.get("cq016_baseline", 0))
+    total = 0
+    samples: list[str] = []
+    for path in iter_python_files():
+        try:
+            findings = [f for f in analyze_file(path) if f.code == CQ_SWALLOW]
+        except SyntaxError as exc:
+            pytest.fail(f"SyntaxError in {path.relative_to(PROJECT_ROOT)}: {exc}")
+        if not findings:
+            continue
+        total += len(findings)
+        rel = path.relative_to(PROJECT_ROOT)
+        for f in findings:
+            samples.append(f"  {rel}:L{f.lineno} {f.message}")
+
+    if total > cap:
+        report = "\n".join(
+            [
+                f"CQ016 baseline exceeded: {total} finding(s) > cap {cap}",
+                *samples[:40],
+                *(["  ..."] if len(samples) > 40 else []),
+                "Log the exception, narrow the type, re-raise CancelledError, or `# noqa: CQ016`.",
+            ]
+        )
+        pytest.fail(report)
+
+
+@pytest.mark.unit
+@pytest.mark.quality
+def test_cq016_detector_fires_on_samples() -> None:
+    """Synthetic fixture proves CQ016 detects swallow patterns and respects noqa."""
+    fixture = Path(__file__).with_name("fixtures") / "cq016_detector_samples.py"
+    findings = [f for f in analyze_file(fixture) if f.code == CQ_SWALLOW]
+    messages = {f.message for f in findings}
+    assert any("except Exception" in m for m in messages)
+    assert any("CancelledError" in m for m in messages)
+    noqa_lines = {f.lineno for f in findings}
+    assert 33 not in noqa_lines, "noqa: CQ016 should suppress the handler"
 
 
 @pytest.mark.unit
