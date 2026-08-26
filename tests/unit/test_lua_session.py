@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -89,17 +90,60 @@ def test_strategy_text_from_item_config(tmp_path):
 
 
 @pytest.mark.unit
-def test_teardown_all_bridge_shm(tmp_path):
+def test_teardown_all_bridge_shm_scoped_by_prefix(tmp_path):
     shm = tmp_path / "blockchecks"
     shm.mkdir(parents=True)
-    (shm / "x").write_text("", encoding="utf-8")
-    teardown_all_bridge_shm(shm)
-    assert not shm.exists()
+    own = shm / "bs-p-1234-0"
+    other = shm / "bs-p-5678-0"
+    own.mkdir()
+    other.mkdir()
+    (own / "x").write_text("", encoding="utf-8")
+    (other / "y").write_text("", encoding="utf-8")
+
+    teardown_all_bridge_shm(shm, pid=1234)
+
+    assert not own.exists()
+    assert other.is_dir()
+    assert (other / "y").exists()
+
+
+@pytest.mark.unit
+def test_teardown_all_bridge_shm_by_ns_names(tmp_path):
+    shm = tmp_path / "blockchecks"
+    shm.mkdir(parents=True)
+    a = shm / "bs-p-1234-0"
+    b = shm / "bs-p-1234-1"
+    c = shm / "bs-p-5678-0"
+    for d in (a, b, c):
+        d.mkdir()
+        (d / "f").write_text("x", encoding="utf-8")
+
+    teardown_all_bridge_shm(shm, ns_names=["bs-p-1234-0"])
+
+    assert not a.exists()
+    assert b.is_dir()
+    assert c.is_dir()
+
+
+@pytest.mark.unit
+def test_teardown_all_bridge_shm_no_scope_warns(tmp_path, caplog):
+    import logging
+
+    shm = tmp_path / "blockchecks"
+    shm.mkdir(parents=True)
+    leftover = shm / "bs-p-1234-0"
+    leftover.mkdir()
+
+    with caplog.at_level(logging.WARNING):
+        teardown_all_bridge_shm(shm)
+
+    assert leftover.is_dir()
+    assert "skipping SHM cleanup" in caplog.text
 
 
 @pytest.mark.unit
 def test_teardown_all_bridge_shm_missing(tmp_path):
-    teardown_all_bridge_shm(tmp_path / "nope")
+    teardown_all_bridge_shm(tmp_path / "nope", pid=os.getpid())
     assert True
 
 

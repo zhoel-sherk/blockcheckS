@@ -234,5 +234,5 @@ async def run_session(
     finally:
         from blockchecks.service.lua_session import teardown_all_bridge_shm
 
-        teardown_all_bridge_shm()
+        teardown_all_bridge_shm(pid=os.getpid())
         clear_active_run()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from collections.abc import Iterator
@@ -9,7 +10,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from blockchecks.engine.config import SHM_BASE
+from blockchecks.engine.config import NETNS_BASE, SHM_BASE
+
+log = logging.getLogger(__name__)
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.service.lua_bridge_ipc import LuaBridge
 from blockchecks.service.lua_conf import write_bridge_conf
@@ -83,11 +86,70 @@ def strategy_text_from_item(item: StrategyItem) -> str:
     return "\n".join(lines)
 
 
-def teardown_all_bridge_shm(shm_base: Path | None = None) -> None:
-    """Remove all bridge IPC dirs under SHM_BASE (campaign stop cleanup)."""
+def _campaign_shm_prefix(pid: int) -> str:
+    """Netns/IPC dir prefix for a campaign process (matches NetNsPool base)."""
+    return f"{NETNS_BASE}-{pid % 10000:04d}-"
+
+
+def _remove_shm_dir(path: Path, *, context: str) -> None:
+    if not path.exists():
+        return
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        log.warning("IPC rmtree %s failed for %s: %s", context, path, exc)
+        return
+    if path.exists():
+        log.warning("IPC rmtree %s left leftovers at %s", context, path)
+
+
+def teardown_all_bridge_shm(
+    shm_base: Path | None = None,
+    *,
+    ns_names: list[str] | None = None,
+    pid: int | None = None,
+) -> None:
+    """Remove bridge IPC dirs owned by this campaign (scoped cleanup).
+
+    Only deletes directories for the campaign identified by *pid* (prefix
+    ``{NETNS_BASE}-{pid%10000:04d}-``) and/or explicit *ns_names*.  Never
+    removes the entire SHM_BASE tree — other campaigns may share it.
+    """
     base = Path(shm_base or SHM_BASE)
-    if base.is_dir():
-        shutil.rmtree(base, ignore_errors=True)
+    if not base.is_dir():
+        return
+
+    targets: set[Path] = set()
+
+    if ns_names:
+        for ns in ns_names:
+            if ns:
+                targets.add(base / ns)
+
+    resolved_pid = pid
+    if resolved_pid is None:
+        from blockchecks.service.run_control import read_active_run
+
+        info = read_active_run()
+        if info is not None and info.pid == os.getpid():
+            resolved_pid = info.pid
+
+    if resolved_pid is not None:
+        prefix = _campaign_shm_prefix(resolved_pid)
+        for child in base.iterdir():
+            if child.is_dir() and child.name.startswith(prefix):
+                targets.add(child)
+
+    if not targets:
+        log.warning(
+            "teardown_all_bridge_shm: no campaign scope (no pid/lock, no ns_names); "
+            "skipping SHM cleanup under %s",
+            base,
+        )
+        return
+
+    for path in sorted(targets):
+        _remove_shm_dir(path, context="teardown_all_bridge_shm")
 
 
 @contextmanager

@@ -279,3 +279,24 @@ def test_register_same_pid_replaces_lock(run_lock_file):
     info = read_active_run()
     assert info is not None
     assert info.db_path == "logs/b.db"
+
+
+@pytest.mark.asyncio
+async def test_run_session_teardown_scoped_shm(run_lock_file, monkeypatch):
+    from blockchecks.service.run_control import run_session
+
+    removed: list[dict] = []
+
+    def fake_teardown(*, shm_base=None, ns_names=None, pid=None):
+        removed.append({"pid": pid, "ns_names": ns_names, "shm_base": shm_base})
+
+    monkeypatch.setattr(
+        "blockchecks.service.lua_session.teardown_all_bridge_shm",
+        fake_teardown,
+    )
+
+    async with run_session("full", db_path="logs/x.db"):
+        assert read_active_run() is not None
+
+    assert removed == [{"pid": os.getpid(), "ns_names": None, "shm_base": None}]
+    assert read_active_run() is None
