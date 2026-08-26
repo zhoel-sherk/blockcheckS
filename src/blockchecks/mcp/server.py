@@ -677,9 +677,13 @@ async def query_strategies(
     if proto_key not in ("tcp", "udp"):
         raise ValueError(f"Invalid proto '{proto}'. Allowed: tcp, udp")
 
-    statuses = (
-        ("PASS", "THROTTLED") if status_key in ("PASS", "THROTTLED", "ALL") else (status_key,)
-    )
+    _status_filters: dict[str, tuple[str, ...]] = {
+        "PASS": ("PASS",),
+        "THROTTLED": ("THROTTLED",),
+        "FAIL": ("FAIL",),
+        "ALL": ("PASS", "THROTTLED"),
+    }
+    statuses = _status_filters[status_key]
     limit = max(1, min(int(limit), 100))
 
     def _query() -> list[dict[str, Any]]:

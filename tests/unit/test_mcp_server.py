@@ -470,6 +470,68 @@ async def test_query_strategies_returns_top_by_latency(tmp_path):
     assert result[0]["status"] == "PASS"
 
 
+async def test_query_strategies_pass_excludes_throttled(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "throttled.db"
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE strategies (id INTEGER PRIMARY KEY, name TEXT, proto TEXT, flags TEXT)"
+    )
+    con.execute(
+        "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, "
+        "domain TEXT, status TEXT, http_code INTEGER, latency_ms REAL, "
+        "timestamp TEXT, fail_phase TEXT, probe_host TEXT DEFAULT '')"
+    )
+    con.executemany(
+        "INSERT INTO strategies (name, proto) VALUES (?,?)",
+        [("fast_pass", "tcp"), ("slow_throttled", "tcp")],
+    )
+    con.executemany(
+        "INSERT INTO tcp_results (strategy_id, domain, status, http_code, latency_ms, timestamp, fail_phase) VALUES (?,?,?,?,?,?,?)",
+        [
+            (1, "a.com", "PASS", 200, 50.0, "2026-08-16T10:00:00", ""),
+            (2, "a.com", "THROTTLED", 429, 90.0, "2026-08-16T10:00:01", ""),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    from blockchecks.mcp.server import query_strategies
+
+    result = await query_strategies("a.com", status="PASS", limit=10, db_path=str(db))
+    assert len(result) == 1
+    assert result[0]["strategy"] == "fast_pass"
+    assert result[0]["status"] == "PASS"
+
+
+async def test_query_strategies_throttled_only(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "throttled_only.db"
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE strategies (id INTEGER PRIMARY KEY, name TEXT, proto TEXT, flags TEXT)"
+    )
+    con.execute(
+        "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, "
+        "domain TEXT, status TEXT, http_code INTEGER, latency_ms REAL, "
+        "timestamp TEXT, fail_phase TEXT, probe_host TEXT DEFAULT '')"
+    )
+    con.execute("INSERT INTO strategies (name, proto) VALUES ('slow_throttled', 'tcp')")
+    con.execute(
+        "INSERT INTO tcp_results (strategy_id, domain, status, http_code, latency_ms, timestamp, fail_phase) VALUES (1,'a.com','THROTTLED',429,90.0,'2026-08-16','')"
+    )
+    con.commit()
+    con.close()
+
+    from blockchecks.mcp.server import query_strategies
+
+    result = await query_strategies("a.com", status="THROTTLED", limit=10, db_path=str(db))
+    assert len(result) == 1
+    assert result[0]["status"] == "THROTTLED"
+
+
 async def test_query_strategies_fail_status(tmp_path):
     db = tmp_path / "run_A_base.db"
     _make_full_db(db)

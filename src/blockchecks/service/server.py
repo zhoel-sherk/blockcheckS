@@ -9,6 +9,7 @@ import logging
 import os
 import signal
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,77 @@ def _merge_top_strategies(rows: list[dict[str, Any]], *, limit: int = 20) -> lis
         if float(row.get("latency_ms") or 0) < float(prev.get("latency_ms") or 0):
             best[key] = row
     return sorted(best.values(), key=lambda r: float(r.get("latency_ms") or 0))[:limit]
+
+
+_STOCK_TCP_STRATEGIES = ["fake:blob=stun:repeats=6:tcp_ts=-1000"]
+_STOCK_UDP_STRATEGIES = ["fake:blob=discord_udp:repeats=6"]
+
+
+def _campaign_db_path(store: Any) -> Path | None:
+    """Resolve read-only campaign DB: store.path, run.lock, else XDG default."""
+    from blockchecks.engine.paths import DEFAULT_DB_PATH
+    from blockchecks.service.run_control import read_active_run
+
+    if store is not None:
+        raw = getattr(store, "path", None) or getattr(store, "db_path", None)
+        if raw:
+            return Path(raw)
+    info = read_active_run()
+    if info and info.db_path:
+        p = Path(info.db_path)
+        if not p.is_absolute() and info.cwd:
+            candidate = Path(info.cwd) / p
+            if candidate.is_file():
+                return candidate.resolve()
+        if p.is_file():
+            return p.resolve()
+    default = Path(DEFAULT_DB_PATH)
+    return default if default.is_file() else None
+
+
+async def _pass_strategies_for_router_config(store: Any) -> tuple[list[str], list[str]]:
+    """Top PASS strategies for nfconf export; stock fallback when DB is empty."""
+    import sqlite3
+
+    tcp_strats: list[str] = []
+    udp_strats: list[str] = []
+    path = _campaign_db_path(store)
+    if path is not None:
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
+            cur = con.cursor()
+            tcp_rows = cur.execute(
+                """SELECT s.name FROM strategies s
+                   JOIN tcp_results t ON t.strategy_id = s.id
+                   WHERE s.proto='tcp' AND t.status='PASS'
+                   GROUP BY s.name
+                   ORDER BY COUNT(DISTINCT t.domain) DESC, AVG(t.latency_ms) ASC
+                   LIMIT 5"""
+            ).fetchall()
+            tcp_strats = [r[0] for r in tcp_rows]
+            try:
+                udp_rows = cur.execute(
+                    """SELECT s.name FROM strategies s
+                       JOIN udp_results u ON u.strategy_id = s.id
+                       WHERE s.proto='udp' AND u.status='PASS'
+                       GROUP BY s.name
+                       ORDER BY COUNT(DISTINCT u.target) DESC, AVG(u.latency_ms) ASC
+                       LIMIT 2"""
+                ).fetchall()
+                udp_strats = [r[0] for r in udp_rows]
+            except sqlite3.Error as err:
+                log.warning("generate_config UDP query failed: %s", err)
+            con.close()
+        except sqlite3.Error as err:
+            log.warning("generate_config DB read failed: %s", err)
+
+    if not tcp_strats:
+        log.warning("generate_config: no TCP PASS rows; using stock fake stun")
+        tcp_strats = list(_STOCK_TCP_STRATEGIES)
+    if not udp_strats:
+        log.warning("generate_config: no UDP PASS rows; using stock discord_udp")
+        udp_strats = list(_STOCK_UDP_STRATEGIES)
+    return tcp_strats, udp_strats
 
 
 def _tap_runner_passes(runner: Any, sink: list[dict[str, Any]]):
@@ -427,9 +499,7 @@ class ProbeServer:
         try:
             from blockchecks.engine.conf_builder import build_keenetic_conf, build_raw_conf
 
-            # Best-known-pass strategies fallback (offline, no daemon scan).
-            tcp = ["fake:blob=stun:repeats=6:tcp_ts=-1000"]
-            udp = ["fake:blob=discord_udp:repeats=6"]
+            tcp, udp = await _pass_strategies_for_router_config(self.service.db)
             if target_os == "keenetic":
                 content = build_keenetic_conf(
                     tcp_strategies=tcp, udp_strategies=udp, domains=domains
@@ -473,7 +543,8 @@ class ProbeServer:
         try:
             from blockchecks.service.lua_bridge_ipc import LuaBridge
 
-            bridge = LuaBridge("bs-mcp-dbg")
+            ipc_name = f"bs-mcp-dbg-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+            bridge = LuaBridge(ipc_name)
             bridge.setup()
             try:
                 events = bridge.drain_events()

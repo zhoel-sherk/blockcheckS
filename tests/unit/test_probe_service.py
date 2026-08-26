@@ -296,3 +296,84 @@ def test_read_http_request_rejects_negative_content_length():
         assert exc.value.status_code == 400
 
     asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_generate_config_uses_db_pass_strategies(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = tmp_path / "gen_cfg.db"
+    con = sqlite3.connect(str(db))
+    con.execute("CREATE TABLE strategies (id INTEGER PRIMARY KEY, name TEXT, proto TEXT)")
+    con.execute(
+        "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, domain TEXT, "
+        "status TEXT, latency_ms REAL)"
+    )
+    con.execute(
+        "CREATE TABLE udp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, target TEXT, "
+        "status TEXT, latency_ms REAL)"
+    )
+    con.execute("INSERT INTO strategies VALUES (1, 'db_tcp_winner', 'tcp')")
+    con.execute("INSERT INTO strategies VALUES (2, 'db_udp_winner', 'udp')")
+    con.execute("INSERT INTO tcp_results VALUES (1, 1, 'a.com', 'PASS', 80.0)")
+    con.execute("INSERT INTO tcp_results VALUES (2, 1, 'b.com', 'PASS', 90.0)")
+    con.execute("INSERT INTO udp_results VALUES (1, 2, 'voice:50000', 'PASS', 40.0)")
+    con.commit()
+    con.close()
+
+    import blockchecks.service.server as srv
+
+    monkeypatch.setattr(srv, "_campaign_db_path", lambda _store: db)
+
+    svc = ProbeService(pool_size=2)
+    server = ProbeServer(svc, socket_path="/tmp/bs_test_gen_cfg.sock")
+
+    async def run():
+        resp = await server.handle_request(
+            {"cmd": "generate_config", "target_os": "linux", "domains": ["a.com"]}
+        )
+        assert resp["status"] == "ok"
+        content = resp["config_content"]
+        assert "db_tcp_winner" in content
+        assert "db_udp_winner" in content
+        assert "fake:blob=stun:repeats=6:tcp_ts=-1000" not in content
+
+    asyncio.run(run())
+
+
+@pytest.mark.unit
+def test_dbg_inspect_lua_uses_unique_ipc_dir(monkeypatch):
+    import blockchecks.service.lua_bridge_ipc as ipc
+
+    created: list[str] = []
+
+    class FakeBridge:
+        def __init__(self, ns_name: str) -> None:
+            created.append(ns_name)
+
+        def setup(self) -> None:
+            pass
+
+        def drain_events(self) -> list:
+            return []
+
+        def teardown(self) -> None:
+            pass
+
+    monkeypatch.setattr(ipc, "LuaBridge", FakeBridge)
+
+    svc = ProbeService(pool_size=2)
+    server = ProbeServer(svc, socket_path="/tmp/bs_test_dbg_ipc.sock")
+
+    async def run():
+        await server.handle_request(
+            {"cmd": "dbg_inspect_lua", "domain": "a.com", "strategy": "fake:blob=stun"}
+        )
+        await server.handle_request(
+            {"cmd": "dbg_inspect_lua", "domain": "b.com", "strategy": "fake:blob=stun"}
+        )
+
+    asyncio.run(run())
+    assert len(created) == 2
+    assert created[0] != created[1]
+    assert all(name.startswith("bs-mcp-dbg-") for name in created)
