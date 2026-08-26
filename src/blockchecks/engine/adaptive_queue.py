@@ -6,8 +6,9 @@ import heapq
 import random
 import re
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
-from functools import cache
+from functools import cache, lru_cache
 from typing import TYPE_CHECKING
 
 from blockchecks.engine.family_needs import classify_strategy_family
@@ -27,6 +28,7 @@ _GOOGLE_RE = re.compile(r"google|gstatic|googleapis|ggpht|googleusercontent", re
 _YOUTUBE_RE = re.compile(r"youtube|googlevideo|ytimg|youtu\.be", re.I)
 
 
+@lru_cache(maxsize=4096)
 def cluster_domain(domain: str) -> str:
     """Map FQDN to coarse cluster (AQ3)."""
     d = domain.lower().split("/")[0].strip(".")
@@ -39,9 +41,24 @@ def cluster_domain(domain: str) -> str:
     return CLUSTER_GENERAL
 
 
-def sibling_domains(domain: str, all_domains: list[str]) -> list[str]:
+def _cluster_domain_index(domains: list[str]) -> dict[str, list[str]]:
+    """Precompute cluster → member domains (PERF-5)."""
+    idx: dict[str, list[str]] = defaultdict(list)
+    for d in domains:
+        idx[cluster_domain(d)].append(d)
+    return dict(idx)
+
+
+def sibling_domains(
+    domain: str,
+    all_domains: list[str],
+    *,
+    cluster_index: dict[str, list[str]] | None = None,
+) -> list[str]:
     """Same-cluster domains except *domain* (AQ2)."""
     cluster = cluster_domain(domain)
+    if cluster_index is not None:
+        return [d for d in cluster_index.get(cluster, ()) if d != domain]
     return [d for d in all_domains if d != domain and cluster_domain(d) == cluster]
 
 
@@ -339,8 +356,10 @@ class AdaptiveJobQueue:
         self._seq = 0
         self._heap: list[_HeapEntry] = []
         self._pending: dict[tuple[str, str], AdaptiveJob] = {}
+        self._by_label: dict[str, set[tuple[str, str]]] = defaultdict(set)
         self._done: set[tuple[str, str]] = set()
         self._all_domains: list[str] = []
+        self._cluster_index: dict[str, list[str]] = {}
         #: HARD exclusions (e.g. quarantined domains): jobs on these domains are
         #: dropped on pop and never enqueued by fan-out. Unlike the soft
         #: ``exclude_domains`` argument (other workers' active domains), hard
@@ -349,23 +368,70 @@ class AdaptiveJobQueue:
         self.metrics = AdaptiveMetrics()
         self._heap_rebuild_every: int = 0
         self._heap_rebuild_counter: int = 0
+        self._rebuild_heap_calls: int = 0
 
     def __len__(self) -> int:
         return len(self._pending)
+
+    def _job_priority(self, job: AdaptiveJob) -> float:
+        return self.weights.get(job.family, job.blobs, job.traits)
+
+    def _push_heap(self, key: tuple[str, str], priority: float) -> None:
+        self._seq += 1
+        heapq.heappush(self._heap, _HeapEntry(-priority, self._seq, key))
+
+    def _drop_pending(self, key: tuple[str, str]) -> AdaptiveJob | None:
+        job = self._pending.pop(key, None)
+        if job is not None:
+            self._by_label[job.item.label].discard(key)
+        return job
+
+    def _entry_stale(self, entry: _HeapEntry, job: AdaptiveJob) -> bool:
+        return entry.neg_priority != -self._job_priority(job)
+
+    def _refresh_stale_entry(self, job: AdaptiveJob) -> None:
+        self._push_heap(job.key, self._job_priority(job))
+
+    def _maybe_compact_heap(self) -> None:
+        """Rebuild when lazy tombstones dominate (optional safety valve)."""
+        pending_n = len(self._pending)
+        if pending_n and len(self._heap) > pending_n * 2 + 512:
+            self._rebuild_heap()
 
     def enqueue(self, job: AdaptiveJob) -> bool:
         """Add job if not pending/done. Returns True if added."""
         if job.key in self._pending or job.key in self._done:
             return False
-        priority = self.weights.get(job.family, job.blobs, job.traits)
-        self._seq += 1
+        priority = self._job_priority(job)
         self._pending[job.key] = job
-        heapq.heappush(self._heap, _HeapEntry(-priority, self._seq, job.key))
+        self._by_label[job.item.label].add(job.key)
+        self._push_heap(job.key, priority)
         self.metrics.total_enqueued += 1
         return True
 
     def enqueue_many(self, jobs: list[AdaptiveJob]) -> int:
         return sum(1 for j in jobs if self.enqueue(j))
+
+    def _epsilon_pick_key(self, exclude: set[str]) -> tuple[str, str] | None:
+        """Reservoir-sample one pending key without building an eligible list (PERF-4)."""
+        chosen: tuple[str, str] | None = None
+        count = 0
+        for key, job in self._pending.items():
+            if job.domain in exclude:
+                continue
+            count += 1
+            if self._rng.randint(1, count) == 1:
+                chosen = key
+        if count:
+            return chosen
+        count = 0
+        for key, job in self._pending.items():
+            if job.domain in self.excluded_domains:
+                continue
+            count += 1
+            if self._rng.randint(1, count) == 1:
+                chosen = key
+        return chosen
 
     def pop(self, exclude_domains: set[str] | None = None) -> AdaptiveJob | None:
         """Pop next job (highest priority or ε-random).
@@ -380,17 +446,10 @@ class AdaptiveJobQueue:
         exclude = set(exclude_domains or ()) | self.excluded_domains
 
         if self.epsilon > 0 and self._rng.random() < self.epsilon and len(self._pending) > 1:
-            eligible = [k for k in self._pending if self._pending[k].domain not in exclude]
-            if not eligible:
-                eligible = [
-                    k
-                    for k in self._pending
-                    if self._pending[k].domain not in self.excluded_domains
-                ]
-            if not eligible:
+            key = self._epsilon_pick_key(exclude)
+            if key is None:
                 return None
-            key = self._rng.choice(eligible)
-            return self._pending.pop(key)
+            return self._drop_pending(key)
 
         skipped: list[_HeapEntry] = []
         while self._heap:
@@ -398,15 +457,18 @@ class AdaptiveJobQueue:
             job = self._pending.get(entry.key)
             if job is None:
                 continue
+            if self._entry_stale(entry, job):
+                self._refresh_stale_entry(job)
+                continue
             if job.domain in self.excluded_domains:
                 # Quarantined (or otherwise hard-excluded): discard forever.
                 self._done.add(job.key)
-                self._pending.pop(job.key)
+                self._drop_pending(job.key)
                 continue
             if job.domain in exclude:
                 skipped.append(entry)
                 continue
-            self._pending.pop(entry.key)
+            self._drop_pending(job.key)
             if skipped:
                 for e in skipped:
                     heapq.heappush(self._heap, e)
@@ -414,7 +476,7 @@ class AdaptiveJobQueue:
         # everything soft-excluded — allow any pending job that is not hard-excluded
         while skipped:
             entry = heapq.heappop(skipped)
-            job = self._pending.pop(entry.key, None)
+            job = self._drop_pending(entry.key)
             if job is not None:
                 for e in skipped:
                     heapq.heappush(self._heap, e)
@@ -437,19 +499,30 @@ class AdaptiveJobQueue:
     def mark_done(self, job: AdaptiveJob, *, passed: bool) -> int:
         """Mark job complete; on PASS boost strategy genetics + fan-out (AQ2/AQ4)."""
         self._done.add(job.key)
-        self._pending.pop(job.key, None)
+        self._drop_pending(job.key)
         self.metrics.record_run(passed=passed)
         if not passed:
+            self._maybe_compact_heap()
             return 0
         self.weights.boost_pass(job.family, job.blobs, job.traits)
         self._maybe_rebuild_heap()
+        self._maybe_compact_heap()
         return self.fanout_on_pass(job)
+
+    def _cluster_index_for_fanout(self) -> dict[str, list[str]]:
+        if not self._cluster_index and self._all_domains:
+            self._cluster_index = _cluster_domain_index(self._all_domains)
+        return self._cluster_index
 
     def fanout_on_pass(self, job: AdaptiveJob) -> int:
         """Enqueue same strategy on sibling domains in the same cluster (AQ2)."""
         if not self._all_domains:
             return 0
-        siblings = sibling_domains(job.domain, self._all_domains)
+        siblings = sibling_domains(
+            job.domain,
+            self._all_domains,
+            cluster_index=self._cluster_index_for_fanout(),
+        )
         added = 0
         for dom in siblings:
             if dom in self.excluded_domains:
@@ -461,12 +534,9 @@ class AdaptiveJobQueue:
         return added
 
     def _rebuild_heap(self) -> None:
+        self._rebuild_heap_calls += 1
         self._heap = [
-            _HeapEntry(
-                -self.weights.get(job.family, job.blobs, job.traits),
-                self._seq + i,
-                key,
-            )
+            _HeapEntry(-self._job_priority(job), self._seq + i, key)
             for i, (key, job) in enumerate(self._pending.items())
         ]
         self._seq += len(self._heap)
@@ -485,13 +555,18 @@ class AdaptiveJobQueue:
         """Seed queue with full strategy × domain matrix."""
         q = cls(weights=weights, epsilon=epsilon, seed=seed)
         q._all_domains = list(domains)
+        q._cluster_index = _cluster_domain_index(domains)
         jobs = [AdaptiveJob.from_item(item, dom) for item in items for dom in domains]
         q.enqueue_many(jobs)
         q.metrics.set_half_mark(len(jobs))
         return q
 
     def pending_domains_for_strategy(self, label: str) -> list[str]:
-        return [j.domain for j in self._pending.values() if j.item.label == label]
+        return [
+            self._pending[k].domain
+            for k in self._by_label.get(label, ())
+            if k in self._pending
+        ]
 
     def pop_batch(
         self,
@@ -522,11 +597,10 @@ class AdaptiveJobQueue:
             if not profiles_compatible(prof, p2):
                 continue
             key = (first.item.label, dom)
-            job = self._pending.pop(key, None)
+            job = self._drop_pending(key)
             if job is not None:
                 batch.append(job)
-        if len(batch) > 1:
-            self._rebuild_heap()
+        self._maybe_compact_heap()
         return batch
 
     async def filter_resume(self, check, *, chunk_size: int = 512) -> int:
@@ -554,8 +628,8 @@ class AdaptiveJobQueue:
                 continue
             if key in self._pending:
                 self._done.add(key)
-                del self._pending[key]
+                self._drop_pending(key)
                 skipped += 1
         if skipped:
-            self._rebuild_heap()
+            self._maybe_compact_heap()
         return skipped

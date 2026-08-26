@@ -71,6 +71,44 @@ def test_epsilon_random_explores():
     assert len(seen) == 5
 
 
+def test_epsilon_pop_returns_pending_job():
+    """ε=1.0 must still return a pending job without building eligible lists (PERF-4)."""
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue.build([item], ["discord.com", "discord.gg"], epsilon=1.0, seed=7)
+    job = q.pop()
+    assert job is not None
+    assert job.domain in {"discord.com", "discord.gg"}
+
+
+def test_pop_batch_skips_full_heap_rebuild(monkeypatch):
+    """pop_batch must not O(n)-rebuild heap after every multi-domain batch (PERF-2)."""
+    items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
+    domains = ["discord.com", "discord.gg", "discord.media"]
+    q = AdaptiveJobQueue.build(items, domains, epsilon=0.0, seed=1)
+    rebuild_calls = 0
+    orig = q._rebuild_heap
+
+    def spy_rebuild() -> None:
+        nonlocal rebuild_calls
+        rebuild_calls += 1
+        orig()
+
+    monkeypatch.setattr(q, "_rebuild_heap", spy_rebuild)
+    batch = q.pop_batch(max_size=3)
+    assert len(batch) >= 2
+    assert rebuild_calls == 0
+    q.mark_done(batch[0], passed=True)
+    assert rebuild_calls == 0
+
+
+def test_cluster_domain_lru_cache():
+    cluster_domain.cache_clear()
+    cluster_domain("discord.com")
+    before = cluster_domain.cache_info().hits
+    cluster_domain("discord.com")
+    assert cluster_domain.cache_info().hits == before + 1
+
+
 @pytest.mark.asyncio
 async def test_scan_weights_db_roundtrip(temp_db):
 
