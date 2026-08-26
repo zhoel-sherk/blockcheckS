@@ -161,16 +161,16 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install package
         run: pip install -e ".[mcp,dev]"
-      - name: Integration (requires real nfqws2 + netns on host)
+      - name: Integration (requires probe host with nfqws2 + sudo + netns)
         run: |
-          # The integration suite needs a probe host with nfqws2 + sudo + netns
-          # (LLC Fiord network). GitHub runners lack these, so we can only run
-          # the subset that is safe without them; the rest run manually via:
-          #   bash dev/release_smoke.sh  (probe host, sudo)
+          # QA-2: без nfqws2 джоба падает ГРОМКО (раньше — тихий exit 0,
+          # и регрессии netns/nfqws2 проходили CI незамеченными).
+          # Полноценный прогон — на self-hosted runner с меткой [probe]:
+          #   см. docs/ci-selfhosted.md (настройка раннера на Fiord-хосте).
           if ! command -v nfqws2 >/dev/null 2>&1; then
-            echo "nfqws2 not present on runner — run tests/integration on the probe host:"
-            echo "  sudo bash dev/release_smoke.sh"
-            exit 0
+            echo "::error::nfqws2 not found on runner. Integration suite MUST run" \
+                 "on a probe host (label [probe]) or via dev/release_smoke.sh manually."
+            exit 1
           fi
           python -m pytest tests/integration -m integration -q --timeout=600
 
