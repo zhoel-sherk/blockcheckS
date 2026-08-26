@@ -48,16 +48,14 @@ def test_run_config_not_found(tmp_path):
 def test_run_invalid_domain_records_fail(tmp_path):
     conf = tmp_path / "c.conf"
     conf.write_text("--qnum=200\n")
-    runner = AsyncMock()
-    runner.start = AsyncMock()
-    runner.stop = AsyncMock()
     pool = AsyncMock()
     pool.acquire = AsyncMock(return_value="ns1")
     pool.release = AsyncMock()
-    runner.pool = pool
     with (
-        patch("blockchecks.checkers.composite_runner.AsyncTestRunner", return_value=runner),
-        patch("blockchecks.checkers.composite_runner.get_ns_firewall") as get_fw,
+        patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool),
+        patch("blockchecks.engine.composite_runner._start_pool", new=AsyncMock()),
+        patch("blockchecks.engine.composite_runner._stop_pool", new=AsyncMock()),
+        patch("blockchecks.engine.composite_runner.get_ns_firewall") as get_fw,
     ):
         get_fw.return_value = MagicMock()
         rc = asyncio.run(run(str(conf), ["not a domain", "discord.com"]))
@@ -68,29 +66,25 @@ def test_run_invalid_domain_records_fail(tmp_path):
 def test_run_success(tmp_path):
     conf = tmp_path / "c.conf"
     conf.write_text("--qnum=200\n")
-    runner = AsyncMock()
-    runner.start = AsyncMock()
-    runner.stop = AsyncMock()
     pool = AsyncMock()
     pool.acquire = AsyncMock(return_value="ns1")
     pool.release = AsyncMock()
-    runner.pool = pool
     data = {"success": True, "http_code": 200, "latency_ms": 50, "error": ""}
     with (
-        patch("blockchecks.checkers.composite_runner.AsyncTestRunner", return_value=runner),
-        patch("blockchecks.checkers.composite_runner.start_daemon", new=MagicMock()),
+        patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool),
+        patch("blockchecks.engine.composite_runner._start_pool", new=AsyncMock()),
+        patch("blockchecks.engine.composite_runner._stop_pool", new=AsyncMock()),
+        patch("blockchecks.engine.composite_runner.start_daemon", new=MagicMock()),
         patch(
-            "blockchecks.checkers.composite_runner.invoke_curl_probe_worker",
+            "blockchecks.engine.composite_runner.invoke_curl_probe_worker",
             return_value=data,
         ),
-        patch("blockchecks.checkers.composite_runner.get_ns_firewall") as get_fw,
+        patch("blockchecks.engine.composite_runner.get_ns_firewall") as get_fw,
     ):
         fw = MagicMock()
         get_fw.return_value = fw
         rc = asyncio.run(run(str(conf), ["discord.com"], timeout=3.0))
     assert rc == 0
     assert fw.attach.call_count == 2
-    runner.start.assert_awaited_once()
-    runner.stop.assert_awaited_once()
     pool.acquire.assert_awaited_once()
     pool.release.assert_awaited_once()

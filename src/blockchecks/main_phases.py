@@ -360,9 +360,9 @@ def print_full_run_banner(ctx: FullRunContext) -> None:
 
 async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> int | None:
     args = ctx.args
-    from blockchecks.cli.commands.pair_phases import _resume_generate_triage
+    from blockchecks.engine.resume_triage import resume_generate_triage
 
-    gen_triage = await _resume_generate_triage(args, ctx.db)
+    gen_triage = await resume_generate_triage(args, ctx.db)
     log.info("%s", f"\n  {CYAN}[1/{ctx.steps}] Generating strategies...{RESET}")
     if not ctx.skip_tcp_tls:
         ctx.tcp_items = await gen.generate_tcp(

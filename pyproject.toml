@@ -142,7 +142,7 @@ ignore-variadic-names = true
 "src/blockchecks/engine/async_runner.py" = ["E402"]
 "src/blockchecks/engine/byedpi_matrix_generator.py" = ["C901", "ARG"]
 "src/blockchecks/engine/generators/*.py" = ["C901", "ARG"]
-"src/blockchecks/checkers/composite_runner.py" = ["E402"]
+"src/blockchecks/engine/composite_runner.py" = ["E402"]
 "tests/**" = ["ARG"]
 "tests/conftest.py" = ["E402", "ARG"]
 
@@ -233,12 +233,18 @@ also_copy = [
 ]
 do_not_mutate_patterns = ["logger\\.", "raise "]
 [tool.blockchecks.architecture]
+# ARC-2 follow-up: move in_ns_workers/test_runner to service (engine→service still allowed).
 package = "blockchecks"
 
 [[tool.blockchecks.architecture.rules]]
 name = "checkers_no_cli"
 match = "blockchecks.checkers*"
 should_not_import = ["blockchecks.cli*"]
+
+[[tool.blockchecks.architecture.rules]]
+name = "checkers_no_async_runner"
+match = "blockchecks.checkers*"
+should_not_import = ["blockchecks.engine.async_runner"]
 
 [[tool.blockchecks.architecture.rules]]
 name = "store_leaf"
@@ -258,6 +264,11 @@ should_not_import = ["blockchecks.cli*", "blockchecks.checkers*"]
 [[tool.blockchecks.architecture.rules]]
 name = "engine_no_cli"
 match = "blockchecks.engine*"
+should_not_import = ["blockchecks.cli*"]
+
+[[tool.blockchecks.architecture.rules]]
+name = "main_no_cli"
+match = "blockchecks.main*"
 should_not_import = ["blockchecks.cli*"]
 
 [[tool.blockchecks.architecture.rules]]
