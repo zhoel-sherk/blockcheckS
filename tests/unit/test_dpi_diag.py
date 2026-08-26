@@ -48,6 +48,17 @@ def test_sni_whitelist_injectable():
     assert hits == ["ya.ru"]
 
 
+def test_l4_25_handshake_failure_inconclusive(monkeypatch):
+    def _fail(*_a, **_k):
+        raise OSError("connection timed out")
+
+    monkeypatch.setattr("blockchecks.checkers.dpi_diag.probes.socket.create_connection", _fail)
+    l4 = probe_l4_25("h", ip="1.1.1.1")
+    assert l4["ok"] is False
+    assert l4["detected"] is None
+    assert l4["packets"] == 0
+
+
 def test_fat_l4_siberian_cidr_hooks():
     fat = probe_fat_keepalive("h", "1.1.1.1", request_fn=lambda i: i < 3, chunks=5, pad=100)
     assert fat == {"ok": False, "detected": True, "stall_at_bytes": 300}

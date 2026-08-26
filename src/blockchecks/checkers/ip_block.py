@@ -61,7 +61,24 @@ def run_ip_block_cross_test(
     unblocked = unblocked_domain or UNBLOCKED_DOM
     report = IpBlockReport(blocked_domain=blocked_domain, unblocked_domain=unblocked)
 
-    baseline = check_tls(unblocked, timeout=timeout, verify_content=False)
+    cache = dns_cache or DnsRunCache(doh_server=pick_working_doh(timeout=timeout))
+    report.unblocked_ip = cache.primary_ip(unblocked) or ""
+    if not report.unblocked_ip:
+        log.warning(
+            "%s",
+            f"IP-block cross-test: {unblocked} does not resolve via DoH; "
+            "skipping (no unpinned system-DNS baseline)",
+        )
+        report.skipped = True
+        report.skip_reason = f"{unblocked} does not resolve via DoH"
+        return report
+
+    baseline = check_tls(
+        unblocked,
+        timeout=timeout,
+        verify_content=False,
+        pre_resolved_ip=report.unblocked_ip,
+    )
     report.baseline_ok = baseline.success
     if not baseline.success:
         report.skipped = True
@@ -70,14 +87,7 @@ def run_ip_block_cross_test(
         )
         return report
 
-    cache = dns_cache or DnsRunCache(doh_server=pick_working_doh(timeout=timeout))
-    report.unblocked_ip = cache.primary_ip(unblocked) or ""
     report.blocked_ips = cache.resolve(blocked_domain, timeout=timeout)
-
-    if not report.unblocked_ip:
-        report.skipped = True
-        report.skip_reason = f"{unblocked} does not resolve via DoH"
-        return report
 
     report.probes.append(
         _probe(

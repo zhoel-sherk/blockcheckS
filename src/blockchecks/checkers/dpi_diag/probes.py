@@ -149,7 +149,7 @@ def probe_l4_25(
         raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         sock = ssl._create_unverified_context().wrap_socket(raw, server_hostname=host)
     except (TimeoutError, OSError, ssl.SSLError) as exc:
-        return {"ok": True, "detected": False, "packets": 0, "error": str(exc)}
+        return {"ok": False, "detected": None, "packets": 0, "error": str(exc)}
     packets = 0
     try:
         for i in range(0, len(body), chunk):

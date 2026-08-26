@@ -14,10 +14,34 @@ def _tls(ok: bool, code: int = 200) -> TlsResult:
 
 @pytest.mark.unit
 def test_skips_when_baseline_fails():
-    with patch("blockchecks.checkers.ip_block.check_tls", return_value=_tls(False, 0)):
+    with (
+        patch(
+            "blockchecks.checkers.ip_block.DnsRunCache.primary_ip",
+            return_value="93.184.216.34",
+        ),
+        patch("blockchecks.checkers.ip_block.check_tls", return_value=_tls(False, 0)),
+    ):
         r = run_ip_block_cross_test("discord.com", unblocked_domain="iana.org")
     assert r.skipped
     assert "baseline failed" in r.skip_reason
+
+
+@pytest.mark.unit
+def test_skips_when_doh_unresolved():
+    with patch("blockchecks.checkers.ip_block.DnsRunCache.primary_ip", return_value=""):
+        r = run_ip_block_cross_test("discord.com", unblocked_domain="iana.org")
+    assert r.skipped
+    assert "does not resolve via DoH" in r.skip_reason
+
+
+@pytest.mark.unit
+def test_baseline_uses_doh_pinned_ip():
+    cache = MagicMock()
+    cache.primary_ip.return_value = "93.184.216.34"
+    cache.resolve.return_value = []
+    with patch("blockchecks.checkers.ip_block.check_tls", return_value=_tls(True)) as mock_tls:
+        run_ip_block_cross_test("blocked.com", "ref.com", dns_cache=cache)
+    assert mock_tls.call_args_list[0].kwargs.get("pre_resolved_ip") == "93.184.216.34"
 
 
 @pytest.mark.unit
@@ -49,8 +73,10 @@ def test_baseline_fail_skips():
     from blockchecks.checkers.ip_block import run_ip_block_cross_test
 
     baseline = TlsResult(domain="ref.com", success=False, error="timeout")
+    cache = MagicMock()
+    cache.primary_ip.return_value = "1.2.3.4"
     with patch("blockchecks.checkers.ip_block.check_tls", return_value=baseline):
-        report = run_ip_block_cross_test("blocked.com", "ref.com")
+        report = run_ip_block_cross_test("blocked.com", "ref.com", dns_cache=cache)
     assert report.skipped
     assert "baseline failed" in report.skip_reason
 

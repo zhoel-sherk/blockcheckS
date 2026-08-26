@@ -11,13 +11,14 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from blockchecks.engine.config import ZAPRET2_ROOT
+from blockchecks.engine.config import REPO_BLOBS_DIR, ZAPRET2_ROOT
 from blockchecks.engine.fail_phase import FailPhase
 
 log = logging.getLogger(__name__)
 
 # Baked QUIC Initial blobs (prefer a real ClientHello for realistic DPI trigger).
 _QUIC_BLOB_CANDIDATES = (
+    Path(REPO_BLOBS_DIR) / "quic_initial_www_google_com.bin",
     Path(ZAPRET2_ROOT) / "blobs" / "quic_initial_www_google_com.bin",
     Path(ZAPRET2_ROOT) / "blobs" / "quic_initial.bin",
     Path(ZAPRET2_ROOT) / "blobs" / "quic_initial_dbankcloud_ru.bin",
@@ -98,6 +99,21 @@ def _synthetic_rfc9000_initial() -> bytes:
     return prefix + length_field + os.urandom(pn_len) + os.urandom(payload_len)
 
 
+def _is_quic_long_header_response(data: bytes, *, sent: bytes = b"") -> bool:
+    """True when UDP payload looks like a QUIC long-header packet (RFC 9000)."""
+    if len(data) < 5:
+        return False
+    if sent and data == sent:
+        return False
+    first = data[0]
+    if (first & 0xC0) != 0xC0:
+        return False
+    version = int.from_bytes(data[1:5], "big")
+    if version == 0:
+        return len(data) >= 7
+    return version == 1
+
+
 def _parse_icmp(pkt: bytes) -> tuple[int | None, int | None]:
     """Parse ICMP header from a raw IPv4 packet (may include IP header)."""
     if len(pkt) < 8:
@@ -143,8 +159,7 @@ def probe_quic_initial(
             udp.settimeout(remaining)
             try:
                 data, _addr = udp.recvfrom(2048)
-                if len(data) >= 1:
-                    # Any QUIC packet from server (Long/Short header) = response.
+                if _is_quic_long_header_response(data, sent=packet):
                     res.response_received = True
                     res.phase = FailPhase.PASS
                     res.latency_ms = (time.perf_counter() - t0) * 1000

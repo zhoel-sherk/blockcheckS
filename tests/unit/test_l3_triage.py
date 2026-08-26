@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+
 import pytest
 
 from blockchecks.checkers.dns_secure import _sinkhole_ip
@@ -133,6 +135,28 @@ def test_l3_raw_icmp_block_skips_tcp(monkeypatch):
     monkeypatch.setattr("blockchecks.checkers.l3_probe.socket.create_connection", _no_tcp)
     r = probe_l3("192.0.2.1", 443, timeout=1, use_raw=True)
     assert r.phase == FailPhase.ICMP_BLOCK
+
+
+@pytest.mark.unit
+def test_l3_probe_connection_refused(monkeypatch):
+    def _refused(*a, **k):
+        raise OSError(errno.ECONNREFUSED, "Connection refused")
+
+    monkeypatch.setattr("blockchecks.checkers.l3_probe.socket.create_connection", _refused)
+    r = probe_l3("192.0.2.1", 443, timeout=1, use_raw=False)
+    assert r.phase == FailPhase.CONNECT_REFUSED
+    assert r.rst_received is False
+
+
+@pytest.mark.unit
+def test_l3_probe_rst_at_syn(monkeypatch):
+    def _reset(*a, **k):
+        raise OSError("Connection reset by peer")
+
+    monkeypatch.setattr("blockchecks.checkers.l3_probe.socket.create_connection", _reset)
+    r = probe_l3("192.0.2.1", 443, timeout=1, use_raw=False)
+    assert r.phase == FailPhase.L4_RST_AT_SYN
+    assert r.rst_received is True
 
 
 @pytest.mark.unit

@@ -4,6 +4,7 @@ Uses a raw ICMP receiver when possible; otherwise TCP connect.
 
 from __future__ import annotations
 
+import errno
 import socket
 import time
 from dataclasses import dataclass
@@ -85,7 +86,11 @@ def probe_l3(
         res.error = "SYN sent, no response (silent blackhole)"
     except OSError as e:
         msg = str(e)
-        if "reset" in msg.lower() or "connection refused" in msg.lower():
+        err = getattr(e, "errno", None)
+        if err == errno.ECONNREFUSED or "connection refused" in msg.lower():
+            res.phase = FailPhase.CONNECT_REFUSED
+            res.error = msg[:120]
+        elif err == errno.ECONNRESET or "reset" in msg.lower():
             res.rst_received = True
             res.phase = FailPhase.L4_RST_AT_SYN
             res.error = msg[:120]

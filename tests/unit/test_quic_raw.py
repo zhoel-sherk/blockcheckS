@@ -168,6 +168,50 @@ def test_probe_quic_icmp_port_unreachable(monkeypatch):
 
 
 @pytest.mark.unit
+def test_probe_quic_one_byte_not_pass(monkeypatch):
+    class FakeUdp:
+        def settimeout(self, t):
+            pass
+
+        def sendto(self, *a):
+            pass
+
+        def recvfrom(self, n):
+            return b"\x01", ("1.2.3.4", 443)
+
+        def close(self):
+            pass
+
+    class FakeIcmp:
+        def settimeout(self, t):
+            pass
+
+        def recvfrom(self, n):
+            raise TimeoutError
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "blockchecks.checkers.quic_raw.socket.socket",
+        lambda *a, **k: FakeUdp() if a and a[1] == socket.SOCK_DGRAM else FakeIcmp(),
+    )
+    r = probe_quic_initial("1.2.3.4", 443, timeout=0.2, blob=b"x" * 1200, blob_name="test")
+    assert r.phase == FailPhase.QUIC_DROP
+    assert r.response_received is False
+
+
+@pytest.mark.unit
+def test_is_quic_long_header_response():
+    from blockchecks.checkers.quic_raw import _is_quic_long_header_response
+
+    good = b"\xc0\x00\x00\x00\x01" + b"\x00" * 10
+    assert _is_quic_long_header_response(good) is True
+    assert _is_quic_long_header_response(b"\x01") is False
+    assert _is_quic_long_header_response(good, sent=good) is False
+
+
+@pytest.mark.unit
 def test_quic_raw_result_to_dict():
     r = QuicRawResult(ip="1.2.3.4", port=443, phase=FailPhase.QUIC_DROP, blob_used="q.bin")
     d = r.to_dict()

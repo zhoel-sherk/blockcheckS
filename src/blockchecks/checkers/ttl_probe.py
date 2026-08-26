@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import struct
 import time
 from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 _INITIAL_TTLS = (64, 128, 255)
 
@@ -54,7 +57,8 @@ def probe_ttl(ip: str, port: int = 443, timeout: float = 2.0) -> TtlProbeResult:
         return res
     try:
         raw.settimeout(timeout)
-        raw.bind(("", port))
+        # Do not bind to dest port: SYN-ACK returns to the ephemeral local port.
+        raw.bind(("", 0))
         _nudge_syn(ip, port)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -73,12 +77,23 @@ def probe_ttl(ip: str, port: int = 443, timeout: float = 2.0) -> TtlProbeResult:
                 res.server_ttl = ttl
                 res.server_hops = hops_from_ttl(ttl)
             elif rst and res.dpi_ttl is None:
-                res.dpi_ttl = ttl
-                res.dpi_hops = hops_from_ttl(ttl)
+                # RST before SYN-ACK often indicates a middlebox; origin RST is cheaper
+                # to distinguish only after we know server TTL (same hop count → origin).
+                if res.server_hops is not None and hops_from_ttl(ttl) == res.server_hops:
+                    res.dpi_ttl = ttl
+                    res.dpi_hops = hops_from_ttl(ttl)
+                elif res.server_ttl is None:
+                    res.dpi_ttl = ttl
+                    res.dpi_hops = hops_from_ttl(ttl)
             if res.server_ttl is not None and res.dpi_ttl is not None:
                 break
     finally:
         raw.close()
+    if res.server_ttl is None and res.dpi_ttl is None and not res.error:
+        log.warning(
+            "%s",
+            f"ttl probe to {ip}:{port}: no SYN-ACK or RST captured within {timeout:.1f}s",
+        )
     res.autottl_delta = autottl_delta(res.server_hops, res.dpi_hops)
     return res
 
