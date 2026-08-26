@@ -9,8 +9,11 @@ import pytest
 from blockchecks.service.metrics import (
     MemoryMonitor,
     MemorySample,
+    PkillResult,
+    _pkill_nfqws2_in_ns,
     compute_leak_slope,
     find_nfqws2_pids,
+    pkill_nfqws2_in_ns,
     process_rss_bytes,
 )
 
@@ -109,9 +112,93 @@ def test_find_nfqws2_pids_matches_netns_inode():
         assert find_nfqws2_pids("bs-p0") == [1234]
 
 
-def test_find_nfqws2_pids_missing_ns_file():
-    with patch("blockchecks.service.metrics.os.stat", side_effect=OSError):
-        assert find_nfqws2_pids("bs-p0") == []
+def test_find_nfqws2_pids_missing_ns_file(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        with patch("blockchecks.service.metrics.os.stat", side_effect=OSError("no such file")):
+            assert find_nfqws2_pids("bs-p0") == []
+    assert "netns 'bs-p0' missing or unreadable" in caplog.text
+
+
+def test_find_nfqws2_pids_eperm_readlink_logs_warning(caplog):
+    import logging
+
+    def _listdir(path):
+        if path == "/proc":
+            return ["1234"]
+        raise OSError("unexpected listdir")
+
+    def _readlink(path):
+        raise PermissionError("Operation not permitted")
+
+    def _open(path, *args, **kwargs):
+        if path == "/proc/1234/comm":
+            return _TextIO("nfqws2")
+        raise FileNotFoundError
+
+    with caplog.at_level(logging.WARNING):
+        with (
+            patch("blockchecks.service.metrics.os.stat") as mock_stat,
+            patch("blockchecks.service.metrics.os.listdir", side_effect=_listdir),
+            patch("blockchecks.service.metrics.os.readlink", side_effect=_readlink),
+            patch("blockchecks.service.metrics.open", side_effect=_open),
+        ):
+            mock_stat.return_value.st_ino = 99
+            assert find_nfqws2_pids("bs-p0") == []
+    assert "EPERM reading /proc/1234/ns/net" in caplog.text
+
+
+def test_pkill_nfqws2_in_ns_eperm_retries_sudo(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        with (
+            patch("blockchecks.service.metrics._find_nfqws2_pids", return_value=([4242], 0)),
+            patch("blockchecks.service.metrics.os.kill", side_effect=PermissionError("EPERM")),
+            patch("blockchecks.service.metrics.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value.returncode = 0
+            assert pkill_nfqws2_in_ns("bs-p0") == 1
+    mock_run.assert_called_once_with(
+        ["sudo", "-n", "kill", "-9", "4242"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "EPERM killing pid 4242" in caplog.text
+
+
+def test_pkill_nfqws2_in_ns_sudo_failure_logs_warning(caplog):
+    import logging
+    from subprocess import CompletedProcess
+
+    with caplog.at_level(logging.WARNING):
+        with (
+            patch("blockchecks.service.metrics._find_nfqws2_pids", return_value=([4242], 0)),
+            patch("blockchecks.service.metrics.os.kill", side_effect=PermissionError("EPERM")),
+            patch(
+                "blockchecks.service.metrics.subprocess.run",
+                return_value=CompletedProcess(
+                    args=["sudo", "-n", "kill", "-9", "4242"],
+                    returncode=1,
+                    stdout="",
+                    stderr="not permitted",
+                ),
+            ),
+        ):
+            assert pkill_nfqws2_in_ns("bs-p0") == 0
+    assert "sudo -n kill -9 4242 failed" in caplog.text
+
+
+def test_pkill_result_distinguishes_scan_errors():
+    with (
+        patch("blockchecks.service.metrics._find_nfqws2_pids", return_value=([], 2)),
+        patch("blockchecks.service.metrics._kill_pid_sigkill") as mock_kill,
+    ):
+        result = _pkill_nfqws2_in_ns("bs-p0")
+    assert result == PkillResult(killed=0, scan_errors=2)
+    mock_kill.assert_not_called()
 
 
 def test_find_nfqws2_pids_skips_non_nfqws2():

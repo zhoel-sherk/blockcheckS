@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import subprocess
 import time
 from dataclasses import dataclass, field
+from typing import NamedTuple
+
+log = logging.getLogger(__name__)
 
 from blockchecks.engine.config import (
     MEM_MONITOR_ENABLED,
@@ -16,6 +21,13 @@ from blockchecks.engine.config import (
 )
 
 MIB = 1024 * 1024
+
+
+class PkillResult(NamedTuple):
+    """Outcome of a PID-scoped nfqws2 kill in one netns."""
+
+    killed: int
+    scan_errors: int
 
 
 @dataclass(frozen=True)
@@ -62,6 +74,52 @@ def _proc_status_value(pid: int, field: str) -> int:
     return 0
 
 
+def _sudo_kill_pid(pid: int) -> bool:
+    """Escalate SIGKILL via ``sudo -n kill -9`` (never netns exec / pkill -f)."""
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", "kill", "-9", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        log.warning("sudo -n kill -9 %d failed to execute: %s", pid, exc)
+        return False
+    if proc.returncode == 0:
+        return True
+    log.warning(
+        "sudo -n kill -9 %d failed (rc=%d): %s",
+        pid,
+        proc.returncode,
+        (proc.stderr or proc.stdout or "").strip(),
+    )
+    return False
+
+
+def _kill_pid_sigkill(pid: int) -> bool:
+    """SIGKILL one PID; escalate to sudo -n on EPERM."""
+    import signal as _signal
+
+    try:
+        os.kill(pid, _signal.SIGKILL)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        log.warning("EPERM killing pid %d; retrying sudo -n kill -9", pid)
+        return _sudo_kill_pid(pid)
+    except OSError as exc:
+        log.warning("failed to kill pid %d: %s", pid, exc)
+        return False
+
+
+def _pkill_nfqws2_in_ns(ns_name: str) -> PkillResult:
+    pids, scan_errors = _find_nfqws2_pids(ns_name)
+    killed = sum(1 for pid in pids if _kill_pid_sigkill(pid))
+    return PkillResult(killed=killed, scan_errors=scan_errors)
+
+
 def pkill_nfqws2_in_ns(ns_name: str) -> int:
     """SIGKILL every nfqws2 whose netns inode matches *ns_name*; return count.
 
@@ -70,17 +128,11 @@ def pkill_nfqws2_in_ns(ns_name: str) -> int:
     kills every nfqws2 in every namespace — massacring sibling workers'
     daemons mid-batch (the real root cause of the "PASS without APPLIED"
     storm). PID-scoped kill touches only the target namespace.
-    """
-    import signal as _signal
 
-    killed = 0
-    for pid in find_nfqws2_pids(ns_name):
-        try:
-            os.kill(pid, _signal.SIGKILL)
-            killed += 1
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-    return killed
+    Scan/kill permission failures are logged; use :func:`_pkill_nfqws2_in_ns`
+    when both killed count and scan error count are needed.
+    """
+    return _pkill_nfqws2_in_ns(ns_name).killed
 
 
 def process_rss_bytes(pid: int) -> int:
@@ -93,6 +145,63 @@ def process_vms_bytes(pid: int) -> int:
     return _proc_status_value(pid, "VmSize")
 
 
+def _find_nfqws2_pids(ns_name: str) -> tuple[list[int], int]:
+    """Return matching nfqws2 PIDs and a count of scan permission/path errors."""
+    scan_errors = 0
+    ns_file = f"/var/run/netns/{ns_name}"
+    try:
+        ns_inode = os.stat(ns_file).st_ino
+    except OSError as exc:
+        scan_errors += 1
+        log.warning("netns %r missing or unreadable (%s): cannot scan nfqws2", ns_name, exc)
+        return [], scan_errors
+    pids: list[int] = []
+    try:
+        proc_dirs = os.listdir("/proc")
+    except OSError as exc:
+        scan_errors += 1
+        log.warning("cannot list /proc while scanning nfqws2 in %r: %s", ns_name, exc)
+        return [], scan_errors
+    for entry in proc_dirs:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            # Only consider nfqws2-named processes (cheap comm read first).
+            try:
+                with open(f"/proc/{pid}/comm", encoding="utf-8", errors="replace") as cf:
+                    comm = cf.read().strip()
+            except PermissionError as exc:
+                scan_errors += 1
+                log.warning(
+                    "EPERM reading /proc/%d/comm while scanning nfqws2 in %r: %s",
+                    pid,
+                    ns_name,
+                    exc,
+                )
+                continue
+            except (FileNotFoundError, ProcessLookupError, OSError):
+                continue
+            if comm != "nfqws2":
+                continue
+            try:
+                link = os.readlink(f"/proc/{pid}/ns/net")
+            except PermissionError as exc:
+                scan_errors += 1
+                log.warning(
+                    "EPERM reading /proc/%d/ns/net while scanning nfqws2 in %r: %s",
+                    pid,
+                    ns_name,
+                    exc,
+                )
+                continue
+            if link.endswith(f"[{ns_inode}]"):
+                pids.append(pid)
+        except (FileNotFoundError, ProcessLookupError, OSError):
+            continue
+    return pids, scan_errors
+
+
 def find_nfqws2_pids(ns_name: str) -> list[int]:
     """PID list of nfqws2 running inside *ns_name* (stdlib /proc, no subprocess).
 
@@ -103,36 +212,10 @@ def find_nfqws2_pids(ns_name: str) -> list[int]:
 
     Handles process races (a process may exit while we iterate /proc): every
     /proc access is guarded against FileNotFoundError / ProcessLookupError /
-    PermissionError / OSError.
+    PermissionError / OSError.  Permission/path errors are logged and omitted
+    from the returned PID list (callers see ``[]``, not an exception).
     """
-    try:
-        ns_file = f"/var/run/netns/{ns_name}"
-        ns_inode = os.stat(ns_file).st_ino
-    except OSError:
-        return []
-    pids: list[int] = []
-    try:
-        proc_dirs = os.listdir("/proc")
-    except OSError:
-        return []
-    for entry in proc_dirs:
-        if not entry.isdigit():
-            continue
-        pid = int(entry)
-        try:
-            # Only consider nfqws2-named processes (cheap comm read first).
-            try:
-                with open(f"/proc/{pid}/comm", encoding="utf-8", errors="replace") as cf:
-                    comm = cf.read().strip()
-            except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
-                continue
-            if comm != "nfqws2":
-                continue
-            link = os.readlink(f"/proc/{pid}/ns/net")
-            if link.endswith(f"[{ns_inode}]"):
-                pids.append(pid)
-        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
-            continue
+    pids, _scan_errors = _find_nfqws2_pids(ns_name)
     return pids
 
 
