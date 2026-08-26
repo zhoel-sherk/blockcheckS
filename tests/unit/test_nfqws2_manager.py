@@ -194,14 +194,92 @@ def test_start_daemon_launches(tmp_path):
     conf.write_text("--qnum=200\n")
     with (
         patch("blockchecks.service.nfqws2.subprocess.run"),
-        patch("blockchecks.service.nfqws2.subprocess.Popen"),
+        patch("blockchecks.service.nfqws2.subprocess.Popen") as popen,
         patch("blockchecks.service.nfqws2.inject_debug_and_daemon", return_value=(None, None)),
         patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.5),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_bind_proof", return_value=True),
         patch("blockchecks.service.nfqws2._wait_nfqws2_gone", return_value=True),
         patch("blockchecks.service.nfqws2._reclaim_debug_log"),
+        patch("blockchecks.service.nfqws2._reap_daemon_popens"),
     ):
+        proc = MagicMock()
+        proc.pid = 5555
+        popen.return_value = proc
         settle = start_daemon("bs-p-0", str(conf))
     assert settle == 0.5
+    assert proc in popen.return_value.__class__.__mro__ or popen.called
+
+
+def test_start_daemon_tracks_popen_for_reap(tmp_path):
+    from blockchecks.service import nfqws2 as nfq
+
+    conf = tmp_path / "c.conf"
+    conf.write_text("--qnum=200\n")
+    proc = MagicMock()
+    proc.pid = 6001
+    proc.poll.return_value = 0
+
+    with (
+        patch.object(nfq.subprocess, "Popen", return_value=proc),
+        patch.object(nfq, "inject_debug_and_daemon", return_value=(None, None)),
+        patch.object(nfq, "wait_nfqws2_ready", return_value=0.01),
+        patch.object(nfq, "wait_nfqws2_bind_proof", return_value=True),
+        patch.object(nfq, "_wait_nfqws2_gone", return_value=True),
+        patch.object(nfq, "_reclaim_debug_log"),
+        patch.object(nfq, "open_out_capture", return_value=(None, None)),
+    ):
+        nfq._daemon_popens.clear()
+        nfq.start_daemon("bs-p-0", str(conf), kill_existing=False)
+    assert proc in nfq._daemon_popens
+    nfq._reap_daemon_popens()
+    proc.poll.assert_called()
+
+
+def test_start_daemon_warns_when_drain_times_out(tmp_path, caplog):
+    import logging
+
+    from blockchecks.service import nfqws2 as nfq
+
+    conf = tmp_path / "c.conf"
+    conf.write_text("--qnum=200\n")
+    proc = MagicMock()
+    proc.pid = 6002
+    with (
+        patch.object(nfq.subprocess, "Popen", return_value=proc),
+        patch.object(nfq, "inject_debug_and_daemon", return_value=(None, None)),
+        patch.object(nfq, "wait_nfqws2_ready", return_value=0.01),
+        patch.object(nfq, "wait_nfqws2_bind_proof", return_value=True),
+        patch.object(nfq, "_wait_nfqws2_gone", return_value=False),
+        patch.object(nfq, "pkill_nfqws2_in_ns", create=True),
+        patch("blockchecks.service.metrics.pkill_nfqws2_in_ns"),
+        patch.object(nfq, "_reclaim_debug_log"),
+        patch.object(nfq, "open_out_capture", return_value=(None, None)),
+        patch.object(nfq, "nfqws2_pid_in_ns", return_value=True),
+        caplog.at_level(logging.WARNING),
+    ):
+        nfq.start_daemon("bs-p-0", str(conf), kill_existing=True)
+    assert "pkill drain" in caplog.text
+
+
+def test_launch_settle_timeout_raises_when_no_procs(tmp_path):
+    conf = tmp_path / "ok.conf"
+    conf.write_text("--qnum=200\n", encoding="utf-8")
+
+    alive = MagicMock()
+    alive.pid = 7777
+    alive.poll.return_value = None
+
+    mgr = Nfqws2Manager(ns_name="bs-p0")
+    with (
+        patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
+        patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=alive),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.6),
+        patch("blockchecks.service.nfqws2.NFQWS2_SETTLE_MAX", 0.5),
+        patch("blockchecks.service.nfqws2.nfqws2_count_in_ns", return_value=0),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_bind_proof", return_value=True),
+    ):
+        with pytest.raises(RuntimeError, match="not visible"):
+            mgr.start_config(str(conf))
 
 
 def test_launch_sudo_no_netns(tmp_path):

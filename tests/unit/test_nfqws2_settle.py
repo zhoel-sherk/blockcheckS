@@ -144,3 +144,46 @@ def test_wait_nfqws2_gone_timeout():
                 side_effect=fake_perf,
             ):
                 assert _wait_nfqws2_gone("bs-p0", max_wait=0.3, poll_interval=0.1) is False
+
+
+def test_nfqws2_pid_in_ns():
+    from blockchecks.service.nfqws2_settle import nfqws2_pid_in_ns
+
+    with patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[42, 99]):
+        assert nfqws2_pid_in_ns(42, "bs-p0") is True
+        assert nfqws2_pid_in_ns(1, "bs-p0") is False
+
+
+def test_nfqws2_out_shows_bind(tmp_path):
+    from blockchecks.service.nfqws2_settle import nfqws2_out_shows_bind
+
+    logf = tmp_path / "out.log"
+    logf.write_text("nfqws2 init\n", encoding="utf-8")
+    assert nfqws2_out_shows_bind(logf) is False
+    logf.write_text("setting copy_packet mode\n", encoding="utf-8")
+    assert nfqws2_out_shows_bind(logf) is True
+
+
+def test_wait_nfqws2_bind_proof_out_marker(tmp_path):
+    from blockchecks.service.nfqws2_settle import wait_nfqws2_bind_proof
+
+    logf = tmp_path / "out.log"
+    logf.write_text("setting copy_packet mode\n", encoding="utf-8")
+    with patch("blockchecks.service.nfqws2_settle.time.sleep"):
+        assert wait_nfqws2_bind_proof("bs-p0", out_path=logf, within=0.1) is True
+
+
+def test_wait_nfqws2_bind_proof_pid(tmp_path):
+    from blockchecks.service.nfqws2_settle import wait_nfqws2_bind_proof
+
+    calls = {"n": 0}
+
+    def pid_ready(pid, ns):
+        calls["n"] += 1
+        return calls["n"] >= 2
+
+    with (
+        patch("blockchecks.service.nfqws2_settle.nfqws2_pid_in_ns", side_effect=pid_ready),
+        patch("blockchecks.service.nfqws2_settle.time.sleep"),
+    ):
+        assert wait_nfqws2_bind_proof("bs-p0", launched_pid=123, within=0.5) is True
