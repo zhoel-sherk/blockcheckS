@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from blockchecks.service.lua_bridge_ipc import BridgeEvent, BridgePaths, LuaBridge
 
@@ -181,6 +184,7 @@ def test_world_writable_warning_includes_path_and_uid(tmp_path, caplog, monkeypa
     from blockchecks.service import lua_bridge_ipc as ipc
 
     ipc._world_warned.clear()
+    ipc._setfacl_available = False
     path = tmp_path / "shm"
     path.mkdir()
     monkeypatch.setattr(ipc.os, "chmod", lambda *_a, **_k: None)
@@ -193,3 +197,77 @@ def test_world_writable_warning_includes_path_and_uid(tmp_path, caplog, monkeypa
     assert str(path) in msg
     assert str(ipc.NFQWS2_OVERFLOW_UID) in msg
     assert "world-writable" in msg
+
+
+def test_ipc_relax_raises_when_all_chmod_paths_fail(tmp_path, monkeypatch):
+    from blockchecks.service import lua_bridge_ipc as ipc
+
+    ipc._setfacl_available = False
+    path = tmp_path / "shm"
+    path.mkdir()
+
+    def fail_chmod(*_a, **_k):
+        raise OSError(errno.EACCES, "chmod denied")
+
+    monkeypatch.setattr(ipc.os, "chmod", fail_chmod)
+    monkeypatch.setattr(
+        ipc.sp,
+        "run",
+        lambda *_a, **_k: SimpleNamespace(returncode=1, stderr="sudo denied"),
+    )
+    with pytest.raises(ipc.IpcPermissionError, match="world-writable fallback all failed"):
+        ipc._ipc_relax_for_nobody(path, is_dir=True)
+
+
+def test_setfacl_probe_cached(monkeypatch):
+    from blockchecks.service import lua_bridge_ipc as ipc
+
+    ipc._setfacl_available = None
+    calls: list[list[str]] = []
+
+    def track_run(cmd, **_kw):
+        calls.append(list(cmd))
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(ipc.sp, "run", track_run)
+    assert ipc._setfacl_usable() is True
+    assert ipc._setfacl_usable() is True
+    assert [c[0] for c in calls].count("setfacl") == 1
+    assert calls[0][1] == "--version"
+
+
+def test_rmtree_logged_warns_on_leftovers(tmp_path, caplog, monkeypatch):
+    from blockchecks.service import lua_bridge_ipc as ipc
+
+    leftover = tmp_path / "stuck"
+    leftover.mkdir()
+    monkeypatch.setattr(
+        ipc.shutil,
+        "rmtree",
+        lambda *_a, **_k: None,
+    )
+    with caplog.at_level(logging.WARNING, logger=ipc.log.name):
+        ipc._rmtree_logged(leftover, context="test")
+    assert any("left leftovers" in r.getMessage() for r in caplog.records)
+
+
+def test_publish_enospc_raises_ipc_publish_error(tmp_path, caplog, monkeypatch):
+    import errno as errno_mod
+
+    from blockchecks.service.lua_bridge_ipc import IpcPublishError, LuaBridge
+
+    lb = LuaBridge("enospc-ns", shm_base=tmp_path)
+    lb.setup()
+
+    def enospc_write(*_a, **_k):
+        raise OSError(errno_mod.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(
+        "blockchecks.service.lua_bridge_ipc.Path.write_text",
+        enospc_write,
+    )
+    with caplog.at_level(logging.ERROR, logger="blockchecks.service.lua_bridge_ipc"):
+        with pytest.raises(IpcPublishError, match="enospc-ns"):
+            lb.publish(strategy_id=1, gen=1)
+    assert any("ENOSPC" in r.getMessage() for r in caplog.records)
+    lb.teardown()

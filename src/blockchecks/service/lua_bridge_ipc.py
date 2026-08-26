@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -15,6 +16,15 @@ from blockchecks.engine.config import SHM_BASE
 
 log = logging.getLogger(__name__)
 _world_warned: set[str] = set()
+_setfacl_available: bool | None = None
+
+
+class IpcPermissionError(OSError):
+    """IPC path could not be made accessible to nfqws2 overflow-uid."""
+
+
+class IpcPublishError(OSError):
+    """IPC publish failed; caller should stop the batch early."""
 
 
 #: uid, под которым nfqws2 работает внутри ns (setuid overflow-uid; см. лог
@@ -24,30 +34,52 @@ NFQWS2_OVERFLOW_UID = int(
 )
 
 
-def _ipc_relax_for_nobody(path: Path, *, is_dir: bool) -> None:
-    """Дать nfqws2 (setuid overflow-uid) доступ к IPC без world-writable.
+def _setfacl_usable() -> bool:
+    """Probe setfacl once per process; avoid spawning subprocess on every publish."""
+    global _setfacl_available
+    if _setfacl_available is not None:
+        return _setfacl_available
+    try:
+        proc = sp.run(
+            ["setfacl", "--version"],
+            capture_output=True,
+            timeout=2,
+        )
+    except (OSError, sp.TimeoutExpired) as exc:
+        log.debug("IPC setfacl probe unavailable (%s)", exc)
+        _setfacl_available = False
+        return False
+    _setfacl_available = proc.returncode == 0
+    return _setfacl_available
 
-    Урок 25.08: ACL для системного `nobody` бесполезен — демон работает под
-    overflow-uid 2147483647. Если setfacl недоступен/не сработал — честный
-    фолбэк 0777/0666 (старое рабочее поведение).
-    """
-    mode = 0o770 if is_dir else 0o660
+
+def _chmod_or_sudo(path: Path, mode: int, *, is_dir: bool) -> bool:
+    """Try os.chmod; on failure retry via passwordless sudo. Return True on success."""
     try:
         os.chmod(path, mode)
+        return True
     except OSError as exc:
-        # Каталог мог создать сам демон (overflow-uid) раньше питоновского
-        # setup — мы не владелец, обычный chmod недоступен. Чиним через sudo.
-        log.warning("IPC chmod %s failed (%s) — retrying via sudo", path, exc)
-        fix = sp.run(
-            ["sudo", "-n", "chmod", "-R", "a+rwX" if is_dir else "a+rw", str(path)],
-            capture_output=True, text=True, timeout=10,
+        log.warning("IPC chmod %s to %o failed (%s) — retrying via sudo", path, mode, exc)
+    fix = sp.run(
+        ["sudo", "-n", "chmod", "-R", "a+rwX" if is_dir else "a+rw", str(path)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if fix.returncode != 0:
+        log.warning(
+            "IPC sudo-chmod %s failed rc=%d stderr=%r",
+            path,
+            fix.returncode,
+            fix.stderr.strip()[:200],
         )
-        if fix.returncode != 0:
-            log.warning(
-                "IPC sudo-chmod %s failed rc=%d stderr=%r",
-                path, fix.returncode, fix.stderr.strip()[:200],
-            )
-            return
+        return False
+    return True
+
+
+def _apply_setfacl(path: Path, *, is_dir: bool) -> bool:
+    if not _setfacl_usable():
+        return False
     perm = "rwx" if is_dir else "rw"
     spec = f"u:{NFQWS2_OVERFLOW_UID}:{perm},u:nobody:{perm}"
     try:
@@ -59,15 +91,39 @@ def _ipc_relax_for_nobody(path: Path, *, is_dir: bool) -> None:
         )
     except (OSError, sp.TimeoutExpired) as exc:
         log.warning("IPC setfacl %s failed (%s); falling back to world-writable", path, exc)
-        proc = None
-    if proc is not None and proc.returncode == 0:
+        return False
+    if proc.returncode == 0:
+        return True
+    log.warning(
+        "IPC setfacl %s failed rc=%d stderr=%r; falling back to world-writable",
+        path,
+        proc.returncode,
+        (proc.stderr or b"").decode(errors="replace").strip()[:200],
+    )
+    return False
+
+
+def _ipc_relax_for_nobody(path: Path, *, is_dir: bool) -> None:
+    """Дать nfqws2 (setuid overflow-uid) доступ к IPC без world-writable.
+
+    Урок 25.08: ACL для системного `nobody` бесполезен — демон работает под
+    overflow-uid 2147483647. Если setfacl недоступен/не сработал — честный
+    фолбэк 0777/0666 (старое рабочее поведение) с однократным warning.
+    При полном провале цепочки — raise, иначе APPLIED теряются молча.
+    """
+    mode = 0o770 if is_dir else 0o660
+    _chmod_or_sudo(path, mode, is_dir=is_dir)
+
+    if _apply_setfacl(path, is_dir=is_dir):
         return
+
     world = 0o777 if is_dir else 0o666
-    try:
-        os.chmod(path, world)
-    except OSError as exc:
-        log.warning("IPC world-chmod %s failed: %s", path, exc)
-        return
+    if not _chmod_or_sudo(path, world, is_dir=is_dir):
+        raise IpcPermissionError(
+            errno.EACCES,
+            f"IPC {path}: chmod, sudo-chmod, setfacl, and world-writable fallback all failed",
+        )
+
     key = str(path.parent if not is_dir else path)
     if key not in _world_warned:
         _world_warned.add(key)
@@ -76,6 +132,14 @@ def _ipc_relax_for_nobody(path: Path, *, is_dir: bool) -> None:
             path,
             NFQWS2_OVERFLOW_UID,
         )
+
+
+def _rmtree_logged(path: Path, *, context: str) -> None:
+    if not path.exists():
+        return
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists():
+        log.warning("IPC rmtree %s left leftovers at %s", context, path)
 
 
 @dataclass(frozen=True)
@@ -191,7 +255,7 @@ class LuaBridge:
         _ipc_relax_for_nobody(self.paths.events, is_dir=False)
 
     def teardown(self) -> None:
-        shutil.rmtree(self.paths.base, ignore_errors=True)
+        _rmtree_logged(self.paths.base, context="teardown")
 
     def publish(self, strategy_id: int, gen: int, cmd: str | None = None) -> None:
         """Atomically publish strategy index + generation (os.replace).
@@ -210,13 +274,30 @@ class LuaBridge:
         committed first, every intermediate state fails the fence and readers
         keep their previous consistent snapshot instead.
         """
+        try:
+            self._publish_impl(strategy_id, gen, cmd)
+        except IpcPermissionError:
+            raise
+        except OSError as exc:
+            if exc.errno == errno.ENOSPC:
+                log.error(
+                    "IPC publish aborted: no space left on device (ENOSPC) at %s",
+                    self.paths.base,
+                )
+            else:
+                log.error("IPC publish failed at %s: %s", self.paths.base, exc)
+            raise IpcPublishError(
+                f"IPC publish failed for {self.ns_name}: {exc}"
+            ) from exc
+
+    def _publish_impl(self, strategy_id: int, gen: int, cmd: str | None) -> None:
         _ipc_relax_for_nobody(self.paths.base, is_dir=True)
         if self.paths.events.is_file():
             _ipc_relax_for_nobody(self.paths.events, is_dir=False)
 
         staging = self.paths.base / f".staging.{gen}"
         if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
+            _rmtree_logged(staging, context="publish pre-staging")
         staging.mkdir(parents=True, exist_ok=True)
         _ipc_relax_for_nobody(staging, is_dir=True)
 
@@ -248,7 +329,7 @@ class LuaBridge:
         os.replace(ready_src, ready_dst)
         _ipc_relax_for_nobody(ready_dst, is_dir=False)
 
-        shutil.rmtree(staging, ignore_errors=True)
+        _rmtree_logged(staging, context="publish post-staging")
 
     def drain_events(
         self, since_gen: int = 0, expect_id: int | None = None
