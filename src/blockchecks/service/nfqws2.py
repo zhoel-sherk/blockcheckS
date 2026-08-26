@@ -9,16 +9,23 @@ import signal
 import subprocess
 import tempfile
 import time
+import weakref
 from pathlib import Path
 
 from blockchecks.engine.config import (
     BLOB_DIR,
+    NFQWS2_SETTLE_MAX,
     get_lua_init_scripts,
     get_nfqws2_bin,
     nfqws2_debug_conf_line,
 )
 from blockchecks.service.nfqws2_settle import (
+    NFQWS2_BIND_MARKER,
     _wait_nfqws2_gone,
+    nfqws2_count_in_ns,
+    nfqws2_out_shows_bind,
+    nfqws2_pid_in_ns,
+    wait_nfqws2_bind_proof,
     wait_nfqws2_ready,
 )
 
@@ -26,6 +33,18 @@ log = logging.getLogger(__name__)
 
 #: Попытки бинда NFQUEUE при "queue busy" (сокет освобождается ядром с задержкой)
 NFQWS2_BIND_ATTEMPTS = 5
+
+#: Fire-and-forget daemon Popens from start_daemon — poll() to reap zombies (RT-7).
+_daemon_popens: weakref.WeakSet[subprocess.Popen] = weakref.WeakSet()
+
+
+def _reap_daemon_popens() -> None:
+    """Poll tracked daemon Popens so exited children do not accumulate as zombies."""
+    for proc in list(_daemon_popens):
+        try:
+            proc.poll()
+        except Exception as exc:
+            log.debug("daemon Popen poll failed: %s", exc)
 
 
 def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
@@ -130,9 +149,12 @@ def start_daemon(
     """
     _fd, tmp_conf = tempfile.mkstemp(prefix="bs_nfq_", suffix=".conf")
     os.close(_fd)
+    launched_pid: int | None = None
+    last_out_path: Path | None = None
     try:
         shutil.copy2(config_path, tmp_conf)
         dbg_path = inject_debug_and_daemon(tmp_conf, tag=ns_name)
+        drain_ok = True
         if kill_existing:
             # Scoped kill: netns exec pkill would hit nfqws2 host-wide (no PID ns).
             from blockchecks.service.metrics import pkill_nfqws2_in_ns
@@ -142,7 +164,13 @@ def start_daemon(
             # when the new one binds, causing the new daemon to die (settle
             # spikes, "PASS without APPLIED" warnings). Wait for it to actually
             # disappear before starting the replacement.
-            _wait_nfqws2_gone(ns_name, max_wait=2.0)
+            drain_ok = _wait_nfqws2_gone(ns_name, max_wait=2.0)
+            if not drain_ok:
+                log.warning(
+                    "%s",
+                    f"  [nfqws2] {ns_name}: prior daemon still visible after "
+                    f"pkill drain — bind retries likely",
+                )
         # @config must be the only argument; daemon/debug are inside the file
         cmd = [
             "sudo",
@@ -159,17 +187,21 @@ def start_daemon(
         # даёт надёжный маркер именно этой причины.
         max_bind_attempts = NFQWS2_BIND_ATTEMPTS
         settle = 0.0
-        from blockchecks.service.nfqws2_settle import nfqws2_count_in_ns
-
-        procs_before = nfqws2_count_in_ns(ns_name)
+        _reap_daemon_popens()
         for attempt in range(1, max_bind_attempts + 1):
             out_fh, out_path = open_out_capture(ns_name)
+            last_out_path = out_path
+            proc: subprocess.Popen | None = None
             try:
-                subprocess.Popen(
+                proc = subprocess.Popen(
                     cmd,
                     stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
                     stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
                 )
+                if proc is not None:
+                    launched_pid = proc.pid
+                    _daemon_popens.add(proc)
+                    _reap_daemon_popens()
             finally:
                 if out_fh is not None:
                     out_fh.close()
@@ -178,10 +210,8 @@ def start_daemon(
                 ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
             )
             _reclaim_debug_log(dbg_path)
-            # Liveness: /proc-сканирование слепо к root-owned процессам при
-            # user-запуске (readlink ns/net → EPERM), поэтому первичный
-            # маркер — строка "setting copy_packet mode" в stdout-захвате;
-            # /proc-count используется только как дополнительный сигнал.
+            # Liveness: readiness is THIS session's PID or stdout bind marker —
+            # not any comm=nfqws2 left in the ns from a stale pkill.
             try:
                 out_txt = (
                     out_path.read_text(errors="replace")[:2000]
@@ -190,17 +220,20 @@ def start_daemon(
                 )
             except OSError:
                 out_txt = ""
-            alive = (
-                "setting copy_packet mode" in out_txt
-                or nfqws2_count_in_ns(ns_name) > procs_before
+            alive = NFQWS2_BIND_MARKER in out_txt or (
+                launched_pid is not None and nfqws2_pid_in_ns(launched_pid, ns_name)
             )
             if alive or attempt == max_bind_attempts:
                 break
-            if "Operation not permitted" in out_txt and "nfq_create_queue" in out_txt:
+            bind_busy = (
+                "Operation not permitted" in out_txt and "nfq_create_queue" in out_txt
+            )
+            if bind_busy or not drain_ok:
                 backoff = min(2.0 * attempt, 6.0)
+                reason = "queue busy" if bind_busy else "pkill drain incomplete"
                 log.warning(
                     "%s",
-                    f"  [nfqws2] {ns_name}: queue 200 busy after pkill "
+                    f"  [nfqws2] {ns_name}: {reason} after pkill "
                     f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
                 )
                 time.sleep(backoff)
@@ -209,7 +242,16 @@ def start_daemon(
         _prune_out_logs()
         return settle
     finally:
-        # Daemon has read @config into memory by settle; do not leak /tmp/bs_nfq_*
+        # Hold @config until this session's daemon read it (bind marker or PID).
+        if launched_pid is not None and not (
+            nfqws2_out_shows_bind(last_out_path)
+            or nfqws2_pid_in_ns(launched_pid, ns_name)
+        ):
+            wait_nfqws2_bind_proof(
+                ns_name,
+                launched_pid=launched_pid,
+                out_path=last_out_path,
+            )
         try:
             os.unlink(tmp_conf)
         except OSError:
@@ -269,7 +311,23 @@ class Nfqws2Manager:
                     _prune_out_logs()
             self._pid = self._proc.pid
             if self.ns_name:
-                wait_nfqws2_ready(self.ns_name)
+                settle_max = NFQWS2_SETTLE_MAX
+                settle = wait_nfqws2_ready(self.ns_name, max_wait=settle_max)
+                if settle >= settle_max and nfqws2_count_in_ns(self.ns_name) == 0:
+                    raise RuntimeError(
+                        f"nfqws2 not visible in {self.ns_name} after settle "
+                        f"({settle:.2f}s >= {settle_max:.2f}s)"
+                    )
+                if not wait_nfqws2_bind_proof(
+                    self.ns_name,
+                    launched_pid=self._pid,
+                    out_path=self.last_out_log,
+                ):
+                    log.warning(
+                        "%s",
+                        f"  [nfqws2] {self.ns_name}: no bind proof after settle "
+                        f"— process visible but NFQUEUE may not be ready",
+                    )
             else:
                 time.sleep(0.1)
             _reclaim_debug_log(self.last_debug_log)
