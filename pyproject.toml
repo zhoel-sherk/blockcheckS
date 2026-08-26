@@ -293,6 +293,7 @@ parity_dests = [
     "secure_dns",
     "doh_server",
     "resume",
+    "reprobe_failed",
     "export_limit",
 ]
 # command → source files that must mention each dest (plus shared_readers)

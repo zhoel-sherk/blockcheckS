@@ -36,6 +36,7 @@ class RunSpec:
     db_batch: int = 500
     out_dir: str = DEFAULT_OUT_DIR
     resume: bool = False
+    reprobe_failed: int = 0
     force: bool = False
     disable_ech: bool = False
     try_wssize: bool = True
@@ -117,6 +118,11 @@ class RunSpec:
             db_batch=int(getattr(args, "db_batch", 500) or 500),
             out_dir=getattr(args, "out_dir", None) or DEFAULT_OUT_DIR,
             resume=bool(getattr(args, "resume", False)),
+            reprobe_failed=(
+                0
+                if (rf := getattr(args, "reprobe_failed", None)) is None
+                else int(rf)
+            ),
             force=bool(getattr(args, "force", False)),
             disable_ech=bool(getattr(args, "disable_ech", False)),
             try_wssize=not no_wssize,

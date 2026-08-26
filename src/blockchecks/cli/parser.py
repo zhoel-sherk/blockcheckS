@@ -534,6 +534,16 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
         "--resume", action="store_true", help="Resume prior run: skip domain×strategy in DB"
     )
     parser.add_argument(
+        "--reprobe-failed",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "With --resume: re-queue infra FAIL pairs until N infra failures "
+            "per pair; also skip DPI-shaped FAIL (0=off, only PASS/THROTTLED skipped)"
+        ),
+    )
+    parser.add_argument(
         "--migrate-cwd-db",
         action="store_true",
         help="Copy ./state.db into XDG state.db if missing (off by default)",

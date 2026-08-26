@@ -188,6 +188,116 @@ async def test_dao_get_completed_tcp_keys_latest_row_only(tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_get_resume_skip_tcp_keys_working_skipped(tmp_path):
+    store = open_run_store(tmp_path / "resume_skip.db")
+    await store.init()
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store.log_tcp("s2", "b.com", "THROTTLED", 10.0, 206, config_path="fake:2")
+    await store.flush()
+
+    keys = await store.get_resume_skip_tcp_keys(reprobe_failed=2)
+    assert ("s1", "a.com") in keys
+    assert ("s2", "b.com") in keys
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_resume_skip_tcp_keys_infra_fail_requeued(tmp_path):
+    store = open_run_store(tmp_path / "infra_reprobe.db")
+    await store.init()
+    await store.log_tcp(
+        "s1",
+        "infra.com",
+        "FAIL",
+        0.0,
+        0,
+        config_path="fake:1",
+        fail_phase="connect_timeout",
+    )
+    await store.flush()
+
+    keys_n0 = await store.get_resume_skip_tcp_keys(reprobe_failed=0)
+    assert ("s1", "infra.com") not in keys_n0
+
+    keys_n2 = await store.get_resume_skip_tcp_keys(reprobe_failed=2)
+    assert ("s1", "infra.com") not in keys_n2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_resume_skip_tcp_keys_dpi_fail_skipped_when_n_gt_zero(tmp_path):
+    store = open_run_store(tmp_path / "dpi_skip.db")
+    await store.init()
+    await store.log_tcp(
+        "s1",
+        "dpi.com",
+        "FAIL",
+        0.0,
+        0,
+        config_path="fake:1",
+        fail_phase="tls_silent_drop_after_sni",
+    )
+    await store.flush()
+
+    keys_n0 = await store.get_resume_skip_tcp_keys(reprobe_failed=0)
+    assert ("s1", "dpi.com") not in keys_n0
+
+    keys_n2 = await store.get_resume_skip_tcp_keys(reprobe_failed=2)
+    assert ("s1", "dpi.com") in keys_n2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_resume_skip_tcp_keys_infra_exhausted_skipped(tmp_path):
+    store = open_run_store(tmp_path / "infra_exhaust.db")
+    await store.init()
+    await store.log_tcp(
+        "s1",
+        "infra.com",
+        "FAIL",
+        0.0,
+        0,
+        config_path="fake:1",
+        fail_phase="connect_timeout",
+    )
+    await store.log_tcp(
+        "s1",
+        "infra.com",
+        "FAIL",
+        0.0,
+        0,
+        config_path="fake:1",
+        fail_phase="connect_timeout",
+    )
+    await store.flush()
+
+    keys = await store.get_resume_skip_tcp_keys(reprobe_failed=2)
+    assert ("s1", "infra.com") in keys
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_resume_skip_tcp_keys_infra_error_fallback(tmp_path):
+    store = open_run_store(tmp_path / "infra_err.db")
+    await store.init()
+    await store.log_tcp(
+        "s1",
+        "shm.com",
+        "FAIL",
+        0.0,
+        0,
+        config_path="fake:1",
+        fail_phase="other",
+        error="ipc write failed: /dev/shm/blockchecks/bs-p-0/strategy.id",
+    )
+    await store.flush()
+
+    keys = await store.get_resume_skip_tcp_keys(reprobe_failed=2)
+    assert ("s1", "shm.com") not in keys
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_flush_concurrent_append_not_lost(tmp_path, monkeypatch):
     """A row appended AFTER flush snapshots its batch must never be cleared."""
     store = open_run_store(tmp_path / "race.db", batch_size=10)

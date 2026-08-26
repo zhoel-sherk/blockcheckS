@@ -75,6 +75,23 @@ def test_run_spec_from_args_fanout_curl_parallel():
     assert spec.curl_parallel >= 4
 
 
+def test_run_spec_from_args_reprobe_failed_zero_preserved():
+    args = SimpleNamespace(reprobe_failed=0)
+    spec = RunSpec.from_args(args)
+    assert spec.reprobe_failed == 0
+
+
+def test_run_spec_from_args_reprobe_failed():
+    args = SimpleNamespace(reprobe_failed=3)
+    spec = RunSpec.from_args(args)
+    assert spec.reprobe_failed == 3
+
+
+def test_run_spec_defaults_reprobe_failed():
+    spec = RunSpec()
+    assert spec.reprobe_failed == 0
+
+
 def test_campaign_context():
     spec = RunSpec(domain="discord.com")
     ctx = CampaignContext(spec=spec, domains=["discord.com"], primary="discord.com")

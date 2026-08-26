@@ -690,7 +690,7 @@ def test_run_standard_pair_phase_resume_skips_completed():
     args = _args(tcp_only=True, resume=True)
     runner = AsyncMock()
     runner.db = MagicMock()
-    runner.db.get_completed_tcp_keys = AsyncMock(return_value={("s1", "youtube.com")})
+    runner.db.get_resume_skip_tcp_keys = AsyncMock(return_value={("s1", "youtube.com")})
     runner.test_batch_tcp = AsyncMock(return_value=[_result("s2", True)])
     phase = asyncio.run(
         run_standard_pair_phase(
@@ -720,7 +720,7 @@ def test_run_standard_pair_phase_resume_all_skipped():
     args = _args(tcp_only=True, resume=True)
     runner = AsyncMock()
     runner.db = MagicMock()
-    runner.db.get_completed_tcp_keys = AsyncMock(
+    runner.db.get_resume_skip_tcp_keys = AsyncMock(
         return_value={("s1", "youtube.com"), ("s2", "youtube.com")}
     )
     runner.test_batch_tcp = AsyncMock()

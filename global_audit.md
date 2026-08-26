@@ -76,7 +76,7 @@
 - QUIC-subprocess f-string payload: `in_ns_workers.py:220-236` vs `batch_bridge_probe.py:172-215` — **Сделано, коммит de7a0db** (`quic_subprocess_result` в http3).
 - curl-payload dict: канонический `probe.probe_request_dict` vs ручной в `test_runner._check_tls_in_ns:37-59` (P3).
 - Bridge-worker паттерн ×2: `adaptive_runner._bridge_worker:187-298` vs `main_phases._run_tcp_sequential_bridge:859-976` **Сделано, коммит b99b26b** (`BridgeWorkerPool`).
-**Статус:** коммит 623061d (BridgeWorkerPool b99b26b; bind-retry helper)
+**Статус:** коммит 4a08a2b (BridgeWorkerPool b99b26b; bind-retry helper)
 
 ### ARC-7. Глобальное мутируемое состояние процесса — P2
 `cliapp.py:33-37` (_CMD_HANDLERS растёт при каждом main(), _CLI_EXIT_CODE, _USER_CFG, _NO_FLAGS_CAPTURED); `conf_builder.py:61-69` global manifest; `settings.py:139` lru_cache(1) замораживает конфиг на процесс; `ipset_catalog.py:114,127,140,184,213,296` — шесть lru_cache(1) поверх живых файлов; `adaptive_queue.py:48,59` @cache без maxsize (рост за 20ч прогон); `batch_service.py:561-572` _FANOUT_BRIDGE_WARNED; `netns_pool.py:25-26,70-73` atexit/signal глобально; `log.py:140,202,208-220` мутация env из SIGUSR1-обработчика; `config.py:157-183` refresh_tool_paths мутирует константы и env (NFQWS2_DEBUG читается на импорте :437 vs геттер :451 — два источника истины); `curl_probe.py:385` _ech_warned; `youtube_url.py:77`; `voice_discovery.py:33`.
@@ -113,7 +113,7 @@
 **Где:** `sqlite_store.py:595-606` (get_completed_tcp_keys: любой статус), `batch_service.py:60-67,132-146` («stopped before probe» → FAIL всем элементам батча; TimeoutError пула неотличим от остановки), `pair_phases.py:702-704`; дополнительно `zip(jobs,results,strict=False)` в `adaptive_runner.py:234` молча теряет хвост батча при stop_event.
 **Сценарий:** semaphore-wait пересёкся со стопом/таймаутом → FAIL без пробы → resume считает пару сделанной навсегда. Наш кейс: 14 246 битых пар потребовали ручной чистки БД.
 **Фикс:** (а) статус SKIPPED для непроведённых проб, исключённый из latest-row вердикта и resume; (б) get_completed_tcp_keys → latest-row WORKING-семантика; (в) `--reprobe-failed N` / retry_after для инфраструктурных fail_phase; (г) zip strict=True + доучёт недостающих job.
-**Статус:** Сделано, коммит 5659771 (store/resume keys) + f636316 (SKIPPED + zip strict); TODO: (в) `--reprobe-failed`
+**Статус:** коммит 4aae490 (incl. --reprobe-failed)
 
 ### ENG-3. В bridge-режиме веса не влияют на планирование; triage-сид удваивается на каждом resume — P2
 **Где:** приоритет считается в `enqueue()` (`adaptive_queue.py:297`); `boost_pass()` мутирует веса, но `_rebuild_heap()` вызывается только из classic `pop_batch:459-479` — bridge `pop()` никогда. `seed_from_triage:165-190` выполняется ПОСЛЕ загрузки персистентных весов (`adaptive_runner.py:50-56`) и делает `family[fam]=get(fam,1)*2.0` без cap (cap 64 есть только в boost_pass) → 2^N расползание между рестартами; provider-бусты суммируются каждый запуск.

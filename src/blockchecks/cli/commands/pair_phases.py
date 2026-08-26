@@ -732,7 +732,9 @@ async def run_adaptive_pair_phase(
 
     completed_tcp: set[tuple[str, str]] = set()
     if getattr(args, "resume", False):
-        completed_tcp = await db.get_completed_tcp_keys()
+        reprobe = getattr(args, "reprobe_failed", 0)
+        reprobe_failed = 0 if reprobe is None else int(reprobe)
+        completed_tcp = await db.get_resume_skip_tcp_keys(reprobe_failed=reprobe_failed)
 
     from blockchecks.engine.domain_quarantine import DomainQuarantine, quarantine_from_args
 
@@ -833,9 +835,11 @@ async def run_standard_pair_phase(
     completed_tcp: set[tuple[str, str]] = set()
     if getattr(args, "resume", False):
         db = getattr(runner, "db", None)
-        get_keys = getattr(db, "get_completed_tcp_keys", None) if db is not None else None
+        get_keys = getattr(db, "get_resume_skip_tcp_keys", None) if db is not None else None
         if asyncio.iscoroutinefunction(get_keys):
-            completed_tcp = await get_keys()
+            reprobe = getattr(args, "reprobe_failed", 0)
+            reprobe_failed = 0 if reprobe is None else int(reprobe)
+            completed_tcp = await get_keys(reprobe_failed=reprobe_failed)
 
     async def _resume_done(label: str, dom: str) -> bool:
         return (label, dom) in completed_tcp

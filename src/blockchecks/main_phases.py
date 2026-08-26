@@ -619,7 +619,11 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     # opens that many aiosqlite threads and hits RLIMIT (EMFILE / can't start thread).
     completed_tcp: set[tuple[str, str]] = set()
     if args.resume and ctx.db is not None:
-        completed_tcp = await ctx.db.get_completed_tcp_keys()
+        reprobe = getattr(args, "reprobe_failed", 0)
+        reprobe_failed = 0 if reprobe is None else int(reprobe)
+        completed_tcp = await ctx.db.get_resume_skip_tcp_keys(
+            reprobe_failed=reprobe_failed
+        )
 
     async def _resume_job(job):
         return (job.item.label, job.domain) in completed_tcp

@@ -942,6 +942,108 @@ class SqliteRunStore:
             )
             return {(r[0], r[1]) for r in await rows.fetchall()}
 
+    async def _count_infra_fail_rows(
+        self,
+        db: aiosqlite.Connection,
+        strategy: str,
+        domain: str,
+        proto: str,
+        run_id: int,
+    ) -> int:
+        from blockchecks.engine.fail_phase import is_infra_fail_phase
+
+        rows = await db.execute(
+            """SELECT t.fail_phase, t.error
+               FROM tcp_results t
+               JOIN strategies s ON t.strategy_id = s.id
+               WHERE s.name=? AND s.proto=? AND t.domain=? AND t.run_id=?
+                 AND t.status='FAIL'""",
+            (strategy, proto, domain, run_id),
+        )
+        count = 0
+        for fail_phase, error in await rows.fetchall():
+            if is_infra_fail_phase(fail_phase or "", error=error or ""):
+                count += 1
+        return count
+
+    async def get_resume_skip_tcp_keys(
+        self, proto: str = "tcp", *, reprobe_failed: int = 0
+    ) -> set[tuple[str, str]]:
+        """Keys to skip on ``--resume``: WORKING plus optional DPI/exhausted infra FAIL.
+
+        When ``reprobe_failed`` is 0, only latest-row PASS/THROTTLED are skipped
+        (same as ``get_completed_tcp_keys``).  When N>0, latest-row DPI-shaped
+        FAIL is skipped, and infra FAIL is skipped only after N infra FAIL rows.
+        """
+        from blockchecks.engine.fail_phase import is_infra_fail_phase
+
+        working = await self.get_completed_tcp_keys(proto)
+        if reprobe_failed <= 0:
+            return working
+        if self._run_id is None:
+            return working
+
+        run_id = self._run_id
+        async with aiosqlite.connect(self._path) as db:
+            await SqliteRunStore._apply_pragmas(db)
+            rows = await db.execute(
+                """SELECT s.name, t.domain, t.fail_phase, t.error
+                   FROM tcp_results t
+                   JOIN strategies s ON t.strategy_id = s.id
+                   WHERE s.proto=? AND t.run_id=?
+                     AND t.id = (
+                       SELECT t2.id FROM tcp_results t2
+                       WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+                         AND t2.run_id = ?
+                       ORDER BY t2.id DESC LIMIT 1
+                     )
+                     AND t.status = 'FAIL'""",
+                (proto, run_id, run_id),
+            )
+            latest_fails = await rows.fetchall()
+
+            skip_fail: set[tuple[str, str]] = set()
+            reprobe_keys: list[tuple[str, str]] = []
+            for name, domain, fail_phase, error in latest_fails:
+                key = (name, domain)
+                if key in working:
+                    continue
+                err = error or ""
+                phase = fail_phase or ""
+                if is_infra_fail_phase(phase, error=err):
+                    infra_count = await self._count_infra_fail_rows(
+                        db, name, domain, proto, run_id
+                    )
+                    if infra_count < reprobe_failed:
+                        reprobe_keys.append(key)
+                        continue
+                else:
+                    if not phase and any(
+                        m in err for m in ("dev/shm", "ns pool exhausted", "stopped before probe")
+                    ):
+                        log.debug(
+                            "resume reprobe: infra FAIL via error fallback %s×%s",
+                            name,
+                            domain,
+                        )
+                    else:
+                        log.debug(
+                            "resume reprobe: DPI-shaped FAIL skip %s×%s fail_phase=%r",
+                            name,
+                            domain,
+                            phase,
+                        )
+                skip_fail.add(key)
+
+        if reprobe_keys:
+            log.info(
+                "resume: re-queuing %d infra-fail pairs (reprobe_failed=%d, count < %d)",
+                len(reprobe_keys),
+                reprobe_failed,
+                reprobe_failed,
+            )
+        return working | skip_fail
+
     async def get_best_tcp(self, domain: str, *, limit: int = 5) -> list[dict]:
         """Latest PASS/THROTTLED per strategy for domain, ordered by latency_ms ASC."""
         async with aiosqlite.connect(self._path) as db:

@@ -122,6 +122,32 @@ _PHASE_PATTERNS: tuple[tuple[FailPhase, re.Pattern], ...] = (
 # TLS handshake to origin (empty/small 401/403/404) is a Fryazino bypass proof.
 _PASS_HTTP = frozenset({200, 204, 206, 401, 403, 404})
 
+# Infrastructure failures eligible for ``--reprobe-failed`` (not DPI-shaped).
+INFRA_FAIL_PHASES = frozenset(
+    {
+        FailPhase.CONNECT_TIMEOUT,
+        FailPhase.DNS_RESOLVE,
+    }
+)
+
+_INFRA_ERROR_MARKERS = (
+    "dev/shm",
+    "ns pool exhausted",
+    "stopped before probe",
+)
+
+
+def is_infra_fail_phase(fail_phase: str, *, error: str = "") -> bool:
+    """True when a probe failure is infrastructure-related, not DPI-shaped."""
+    phase = (fail_phase or "").strip().lower()
+    if phase in {p.value for p in INFRA_FAIL_PHASES}:
+        return True
+    if phase in (FailPhase.UNKNOWN.value, FailPhase.OTHER.value):
+        err = error or ""
+        if any(marker in err for marker in _INFRA_ERROR_MARKERS):
+            return True
+    return False
+
 
 def classify_fail_phase(error: str, http_code: int = 0) -> FailPhase:
     """Map a probe error string to a structured failure phase.
