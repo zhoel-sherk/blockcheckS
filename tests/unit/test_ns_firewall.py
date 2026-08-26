@@ -54,7 +54,7 @@ def test_detach_one_leaves_other_rules():
 
 
 def test_tcp_check_detaches_in_finally():
-    from blockchecks.engine.in_ns_workers import _run_tcp_check
+    from blockchecks.service.in_ns_workers import _run_tcp_check
 
     fw = MagicMock()
     with (
@@ -64,8 +64,8 @@ def test_tcp_check_detaches_in_finally():
             "blockchecks.service.probe.invoke_curl_probe_worker",
             return_value={"success": True, "http_code": 200},
         ),
-        patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
-        patch("blockchecks.engine.in_ns_workers.is_ytcdn_domain", return_value=False),
+        patch("blockchecks.service.in_ns_workers.is_googlevideo_domain", return_value=False),
+        patch("blockchecks.service.in_ns_workers.is_ytcdn_domain", return_value=False),
     ):
         _run_tcp_check("bs-p0", "fake:blob=stun:repeats=6", "discord.com", 5.0)
 
@@ -74,7 +74,7 @@ def test_tcp_check_detaches_in_finally():
 
 
 def test_udp_coexist_does_not_flush_tcp():
-    from blockchecks.engine.in_ns_workers import _attach_udp_queue
+    from blockchecks.service.in_ns_workers import _attach_udp_queue
 
     fw = MagicMock()
     with patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw):
@@ -85,7 +85,7 @@ def test_udp_coexist_does_not_flush_tcp():
 
 
 def test_udp_non_coexist_detaches_before_attach():
-    from blockchecks.engine.in_ns_workers import _attach_udp_queue
+    from blockchecks.service.in_ns_workers import _attach_udp_queue
 
     fw = MagicMock()
     with patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw):
@@ -96,7 +96,7 @@ def test_udp_non_coexist_detaches_before_attach():
 
 
 def test_quic_check_no_flush_uses_ns_firewall():
-    from blockchecks.engine.in_ns_workers import _run_quic_check
+    from blockchecks.service.in_ns_workers import _run_quic_check
 
     fw = MagicMock()
     with (

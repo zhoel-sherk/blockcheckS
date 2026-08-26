@@ -11,7 +11,7 @@ from blockchecks.checkers.voice_dns import (
 )
 from blockchecks.engine.config import DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
 from blockchecks.engine.strategy_loader import StrategyLoader
-from blockchecks.engine.test_runner import TestRunner
+from blockchecks.service.test_runner import TestRunner
 from blockchecks.terminal import CYAN, GREEN, RESET, YELLOW, error
 
 log = logging.getLogger(__name__)

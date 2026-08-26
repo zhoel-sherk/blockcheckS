@@ -192,6 +192,8 @@ async def test_export_configs_writes_files(tmp_path):
         30.0,
         "PASS",
     )
+    # ST-2: экспорт открывает СВОЁ соединение — буфер обязан быть сброшен
+    await db.flush()
 
     out = tmp_path / "output"
     domains = tmp_path / "domains.txt"
@@ -204,6 +206,7 @@ async def test_export_configs_writes_files(tmp_path):
         out_dir=str(out),
         domains_file=str(domains),
         timestamp="testrun",
+        common_only=False,
     )
     assert Path(result["keenetic"]).exists()
     assert Path(result["raw"]).exists()

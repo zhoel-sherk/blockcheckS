@@ -20,7 +20,6 @@ from blockchecks.engine.adaptive_runner import (
     run_adaptive_tcp,
 )
 from blockchecks.engine.async_runner import AsyncTestRunner, tcp_results_from_details
-from blockchecks.engine.resume_triage import resume_generate_triage
 from blockchecks.engine.config import (
     CONFIGS_DIR,
     DEFAULT_VOICE_IP,
@@ -38,6 +37,7 @@ from blockchecks.engine.domain_loader import (
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
 from blockchecks.engine.matrix_generator import MatrixGenerator, StrategyItem
 from blockchecks.engine.preflight import PreflightOptions
+from blockchecks.engine.resume_triage import resume_generate_triage
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.run_finalize import (
     maybe_export_configs,

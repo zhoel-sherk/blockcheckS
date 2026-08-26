@@ -165,19 +165,26 @@ def test_cli_dispatches_scan_handler_once():
         calls.append(1)
         return 0
 
-    with patch("blockchecks.cli.cliapp._run_scan", side_effect=trace_scan):
-        with patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0):
-            ca.main(["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"])
-    assert len(calls) == 1
+    with (
+        patch("blockchecks.cli.cliapp._run_scan", side_effect=trace_scan),
+        patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0),
+        patch("blockchecks.cli.commands.pair.cmd_pair", new=AsyncMock(return_value=0)),
+    ):
+        rc = ca.main(["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"])
+        print("DBG rc:", rc)
+    assert len(calls) == 1, f"calls={len(calls)}"
 
 
 @pytest.mark.unit
 def test_cli_main_returns_handler_exit_code():
     from blockchecks.cli import cliapp as ca
 
-    with patch("blockchecks.cli.cliapp._run_scan", return_value=7):
-        with patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0):
-            code = ca.main(["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"])
+    with (
+        patch("blockchecks.cli.cliapp._run_scan", return_value=7),
+        patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0),
+        patch("blockchecks.cli.commands.pair.cmd_pair", new=AsyncMock(return_value=7)),
+    ):
+        code = ca.main(["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"])
     assert code == 7
 
 

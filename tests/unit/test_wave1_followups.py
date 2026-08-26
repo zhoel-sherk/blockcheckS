@@ -63,7 +63,7 @@ def test_invoke_curl_probe_worker_parses_stdout():
     assert out["success"] is True
     assert out["http_code"] == 200
     cmd = popen.call_args.args[0]
-    assert "blockchecks.engine.in_ns_workers" in cmd
+    assert "blockchecks.service.in_ns_workers" in cmd
     assert "--mode" in cmd
     assert "curl" in cmd
     fake.stdin.write.assert_called_once()
@@ -147,11 +147,15 @@ def test_invoke_curl_probe_worker_timeout_returns_failure_dict():
 
 @pytest.mark.unit
 def test_composite_imports_public_probe():
+    """Реализация переехала в engine (ARC-2): шим обязан вести на неё."""
     import blockchecks.checkers.composite_runner as cr
 
     src = Path(cr.__file__).read_text(encoding="utf-8")
-    assert "from blockchecks.service.probe import" in src
+    assert "from blockchecks.engine.composite_runner import" in src
     assert "_invoke_curl_probe_worker" not in src
+    # публичное API живо через re-export
+    assert callable(cr.normalize_domains)
+    assert callable(cr.run)
 
 
 @pytest.mark.unit
@@ -196,7 +200,9 @@ def test_load_token_refuses_world_writable(tmp_path: Path, monkeypatch):
     settings = tmp_path / "settings.ini"
     settings.write_text("[discord]\ntoken=sekret\n", encoding="utf-8")
     settings.chmod(0o666)
-    monkeypatch.setattr("blockchecks.checkers.voice_discovery.DPI_TESTER_SETTINGS", str(settings))
+    # resolve_settings_path читает env напрямую (модульного атрибута больше нет)
+    monkeypatch.setenv("BLOCKCHECKS_SETTINGS", str(settings))
+    monkeypatch.delenv("DPI_TESTER_SETTINGS", raising=False)
     assert load_token() is None
 
 

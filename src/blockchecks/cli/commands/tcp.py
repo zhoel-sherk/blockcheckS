@@ -8,7 +8,7 @@ from blockchecks.checkers.dns_secure import prepare_dns_for_run
 from blockchecks.engine.config import CONFIGS_DIR, SECURE_DNS_DEFAULT, ZAPRET2_ROOT
 from blockchecks.engine.run_deadline import RunDeadline, parse_time_limit_seconds
 from blockchecks.engine.strategy_loader import StrategyLoader
-from blockchecks.engine.test_runner import TestRunner
+from blockchecks.service.test_runner import TestRunner
 from blockchecks.terminal import error
 
 log = logging.getLogger(__name__)

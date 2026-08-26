@@ -131,7 +131,7 @@ async def test_generate_tcp_run_set_all_sources():
 
 
 @pytest.mark.asyncio
-async def test_log_tcp_uses_single_connection(temp_db: StateDB):
+async def test_log_tcp_uses_single_connection(tmp_path, temp_db: StateDB):
     connect_calls = {"n": 0}
     real_connect = __import__("aiosqlite").connect
 
@@ -146,9 +146,21 @@ async def test_log_tcp_uses_single_connection(temp_db: StateDB):
         async def __aexit__(self, *exc):
             return await self._cm.__aexit__(*exc)
 
+        def __await__(self):
+            return self.__aenter__().__await__()
+
+    from blockchecks.engine.store import open_run_store
+
     with patch("aiosqlite.connect", side_effect=CountingCM):
-        await temp_db.log_tcp("s1", "discord.com", "PASS", 10.0, 200)
-    assert connect_calls["n"] == 1
+        # init() открывает ЕДИНСТВЕННОЕ long-lived writer-соединение (ST-2);
+        # последующие log_tcp/flush переиспользуют его — новых connect нет.
+        fresh = open_run_store(tmp_path / "fresh.db")
+        await fresh.init()
+        await fresh.log_tcp("s1", "discord.com", "PASS", 10.0, 200)
+        await fresh.flush()
+    assert connect_calls["n"] == 1, (
+        f"ожидался ровно один writer-connect, было {connect_calls['n']}"
+    )
 
 
 @pytest.mark.asyncio

@@ -56,7 +56,7 @@ class TestSubmoduleImports:
         "blockchecks.engine.store",
         "blockchecks.engine.store",
         "blockchecks.engine.strategy_loader",
-        "blockchecks.engine.test_runner",
+        "blockchecks.service.test_runner",
         "blockchecks.engine.async_runner",
         "blockchecks.engine.matrix_generator",
         "blockchecks.engine.adaptive_queue",

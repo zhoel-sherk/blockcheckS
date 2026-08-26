@@ -9,8 +9,6 @@ import time
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
-log = logging.getLogger(__name__)
-
 from blockchecks.engine.config import (
     MEM_MONITOR_ENABLED,
     MEM_MONITOR_LEAK_SLOPE,
@@ -19,6 +17,8 @@ from blockchecks.engine.config import (
     MEM_MONITOR_PY_MAX_MIB,
     MEM_MONITOR_WINDOW,
 )
+
+log = logging.getLogger(__name__)
 
 MIB = 1024 * 1024
 

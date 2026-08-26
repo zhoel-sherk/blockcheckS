@@ -6,6 +6,7 @@ import inspect
 from pathlib import Path
 
 import aiosqlite
+import sys
 import pytest
 
 from blockchecks.engine import async_runner as ar
@@ -172,7 +173,7 @@ def test_disable_ech_in_curl_probe_source():
     assert "CurlOpt.ECH" in src
     assert "_apply_ech_off" in src
     assert 'kwargs["options"]' not in src
-    from blockchecks.engine import in_ns_workers as insw
+    from blockchecks.service import in_ns_workers as insw
 
     runner = Path(insw.__file__).read_text(encoding="utf-8")
     assert "_curl_probe_worker" in runner
@@ -180,7 +181,7 @@ def test_disable_ech_in_curl_probe_source():
 
 
 def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
-    from blockchecks.engine import in_ns_workers as insw
+    from blockchecks.service import in_ns_workers as insw
 
     written = {}
 
@@ -189,16 +190,22 @@ def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
         written["kill"] = kill_existing
 
     monkeypatch.setattr(insw, "_nfqws2_daemon", fake_daemon)
-    monkeypatch.setattr(insw, "_sudo", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "blockchecks.service.ns_firewall.NsFirewall.attach",
+        lambda self, *a, **k: None,
+    )
+
+    monkeypatch.setattr(
+        insw, "_attach_udp_queue", lambda ns, port, coexist=False: None
+    )
 
     class FakeCompleted:
         stdout = '{"success": true, "latency_ms": 1.0, "detail": "ok"}'
         stderr = ""
         returncode = 0
 
-    import subprocess as _sp
-
-    monkeypatch.setattr(_sp, "run", lambda *a, **k: FakeCompleted())
+    # проба уходит через патчируемый шов _sudo
+    monkeypatch.setattr(insw, "_sudo", lambda *a, **k: FakeCompleted())
 
     strategy = "--filter-udp=50000-50100 --lua-desync=fake:blob=DISCORD:repeats=6"
     _run_udp_check("mock-ns", strategy, "1.2.3.4", 3478, 1.0)
@@ -210,26 +217,41 @@ def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
 
 
 def test_udp_coexist_skips_pkill(monkeypatch):
-    from blockchecks.engine import in_ns_workers as insw
+    """coexist=True: pkill пропущен (kill_existing=False), очередь q201 без bypass."""
+    from blockchecks.service import in_ns_workers as insw
 
     calls = []
 
-    def fake_daemon(ns_name, config_path, kill_existing=True, **_kw):
+    def fake_daemon(ns_name, config_path, kill_existing=True, min_procs=1, **_kw):
         calls.append(kill_existing)
         Path(config_path).write_text("--qnum=201\n", encoding="utf-8")
 
-    monkeypatch.setattr(insw, "_nfqws2_daemon", fake_daemon)
-    monkeypatch.setattr(insw, "_sudo", lambda *a, **k: None)
+    class FakeFW:
+        def attach(self, **k):
+            pass
+
+        def detach(self):
+            pass
+
+        def detach_one(self, **k):
+            pass
 
     class FakeCompleted:
-        stdout = '{"success": true, "latency_ms": 1.0, "detail": "ok"}'
+        stdout = '{"success": true, "latency_ms": 1.0}'
+        stderr = ""
         returncode = 0
 
-    import subprocess as _sp
+    monkeypatch.setattr(insw, "_nfqws2_daemon", fake_daemon)
+    monkeypatch.setattr(
+        "blockchecks.service.ns_firewall.get_ns_firewall", lambda ns: FakeFW()
+    )
+    monkeypatch.setattr(
+        "blockchecks.service.ns_firewall.NsFirewall.attach",
+        lambda self, **k: None,
+    )
+    monkeypatch.setattr(insw, "_sudo", lambda *a, **k: FakeCompleted())
 
-    monkeypatch.setattr(_sp, "run", lambda *a, **k: FakeCompleted())
-
-    _run_udp_check(
+    insw._run_udp_check(
         "mock-ns",
         "fake:blob=discord_udp:repeats=6",
         "1.2.3.4",
@@ -237,12 +259,12 @@ def test_udp_coexist_skips_pkill(monkeypatch):
         1.0,
         coexist=True,
     )
-    assert calls == [False]
+    assert calls == [False], f"coexist обязан пропускать pkill: {calls}"
 
 
 def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
     import blockchecks.service.nfqws2 as nfq
-    from blockchecks.engine import in_ns_workers as insw
+    from blockchecks.service import in_ns_workers as insw
 
     src = Path(nfq.__file__).read_text(encoding="utf-8")
     # zapret2#300: bind-ошибки печатаются в stdout nfqws2 — захват обязателен,

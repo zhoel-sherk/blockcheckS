@@ -126,7 +126,7 @@ class TestRunner:
                 self.ns_name,
                 self._python,
                 "-m",
-                "blockchecks.engine.in_ns_workers",
+                "blockchecks.service.in_ns_workers",
                 "--mode",
                 "curl",
             ]
@@ -134,7 +134,7 @@ class TestRunner:
             cmd = [
                 self._python,
                 "-m",
-                "blockchecks.engine.in_ns_workers",
+                "blockchecks.service.in_ns_workers",
                 "--mode",
                 "curl",
             ]
@@ -297,7 +297,7 @@ class TestRunner:
         cmd = [
             self._python,
             "-m",
-            "blockchecks.engine.in_ns_workers",
+            "blockchecks.service.in_ns_workers",
             "--mode",
             "udp",
             ip,
@@ -342,7 +342,7 @@ class TestRunner:
         if result.success:
             import asyncio
 
-            from blockchecks.engine.in_ns_workers import _save_pass_strategy_data_block
+            from blockchecks.service.in_ns_workers import _save_pass_strategy_data_block
 
             try:
                 asyncio.run(

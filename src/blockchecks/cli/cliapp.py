@@ -512,8 +512,11 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_user_config()
     global _USER_CFG
     _USER_CFG = cfg
-    if not _CMD_HANDLERS:
-        build_command_registry(cfg)
+    # Пересобираем реестр на каждый запуск main(): тесты патчат handler-функции
+    # в модуле ПОСЛЕ первого построения, а замороженные ссылки делают патчи
+    # мёртвыми (ARC-7). Построение дешёвое — это только словарь ссылок.
+    _CMD_HANDLERS.clear()
+    build_command_registry(cfg)
 
     paths_cfg = cfg.get("paths") if isinstance(cfg.get("paths"), dict) else {}
     raw = list(argv) if argv is not None else None

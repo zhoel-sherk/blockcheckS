@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from blockchecks.engine.test_runner import ScanReport, TestRunner
+from blockchecks.service.test_runner import ScanReport, TestRunner
 
 pytestmark = pytest.mark.unit
 
@@ -25,7 +25,7 @@ def test_scan_report_passed_count():
 
 
 def test_check_tls_in_ns_error():
-    from blockchecks.engine.test_runner import _check_tls_in_ns
+    from blockchecks.service.test_runner import _check_tls_in_ns
 
     with patch(
         "blockchecks.checkers.curl_probe.build_probe_request",
@@ -37,7 +37,7 @@ def test_check_tls_in_ns_error():
 
 
 def test_check_tls_in_ns_ok():
-    from blockchecks.engine.test_runner import _check_tls_in_ns
+    from blockchecks.service.test_runner import _check_tls_in_ns
 
     req = MagicMock()
     req.domain = "d.com"
@@ -60,11 +60,11 @@ def test_run_check_success():
     data = json.dumps({"success": True, "http_code": 200, "latency_ms": 50})
     with (
         patch(
-            "blockchecks.engine.test_runner._check_tls_in_ns",
+            "blockchecks.service.test_runner._check_tls_in_ns",
             return_value={"payload": {"request": {"domain": "d.com"}}, "error_result": None},
         ),
         patch(
-            "blockchecks.engine.test_runner.subprocess.run",
+            "blockchecks.service.test_runner.subprocess.run",
             return_value=MagicMock(stdout=data),
         ),
     ):
@@ -76,11 +76,11 @@ def test_run_check_parse_error():
     runner = _runner()
     with (
         patch(
-            "blockchecks.engine.test_runner._check_tls_in_ns",
+            "blockchecks.service.test_runner._check_tls_in_ns",
             return_value={"payload": {}, "error_result": None},
         ),
         patch(
-            "blockchecks.engine.test_runner.subprocess.run",
+            "blockchecks.service.test_runner.subprocess.run",
             return_value=MagicMock(stdout="not-json"),
         ),
     ):
@@ -91,7 +91,7 @@ def test_run_check_parse_error():
 def test_run_check_error_result_path():
     runner = _runner()
     with patch(
-        "blockchecks.engine.test_runner._check_tls_in_ns",
+        "blockchecks.service.test_runner._check_tls_in_ns",
         return_value={
             "payload": None,
             "error_result": {"success": False, "http_code": 0, "latency_ms": 0, "error": "boom"},
@@ -106,8 +106,8 @@ def test_test_single_success():
     fw = MagicMock()
     nfq = MagicMock()
     with (
-        patch("blockchecks.engine.test_runner.Firewall", return_value=fw),
-        patch("blockchecks.engine.test_runner.Nfqws2Manager", return_value=nfq),
+        patch("blockchecks.service.test_runner.Firewall", return_value=fw),
+        patch("blockchecks.service.test_runner.Nfqws2Manager", return_value=nfq),
         patch.object(
             runner,
             "_run_check",
@@ -126,8 +126,8 @@ def test_test_single_exception():
     nfq = MagicMock()
     nfq.start.side_effect = RuntimeError("no netns")
     with (
-        patch("blockchecks.engine.test_runner.Firewall", return_value=fw),
-        patch("blockchecks.engine.test_runner.Nfqws2Manager", return_value=nfq),
+        patch("blockchecks.service.test_runner.Firewall", return_value=fw),
+        patch("blockchecks.service.test_runner.Nfqws2Manager", return_value=nfq),
     ):
         result = runner.test_single("fake:a", "d.com", timeout=3.0)
     assert "no netns" in result.error
@@ -138,8 +138,8 @@ def test_test_config():
     fw = MagicMock()
     nfq = MagicMock()
     with (
-        patch("blockchecks.engine.test_runner.Firewall", return_value=fw),
-        patch("blockchecks.engine.test_runner.Nfqws2Manager", return_value=nfq),
+        patch("blockchecks.service.test_runner.Firewall", return_value=fw),
+        patch("blockchecks.service.test_runner.Nfqws2Manager", return_value=nfq),
         patch.object(
             runner,
             "_run_check",
@@ -170,13 +170,13 @@ def test_test_udp_config():
     fw = MagicMock()
     nfq = MagicMock()
     with (
-        patch("blockchecks.engine.test_runner.Firewall", return_value=fw),
-        patch("blockchecks.engine.test_runner.Nfqws2Manager", return_value=nfq),
+        patch("blockchecks.service.test_runner.Firewall", return_value=fw),
+        patch("blockchecks.service.test_runner.Nfqws2Manager", return_value=nfq),
         patch.object(
             runner, "_run_stun_check", return_value={"success": True, "latency_ms": 5, "detail": ""}
         ),
         patch(
-            "blockchecks.engine.in_ns_workers._save_pass_strategy_data_block",
+            "blockchecks.service.in_ns_workers._save_pass_strategy_data_block",
             new=AsyncMock(),
         ),
     ):
@@ -200,7 +200,7 @@ def test_test_sequential_udp():
 def test_run_stun_check_parse_error():
     runner = _runner()
     with patch(
-        "blockchecks.engine.test_runner.subprocess.run", return_value=MagicMock(stdout="garbage")
+        "blockchecks.service.test_runner.subprocess.run", return_value=MagicMock(stdout="garbage")
     ):
         data = runner._run_stun_check("1.2.3.4", 50004, 3.0)
     assert data["success"] is False

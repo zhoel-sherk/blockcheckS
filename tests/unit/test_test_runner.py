@@ -4,7 +4,7 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 from blockchecks.engine.run_deadline import RunDeadline
-from blockchecks.engine.test_runner import TestRunner as SyncTestRunner
+from blockchecks.service.test_runner import TestRunner as SyncTestRunner
 
 
 def test_sequential_stops_on_deadline():

@@ -343,7 +343,7 @@ async def _run_bridge_worker(
 
 @pytest.mark.unit
 async def test_bridge_worker_accounts_partial_batch_as_skipped():
-    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+    from blockchecks.engine.adaptive_runner import _RunStats
     from blockchecks.engine.results import TcpTestResult
 
     queue = MagicMock()
@@ -373,7 +373,7 @@ async def test_bridge_worker_accounts_partial_batch_as_skipped():
 
 @pytest.mark.unit
 async def test_bridge_worker_flushes_full_batch():
-    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+    from blockchecks.engine.adaptive_runner import _RunStats
 
     queue = MagicMock()
     results = [MagicMock(success=True), MagicMock(success=False)]
@@ -400,7 +400,7 @@ async def test_bridge_worker_flushes_full_batch():
 
 @pytest.mark.unit
 async def test_bridge_worker_fanout_run_single():
-    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+    from blockchecks.engine.adaptive_runner import _RunStats
 
     queue = MagicMock()
     job = await _make_job(fanout=True)
@@ -419,7 +419,7 @@ async def test_bridge_worker_fanout_run_single():
 
 @pytest.mark.unit
 async def test_bridge_worker_stop_event_flushes():
-    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+    from blockchecks.engine.adaptive_runner import _RunStats
 
     stop = asyncio.Event()
     stop.set()
@@ -435,7 +435,7 @@ async def test_bridge_worker_stop_event_flushes():
 @pytest.mark.unit
 async def test_bridge_worker_progress_before_batch_flush():
     """on_progress fires incrementally (done + acc) even before a big-batch flush."""
-    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+    from blockchecks.engine.adaptive_runner import _RunStats
 
     queue = MagicMock()
     runner = MagicMock()
@@ -544,7 +544,7 @@ async def test_classic_quarantine_filtered_jobs_mark_done():
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_bridge_worker_stop_empty_and_fanout():
-    from blockchecks.engine.adaptive_runner import _bridge_worker, _RunStats
+    from blockchecks.engine.adaptive_runner import _RunStats
 
     stats = _RunStats()
     runner = MagicMock()

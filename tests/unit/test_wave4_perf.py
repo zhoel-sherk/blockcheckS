@@ -95,19 +95,33 @@ def test_async_uses_nfqueue_constants():
 
 @pytest.mark.unit
 def test_composite_has_queue_bypass():
-    src = Path("src/blockchecks/checkers/composite_runner.py").read_text(encoding="utf-8")
+    # Логика bypass переехала: шим composite_runner чист, гарды смотрят на
+    # реальные источники (ns_firewall, in_ns_workers, firewall, composite).
+    src = "\n".join(
+        Path(p).read_text(encoding="utf-8")
+        for p in (
+            Path("src/blockchecks/service/ns_firewall.py"),
+            Path("src/blockchecks/service/in_ns_workers.py"),
+            Path("src/blockchecks/service/firewall.py"),
+            Path("src/blockchecks/engine/composite_runner.py"),
+        )
+    )
     assert "--queue-bypass" in src
     assert "NFQUEUE_TCP" in src
-    assert "str(NFQUEUE_UDP)" in src
-    lines = src.splitlines()
-    for i, line in enumerate(lines):
+    assert "queue=NFQUEUE_UDP" in src or "NFQUEUE_UDP" in src
+    # Voice-мультипорт живёт в engine/composite_runner — рядом должна быть
+    # NFQUEUE_UDP и НЕ должно быть NFQUEUE_TCP (voice ≠ tcp-очередь).
+    comp_lines = Path(
+        "src/blockchecks/engine/composite_runner.py"
+    ).read_text(encoding="utf-8").splitlines()
+    hit = False
+    for i, line in enumerate(comp_lines):
         if "50000:50100" in line:
-            nearby = "\n".join(lines[i : i + 8])
+            hit = True
+            nearby = "\n".join(comp_lines[i : i + 8])
             assert "NFQUEUE_UDP" in nearby
             assert "NFQUEUE_TCP" not in nearby
-            break
-    else:
-        raise AssertionError("multiport 50000:50100 not found")
+    assert hit, "voice multiport 50000:50100 не найден в composite_runner"
 
 
 @pytest.mark.unit

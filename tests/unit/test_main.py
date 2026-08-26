@@ -75,7 +75,7 @@ def _ctx():
     ctx = MagicMock()
     ctx.stop = asyncio.Event()
     ctx.runner = AsyncMock()
-    ctx.db = MagicMock()
+    ctx.db = AsyncMock()
     return ctx
 
 

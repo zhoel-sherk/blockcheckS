@@ -27,6 +27,20 @@ from blockchecks.engine.config import RETRY_IP_TIMEOUT
 log = logging.getLogger(__name__)
 
 
+
+def _sudo(*args, timeout: float | None = None):
+    """Патчируемый шов sudo-исполнения внутри ns (тесты подменяют)."""
+    return sp.run(["sudo", *args], capture_output=True, text=True, timeout=timeout)
+
+
+def _nfqws2_daemon(ns_name: str, config_path: str, *, kill_existing: bool = True,
+                   **kw):
+    """Точка патча для тестов: ленивый старт демона без top-level импорта."""
+    from blockchecks.service.nfqws2 import start_daemon
+
+    return start_daemon(ns_name, config_path,
+                        kill_existing=kill_existing, **kw)
+
 def udp_filter_covers_port(spec: str, port: int) -> bool:
     """True if a nfqws2 --filter-udp value includes ``port``."""
     parts = [p.strip() for p in spec.split(",") if p.strip()]
@@ -94,6 +108,8 @@ def _load_conf_lines(path: str) -> list[str]:
 
 def _attach_udp_queue(ns_name: str, port: int, *, coexist: bool) -> None:
     """NFQUEUE UDP to q201 after nfqws2 is up. No --queue-bypass (would skip desync)."""
+    import sys as _s
+    print("ZDBG real attach called; module:", __name__, file=_s.stderr)
     from blockchecks.engine.config import NFQUEUE_UDP
     from blockchecks.service.ns_firewall import get_ns_firewall
 
@@ -153,7 +169,6 @@ def _run_quic_check(
     from blockchecks.checkers.http3 import quic_subprocess_result
     from blockchecks.engine.config import NFQUEUE_UDP, PYTHON_BIN
     from blockchecks.engine.nfqws_config import _build_quic_nfqws_lines
-    from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
     from blockchecks.service.ns_firewall import get_ns_firewall
 
     py = python_bin or PYTHON_BIN
@@ -167,7 +182,7 @@ def _run_quic_check(
         _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_quic_", suffix=".conf")
         os.close(_tf_fd)
         shutil.copy2(src, tmp_conf)
-        nfqws2_daemon(ns_name, tmp_conf)
+        _nfqws2_daemon(ns_name, tmp_conf)
     else:
         import tempfile as _tf
 
@@ -176,7 +191,7 @@ def _run_quic_check(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        nfqws2_daemon(ns_name, tmp_conf)
+        _nfqws2_daemon(ns_name, tmp_conf)
 
     fw = get_ns_firewall(ns_name)
     fw.attach(proto="udp", port="443", queue=NFQUEUE_UDP, bypass=True)
@@ -250,7 +265,6 @@ def _run_tcp_check(
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
     from blockchecks.engine.config import NFQUEUE_TCP, PYTHON_BIN
     from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines
-    from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
     from blockchecks.service.ns_firewall import get_ns_firewall
     from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 
@@ -294,7 +308,7 @@ def _run_tcp_check(
         if extra_lua_desync:
             with open(tmp_conf, "a", encoding="utf-8") as f:
                 f.write(f"\n--lua-desync={extra_lua_desync}\n")
-        settle_elapsed = nfqws2_daemon(
+        settle_elapsed = _nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
     else:
@@ -305,7 +319,7 @@ def _run_tcp_check(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        settle_elapsed = nfqws2_daemon(
+        settle_elapsed = _nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
 
@@ -454,7 +468,6 @@ def _run_tcp_check_multi(
     """One nfqws2 session, parallel curl across domains (B2)."""
     from blockchecks.engine.config import NFQUEUE_TCP, PYTHON_BIN
     from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines
-    from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
     from blockchecks.service.ns_firewall import get_ns_firewall
     from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 
@@ -488,7 +501,7 @@ def _run_tcp_check_multi(
         if extra_lua_desync:
             with open(tmp_conf, "a", encoding="utf-8") as f:
                 f.write(f"\n--lua-desync={extra_lua_desync}\n")
-        settle_elapsed = nfqws2_daemon(
+        settle_elapsed = _nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
     else:
@@ -499,7 +512,7 @@ def _run_tcp_check_multi(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        settle_elapsed = nfqws2_daemon(
+        settle_elapsed = _nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
 
@@ -589,14 +602,13 @@ def _run_udp_check(
     iptables is attached after settle, without --queue-bypass.
     """
     from blockchecks.engine.config import NFQUEUE_UDP, PYTHON_BIN
-    from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
     from blockchecks.service.ns_firewall import get_ns_firewall
 
     py = python_bin or PYTHON_BIN
     tmp_conf = _materialize_udp_conf(strategy, port, is_config=is_config)
     fw = get_ns_firewall(ns_name)
     try:
-        nfqws2_daemon(
+        _nfqws2_daemon(
             ns_name,
             tmp_conf,
             kill_existing=not coexist,
@@ -619,10 +631,14 @@ print(json.dumps({{"success": ok, "latency_ms": lat,
             "yes",
         )
         try:
-            r = sp.run(
-                ["sudo", "ip", "netns", "exec", ns_name, py, "-c", probe_code],
-                capture_output=True,
-                text=True,
+            r = _sudo(
+                "ip",
+                "netns",
+                "exec",
+                ns_name,
+                py,
+                "-c",
+                probe_code,
                 timeout=timeout * (3 if burst else 2) + 3,
             )
             try:
@@ -673,8 +689,8 @@ async def _save_pass_strategy_data_block(
 
 # Subprocess entries (integrated from _curl_probe_worker / _probe_worker)
 #
-# These run inside a netns as ``python -m blockchecks.engine.in_ns_workers
-# --mode curl|udp`` (see service/probe.py and engine/test_runner.py). They read
+# These run inside a netns as ``python -m blockchecks.service.in_ns_workers
+# --mode curl|udp`` (see service/probe.py and service/test_runner.py). They read
 # a JSON payload from stdin and write a JSON result to stdout, preserving the
 # exact contract the standalone _probe_worker / _curl_probe_worker modules had.
 
@@ -795,7 +811,7 @@ def _dispatch_worker_main(argv: list[str] | None = None) -> int:
         args = [a for a in args if a != "--burst"]
         if len(args) != 3:
             print(
-                "usage: python -m blockchecks.engine.in_ns_workers --mode udp IP PORT TIMEOUT [--burst]",
+                "usage: python -m blockchecks.service.in_ns_workers --mode udp IP PORT TIMEOUT [--burst]",
                 file=sys.stderr,
             )
             return 2
@@ -807,7 +823,7 @@ def _dispatch_worker_main(argv: list[str] | None = None) -> int:
     argv_payload = args[0] if args else None
     if argv_payload is None and sys.stdin.isatty():
         print(
-            "usage: echo JSON | python -m blockchecks.engine.in_ns_workers --mode curl",
+            "usage: echo JSON | python -m blockchecks.service.in_ns_workers --mode curl",
             file=sys.stderr,
         )
         return 2

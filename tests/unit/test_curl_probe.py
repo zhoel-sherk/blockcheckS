@@ -197,9 +197,9 @@ def test_no_options_kwarg_in_probe_sources():
     paths = [
         root / "checkers" / "curl_probe.py",
         root / "engine" / "_curl_probe_worker.py",
-        root / "engine" / "in_ns_workers.py",
+        root / "service" / "in_ns_workers.py",
         root / "engine" / "async_runner.py",
-        root / "engine" / "test_runner.py",
+        root / "service" / "test_runner.py",
     ]
     for path in paths:
         text = path.read_text(encoding="utf-8")

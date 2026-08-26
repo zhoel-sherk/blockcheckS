@@ -98,46 +98,70 @@ async def test_get_best_pairs_includes_throttled(tmp_path):
 
 @pytest.mark.asyncio
 async def test_flush_rollback_preserves_pending(tmp_path):
-    """On flush failure after BEGIN, pending buffers must not be cleared."""
-    db = open_run_store(tmp_path / "flush.db")
-    await db.init()
-    db.batch_size = 100
-    await db.log_tcp("s1", "discord.com", "PASS", 10.0, http_code=200)
-    assert len(db._tcp_pending) == 1
+    """On flush failure rows must return to pending (ST-2 long-lived writer).
 
+    Мок ставится ДО init(): writer-соединение кэшируется лениво, поздний
+    перехват уже не действует. Проксируем настоящий aiosqlite.Connection,
+    подменяя только executemany.
+    """
     import blockchecks.engine.store.sqlite_store as mod
 
-    orig = mod.aiosqlite.connect
+    db = open_run_store(tmp_path / "flush.db")
+    orig_connect = mod.aiosqlite.connect
+    injected = {"n": 0}
 
-    class BoomCM:
-        def __init__(self):
-            self._cm = orig(db._path)
+    class _BoomProxy:
+        def __init__(self, conn):
+            self._conn = conn
 
         async def __aenter__(self):
-            self._conn = await self._cm.__aenter__()
+            await self._conn.__aenter__()
             return self
 
         async def __aexit__(self, *exc):
-            return await self._cm.__aexit__(*exc)
+            return await self._conn.__aexit__(*exc)
 
-        async def execute(self, sql, params=()):
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+        async def executemany(self, sql, seq=()):
             if isinstance(sql, str) and "INSERT INTO tcp_results" in sql:
+                injected["n"] += 1
                 raise RuntimeError("inject fail")
-            return await self._conn.execute(sql, params)
+            return await self._conn.executemany(sql, seq)
 
-        async def commit(self):
-            return await self._conn.commit()
+    class _ConnectAwaitable:
+        def __init__(self, cm):
+            self._cm = cm
 
-        async def rollback(self):
-            return await self._conn.rollback()
+        def __await__(self):
+            async def _resolve():
+                conn = await self._cm
+                return _BoomProxy(conn)
+            return _resolve().__await__()
 
-    mod.aiosqlite.connect = lambda *a, **k: BoomCM()  # type: ignore[assignment]
+    def boom_connect(*a, **k):
+        return _ConnectAwaitable(orig_connect(*a, **k))
+
+    mod.aiosqlite.connect = boom_connect  # type: ignore[assignment]
     try:
+        await db.init()
+        db.batch_size = 100
+        await db.log_tcp("s1", "discord.com", "PASS", 10.0, http_code=200)
+        assert len(db._tcp_pending) == 1
+        # Контракт ST-2/RT: flush ретраит внутри, затем бросает; rollback
+        # возвращает строки в pending.
         with pytest.raises(RuntimeError, match="inject fail"):
             await db.flush()
+        assert injected["n"] >= 1
+        assert len(db._tcp_pending) == 1, "rollback обязан сохранить pending"
     finally:
-        mod.aiosqlite.connect = orig
-    assert len(db._tcp_pending) == 1
+        mod.aiosqlite.connect = orig_connect
+        try:
+            await db.close()
+        except Exception:
+            pass
+
 
 
 @pytest.mark.asyncio

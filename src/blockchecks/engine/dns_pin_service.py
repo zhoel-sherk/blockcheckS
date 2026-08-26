@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from blockchecks.checkers.dns_secure import DnsRunCache
 from blockchecks.engine.config import PIN_TIMEOUT, PYTHON_BIN
 from blockchecks.engine.fail_phase import FailPhase
-from blockchecks.engine.in_ns_workers import _run_tcp_check
+from blockchecks.service.in_ns_workers import _run_tcp_check
 from blockchecks.terminal import CYAN, RESET, YELLOW
 
 log = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 
-from blockchecks.engine.in_ns_workers import run_curl_worker_payload as run_payload
+from blockchecks.service.in_ns_workers import run_curl_worker_payload as run_payload
 
 
 def main(argv: list[str] | None = None) -> int:

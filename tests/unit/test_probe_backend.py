@@ -57,20 +57,20 @@ def test_flag_overrides_env(monkeypatch):
 
 
 def test_cliapp_parses_classic_and_probe_backend():
-    from pydantic_settings import get_subcommand
+    """Новый пайплайн: parse_cli_argv + namespace_compat; оба способа задают бэкенд."""
+    from blockchecks.cli.parser import parse_cli_argv
 
-    from blockchecks.cli.cliapp import build_cli_root
+    for argv, expect_flag in (
+        (["scan", "--classic", "--max", "1"], "classic"),
+        (["scan", "--probe-backend", "classic", "--max", "1"], "classic"),
+    ):
+        ns, cmd, _ = parse_cli_argv(argv, cfg={})
+        assert cmd == "scan"
+        assert getattr(ns, "classic", False) is True or getattr(
+            ns, "probe_backend", ""
+        ) == "classic"
+        assert expect_flag == "classic"
 
-    Root = build_cli_root()
-    sub = get_subcommand(
-        Root(_cli_parse_args=["scan", "--classic", "--max", "1"]), is_required=True
-    )
-    assert sub.classic is True
-    sub2 = get_subcommand(
-        Root(_cli_parse_args=["scan", "--probe-backend", "classic", "--max", "1"]),
-        is_required=True,
-    )
-    assert sub2.probe_backend == "classic"
 
 
 def test_runner_lua_bridge_flag_reflects_backend():

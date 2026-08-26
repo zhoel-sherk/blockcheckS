@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from blockchecks.engine.in_ns_workers import (
+from blockchecks.service.in_ns_workers import (
     _is_quic_dropped,
     _run_quic_check,
     _run_tcp_check_multi,
@@ -22,11 +22,11 @@ from blockchecks.engine.in_ns_workers import (
 
 @pytest.mark.unit
 def test_curl_worker_stdio_loop():
-    from blockchecks.engine.in_ns_workers import _run_curl_worker_stdio_loop
+    from blockchecks.service.in_ns_workers import _run_curl_worker_stdio_loop
 
     payload = {"mode": "single", "request": {"domain": "x", "timeout": 1.0}}
     with patch(
-        "blockchecks.engine.in_ns_workers.run_curl_worker_payload",
+        "blockchecks.service.in_ns_workers.run_curl_worker_payload",
         return_value={"success": True, "http_code": 200},
     ) as run_payload:
         import io
@@ -51,14 +51,14 @@ def test_curl_worker_module_avoids_heavy_imports():
         "blockchecks.service.nfqws2",
         "blockchecks.engine.conf_builder",
         "blockchecks.engine.nfqws_config",
-        "blockchecks.engine.in_ns_workers",
+        "blockchecks.service.in_ns_workers",
     }
     saved = {name: sys.modules.pop(name, None) for name in heavy}
     try:
         before = set(sys.modules)
-        importlib.import_module("blockchecks.engine.in_ns_workers")
+        importlib.import_module("blockchecks.service.in_ns_workers")
         new = set(sys.modules) - before
-        assert not new.intersection(heavy - {"blockchecks.engine.in_ns_workers"})
+        assert not new.intersection(heavy - {"blockchecks.service.in_ns_workers"})
     finally:
         for name, mod in saved.items():
             if mod is not None:
@@ -104,10 +104,10 @@ def test_run_tcp_check_multi_gv_fail():
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
         patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch(
-            "blockchecks.engine.in_ns_workers.prepare_googlevideo_probe",
+            "blockchecks.service.in_ns_workers.prepare_googlevideo_probe",
             return_value=(MagicMock(), {"success": False, "error": "gv url unavailable"}),
         ),
-        patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=True),
+        patch("blockchecks.service.in_ns_workers.is_googlevideo_domain", return_value=True),
     ):
         out = _run_tcp_check_multi("bs-p0", "fake:x", ["googlevideo.com"], 5.0)
     assert out["googlevideo.com"]["success"] is False
@@ -135,7 +135,7 @@ def test_run_tcp_check_multi_retry():
             "blockchecks.service.probe.invoke_curl_probe_worker",
             side_effect=fake_worker,
         ),
-        patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
+        patch("blockchecks.service.in_ns_workers.is_googlevideo_domain", return_value=False),
     ):
         out = _run_tcp_check_multi(
             "bs-p0",
@@ -156,7 +156,7 @@ def test_run_udp_check_coexist():
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05) as daemon,
         patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
         patch(
-            "blockchecks.engine.in_ns_workers.sp.run",
+            "blockchecks.service.in_ns_workers.sp.run",
             return_value=MagicMock(stdout='{"success": true, "latency_ms": 30}'),
         ),
     ):
@@ -196,7 +196,7 @@ def test_run_udp_check_dport_and_no_bypass():
         patch("blockchecks.service.nfqws2.start_daemon", side_effect=fake_daemon),
         patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
         patch(
-            "blockchecks.engine.in_ns_workers.sp.run",
+            "blockchecks.service.in_ns_workers.sp.run",
             return_value=MagicMock(stdout='{"success": true, "latency_ms": 12}'),
         ),
     ):
@@ -226,7 +226,7 @@ def test_run_udp_check_timeout_expired():
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
         patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch(
-            "blockchecks.engine.in_ns_workers.sp.run",
+            "blockchecks.service.in_ns_workers.sp.run",
             side_effect=sp.TimeoutExpired(cmd="probe", timeout=1),
         ),
     ):

@@ -9,7 +9,6 @@ import os
 from blockchecks.checkers.dns_secure import DnsRunCache
 from blockchecks.engine.config import BLOB_DIR, PYTHON_BIN  # noqa: F401
 from blockchecks.engine.dns_pin_service import DnsPinService, pin_candidate_l3_ok
-from blockchecks.engine.in_ns_workers import RETRY_IP_TIMEOUT  # noqa: F401
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.pair_matrix_runner import PairMatrixRunner
 from blockchecks.engine.probe_executors import (
@@ -23,6 +22,7 @@ from blockchecks.engine.store import RunStateStore
 from blockchecks.service.batch_models import BatchContext, BatchProbeConfig, RunnerProbeDeps
 from blockchecks.service.batch_scheduler import BatchScheduler
 from blockchecks.service.batch_service import ProbeBatchService
+from blockchecks.service.in_ns_workers import RETRY_IP_TIMEOUT  # noqa: F401
 from blockchecks.service.netns_pool import NetNsPool
 from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon  # noqa: F401
 from blockchecks.terminal import RED, RESET, status_tag
@@ -32,15 +32,6 @@ log = logging.getLogger(__name__)
 _pin_candidate_l3_ok = pin_candidate_l3_ok
 
 from blockchecks.engine.conf_builder import add_blobs_from_strategy, split_cli_args
-from blockchecks.engine.in_ns_workers import (
-    _is_quic_dropped,  # noqa: F401 — re-export for tests / lazy workers
-    _quic_fallback_variants,  # noqa: F401
-    _run_quic_check,  # noqa: F401
-    _run_tcp_check,
-    _run_tcp_check_multi,  # noqa: F401
-    _run_udp_check,  # noqa: F401
-    _save_pass_strategy_data_block,  # noqa: F401
-)
 from blockchecks.engine.nfqws_config import (  # noqa: F401
     _build_inline_nfqws_lines,
     _build_quic_nfqws_lines,
@@ -52,6 +43,15 @@ from blockchecks.engine.results import (
     TcpTestResult,
     UdpTestResult,
     tcp_results_from_details,
+)
+from blockchecks.service.in_ns_workers import (
+    _is_quic_dropped,  # noqa: F401 — re-export for tests / lazy workers
+    _quic_fallback_variants,  # noqa: F401
+    _run_quic_check,  # noqa: F401
+    _run_tcp_check,
+    _run_tcp_check_multi,  # noqa: F401
+    _run_udp_check,  # noqa: F401
+    _save_pass_strategy_data_block,  # noqa: F401
 )
 
 __all__ = [

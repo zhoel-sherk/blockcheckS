@@ -70,7 +70,7 @@ def _worker_cmd(ns_name: str, py: str) -> list[str]:
         ns_name,
         py,
         "-m",
-        "blockchecks.engine.in_ns_workers",
+        "blockchecks.service.in_ns_workers",
         "--mode",
         "curl",
     ]

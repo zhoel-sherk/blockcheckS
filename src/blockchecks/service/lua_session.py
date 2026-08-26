@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from blockchecks.engine.config import NETNS_BASE, SHM_BASE
-
-log = logging.getLogger(__name__)
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.service.lua_bridge_ipc import LuaBridge
 from blockchecks.service.lua_conf import write_bridge_conf
@@ -21,6 +19,8 @@ from blockchecks.service.lua_netns import (
     _bridge_iptables_add,
     _check_netns_exists,
 )
+
+log = logging.getLogger(__name__)
 
 
 @dataclass

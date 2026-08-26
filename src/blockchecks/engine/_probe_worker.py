@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 
-from blockchecks.engine.in_ns_workers import run_udp_worker_probe as run_probe
+from blockchecks.service.in_ns_workers import run_udp_worker_probe as run_probe
 
 
 def main(argv: list[str] | None = None) -> int:
