@@ -8,6 +8,7 @@ import logging
 import os
 import random
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -425,12 +426,12 @@ def udp_discover_bootstrap(
     finally:
         try:
             mgr.stop()
-        except Exception:
-            pass
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("[voice-dns] bootstrap nfqws2 stop failed: %s", exc)
         try:
             fw.cleanup()
-        except Exception:
-            pass
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("[voice-dns] bootstrap firewall cleanup failed: %s", exc)
         if conf_path:
             try:
                 os.unlink(conf_path)

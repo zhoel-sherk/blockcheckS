@@ -2,7 +2,10 @@
 Always --queue-bypass. Never iptables -F OUTPUT.
 """
 
+import logging
 import subprocess
+
+log = logging.getLogger(__name__)
 
 
 class Firewall:
@@ -106,8 +109,12 @@ class Firewall:
         for rule_args in self._rules:
             try:
                 self._run(*rule_args, check=False)
-            except Exception:
-                pass
+            except (OSError, subprocess.SubprocessError) as exc:
+                log.warning(
+                    "firewall cleanup: iptables delete failed %s: %s",
+                    rule_args,
+                    exc,
+                )
         self._rules.clear()
 
     def __enter__(self):

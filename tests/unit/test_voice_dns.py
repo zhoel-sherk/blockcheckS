@@ -1,6 +1,7 @@
 """Tests for voice DNS discovery."""
 
 import asyncio
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +14,7 @@ from blockchecks.checkers.voice_dns import (
     parse_maks_ip_list,
     positive_discover_count,
     resolve_voice_targets,
+    udp_discover_bootstrap,
 )
 
 
@@ -273,3 +275,24 @@ async def test_discover_dns_alive_stops_on_stop_event(monkeypatch):
         )
     # Stop fired before probing: the gather must bail out (no hang).
     assert isinstance(eps, list)
+
+
+def test_udp_discover_bootstrap_cleanup_logs_failures(caplog):
+    """Bootstrap finally must log stop/cleanup failures instead of swallowing them."""
+    mock_fw = MagicMock()
+    mock_fw.cleanup.side_effect = OSError("iptables fail")
+    mock_mgr = MagicMock()
+    mock_mgr.stop.side_effect = OSError("kill fail")
+
+    with patch("blockchecks.checkers.voice_dns.sys.platform", "linux"):
+        with patch("blockchecks.service.firewall.Firewall", return_value=mock_fw):
+            with patch("blockchecks.service.nfqws2.Nfqws2Manager", return_value=mock_mgr):
+                with patch.object(mock_mgr, "start_config", side_effect=RuntimeError("boot fail")):
+                    with caplog.at_level(logging.WARNING, logger="blockchecks.checkers.voice_dns"):
+                        with udp_discover_bootstrap(enabled=True) as active:
+                            assert active is False
+    mock_mgr.stop.assert_called_once()
+    mock_fw.cleanup.assert_called_once()
+    messages = [r.message for r in caplog.records]
+    assert any("nfqws2 stop failed" in m for m in messages)
+    assert any("firewall cleanup failed" in m for m in messages)

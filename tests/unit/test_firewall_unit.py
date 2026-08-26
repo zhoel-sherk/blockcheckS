@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -122,3 +123,15 @@ def test_ns_prefix_includes_netns_exec():
     fw = Firewall(ns_name="bs-p3")
     assert fw._ns_prefix() == ["sudo", "ip", "netns", "exec", "bs-p3"]
     assert Firewall()._ns_prefix() == ["sudo"]
+
+
+def test_cleanup_logs_on_delete_failure(caplog):
+    fw = Firewall(ns_name="bs-p0")
+    fw._rules = [
+        ["-D", "OUTPUT", "-p", "tcp", "--dport", "443", "-j", "NFQUEUE"],
+    ]
+    with patch.object(fw, "_run", side_effect=OSError("no iptables")):
+        with caplog.at_level(logging.WARNING, logger="blockchecks.service.firewall"):
+            fw.cleanup()
+    assert fw._rules == []
+    assert any("iptables delete failed" in r.message for r in caplog.records)
