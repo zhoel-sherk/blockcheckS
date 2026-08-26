@@ -172,6 +172,51 @@ async def test_pass_strategies_udp_does_not_clobber_tcp(store: ProviderStore):
     assert by_proto["tcp"]["http_code"] == 200
 
 
+@pytest.mark.asyncio
+async def test_pass_strategies_same_strategy_tcp_udp_coexist(store: ProviderStore):
+    strat = "fake:blob=stun:repeats=6:tcp_ts=-1000"
+    await store.upsert_pass_strategy(
+        strat, "discord.com", protocol="tcp", latency_ms=90, http_code=200
+    )
+    await store.upsert_pass_strategy(strat, "discord.com", protocol="udp", latency_ms=12)
+    rows = await store.pass_strategies()
+    by_proto = {r["protocol"]: r for r in rows}
+    assert len(rows) == 2
+    assert by_proto["tcp"]["latency_ms"] == 90
+    assert by_proto["udp"]["latency_ms"] == 12
+
+
+@pytest.mark.asyncio
+async def test_pass_strategies_migrates_legacy_unique(store: ProviderStore):
+    import aiosqlite
+
+    legacy = """
+    CREATE TABLE pass_strategies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy TEXT NOT NULL,
+        domain TEXT NOT NULL,
+        protocol TEXT DEFAULT 'tcp',
+        latency_ms REAL DEFAULT 0,
+        http_code INTEGER DEFAULT 0,
+        approved INTEGER DEFAULT 0,
+        checked_at TEXT NOT NULL,
+        UNIQUE(strategy, domain)
+    );
+    INSERT INTO pass_strategies
+        (strategy, domain, protocol, latency_ms, http_code, approved, checked_at)
+    VALUES ('legacy_strat', 'example.com', 'tcp', 50, 200, 1, '2026-01-01T00:00:00');
+    """
+    async with aiosqlite.connect(store.strategies_db) as db:
+        await db.executescript(legacy)
+        await db.commit()
+    strat = "legacy_strat"
+    await store.upsert_pass_strategy(strat, "example.com", protocol="udp", latency_ms=9)
+    rows = await store.pass_strategies()
+    by_proto = {r["protocol"]: r for r in rows}
+    assert by_proto["tcp"]["latency_ms"] == 50
+    assert by_proto["udp"]["latency_ms"] == 9
+
+
 @pytest.mark.unit
 def test_best_config_write(store: ProviderStore):
     content = "# best config\n--lua-desync=fake\n"
@@ -223,6 +268,33 @@ def test_provider_name_auto_detect_network_failure(monkeypatch, tmp_path):
     name = prov.provider_name(allow_detect=True)
     assert name == "default"
     assert not cfg_file.exists()  # default is not persisted
+
+
+def test_provider_name_does_not_cache_soft_default(monkeypatch, tmp_path):
+    import blockchecks.data_block.provider as prov
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    cfg_file = cfg_dir / "config.toml"
+    monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
+    prov._CACHE.clear()
+    assert prov.provider_name(allow_detect=False) == "default"
+    cfg_file.write_text('[provider]\nname = "llc_trc_fiord"\n')
+    assert prov.provider_name(allow_detect=False) == "llc_trc_fiord"
+
+
+def test_provider_name_does_not_cache_ipinfo_failure(monkeypatch, tmp_path):
+    import blockchecks.data_block.provider as prov
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    cfg_file = cfg_dir / "config.toml"
+    monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
+    prov._CACHE.clear()
+    monkeypatch.setattr(prov, "_query_ipinfo", lambda timeout=5.0: None)
+    assert prov.provider_name(allow_detect=True) == "default"
+    monkeypatch.setattr(prov, "_query_ipinfo", lambda timeout=5.0: "AS1 Real ISP")
+    assert prov.provider_name(allow_detect=True) == "real_isp"
 
 
 def test_get_provider_dir(monkeypatch, tmp_path):
@@ -436,6 +508,38 @@ def test_export_copies_without_deleting_other_slugs(tmp_path, monkeypatch):
     assert (dest_root / "providers" / "isp" / "hosts").read_text().startswith("9.9.9.9")
     assert (other / "hosts").read_text() == "keep-me\n"
     assert not (dest_root / "providers" / "default").exists()
+
+
+def test_sync_exported_resolves_exported_slug(tmp_path, monkeypatch):
+    import subprocess
+
+    import blockchecks.data_block.provider as prov
+    from blockchecks.data_block.export import sync_exported
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    cfg_file = cfg_dir / "config.toml"
+    monkeypatch.setattr(prov, "CONFIG_FILE", cfg_file)
+    prov._CACHE.clear()
+    dest = tmp_path / "repo"
+    slug_dir = dest / "providers" / "llc_trc_fiord"
+    slug_dir.mkdir(parents=True)
+    (dest / ".git").mkdir()
+    seen: list[str] = []
+
+    def fake_run(cmd, cwd=None, **kwargs):
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    orig_init = ProviderStore.__init__
+
+    def track_init(self, provider_dir, *a, **k):
+        seen.append(Path(provider_dir).name)
+        return orig_init(self, provider_dir, *a, **k)
+
+    monkeypatch.setattr(ProviderStore, "__init__", track_init)
+    assert sync_exported(dest, push=False) is True
+    assert seen == ["llc_trc_fiord"]
 
 
 def test_cmd_data_block_requires_out_when_no_git(monkeypatch, tmp_path):

@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from blockchecks.data_block.provider import (
+    _read_provider_from_cfg,
     data_block_repo_root,
     provider_name,
 )
@@ -73,7 +74,22 @@ def export_runtime_data_block(out: Path, *, provider: str | None = None) -> int:
     return copied
 
 
-def sync_exported(out: Path, *, push: bool = True) -> bool:
-    slug = provider_name(allow_detect=False)
+def _resolve_sync_provider(out: Path, provider: str | None) -> str:
+    """Pick the provider slug to sync — never a stale soft-default cache."""
+    if provider:
+        return provider
+    from_cfg = _read_provider_from_cfg()
+    if from_cfg:
+        return from_cfg
+    dest_base = Path(out) / "providers"
+    if dest_base.is_dir():
+        slugs = sorted(p.name for p in dest_base.iterdir() if p.is_dir())
+        if len(slugs) == 1:
+            return slugs[0]
+    return provider_name(allow_detect=True)
+
+
+def sync_exported(out: Path, *, provider: str | None = None, push: bool = True) -> bool:
+    slug = _resolve_sync_provider(Path(out), provider)
     store = ProviderStore(Path(out) / "providers" / slug)
     return store.sync_commit(push=push, repo_root=Path(out))

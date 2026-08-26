@@ -26,13 +26,28 @@ _SKIP_DETECT_WARNED = False
 
 
 def _cached_provider(fn):
-    """Memoize provider_name() per (allow_detect) — avoid re-reading config.toml."""
+    """Memoize provider_name() per (allow_detect) — avoid re-reading config.toml.
+
+    Soft defaults (detect skipped / ipinfo failed) are never cached so a later
+    config.toml write or successful detect can take effect in-process.
+    """
 
     def wrapper(allow_detect: bool = True) -> str:
+        from_cfg = _read_provider_from_cfg()
+        if from_cfg:
+            key = str(bool(allow_detect))
+            _CACHE[key] = from_cfg
+            return from_cfg
         key = str(bool(allow_detect))
-        if key not in _CACHE:
-            _CACHE[key] = fn(allow_detect=allow_detect)
-        return _CACHE[key]
+        cached = _CACHE.get(key)
+        if cached is not None and cached != DEFAULT_PROVIDER:
+            return cached
+        result = fn(allow_detect=allow_detect)
+        if result != DEFAULT_PROVIDER:
+            _CACHE[key] = result
+        else:
+            _CACHE.pop(key, None)
+        return result
 
     return wrapper
 

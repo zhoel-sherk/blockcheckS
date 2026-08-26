@@ -45,9 +45,59 @@ CREATE TABLE IF NOT EXISTS pass_strategies (
     http_code INTEGER DEFAULT 0,
     approved INTEGER DEFAULT 0,
     checked_at TEXT NOT NULL,
-    UNIQUE(strategy, domain)
+    UNIQUE(strategy, domain, protocol)
 );
 """
+
+_STRATEGIES_LEGACY_UNIQUE = ("strategy", "domain")
+
+
+async def _pass_strategies_needs_protocol_unique(db: aiosqlite.Connection) -> bool:
+    """True when the table still has the legacy UNIQUE(strategy, domain) index."""
+    cur = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='pass_strategies'"
+    )
+    if await cur.fetchone() is None:
+        return False
+    cur = await db.execute("PRAGMA index_list(pass_strategies)")
+    for row in await cur.fetchall():
+        idx_name = row[1]
+        if not idx_name.startswith("sqlite_autoindex"):
+            continue
+        info = await db.execute(f"PRAGMA index_info({idx_name})")
+        cols = [r[2] for r in await info.fetchall()]
+        if cols == list(_STRATEGIES_LEGACY_UNIQUE):
+            return True
+    return False
+
+
+async def _migrate_pass_strategies_protocol_unique(db: aiosqlite.Connection) -> None:
+    """Rebuild pass_strategies so UNIQUE includes protocol; preserve rows."""
+    if not await _pass_strategies_needs_protocol_unique(db):
+        return
+    log.info("%s", "  [data_block] migrating pass_strategies UNIQUE → (strategy, domain, protocol)")
+    await db.executescript(
+        """
+        CREATE TABLE pass_strategies_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            protocol TEXT DEFAULT 'tcp',
+            latency_ms REAL DEFAULT 0,
+            http_code INTEGER DEFAULT 0,
+            approved INTEGER DEFAULT 0,
+            checked_at TEXT NOT NULL,
+            UNIQUE(strategy, domain, protocol)
+        );
+        INSERT INTO pass_strategies_new
+            (id, strategy, domain, protocol, latency_ms, http_code, approved, checked_at)
+        SELECT id, strategy, domain, COALESCE(protocol, 'tcp'),
+               latency_ms, http_code, approved, checked_at
+        FROM pass_strategies;
+        DROP TABLE pass_strategies;
+        ALTER TABLE pass_strategies_new RENAME TO pass_strategies;
+        """
+    )
 
 
 def _now() -> str:
@@ -216,6 +266,7 @@ class ProviderStore:
     async def _init_strategies(self) -> aiosqlite.Connection:
         db = await aiosqlite.connect(self.strategies_db)
         await db.executescript(_STRATEGIES_SCHEMA)
+        await _migrate_pass_strategies_protocol_unique(db)
         await db.commit()
         return db
 
@@ -235,8 +286,7 @@ class ProviderStore:
                 """INSERT INTO pass_strategies
                        (strategy, domain, protocol, latency_ms, http_code, approved, checked_at)
                    VALUES (?,?,?,?,?,?,?)
-                   ON CONFLICT(strategy, domain) DO UPDATE SET
-                     protocol=excluded.protocol,
+                   ON CONFLICT(strategy, domain, protocol) DO UPDATE SET
                      latency_ms=excluded.latency_ms,
                      http_code=excluded.http_code,
                      approved=excluded.approved,
