@@ -219,12 +219,10 @@ async def test_run_adaptive_tcp_bridge_workers(monkeypatch):
 
     calls = {"n": 0}
 
-    async def fake_worker(runner, queue, stats, **kw):
+    async def fake_worker(pool, queue, stats, **kw):
         calls["n"] += 1
         stats.done += 1
         stats.passed += 1
-        if kw.get("stop_event") is None:
-            pass
 
     with patch("blockchecks.engine.adaptive_runner._bridge_worker", side_effect=fake_worker):
         result = await run_adaptive_tcp_bridge(
@@ -303,10 +301,43 @@ async def test_apply_provider_weights_skips_missing_strategy():
 async def _make_job(
     strategy="fake:blob=stun:repeats=6:tcp_ts=-1000", domain="discord.com", fanout=False
 ):
-    from blockchecks.engine.adaptive_runner import _bridge_worker  # noqa: F401
-
     return AdaptiveJob.from_item(
         StrategyItem(label=strategy, strategy=strategy), domain, fanout=fanout
+    )
+
+
+async def _run_bridge_worker(
+    runner,
+    queue,
+    stats,
+    *,
+    bridge_batch=50,
+    stop_event=None,
+    on_progress=None,
+    isolate=True,
+    quarantine=None,
+    timeout=5.0,
+):
+    from blockchecks.engine.adaptive_runner import _bridge_worker
+    from blockchecks.engine.bridge_worker_pool import BridgeWorkerPool
+
+    if not hasattr(queue, "excluded_domains"):
+        queue.excluded_domains = set()
+    pool = BridgeWorkerPool(
+        runner,
+        timeout=timeout,
+        stop_event=stop_event,
+        isolate=isolate,
+        active_domains=set(),
+        quarantine=quarantine,
+        excluded_domains=queue.excluded_domains,
+    )
+    await _bridge_worker(
+        pool,
+        queue,
+        stats,
+        bridge_batch=bridge_batch,
+        on_progress=on_progress,
     )
 
 
@@ -329,16 +360,11 @@ async def test_bridge_worker_accounts_partial_batch_as_skipped():
     )
 
     stats = _RunStats()
-    await _bridge_worker(
+    await _run_bridge_worker(
         runner,
         queue,
         stats,
-        timeout=5.0,
         bridge_batch=3,
-        stop_event=None,
-        on_progress=None,
-        active_domains=set(),
-        domain_lock=asyncio.Lock(),
     )
     assert stats.done == 3
     assert stats.passed == 1
@@ -360,16 +386,12 @@ async def test_bridge_worker_flushes_full_batch():
 
     stats = _RunStats()
     progress = []
-    await _bridge_worker(
+    await _run_bridge_worker(
         runner,
         queue,
         stats,
-        timeout=5.0,
         bridge_batch=1,
-        stop_event=None,
         on_progress=lambda d, s, p: progress.append((d, p)),
-        active_domains=set(),
-        domain_lock=asyncio.Lock(),
     )
     assert stats.done == 2
     assert stats.passed == 1
@@ -389,17 +411,7 @@ async def test_bridge_worker_fanout_run_single():
     runner.test_tcp = AsyncMock(return_value=MagicMock(success=True))
 
     stats = _RunStats()
-    await _bridge_worker(
-        runner,
-        queue,
-        stats,
-        timeout=5.0,
-        bridge_batch=50,
-        stop_event=None,
-        on_progress=None,
-        active_domains=set(),
-        domain_lock=asyncio.Lock(),
-    )
+    await _run_bridge_worker(runner, queue, stats, bridge_batch=50)
     assert stats.done == 1
     assert stats.passed == 1
     runner.test_tcp.assert_awaited_once()
@@ -416,9 +428,7 @@ async def test_bridge_worker_stop_event_flushes():
     runner._run_probe_batch = AsyncMock(return_value=[])
 
     stats = _RunStats()
-    await _bridge_worker(
-        runner, queue, stats, timeout=5.0, bridge_batch=50, stop_event=stop, on_progress=None
-    )
+    await _run_bridge_worker(runner, queue, stats, bridge_batch=50, stop_event=stop)
     assert stats.done == 0
 
 
@@ -442,16 +452,12 @@ async def test_bridge_worker_progress_before_batch_flush():
 
     stats = _RunStats()
     progress: list[tuple[int, int]] = []
-    await _bridge_worker(
+    await _run_bridge_worker(
         runner,
         queue,
         stats,
-        timeout=5.0,
         bridge_batch=5,
-        stop_event=None,
         on_progress=lambda d, s, p: progress.append((d, p)),
-        active_domains=set(),
-        domain_lock=asyncio.Lock(),
     )
     # progress reported for each accumulated job (1, 2, 3) before the flush,
     # plus the final flush progress (3).
@@ -549,44 +555,41 @@ async def test_bridge_worker_stop_empty_and_fanout():
 
     stop = asyncio.Event()
     stop.set()
-    await _bridge_worker(
-        runner,
-        queue,
-        stats,
-        timeout=5.0,
-        bridge_batch=50,
-        stop_event=stop,
-        on_progress=None,
-        active_domains=set(),
-        domain_lock=asyncio.Lock(),
-    )
+    await _run_bridge_worker(runner, queue, stats, bridge_batch=50, stop_event=stop)
     runner.test_tcp.assert_not_called()
 
-    await _bridge_worker(
-        runner,
-        queue,
-        _RunStats(),
-        timeout=5.0,
-        bridge_batch=50,
-        stop_event=None,
-        on_progress=None,
-        active_domains=set(),
-        domain_lock=asyncio.Lock(),
-    )
+    await _run_bridge_worker(runner, queue, _RunStats(), bridge_batch=50)
     runner.test_tcp.assert_not_called()
 
     job = await _make_job(fanout=True)
     pops = iter([job, None])
     queue.pop = MagicMock(side_effect=lambda **kw: next(pops))
-    await _bridge_worker(
-        runner,
-        queue,
-        _RunStats(),
-        timeout=5.0,
-        bridge_batch=50,
-        stop_event=None,
-        on_progress=None,
-        active_domains=set(),
-        domain_lock=asyncio.Lock(),
-    )
+    await _run_bridge_worker(runner, queue, _RunStats(), bridge_batch=50)
     runner.test_tcp.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_bridge_worker_pool_claim_isolation():
+    """Two workers cannot claim the same domain while isolation is enabled."""
+    from blockchecks.engine.bridge_worker_pool import DomainIsolationPool
+
+    pool = DomainIsolationPool(enabled=True)
+    assert await pool.claim_domain("a.com")
+    assert not await pool.claim_domain("a.com")
+    await pool.release_domains(["a.com"])
+    assert await pool.claim_domain("a.com")
+
+
+@pytest.mark.unit
+async def test_bridge_worker_pool_parallel_claims():
+    from blockchecks.engine.bridge_worker_pool import DomainIsolationPool
+
+    pool = DomainIsolationPool(enabled=True)
+    results = await asyncio.gather(
+        pool.claim_domain("a.com"),
+        pool.claim_domain("b.com"),
+        pool.claim_domain("a.com"),
+    )
+    assert results == [True, True, False]
+    await pool.release_domains(["a.com", "b.com"])
+    assert await pool.claim_domain("a.com")

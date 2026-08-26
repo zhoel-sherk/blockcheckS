@@ -14,11 +14,14 @@ from blockchecks.engine.adaptive_queue import (
     AdaptiveMetrics,
     ScanWeights,
 )
+from blockchecks.engine.bridge_worker_pool import (
+    BridgeJob,
+    BridgeWorkerPool,
+    persist_quarantine,
+)
 from blockchecks.engine.generators.base import StrategyItem
-from blockchecks.engine.results import TcpTestResult
 from blockchecks.engine.store import RunStateStore
 from blockchecks.service.batch_scheduler import BatchJobAccumulator
-from blockchecks.service.batch_service import STOPPED_BEFORE_PROBE
 
 log = logging.getLogger(__name__)
 
@@ -146,20 +149,23 @@ async def run_adaptive_tcp_bridge(
     active_domains: set[str] = set()
     if quarantine is not None:
         active_domains |= quarantine.exclude_domains()
-    domain_lock = asyncio.Lock()
+    pool = BridgeWorkerPool(
+        runner,
+        timeout=timeout,
+        stop_event=stop_event,
+        isolate=bool(AQ_DOMAIN_ISOLATE),
+        active_domains=active_domains,
+        quarantine=quarantine,
+        excluded_domains=queue.excluded_domains,
+    )
     tasks = [
         asyncio.create_task(
             _bridge_worker(
-                runner,
+                pool,
                 queue,
                 stats,
-                timeout=timeout,
                 bridge_batch=bridge_batch,
-                stop_event=stop_event,
                 on_progress=on_progress,
-                active_domains=active_domains if AQ_DOMAIN_ISOLATE else None,
-                domain_lock=domain_lock if AQ_DOMAIN_ISOLATE else None,
-                quarantine=quarantine,
             )
         )
         for _ in range(max(1, int(workers)))
@@ -187,103 +193,75 @@ class _RunStats:
 
 
 async def _bridge_worker(  # noqa: C901
-    runner,
+    pool: BridgeWorkerPool,
     queue: AdaptiveJobQueue,
     stats: _RunStats,
     *,
-    timeout: float,
     bridge_batch: int,
-    stop_event: asyncio.Event | None,
     on_progress: ProgressCb | None,
-    active_domains: set[str] | None = None,
-    domain_lock: asyncio.Lock | None = None,
-    quarantine=None,
 ) -> None:
-    """One AQ bridge worker.
-
-    Domain isolation: workers share *active_domains* (+ lock). Each worker
-    pops jobs whose domain is not already probed by another worker, so with
-    ``parallel=N`` netns we always test N distinct domains simultaneously —
-    never all-youtube. The domain is released when the accumulated batch is
-    flushed (or a single fanout job runs).
-    """
+    """One AQ bridge worker (thin adapter over :class:`BridgeWorkerPool`)."""
     acc = BatchJobAccumulator(bridge_batch)
     queue.configure_heap_rebuild(bridge_batch)
-    active_domains = active_domains or set()
-    domain_lock = domain_lock or asyncio.Lock()
+    stop_event = pool.stop_event
+    quarantine = pool.quarantine
 
     async def _account(job: AdaptiveJob, ok: bool) -> None:
         queue.mark_done(job, passed=ok)
         stats.done += 1
         if ok:
             stats.passed += 1
-        if quarantine is not None:
-            newly = quarantine.record(job.domain, ok)
-            if newly:
-                # Hard-exclude immediately so sibling workers drop these jobs.
-                queue.excluded_domains.add(domain := newly)
-                await _persist_quarantine(runner, quarantine, domain)
+        await pool.account_with_quarantine(
+            BridgeJob(item=job.item, domain=job.domain, fanout=job.fanout),
+            ok,
+        )
 
     async def _account_skipped(job: AdaptiveJob) -> None:
         queue.mark_done(job, passed=False)
         stats.skipped += 1
         stats.done += 1
 
+    def _report_progress() -> None:
+        if on_progress:
+            on_progress(stats.done, stats.skipped, stats.passed)
+
     async def flush() -> None:
         nonlocal acc
-        jobs = acc.flush()
-        if not jobs:
+        aq_jobs = acc.flush()
+        if not aq_jobs:
             return
-        items = [j.item for j in jobs]
-        domains = [j.domain for j in jobs]
-        results = list(
-            await runner._run_probe_batch(
-                items, domains[0], timeout, "lua_bridge", domains=domains, stop_event=stop_event
-            )
+        batch = [BridgeJob(item=j.item, domain=j.domain, fanout=j.fanout) for j in aq_jobs]
+        job_by_key = {(j.item.label, j.domain): j for j in aq_jobs}
+
+        async def account_ok(bj: BridgeJob, ok: bool) -> None:
+            await _account(job_by_key[(bj.item.label, bj.domain)], ok)
+
+        async def account_skipped_bj(bj: BridgeJob) -> None:
+            await _account_skipped(job_by_key[(bj.item.label, bj.domain)])
+
+        await pool.flush_batch(
+            batch,
+            account_ok=account_ok,
+            account_skipped=account_skipped_bj,
+            on_progress=_report_progress,
         )
-        while len(results) < len(jobs):
-            job = jobs[len(results)]
-            results.append(
-                TcpTestResult(
-                    item=job.item,
-                    domain=job.domain,
-                    success=False,
-                    error=STOPPED_BEFORE_PROBE,
-                )
-            )
-        for job, result in zip(jobs, results, strict=True):
-            if result.error == STOPPED_BEFORE_PROBE:
-                await _account_skipped(job)
-                if on_progress:
-                    on_progress(stats.done, stats.skipped, stats.passed)
-                continue
-            ok = bool(result.success)
-            await _account(job, ok)
-            if on_progress:
-                on_progress(stats.done, stats.skipped, stats.passed)
-        async with domain_lock:
-            active_domains.difference_update(domains)
 
     async def pop_isolated() -> AdaptiveJob | None:
-        """Pop a job whose domain is not currently probed by another worker."""
-        async with domain_lock:
-            exclude = set(active_domains)
-            if quarantine is not None:
-                exclude |= quarantine.exclude_domains()
+        extra = quarantine.exclude_domains() if quarantine is not None else None
+        exclude = await pool.isolation.excluded_snapshot(extra)
+        async with pool.isolation.domain_lock:
             job = queue.pop(exclude_domains=exclude)
             if job is not None:
-                active_domains.add(job.domain)
+                pool.isolation.active_domains.add(job.domain)
             return job
 
     async def run_single(job: AdaptiveJob) -> None:
-        results = [await runner.test_tcp(job.item, job.domain, timeout=timeout)]
-        for result in results:
-            ok = bool(result.success)
-            await _account(job, ok)
-            if on_progress:
-                on_progress(stats.done, stats.skipped, stats.passed)
-        async with domain_lock:
-            active_domains.discard(job.domain)
+        try:
+            result = await pool.runner.test_tcp(job.item, job.domain, timeout=pool.timeout)
+            await _account(job, bool(result.success))
+            _report_progress()
+        finally:
+            await pool.isolation.release_domains([job.domain])
 
     while True:
         if stop_event and stop_event.is_set():
@@ -309,9 +287,6 @@ async def _bridge_worker(  # noqa: C901
                     return
                 continue
 
-        # Incremental progress even before the batch flush: report completed
-        # (stats.done) plus jobs currently accumulated in this worker's batch,
-        # so a long run with bridge_batch=500 doesn't show a frozen [0/N].
         if on_progress:
             on_progress(stats.done + len(acc), stats.skipped, stats.passed)
 
@@ -393,7 +368,7 @@ async def run_adaptive_tcp(
             if quarantine is not None:
                 newly = quarantine.record(job.domain, ok)
                 if newly:
-                    await _persist_quarantine(runner, quarantine, newly)
+                    await persist_quarantine(runner, quarantine, newly)
             if on_progress:
                 on_progress(done, skipped, passed)
             if stop_event and stop_event.is_set():
@@ -419,25 +394,6 @@ async def _classic_aq_probe(runner, item, doms: list[str], timeout: float):
     return await runner.test_tcp_domains(
         item, doms, timeout=timeout, curl_parallel=len(doms)
     )
-
-
-async def _persist_quarantine(runner, quarantine, domain: str) -> None:
-    """Persist + notify one newly quarantined domain (best-effort)."""
-    info = quarantine.quarantined.get(domain) or {}
-    db = getattr(runner, "db", None)
-    if db is not None:
-        try:
-            await db.quarantine_domain(
-                domain,
-                reason=info.get("reason", ""),
-                failed=info.get("attempts", 0),
-            )
-        except Exception as exc:
-            log.warning("%s", f"  [quarantine] DB persist skipped for {domain} ({exc})")
-    if quarantine.config.auto_denylist:
-        from blockchecks.engine.domain_quarantine import append_denylist
-
-        append_denylist([info])
 
 
 async def persist_adaptive_weights(db: RunStateStore, weights: ScanWeights) -> None:

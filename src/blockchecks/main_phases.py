@@ -861,6 +861,7 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
     strategies of *distinct* domains — never all-youtube — avoiding
     false-positive results from simultaneous probes to the same domain.
     """
+    from blockchecks.engine.bridge_worker_pool import BridgeWorkerPool, run_queue_bridge_worker
     from blockchecks.engine.config import AQ_DOMAIN_ISOLATE
 
     args = ctx.args
@@ -875,12 +876,19 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
             f"netns may probe the same domain → false-positive results.{RESET}",
         )
 
+    quarantine = ctx.quarantine
+    if quarantine is None:
+        log.debug("%s", "  [bridge] sequential path has no quarantine object")
+
+    excluded_domains: set[str] = set()
+    if quarantine is not None:
+        excluded_domains |= quarantine.exclude_domains()
+
     jobs: list[tuple[StrategyItem, str]] = []
-    # Strategy-major order: s1×all domains, then s2×all domains … so parallel
-    # workers pulling the queue front grab *different* domains at once
-    # (domain isolation without false all-youtube batches).
     for item in ctx.tcp_items:
         for domain in ctx.domains:
+            if domain in excluded_domains:
+                continue
             if args.resume and await ctx.db.has_tcp_result(item.label, domain):
                 progress.skipped += 1
                 progress.done += 1
@@ -892,77 +900,48 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
     for j in jobs:
         queue.put_nowait(j)
 
-    # active_domains = domains currently claimed by a worker's in-flight batch.
-    # A worker claims a domain when it picks a job and releases it on flush, so
-    # parallel netns never probe the same domain simultaneously (isolation).
-    active_domains: set[str] = set()
-    domain_lock = asyncio.Lock()
-    stop_event = ctx.stop
+    active_domains: set[str] = set(excluded_domains)
+    pool = BridgeWorkerPool(
+        ctx.runner,
+        timeout=args.timeout,
+        stop_event=ctx.stop,
+        isolate=isolate,
+        active_domains=active_domains,
+        quarantine=quarantine,
+        excluded_domains=excluded_domains,
+    )
     stats_lock = asyncio.Lock()
     stats = {"done": progress.done, "passed": progress.passed, "skipped": progress.skipped}
 
+    async def sync_progress() -> None:
+        async with stats_lock:
+            progress.done = stats["done"]
+            progress.passed = stats["passed"]
+            progress.skipped = stats["skipped"]
+        progress.report()
+
+    async def account_ok(bj, ok: bool) -> None:
+        async with stats_lock:
+            stats["done"] += 1
+            if ok:
+                stats["passed"] += 1
+        await pool.account_with_quarantine(bj, ok)
+
+    async def account_skipped(_bj) -> None:
+        async with stats_lock:
+            stats["skipped"] += 1
+            stats["done"] += 1
+
     async def worker() -> None:
-        acc: list[tuple[StrategyItem, str]] = []
-
-        async def flush() -> None:
-            nonlocal acc
-            if not acc:
-                return
-            items = [j[0] for j in acc]
-            doms = [j[1] for j in acc]
-            try:
-                results = await ctx.runner._run_probe_batch(
-                    items,
-                    doms[0],
-                    args.timeout,
-                    "lua_bridge",
-                    domains=doms,
-                    stop_event=ctx.stop,
-                )
-            finally:
-                if isolate:
-                    async with domain_lock:
-                        active_domains.difference_update(doms)
-            async with stats_lock:
-                for r in results:
-                    stats["done"] += 1
-                    if r.success:
-                        stats["passed"] += 1
-                # Mirror the worker-local counters onto the shared TcpProgress so
-                # report() prints live progress instead of a frozen [0/N] for the
-                # whole phase (the previous code only synced after gather()).
-                progress.done = stats["done"]
-                progress.passed = stats["passed"]
-                progress.skipped = stats["skipped"]
-            progress.report()
-            acc = []
-
-        while True:
-            if stop_event.is_set():
-                await flush()
-                return
-            try:
-                item, dom = queue.get_nowait()
-            except asyncio.QueueEmpty:
-                await flush()
-                return
-            if isolate:
-                conflict = False
-                async with domain_lock:
-                    if dom in active_domains:
-                        conflict = True
-                    else:
-                        active_domains.add(dom)
-                if conflict:
-                    # domain claimed by a parallel worker's in-flight batch —
-                    # return the job and wait briefly for release (no livelock).
-                    queue.put_nowait((item, dom))
-                    await asyncio.sleep(0.05)
-                    await flush()
-                    continue
-            acc.append((item, dom))
-            if len(acc) >= batch_size:
-                await flush()
+        await run_queue_bridge_worker(
+            pool,
+            queue,
+            batch_size=batch_size,
+            excluded_domains=excluded_domains,
+            account_ok=account_ok,
+            account_skipped=account_skipped,
+            on_progress=sync_progress,
+        )
 
     tasks = [asyncio.create_task(worker()) for _ in range(workers)]
     await asyncio.gather(*tasks)
