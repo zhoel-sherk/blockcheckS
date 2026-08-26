@@ -80,10 +80,11 @@ def test_run_quic_check_is_config():
     fd, conf = tempfile.mkstemp(suffix=".conf")
     with os.fdopen(fd, "w") as f:
         f.write("--qnum=201\n")
+    fw = MagicMock()
     try:
         with (
             patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
-            patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
+            patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
             patch(
                 "blockchecks.checkers.http3.quic_subprocess_result",
                 return_value={"success": True, "http_version": "HTTP/3"},
@@ -91,6 +92,7 @@ def test_run_quic_check_is_config():
         ):
             data = _run_quic_check("bs-p0", conf, "discord.com", 5.0, is_config=True)
         assert data["success"] is True
+        fw.detach_one.assert_called_once()
     finally:
         os.unlink(conf)
 
@@ -100,7 +102,7 @@ def test_run_tcp_check_multi_gv_fail():
     """googlevideo domain with prepare error short-circuits to gv_fail."""
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
-        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch(
             "blockchecks.engine.in_ns_workers.prepare_googlevideo_probe",
             return_value=(MagicMock(), {"success": False, "error": "gv url unavailable"}),
@@ -128,7 +130,7 @@ def test_run_tcp_check_multi_retry():
 
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
-        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch(
             "blockchecks.service.probe.invoke_curl_probe_worker",
             side_effect=fake_worker,
@@ -149,9 +151,10 @@ def test_run_tcp_check_multi_retry():
 @pytest.mark.unit
 def test_run_udp_check_coexist():
     """coexist=True passes through to nfqws2 daemon (kill_existing=False)."""
+    fw = MagicMock()
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05) as daemon,
-        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
             return_value=MagicMock(stdout='{"success": true, "latency_ms": 30}'),
@@ -163,6 +166,7 @@ def test_run_udp_check_coexist():
     assert data["success"] is True
     assert daemon.call_args.kwargs.get("kill_existing") is False
     assert daemon.call_args.kwargs.get("min_procs") == 2
+    fw.detach_one.assert_called_once()
 
 
 @pytest.mark.unit
@@ -180,12 +184,8 @@ def test_udp_filter_covers_voice_ports():
 
 @pytest.mark.unit
 def test_run_udp_check_dport_and_no_bypass():
-    """iptables --dport is the probe port; no --queue-bypass before/after settle."""
-    sudo_calls: list[tuple] = []
-
-    def fake_sudo(*a, **k):
-        sudo_calls.append(a)
-
+    """NsFirewall attach uses probe port; bypass=False for voice UDP."""
+    fw = MagicMock()
     written = {}
 
     def fake_daemon(ns_name, config_path, kill_existing=True, **kw):
@@ -194,7 +194,7 @@ def test_run_udp_check_dport_and_no_bypass():
 
     with (
         patch("blockchecks.service.nfqws2.start_daemon", side_effect=fake_daemon),
-        patch("blockchecks.engine.nfqws_config._sudo", side_effect=fake_sudo),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
             return_value=MagicMock(stdout='{"success": true, "latency_ms": 12}'),
@@ -208,12 +208,8 @@ def test_run_udp_check_dport_and_no_bypass():
             3.0,
             coexist=True,
         )
-    ipt = [c for c in sudo_calls if "iptables" in c]
-    assert ipt
-    dport_idx = ipt[-1].index("--dport")
-    assert ipt[-1][dport_idx + 1] == "50004"
-    assert "--queue-bypass" not in ipt[-1]
-    assert not any("-F" in c for c in sudo_calls)
+    fw.attach.assert_called_with(proto="udp", port="50004", queue=201, bypass=False)
+    fw.detach_one.assert_called_with(proto="udp", port="50004", queue=201, bypass=False)
     assert written["min_procs"] == 2
     assert any(
         udp_filter_covers_port(ln.split("=", 1)[1], 50004)
@@ -228,7 +224,7 @@ def test_run_udp_check_timeout_expired():
 
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
-        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
             side_effect=sp.TimeoutExpired(cmd="probe", timeout=1),

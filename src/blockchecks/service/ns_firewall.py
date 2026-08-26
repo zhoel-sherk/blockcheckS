@@ -2,8 +2,6 @@
 
 Never ``iptables -F OUTPUT``. Rules are attached once per namespace (idempotent
 ``attach``) and removed with matching ``-D`` on teardown.
-
-classic ``in_ns_workers`` still has local ``-A``/``-F``; follow-up PERF-6/ARC-3.
 """
 
 from __future__ import annotations
@@ -29,6 +27,7 @@ class _RuleSpec:
     dport: str
     queue: int
     multiport: bool = False
+    bypass: bool = True
 
 
 class NsFirewall:
@@ -36,8 +35,7 @@ class NsFirewall:
 
     def __init__(self, ns_name: str) -> None:
         self.ns_name = ns_name
-        self._delete_args: list[list[str]] = []
-        self._specs: set[_RuleSpec] = set()
+        self._rules: dict[_RuleSpec, list[str]] = {}
         self._dirty = False
 
     def _cmd_prefix(self) -> list[str]:
@@ -66,15 +64,9 @@ class NsFirewall:
             body.extend(["-m", "multiport", "--dports", spec.dport])
         else:
             body.extend(["--dport", spec.dport])
-        body.extend(
-            [
-                "-j",
-                "NFQUEUE",
-                "--queue-num",
-                str(spec.queue),
-                "--queue-bypass",
-            ]
-        )
+        body.extend(["-j", "NFQUEUE", "--queue-num", str(spec.queue)])
+        if spec.bypass:
+            body.append("--queue-bypass")
         return body
 
     @property
@@ -85,8 +77,16 @@ class NsFirewall:
         """Signal foreign or unknown rule state; next attach re-syncs tracked rules."""
         self._dirty = True
 
-    def is_attached(self, *, proto: str, port: str, queue: int, multiport: bool = False) -> bool:
-        return _RuleSpec(proto, port, queue, multiport) in self._specs
+    def is_attached(
+        self,
+        *,
+        proto: str,
+        port: str,
+        queue: int,
+        multiport: bool = False,
+        bypass: bool = True,
+    ) -> bool:
+        return _RuleSpec(proto, port, queue, multiport, bypass) in self._rules
 
     def attach(
         self,
@@ -95,6 +95,7 @@ class NsFirewall:
         port: str,
         queue: int,
         multiport: bool = False,
+        bypass: bool = True,
     ) -> None:
         """Add one OUTPUT NFQUEUE rule; no-op when already tracked."""
         if self._dirty:
@@ -102,14 +103,13 @@ class NsFirewall:
             self.detach()
             self._dirty = False
 
-        spec = _RuleSpec(proto, port, queue, multiport)
-        if spec in self._specs:
+        spec = _RuleSpec(proto, port, queue, multiport, bypass)
+        if spec in self._rules:
             return
 
         body = self._rule_body(spec)
         self._run("-A", *body, check=True)
-        self._delete_args.append(["-D", *body])
-        self._specs.add(spec)
+        self._rules[spec] = ["-D", *body]
 
         verify = self._run("-C", *body)
         if verify.returncode != 0:
@@ -119,26 +119,48 @@ class NsFirewall:
                 self.ns_name,
                 verify.returncode,
             )
-            self._specs.discard(spec)
-            self._delete_args.pop()
+            self._rules.pop(spec, None)
             raise IptablesError(
                 f"{self.ns_name}: iptables -C NFQUEUE/{queue} failed after -A"
             )
 
+    def detach_one(
+        self,
+        *,
+        proto: str,
+        port: str,
+        queue: int,
+        multiport: bool = False,
+        bypass: bool = True,
+    ) -> None:
+        """Remove one tracked rule via ``iptables -D``."""
+        spec = _RuleSpec(proto, port, queue, multiport, bypass)
+        delete_args = self._rules.pop(spec, None)
+        if delete_args is None:
+            return
+        try:
+            self._run(*delete_args, check=False)
+        except Exception as exc:
+            log.warning(
+                "ns_firewall %s: detach_one %s failed: %s",
+                self.ns_name,
+                " ".join(delete_args),
+                exc,
+            )
+
     def detach(self) -> None:
         """Remove only rules this instance added via ``iptables -D``."""
-        for rule_args in reversed(self._delete_args):
+        for delete_args in reversed(list(self._rules.values())):
             try:
-                self._run(*rule_args, check=False)
+                self._run(*delete_args, check=False)
             except Exception as exc:
                 log.warning(
                     "ns_firewall %s: detach %s failed: %s",
                     self.ns_name,
-                    " ".join(rule_args),
+                    " ".join(delete_args),
                     exc,
                 )
-        self._delete_args.clear()
-        self._specs.clear()
+        self._rules.clear()
 
     def __enter__(self) -> NsFirewall:
         return self

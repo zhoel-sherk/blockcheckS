@@ -95,27 +95,12 @@ def _load_conf_lines(path: str) -> list[str]:
 def _attach_udp_queue(ns_name: str, port: int, *, coexist: bool) -> None:
     """NFQUEUE UDP to q201 after nfqws2 is up. No --queue-bypass (would skip desync)."""
     from blockchecks.engine.config import NFQUEUE_UDP
-    from blockchecks.engine.nfqws_config import _sudo
+    from blockchecks.service.ns_firewall import get_ns_firewall
 
+    fw = get_ns_firewall(ns_name)
     if not coexist:
-        _sudo("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT")
-    _sudo(
-        "ip",
-        "netns",
-        "exec",
-        ns_name,
-        "iptables",
-        "-A",
-        "OUTPUT",
-        "-p",
-        "udp",
-        "--dport",
-        str(port),
-        "-j",
-        "NFQUEUE",
-        "--queue-num",
-        str(NFQUEUE_UDP),
-    )
+        fw.detach()
+    fw.attach(proto="udp", port=str(port), queue=NFQUEUE_UDP, bypass=False)
 
 
 def _conf_from_file(strategy: str, port: int) -> str:
@@ -167,8 +152,9 @@ def _run_quic_check(
     """Start nfqws2 QUIC desync in ns, probe domain via HTTP/3 HEAD."""
     from blockchecks.checkers.http3 import quic_subprocess_result
     from blockchecks.engine.config import NFQUEUE_UDP, PYTHON_BIN
-    from blockchecks.engine.nfqws_config import _build_quic_nfqws_lines, _sudo
+    from blockchecks.engine.nfqws_config import _build_quic_nfqws_lines
     from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
+    from blockchecks.service.ns_firewall import get_ns_firewall
 
     py = python_bin or PYTHON_BIN
     tmp_conf = None
@@ -192,31 +178,13 @@ def _run_quic_check(
             f.write("\n".join(config_lines))
         nfqws2_daemon(ns_name, tmp_conf)
 
-    # Flush OUTPUT first: fallback variants re-enter this function in the same
-    # netns and would otherwise stack duplicate NFQUEUE rules.
-    _sudo("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT")
-    _sudo(
-        "ip",
-        "netns",
-        "exec",
-        ns_name,
-        "iptables",
-        "-A",
-        "OUTPUT",
-        "-p",
-        "udp",
-        "--dport",
-        "443",
-        "-j",
-        "NFQUEUE",
-        "--queue-num",
-        str(NFQUEUE_UDP),
-        "--queue-bypass",
-    )
+    fw = get_ns_firewall(ns_name)
+    fw.attach(proto="udp", port="443", queue=NFQUEUE_UDP, bypass=True)
 
     try:
         return quic_subprocess_result(ns_name, py, domain, timeout, resolved_ip)
     finally:
+        fw.detach_one(proto="udp", port="443", queue=NFQUEUE_UDP, bypass=True)
         if tmp_conf:
             try:
                 os.unlink(tmp_conf)
@@ -281,8 +249,9 @@ def _run_tcp_check(
 ) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
     from blockchecks.engine.config import NFQUEUE_TCP, PYTHON_BIN
-    from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines, _sudo
+    from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines
     from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
+    from blockchecks.service.ns_firewall import get_ns_firewall
     from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 
     py = python_bin or PYTHON_BIN
@@ -340,24 +309,8 @@ def _run_tcp_check(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
 
-    _sudo(
-        "ip",
-        "netns",
-        "exec",
-        ns_name,
-        "iptables",
-        "-A",
-        "OUTPUT",
-        "-p",
-        "tcp",
-        "--dport",
-        dport,
-        "-j",
-        "NFQUEUE",
-        "--queue-num",
-        str(NFQUEUE_TCP),
-        "--queue-bypass",
-    )
+    fw = get_ns_firewall(ns_name)
+    fw.attach(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
 
     probe_req.timeout = timeout
     # Retry-on-next-IP: when the resolved IP fails but nfqws2 is already
@@ -406,6 +359,7 @@ def _run_tcp_check(
             data["used_ip"] = used_ip
         return data
     finally:
+        fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
         if tmp_conf:
             try:
                 os.unlink(tmp_conf)
@@ -499,8 +453,9 @@ def _run_tcp_check_multi(
 ) -> dict[str, dict]:
     """One nfqws2 session, parallel curl across domains (B2)."""
     from blockchecks.engine.config import NFQUEUE_TCP, PYTHON_BIN
-    from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines, _sudo
+    from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines
     from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
+    from blockchecks.service.ns_firewall import get_ns_firewall
     from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 
     if not domains:
@@ -548,24 +503,8 @@ def _run_tcp_check_multi(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
 
-    _sudo(
-        "ip",
-        "netns",
-        "exec",
-        ns_name,
-        "iptables",
-        "-A",
-        "OUTPUT",
-        "-p",
-        "tcp",
-        "--dport",
-        dport,
-        "-j",
-        "NFQUEUE",
-        "--queue-num",
-        str(NFQUEUE_TCP),
-        "--queue-bypass",
-    )
+    fw = get_ns_firewall(ns_name)
+    fw.attach(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
 
     for req in probe_requests:
         req.timeout = timeout
@@ -625,6 +564,7 @@ def _run_tcp_check_multi(
         out.update(gv_fail)
         return out
     finally:
+        fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
         if tmp_conf:
             try:
                 os.unlink(tmp_conf)
@@ -648,11 +588,13 @@ def _run_udp_check(
     wait until two nfqws2 processes are visible (q200+q201) before probing.
     iptables is attached after settle, without --queue-bypass.
     """
-    from blockchecks.engine.config import PYTHON_BIN
+    from blockchecks.engine.config import NFQUEUE_UDP, PYTHON_BIN
     from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
+    from blockchecks.service.ns_firewall import get_ns_firewall
 
     py = python_bin or PYTHON_BIN
     tmp_conf = _materialize_udp_conf(strategy, port, is_config=is_config)
+    fw = get_ns_firewall(ns_name)
     try:
         nfqws2_daemon(
             ns_name,
@@ -694,6 +636,7 @@ print(json.dumps({{"success": ok, "latency_ms": lat,
                 "detail": "TimeoutExpired: probe subprocess timeout",
             }
     finally:
+        fw.detach_one(proto="udp", port=str(port), queue=NFQUEUE_UDP, bypass=False)
         try:
             os.unlink(tmp_conf)
         except OSError:

@@ -84,24 +84,25 @@ def test_detach_issues_matching_deletes():
         deletes.append((args, check))
         return MagicMock(returncode=0, stderr="", stdout="")
 
-    fw._delete_args = [
-        ["-D", "OUTPUT", "-p", "tcp", "--dport", "443", "-j", "NFQUEUE"],
-    ]
+    from blockchecks.service.ns_firewall import _RuleSpec
+
+    spec = _RuleSpec("tcp", "443", 200)
+    fw._rules[spec] = ["-D", "OUTPUT", "-p", "tcp", "--dport", "443", "-j", "NFQUEUE"]
     with patch.object(fw, "_run", side_effect=fake_run):
         fw.detach()
 
     assert deletes == [
         (("-D", "OUTPUT", "-p", "tcp", "--dport", "443", "-j", "NFQUEUE"), False)
     ]
-    assert fw._delete_args == []
+    assert fw._rules == {}
 
 
 def test_dirty_attach_resyncs():
     from blockchecks.service.ns_firewall import _RuleSpec
 
     fw = NsFirewall("bs-p0")
-    fw._specs.add(_RuleSpec("tcp", "443", 200))
-    fw._delete_args = [["-D", "OUTPUT", "x"]]
+    spec = _RuleSpec("tcp", "443", 200)
+    fw._rules[spec] = ["-D", "OUTPUT", "x"]
     fw.mark_dirty()
 
     calls: list[str] = []
