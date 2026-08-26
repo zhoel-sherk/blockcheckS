@@ -383,7 +383,7 @@ async def generate_strategy_items(ctx: FullRunContext, gen: MatrixGenerator) -> 
             state_db=ctx.db,
             triage=gen_triage,
         )
-    if not args.no_quic and not args.tcp_only:
+    if not getattr(args, "no_quic", False) and not args.tcp_only:
         ctx.quic_items = await gen.generate_quic(
             sources=ctx.quic_sources,
             domain=ctx.primary,
@@ -1042,7 +1042,7 @@ async def discover_voice_endpoint(ctx: FullRunContext) -> tuple[str, int]:
     args = ctx.args
     voice_step = _voice_step(ctx)
     voice_ip, voice_port = DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
-    if not ctx.stop.is_set() and not args.tcp_only and not args.no_voice:
+    if not ctx.stop.is_set() and not args.tcp_only and not getattr(args, "no_voice", False):
         log.info("%s", f"\n  {CYAN}[{voice_step}/{ctx.steps}] Voice discover-dns...{RESET}")
         try:
             from blockchecks.checkers.voice_dns import discover_dns_alive
@@ -1078,7 +1078,7 @@ async def discover_voice_endpoint(ctx: FullRunContext) -> tuple[str, int]:
 async def run_quic_phase(ctx: FullRunContext) -> None:
     args = ctx.args
     quic_step = _quic_step(ctx)
-    if not ctx.stop.is_set() and ctx.quic_items and not args.tcp_only and not args.no_quic:
+    if not ctx.stop.is_set() and ctx.quic_items and not args.tcp_only and not getattr(args, "no_quic", False):
         quic_timeout = getattr(args, "quic_timeout", args.timeout)
         log.info(
             "%s",

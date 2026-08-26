@@ -61,161 +61,166 @@ async def _cmd_pair_run(args):
         resume=bool(getattr(args, "resume", False)),
     )
     await db.init()
-
-    preset_domains, preset_rc = resolve_preset_domains(args)
-    if preset_rc is not None:
-        return preset_rc
-
-    domain_rc = validate_pair_domain(args, preset_domains)
-    if domain_rc is not None:
-        return domain_rc
-
-    pool_size = args.parallel or effective_default_pool_size()
-    dns_result = await prepare_dns_and_preflight(args, preset_domains, store=db)
-    if dns_result.exit_code is not None:
-        return dns_result.exit_code
-
-    runner = build_pair_runner(args, db, dns_result.dns_cache, dns_result.dns_audits, pool_size)
-    stop_event = asyncio.Event()
-    deadline = RunDeadline.from_args(stop_event, args)
-    stop_state = StopHandlerState()
-    aq_result = None
-    tcp_passed = 0
-    pairs = []
-
-    loop = asyncio.get_running_loop()
-    restore_signals = register_stop_handlers(loop, stop_state, deadline, stop_event)
-
-    if deadline:
-        deadline.arm()
-        await deadline.start_background()
-        log.info("%s", f"  Time limit: {deadline.budget_label()}")
-
     try:
-        await runner.start()
 
-        voice_ctx, voice_rc = await discover_voice_endpoints(args)
-        if voice_rc is not None:
-            return voice_rc
+        preset_domains, preset_rc = resolve_preset_domains(args)
+        if preset_rc is not None:
+            return preset_rc
 
-        strategies = await load_strategy_items(args, db)
-        if strategies.error_code is not None:
-            return strategies.error_code
+        domain_rc = validate_pair_domain(args, preset_domains)
+        if domain_rc is not None:
+            return domain_rc
 
-        banner_rc = print_pair_banner(
-            args,
-            preset_domains,
-            strategies.tcp_items,
-            strategies.udp_items,
-            voice_ctx.voice_ip,
-            voice_ctx.voice_port,
-            voice_ctx.full_voice,
-            pool_size,
-        )
-        if banner_rc is not None:
-            return banner_rc
+        pool_size = args.parallel or effective_default_pool_size()
+        dns_result = await prepare_dns_and_preflight(args, preset_domains, store=db)
+        if dns_result.exit_code is not None:
+            return dns_result.exit_code
 
-        domains_to_test = preset_domains if preset_domains else [args.domain]
-        fp = matrix_fingerprint(
-            [i.strategy for i in strategies.tcp_items],
-            [i.strategy for i in strategies.udp_items],
-            getattr(args, "scan_level", "fast"),
-            getattr(args, "max", 100),
-        )
-        runner.matrix_fingerprint = fp
-        await db.begin_run(
-            fingerprint=fp,
-            args_hash=campaign_args_hash(args),
-        )
+        runner = build_pair_runner(args, db, dns_result.dns_cache, dns_result.dns_audits, pool_size)
+        stop_event = asyncio.Event()
+        deadline = RunDeadline.from_args(stop_event, args)
+        stop_state = StopHandlerState()
+        aq_result = None
+        tcp_passed = 0
+        pairs = []
 
-        resume_from, resume_rc = await resolve_resume_checkpoint(args, db, fp)
-        if resume_rc is not None:
-            return resume_rc
+        loop = asyncio.get_running_loop()
+        restore_signals = register_stop_handlers(loop, stop_state, deadline, stop_event)
 
-        if stop_event.is_set():
-            return run_exit_code(True, deadline, stop_state.signal_interrupted)
-
-        t0 = time.perf_counter()
-        scan_level = getattr(args, "scan_level", "fast")
-        use_adaptive = not bool(getattr(args, "no_adaptive", False))
-        protocol = getattr(args, "protocol", "tls12") or "tls12"
-        curl_parallel = max(
-            1, min(getattr(args, "curl_parallel", DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
-        )
-        if (getattr(args, "fan_out", False) or use_adaptive) and curl_parallel <= 1:
-            curl_parallel = min(max(4, DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
-        use_family_gates = (
-            scan_level != "full"
-            and not getattr(args, "no_family_gates", False)
-            and not use_adaptive
-            and any(s in STANDARD_TCP_SOURCES for s in strategies.tcp_sources_list)
-        )
-
-        if use_adaptive:
-            phase = await run_adaptive_pair_phase(
-                args,
-                runner,
-                db,
-                strategies.tcp_items,
-                strategies.udp_items,
-                domains_to_test,
-                voice_ctx.voice_ip,
-                voice_ctx.voice_port,
-                voice_ctx.full_voice,
-                resume_from,
-                fp,
-                stop_event,
-                curl_parallel,
-                protocol,
-                multi_eps=voice_ctx.multi_eps,
-            )
-        else:
-            phase = await run_standard_pair_phase(
-                args,
-                runner,
-                strategies.tcp_items,
-                strategies.udp_items,
-                domains_to_test,
-                voice_ctx.voice_ip,
-                voice_ctx.voice_port,
-                voice_ctx.full_voice,
-                resume_from,
-                fp,
-                stop_event,
-                scan_level,
-                use_family_gates,
-                strategies.run_set,
-                multi_eps=voice_ctx.multi_eps,
-            )
-
-        tcp_passed = phase.tcp_passed
-        pairs = phase.pairs
-        aq_result = phase.aq_result
-
-        if stop_event.is_set() and deadline and deadline.triggered:
-            log.info(
-                "%s",
-                f"\n  {YELLOW}TIME LIMIT reached ({deadline.budget_label()})"
-                f" — skipping optional phases{RESET}",
-            )
-
-        elapsed = time.perf_counter() - t0
-        log.info("%s", f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
-
-    finally:
-        restore_signals()
         if deadline:
-            await deadline.cancel()
-        await finalize_db_and_weights(db, save_weights=False)
-        await runner.stop()
+            deadline.arm()
+            await deadline.start_background()
+            log.info("%s", f"  Time limit: {deadline.budget_label()}")
 
-    return await finalize_pair_run(
-        args,
-        db,
-        deadline,
-        stop_event,
-        stop_state,
-        tcp_passed,
-        pairs,
-        aq_result,
-    )
+        try:
+            await runner.start()
+
+            voice_ctx, voice_rc = await discover_voice_endpoints(args)
+            if voice_rc is not None:
+                return voice_rc
+
+            strategies = await load_strategy_items(args, db)
+            if strategies.error_code is not None:
+                return strategies.error_code
+
+            banner_rc = print_pair_banner(
+                args,
+                preset_domains,
+                strategies.tcp_items,
+                strategies.udp_items,
+                voice_ctx.voice_ip,
+                voice_ctx.voice_port,
+                voice_ctx.full_voice,
+                pool_size,
+            )
+            if banner_rc is not None:
+                return banner_rc
+
+            domains_to_test = preset_domains if preset_domains else [args.domain]
+            fp = matrix_fingerprint(
+                [i.strategy for i in strategies.tcp_items],
+                [i.strategy for i in strategies.udp_items],
+                getattr(args, "scan_level", "fast"),
+                getattr(args, "max", 100),
+            )
+            runner.matrix_fingerprint = fp
+            await db.begin_run(
+                fingerprint=fp,
+                args_hash=campaign_args_hash(args),
+            )
+
+            resume_from, resume_rc = await resolve_resume_checkpoint(args, db, fp)
+            if resume_rc is not None:
+                return resume_rc
+
+            if stop_event.is_set():
+                return run_exit_code(True, deadline, stop_state.signal_interrupted)
+
+            t0 = time.perf_counter()
+            scan_level = getattr(args, "scan_level", "fast")
+            use_adaptive = not bool(getattr(args, "no_adaptive", False))
+            protocol = getattr(args, "protocol", "tls12") or "tls12"
+            curl_parallel = max(
+                1, min(getattr(args, "curl_parallel", DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
+            )
+            if (getattr(args, "fan_out", False) or use_adaptive) and curl_parallel <= 1:
+                curl_parallel = min(max(4, DEFAULT_CURL_PARALLEL), MAX_CURL_PARALLEL)
+            use_family_gates = (
+                scan_level != "full"
+                and not getattr(args, "no_family_gates", False)
+                and not use_adaptive
+                and any(s in STANDARD_TCP_SOURCES for s in strategies.tcp_sources_list)
+            )
+
+            if use_adaptive:
+                phase = await run_adaptive_pair_phase(
+                    args,
+                    runner,
+                    db,
+                    strategies.tcp_items,
+                    strategies.udp_items,
+                    domains_to_test,
+                    voice_ctx.voice_ip,
+                    voice_ctx.voice_port,
+                    voice_ctx.full_voice,
+                    resume_from,
+                    fp,
+                    stop_event,
+                    curl_parallel,
+                    protocol,
+                    multi_eps=voice_ctx.multi_eps,
+                )
+            else:
+                phase = await run_standard_pair_phase(
+                    args,
+                    runner,
+                    strategies.tcp_items,
+                    strategies.udp_items,
+                    domains_to_test,
+                    voice_ctx.voice_ip,
+                    voice_ctx.voice_port,
+                    voice_ctx.full_voice,
+                    resume_from,
+                    fp,
+                    stop_event,
+                    scan_level,
+                    use_family_gates,
+                    strategies.run_set,
+                    multi_eps=voice_ctx.multi_eps,
+                )
+
+            tcp_passed = phase.tcp_passed
+            pairs = phase.pairs
+            aq_result = phase.aq_result
+
+            if stop_event.is_set() and deadline and deadline.triggered:
+                log.info(
+                    "%s",
+                    f"\n  {YELLOW}TIME LIMIT reached ({deadline.budget_label()})"
+                    f" — skipping optional phases{RESET}",
+                )
+
+            elapsed = time.perf_counter() - t0
+            log.info("%s", f"\n  {CYAN}Done in {elapsed:.0f}s{RESET}")
+
+        finally:
+            restore_signals()
+            if deadline:
+                await deadline.cancel()
+            await finalize_db_and_weights(db, save_weights=False)
+            await runner.stop()
+
+        return await finalize_pair_run(
+            args,
+            db,
+            deadline,
+            stop_event,
+            stop_state,
+            tcp_passed,
+            pairs,
+            aq_result,
+        )
+    finally:
+        # ST-2: long-lived writer держит поток aiosqlite — без close()
+        # процесс висит после завершения работы (найдено смоком).
+        await db.close()
