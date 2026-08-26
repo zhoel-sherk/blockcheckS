@@ -13,6 +13,7 @@ from blockchecks.cli.parser import (
 from blockchecks.cli.profiles import apply_profile
 from blockchecks.engine.matrix_generator import MatrixGenerator
 from blockchecks.engine.run_deadline import validate_time_limit_args
+from blockchecks.engine.store import campaign_args_hash
 from blockchecks.main_phases import (
     arm_run_deadline,
     arm_stop_handlers,
@@ -83,6 +84,10 @@ async def _run_full_campaign(args) -> int:
     print_settle_profile(ctx.settle_profile)
 
     ctx.fp = build_matrix_fingerprint(ctx)
+    await ctx.db.begin_run(
+        fingerprint=ctx.fp,
+        args_hash=campaign_args_hash(args),
+    )
 
     ctx.runner = build_async_runner(ctx)
     restore_signals = arm_stop_handlers(ctx)

@@ -5,6 +5,15 @@ from __future__ import annotations
 import aiosqlite
 
 INIT_SCRIPT = """
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL DEFAULT '',
+    code_version TEXT NOT NULL DEFAULT '',
+    args_hash TEXT NOT NULL DEFAULT '',
+    fingerprint TEXT NOT NULL DEFAULT '',
+    impersonate TEXT NOT NULL DEFAULT '',
+    nfqws2_version TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS strategies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -15,6 +24,7 @@ CREATE TABLE IF NOT EXISTS strategies (
 );
 CREATE TABLE IF NOT EXISTS tcp_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER REFERENCES runs(id),
     strategy_id INTEGER REFERENCES strategies(id),
     domain TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -29,6 +39,7 @@ CREATE TABLE IF NOT EXISTS tcp_results (
 );
 CREATE TABLE IF NOT EXISTS udp_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER REFERENCES runs(id),
     strategy_id INTEGER REFERENCES strategies(id),
     target TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -168,6 +179,28 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         )"""
     )
     await db.commit()
+    # runs table + run_id on results (ST-1 migration for pre-1.3.9 DBs)
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL DEFAULT '',
+            code_version TEXT NOT NULL DEFAULT '',
+            args_hash TEXT NOT NULL DEFAULT '',
+            fingerprint TEXT NOT NULL DEFAULT '',
+            impersonate TEXT NOT NULL DEFAULT '',
+            nfqws2_version TEXT NOT NULL DEFAULT ''
+        )"""
+    )
+    for col, typedef in (
+        ("run_id", "INTEGER REFERENCES runs(id)"),
+    ):
+        if col not in col_names:
+            await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")
+    udp_cols = await db.execute("PRAGMA table_info(udp_results)")
+    udp_col_names = {row[1] for row in await udp_cols.fetchall()}
+    if "run_id" not in udp_col_names:
+        await db.execute("ALTER TABLE udp_results ADD COLUMN run_id INTEGER REFERENCES runs(id)")
+    await db.commit()
     # Query indexes (IF NOT EXISTS)
     pair_cols = await db.execute("PRAGMA table_info(pair_results)")
     pair_col_names = {row[1] for row in await pair_cols.fetchall()}
@@ -181,6 +214,7 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_tcp_strat_domain ON tcp_results(strategy_id, domain);
         CREATE INDEX IF NOT EXISTS idx_tcp_strat_dom_id ON tcp_results(strategy_id, domain, id DESC);
         CREATE INDEX IF NOT EXISTS idx_tcp_domain ON tcp_results(domain, strategy_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_tcp_run_dom_strat ON tcp_results(run_id, domain, strategy_id);
         {pair_strat_idx}
         CREATE INDEX IF NOT EXISTS idx_udp_strat ON udp_results(strategy_id);
         CREATE INDEX IF NOT EXISTS idx_pair_domain ON pair_results(domain);

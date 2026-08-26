@@ -29,7 +29,12 @@ from blockchecks.engine.config import (
 )
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.run_finalize import finalize_db_and_weights, run_exit_code
-from blockchecks.engine.store import DEFAULT_DB_BATCH, matrix_fingerprint, open_run_store
+from blockchecks.engine.store import (
+    DEFAULT_DB_BATCH,
+    campaign_args_hash,
+    matrix_fingerprint,
+    open_run_store,
+)
 from blockchecks.terminal import CYAN, RESET, YELLOW
 
 log = logging.getLogger(__name__)
@@ -53,6 +58,7 @@ async def _cmd_pair_run(args):
     db = open_run_store(
         args.db,
         batch_size=int(getattr(args, "db_batch", DEFAULT_DB_BATCH)),
+        resume=bool(getattr(args, "resume", False)),
     )
     await db.init()
 
@@ -117,6 +123,10 @@ async def _cmd_pair_run(args):
             getattr(args, "max", 100),
         )
         runner.matrix_fingerprint = fp
+        await db.begin_run(
+            fingerprint=fp,
+            args_hash=campaign_args_hash(args),
+        )
 
         resume_from, resume_rc = await resolve_resume_checkpoint(args, db, fp)
         if resume_rc is not None:

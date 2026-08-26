@@ -365,6 +365,87 @@ async def test_timer_flush_drains_pending(tmp_path, monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_migration_adds_run_id_column(tmp_path):
+    con = sqlite3.connect(tmp_path / "old_run.db")
+    con.execute(
+        """CREATE TABLE tcp_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER, domain TEXT, status TEXT,
+            http_code INTEGER, latency_ms REAL, gateway_ws_ms REAL,
+            content_valid INTEGER, read_rate_bps REAL, error TEXT,
+            timestamp TEXT)"""
+    )
+    con.commit()
+    con.close()
+
+    store = open_run_store(tmp_path / "old_run.db")
+    await store.init()
+
+    con = sqlite3.connect(tmp_path / "old_run.db")
+    cols = [r[1] for r in con.execute("PRAGMA table_info(tcp_results)")]
+    assert "run_id" in cols
+    tables = {r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    )}
+    assert "runs" in tables
+    con.close()
+
+    await store.begin_run(fingerprint="fp1")
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store.flush()
+
+    con = sqlite3.connect(tmp_path / "old_run.db")
+    row = con.execute("SELECT run_id FROM tcp_results").fetchone()
+    assert row is not None
+    assert row[0] is not None
+    con.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_run_id_isolates_completed_keys_between_campaigns(tmp_path):
+    db_path = tmp_path / "iso.db"
+    fp1 = "aaaaaaaaaaaaaaaa"
+    fp2 = "bbbbbbbbbbbbbbbb"
+
+    store1 = open_run_store(db_path)
+    await store1.init()
+    await store1.begin_run(fingerprint=fp1)
+    await store1.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store1.flush()
+    await store1.close()
+
+    store2 = open_run_store(db_path, resume=False)
+    await store2.init()
+    await store2.begin_run(fingerprint=fp2)
+    keys = await store2.get_completed_tcp_keys()
+    assert ("s1", "a.com") not in keys
+    assert keys == set()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_resume_reuses_run_id_and_completed_keys(tmp_path):
+    db_path = tmp_path / "resume.db"
+    fp = "cccccccccccccccc"
+
+    store1 = open_run_store(db_path, resume=False)
+    await store1.init()
+    run1 = await store1.begin_run(fingerprint=fp)
+    await store1.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store1.flush()
+    await store1.close()
+
+    store2 = open_run_store(db_path, resume=True)
+    await store2.init()
+    run2 = await store2.begin_run(fingerprint=fp)
+    assert run2 == run1
+    keys = await store2.get_completed_tcp_keys()
+    assert ("s1", "a.com") in keys
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_flush_strategy_cache_one_ensure_per_strategy(tmp_path, monkeypatch):
     store = open_run_store(tmp_path / "cache.db", batch_size=500)
     await store.init()

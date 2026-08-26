@@ -5,14 +5,31 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
+from blockchecks import __version__
 from blockchecks.engine.paths import reclaim_sudo_ownership
 from blockchecks.engine.store.models import Checkpoint
 from blockchecks.engine.store.schema import apply_schema
+
+log = logging.getLogger(__name__)
+
+_TCP_INSERT_SQL = """INSERT INTO tcp_results
+   (run_id,strategy_id,domain,status,http_code,latency_ms,
+    gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
+    resolved_ip,dns_verdict,doh_server,fail_phase,
+    bridge_applied,bridge_batch_id,bridge_gen,probe_host)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+
+_UDP_INSERT_SQL = """INSERT INTO udp_results
+   (run_id,strategy_id,target,status,latency_ms,error,timestamp)
+   VALUES(?,?,?,?,?,?,?)"""
 
 
 def matrix_fingerprint(
@@ -34,6 +51,57 @@ def fingerprint_mismatch(checkpoint_fp: str | None, current_fp: str) -> bool:
     return bool(checkpoint_fp and checkpoint_fp != current_fp)
 
 
+def campaign_args_hash(args: Any) -> str:
+    """Stable hash of campaign CLI args (domains/preset/scan knobs)."""
+    parts: list[str] = []
+    for key in (
+        "domain",
+        "domains",
+        "domains_file",
+        "preset",
+        "scan_level",
+        "max",
+        "parallel",
+        "protocol",
+        "db",
+    ):
+        val = getattr(args, key, None)
+        if val is None or val == "" or val == []:
+            continue
+        parts.append(f"{key}={val}")
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def _probe_nfqws2_version() -> str:
+    try:
+        from blockchecks.engine.config import get_nfqws2_bin
+
+        bin_path = get_nfqws2_bin()
+        if not bin_path:
+            return ""
+        proc = subprocess.run(
+            [bin_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        text = (proc.stdout or proc.stderr or "").strip()
+        return text[:200]
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.debug("nfqws2 --version probe failed: %s", exc)
+        return ""
+
+
+def _resolve_impersonate() -> str:
+    try:
+        from blockchecks.checkers.curl_probe import impersonate_target
+
+        return impersonate_target()
+    except ImportError:
+        return ""
+
+
 _WORKING_STATUSES = "('PASS','THROTTLED')"
 _DEFAULT_FLUSH_INTERVAL_SEC = 15.0
 
@@ -46,6 +114,8 @@ class SqliteRunStore:
         db_path: str | Path,
         batch_size: int = 0,
         flush_interval_sec: float = _DEFAULT_FLUSH_INTERVAL_SEC,
+        *,
+        resume: bool = False,
     ):
         self._path = Path(db_path).expanduser().resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,6 +124,8 @@ class SqliteRunStore:
             reclaim_sudo_ownership(self._path)
         self.batch_size = max(0, int(batch_size or 0))
         self._flush_interval = max(10.0, min(30.0, float(flush_interval_sec)))
+        self._resume = bool(resume)
+        self._run_id: int | None = None
         self._tcp_pending: list[dict] = []
         self._udp_pending: list[dict] = []
         self._flush_lock = asyncio.Lock()
@@ -69,10 +141,93 @@ class SqliteRunStore:
         """Deprecated alias for export tools; prefer ``path``."""
         return str(self._path)
 
+    @property
+    def run_id(self) -> int | None:
+        return self._run_id
+
     async def init(self) -> None:
         async with aiosqlite.connect(self._path) as db:
             await apply_schema(db)
         reclaim_sudo_ownership(self._path)
+
+    async def begin_run(
+        self,
+        *,
+        resume: bool | None = None,
+        fingerprint: str = "",
+        args_hash: str = "",
+        code_version: str | None = None,
+        impersonate: str | None = None,
+        nfqws2_version: str | None = None,
+    ) -> int:
+        """Start or reuse a campaign run row.
+
+        Resume rule: when ``resume`` is true, reuse the latest ``runs`` row whose
+        ``fingerprint`` matches the current campaign; otherwise insert a new run.
+        """
+        use_resume = self._resume if resume is None else bool(resume)
+        fp = fingerprint or ""
+        ah = args_hash or ""
+        cv = code_version if code_version is not None else __version__
+        imp = impersonate if impersonate is not None else _resolve_impersonate()
+        nfv = nfqws2_version if nfqws2_version is not None else _probe_nfqws2_version()
+        async with aiosqlite.connect(self._path) as db:
+            await SqliteRunStore._apply_pragmas(db)
+            if use_resume and fp:
+                row = await db.execute(
+                    "SELECT id FROM runs WHERE fingerprint=? ORDER BY id DESC LIMIT 1",
+                    (fp,),
+                )
+                found = await row.fetchone()
+                if found:
+                    self._run_id = int(found[0])
+                    log.info(
+                        "resume: reusing run_id=%s fingerprint=%s",
+                        self._run_id,
+                        fp,
+                    )
+                    return self._run_id
+            ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+            cur = await db.execute(
+                """INSERT INTO runs
+                   (started_at, code_version, args_hash, fingerprint,
+                    impersonate, nfqws2_version)
+                   VALUES(?,?,?,?,?,?)""",
+                (ts, cv, ah, fp, imp, nfv),
+            )
+            await db.commit()
+            self._run_id = int(cur.lastrowid)
+        log.info("started run_id=%s fingerprint=%s resume=%s", self._run_id, fp, use_resume)
+        reclaim_sudo_ownership(self._path)
+        return self._run_id
+
+    async def _ensure_run_id(self) -> int:
+        if self._run_id is not None:
+            return self._run_id
+        return await self.begin_run(resume=False, fingerprint="")
+
+    def _tcp_row_values(self, run_id: int, sid: int, entry: dict) -> tuple:
+        return (
+            run_id,
+            sid,
+            entry["domain"],
+            entry["status"],
+            entry["http_code"],
+            entry["latency_ms"],
+            entry["gateway_ms"],
+            entry["content_valid"],
+            entry["error"],
+            entry.get("timestamp") or self._row_timestamp(),
+            entry["read_rate_bps"],
+            entry["resolved_ip"],
+            entry["dns_verdict"],
+            entry["doh_server"],
+            entry.get("fail_phase") or "",
+            None if entry.get("bridge_applied") is None else int(entry["bridge_applied"]),
+            entry.get("bridge_batch_id") or 0,
+            entry.get("bridge_gen") or 0,
+            entry.get("probe_host") or "",
+        )
 
     async def close(self) -> None:
         if self._flush_timer_task is not None:
@@ -203,11 +358,13 @@ class SqliteRunStore:
             try:
                 for attempt in range(5):
                     try:
+                        run_id = await self._ensure_run_id()
                         async with aiosqlite.connect(self._path) as db:
                             await SqliteRunStore._apply_pragmas(db)
                             await db.execute("BEGIN IMMEDIATE")
                             try:
                                 strategy_cache: dict[tuple[str, str], int] = {}
+                                tcp_rows: list[tuple] = []
                                 for entry in tcp_batch:
                                     sid = await self._ensure_strategy_cached(
                                         strategy_cache,
@@ -216,38 +373,10 @@ class SqliteRunStore:
                                         entry["config_path"],
                                         db,
                                     )
-                                    await db.execute(
-                                        """INSERT INTO tcp_results
-                                           (strategy_id,domain,status,http_code,latency_ms,
-                                            gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
-                                            resolved_ip,dns_verdict,doh_server,fail_phase,
-                                            bridge_applied,bridge_batch_id,bridge_gen,probe_host)
-                                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                        (
-                                            sid,
-                                            entry["domain"],
-                                            entry["status"],
-                                            entry["http_code"],
-                                            entry["latency_ms"],
-                                            entry["gateway_ms"],
-                                            entry["content_valid"],
-                                            entry["error"],
-                                            entry.get("timestamp") or self._row_timestamp(),
-                                            entry["read_rate_bps"],
-                                            entry["resolved_ip"],
-                                            entry["dns_verdict"],
-                                            entry["doh_server"],
-                                            entry.get("fail_phase") or "",
-                                            (
-                                                None
-                                                if entry.get("bridge_applied") is None
-                                                else int(entry["bridge_applied"])
-                                            ),
-                                            entry.get("bridge_batch_id") or 0,
-                                            entry.get("bridge_gen") or 0,
-                                            entry.get("probe_host") or "",
-                                        ),
-                                    )
+                                    tcp_rows.append(self._tcp_row_values(run_id, sid, entry))
+                                if tcp_rows:
+                                    await db.executemany(_TCP_INSERT_SQL, tcp_rows)
+                                udp_rows: list[tuple] = []
                                 for entry in udp_batch:
                                     sid = await self._ensure_strategy_cached(
                                         strategy_cache,
@@ -256,19 +385,19 @@ class SqliteRunStore:
                                         entry["config_path"],
                                         db,
                                     )
-                                    await db.execute(
-                                        """INSERT INTO udp_results
-                                           (strategy_id,target,status,latency_ms,error,timestamp)
-                                           VALUES(?,?,?,?,?,?)""",
+                                    udp_rows.append(
                                         (
+                                            run_id,
                                             sid,
                                             entry["target"],
                                             entry["status"],
                                             entry["latency_ms"],
                                             entry["error"],
                                             entry.get("timestamp") or self._row_timestamp(),
-                                        ),
+                                        )
                                     )
+                                if udp_rows:
+                                    await db.executemany(_UDP_INSERT_SQL, udp_rows)
                                 await db.commit()
                             except Exception:
                                 await db.rollback()
@@ -346,16 +475,13 @@ class SqliteRunStore:
             return
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
+            run_id = await self._ensure_run_id()
             sid = await self.ensure_strategy(strategy, proto, config_path or strategy, db=db)
             ts = self._row_timestamp()
             await db.execute(
-                """INSERT INTO tcp_results
-                   (strategy_id,domain,status,http_code,latency_ms,
-                    gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
-                    resolved_ip,dns_verdict,doh_server,fail_phase,
-                    bridge_applied,bridge_batch_id,bridge_gen,probe_host)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                _TCP_INSERT_SQL,
                 (
+                    run_id,
                     sid,
                     domain,
                     status,
@@ -408,13 +534,12 @@ class SqliteRunStore:
             return
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
+            run_id = await self._ensure_run_id()
             sid = await self.ensure_strategy(strategy, "udp", config_path or strategy, db=db)
             ts = self._row_timestamp()
             await db.execute(
-                """INSERT INTO udp_results
-                   (strategy_id,target,status,latency_ms,error,timestamp)
-                   VALUES(?,?,?,?,?,?)""",
-                (sid, target, status, latency_ms, error, ts),
+                _UDP_INSERT_SQL,
+                (run_id, sid, target, status, latency_ms, error, ts),
             )
             await db.commit()
         reclaim_sudo_ownership(self._path)
@@ -659,39 +784,43 @@ class SqliteRunStore:
             return {(r[0], r[1]) for r in await rows.fetchall()}
 
     async def has_tcp_result(self, strategy: str, domain: str, proto: str = "tcp") -> bool:
-        """True if any tcp_results row exists for strategy×domain (resume skip)."""
+        """True if any tcp_results row exists for strategy×domain in the current run."""
+        run_id = await self._ensure_run_id()
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             row = await db.execute(
                 """SELECT 1 FROM tcp_results t
                    JOIN strategies s ON t.strategy_id = s.id
-                   WHERE s.name=? AND s.proto=? AND t.domain=?
+                   WHERE s.name=? AND s.proto=? AND t.domain=? AND t.run_id=?
                    LIMIT 1""",
-                (strategy, proto, domain),
+                (strategy, proto, domain, run_id),
             )
             return await row.fetchone() is not None
 
     async def get_completed_tcp_keys(self, proto: str = "tcp") -> set[tuple[str, str]]:
         """(strategy_name, domain) pairs whose *latest* row is working — resume skip.
 
-        Only latest-row PASS/THROTTLED count as completed. FAIL, SKIPPED, and other
-        non-working statuses are excluded so resume can retry infrastructure failures
-        and never-probed rows (SKIPPED).
+        Only latest-row PASS/THROTTLED in the **current run** count as completed.
+        FAIL, SKIPPED, and other non-working statuses are excluded.
         """
+        if self._run_id is None:
+            return set()
+        run_id = self._run_id
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.domain
                    FROM tcp_results t
                    JOIN strategies s ON t.strategy_id = s.id
-                   WHERE s.proto=?
+                   WHERE s.proto=? AND t.run_id=?
                      AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
+                         AND t2.run_id = ?
                        ORDER BY t2.id DESC LIMIT 1
                      )
                      AND t.status IN {_WORKING_STATUSES}""",
-                (proto,),
+                (proto, run_id, run_id),
             )
             return {(r[0], r[1]) for r in await rows.fetchall()}
 

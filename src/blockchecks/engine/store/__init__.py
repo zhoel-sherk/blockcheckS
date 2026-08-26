@@ -9,6 +9,7 @@ from blockchecks.engine.paths import DEFAULT_DB_PATH, expand_path
 from blockchecks.engine.store.models import Checkpoint
 from blockchecks.engine.store.sqlite_store import (
     SqliteRunStore,
+    campaign_args_hash,
     fingerprint_mismatch,
     matrix_fingerprint,
 )
@@ -22,6 +23,16 @@ class RunStateStore(Protocol):
     def path(self) -> Path: ...
 
     async def init(self) -> None: ...
+    async def begin_run(
+        self,
+        *,
+        resume: bool | None = None,
+        fingerprint: str = "",
+        args_hash: str = "",
+        code_version: str | None = None,
+        impersonate: str | None = None,
+        nfqws2_version: str | None = None,
+    ) -> int: ...
     async def flush(self) -> None: ...
     async def close(self) -> None: ...
     async def ensure_strategy(
@@ -99,6 +110,7 @@ def open_run_store(
     *,
     batch_size: int = 0,
     flush_interval_sec: float = DEFAULT_FLUSH_INTERVAL_SEC,
+    resume: bool = False,
 ) -> SqliteRunStore:
     """Open the default SQLite run state store."""
     path = expand_path(db_path, default=DEFAULT_DB_PATH)
@@ -106,6 +118,7 @@ def open_run_store(
         path,
         batch_size=batch_size,
         flush_interval_sec=flush_interval_sec,
+        resume=resume,
     )
 
 
@@ -114,6 +127,7 @@ __all__ = [
     "RunStateStore",
     "SqliteRunStore",
     "StateDB",
+    "campaign_args_hash",
     "fingerprint_mismatch",
     "matrix_fingerprint",
     "open_run_store",

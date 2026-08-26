@@ -180,6 +180,7 @@ async def open_full_run_db(args) -> Any:
     db = open_run_store(
         args.db,
         batch_size=int(getattr(args, "db_batch", DEFAULT_DB_BATCH)),
+        resume=bool(getattr(args, "resume", False)),
     )
     await db.init()
     return db
