@@ -235,6 +235,15 @@ def test_pick_working_doh_uses_first_success():
 
 
 @pytest.mark.unit
+def test_pick_working_doh_returns_none_when_all_fail():
+    with patch(
+        "blockchecks.checkers.dns_secure.doh_query",
+        return_value=([], "dead", 1.0),
+    ):
+        assert pick_working_doh([("https://a/", "a"), ("https://b/", "b")]) is None
+
+
+@pytest.mark.unit
 def test_doh_bootstrap_ip_known_hosts():
     assert doh_bootstrap_ip("https://cloudflare-dns.com/dns-query") == "1.1.1.1"
     assert doh_bootstrap_ip("https://dns.google/dns-query") == "8.8.8.8"
@@ -247,7 +256,8 @@ def test_doh_json_setopt_resolve_bootstrap():
     with patch("blockchecks.checkers.dns_secure.curl_cffi.Session") as sess_cls:
         session = sess_cls.return_value.__enter__.return_value
         resp = MagicMock()
-        resp.json.return_value = {"Answer": [{"type": 1, "data": "9.9.9.9"}]}
+        resp.status_code = 200
+        resp.json.return_value = {"Status": 0, "Answer": [{"type": 1, "data": "9.9.9.9"}]}
         session.get.return_value = resp
         ips, err, _ = _doh_json_query("example.com", "https://cloudflare-dns.com/dns-query")
     assert ips == ["9.9.9.9"]
@@ -258,7 +268,28 @@ def test_doh_json_setopt_resolve_bootstrap():
 
 
 @pytest.mark.unit
-def test_doh_is_trusted_rejects_yandex():
+def test_doh_json_rejects_non_noerror_status():
+    with patch("blockchecks.checkers.dns_secure.curl_cffi.Session") as sess_cls:
+        session = sess_cls.return_value.__enter__.return_value
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"Status": 3, "Answer": []}
+        session.get.return_value = resp
+        ips, err, _ = _doh_json_query("example.com", "https://cloudflare-dns.com/dns-query")
+    assert ips == []
+    assert "status 3" in err
+
+
+@pytest.mark.unit
+def test_doh_json_rejects_non_200_http():
+    with patch("blockchecks.checkers.dns_secure.curl_cffi.Session") as sess_cls:
+        session = sess_cls.return_value.__enter__.return_value
+        resp = MagicMock()
+        resp.status_code = 503
+        session.get.return_value = resp
+        ips, err, _ = _doh_json_query("example.com", "https://cloudflare-dns.com/dns-query")
+    assert ips == []
+    assert "http 503" in err
     from blockchecks.checkers.dns_secure import doh_is_trusted
 
     assert not doh_is_trusted("https://dns.yandex.ru/dns-query")

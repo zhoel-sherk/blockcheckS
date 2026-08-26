@@ -32,7 +32,7 @@ DPI_FAKE_PATTERNS = [
 ]
 
 # blockcheck2 curl exit 254 — suspicious redirect / blockpage
-REDIRECT_BLOCK_STATUSES = frozenset({301, 302, 307, 308})
+REDIRECT_BLOCK_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 
 def _apply_read_timeout(session: curl_cffi.Session, read_timeout: float) -> None:
@@ -63,10 +63,27 @@ _DISCORD_FAMILY_APEXES = frozenset({
     "discord.media",
 })
 
+_GOOGLE_FAMILY_APEXES = frozenset({
+    "google.com",
+    "accounts.google.com",
+    "youtube.com",
+    "youtu.be",
+    "googlevideo.com",
+    "googleapis.com",
+})
+
+
+def _in_host_family(host: str, apexes: frozenset[str]) -> bool:
+    h = host.lower().rstrip(".")
+    return any(h == apex or h.endswith("." + apex) for apex in apexes)
+
 
 def _in_discord_family(host: str) -> bool:
-    h = host.lower().rstrip(".")
-    return any(h == apex or h.endswith("." + apex) for apex in _DISCORD_FAMILY_APEXES)
+    return _in_host_family(host, _DISCORD_FAMILY_APEXES)
+
+
+def _in_google_family(host: str) -> bool:
+    return _in_host_family(host, _GOOGLE_FAMILY_APEXES)
 
 
 def _hosts_related(host: str, domain: str) -> bool:
@@ -75,6 +92,8 @@ def _hosts_related(host: str, domain: str) -> bool:
     if not (h and d):
         return False
     if _in_discord_family(h) and _in_discord_family(d):
+        return True
+    if _in_google_family(h) and _in_google_family(d):
         return True
     return h == d or h.endswith("." + d) or d.endswith("." + h)
 

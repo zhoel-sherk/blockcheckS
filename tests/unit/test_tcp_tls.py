@@ -41,7 +41,17 @@ def test_is_suspicious_redirect_protocol_relative():
 @pytest.mark.unit
 def test_is_suspicious_redirect_external_blocked():
     assert is_suspicious_redirect("discord.com", 301, "https://gov.ru/block") is True
+    assert is_suspicious_redirect("discord.com", 303, "https://gov.ru/block") is True
     assert is_suspicious_redirect("discord.com", 200, "") is False
+
+
+@pytest.mark.unit
+def test_is_suspicious_redirect_google_family_ok():
+    assert is_suspicious_redirect("youtube.com", 302, "https://accounts.google.com/") is False
+    assert is_suspicious_redirect("www.youtube.com", 303, "https://accounts.google.com/signin") is False
+    assert is_suspicious_redirect("youtube.com", 302, "https://rr1---sn-foo.googlevideo.com/") is False
+    assert is_suspicious_redirect("googleapis.com", 301, "https://accounts.google.com/") is False
+    assert is_suspicious_redirect("youtube.com", 302, "https://gov.ru/block") is True
 
 
 @pytest.mark.unit

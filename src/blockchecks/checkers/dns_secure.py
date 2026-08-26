@@ -156,8 +156,15 @@ def _doh_json_query(
                 headers={"Accept": "application/dns-json"},
             )
         elapsed = (time.perf_counter() - start) * 1000
+        if resp.status_code != 200:
+            return [], f"http {resp.status_code}", elapsed
         data = resp.json()
+        dns_status = data.get("Status")
+        if dns_status != 0:
+            return [], f"dns-json status {dns_status}", elapsed
         ips = [a["data"] for a in data.get("Answer", []) if a.get("type") == 1]
+        if not ips:
+            return [], "no A records in dns-json", elapsed
         return ips, "", elapsed
     except RequestsError as e:
         return [], str(e)[:80], (time.perf_counter() - start) * 1000
@@ -184,7 +191,15 @@ def _doh_wire_query(
                 },
             )
         elapsed = (time.perf_counter() - start) * 1000
-        return _parse_dns_response(resp.content), "", elapsed
+        if resp.status_code != 200:
+            return [], f"http {resp.status_code}", elapsed
+        body = resp.content
+        if len(body) >= 4 and (struct.unpack("!H", body[2:4])[0] & 0x0F) != 0:
+            return [], f"dns-wire rcode {struct.unpack('!H', body[2:4])[0] & 0x0F}", elapsed
+        ips = _parse_dns_response(body)
+        if not ips:
+            return [], "no A records in dns-wire", elapsed
+        return ips, "", elapsed
     except RequestsError as e:
         return [], str(e)[:80], (time.perf_counter() - start) * 1000
     except Exception as e:
@@ -226,18 +241,29 @@ def pick_working_doh(
     servers: list[tuple[str, str]] | None = None,
     probe_domain: str = "cloudflare.com",
     timeout: float = 3.0,
-) -> str:
+) -> str | None:
     """Return first working *trusted* DoH URL (blockcheck2 ``doh_find_working``)."""
     pool = trusted_doh_servers(servers) or trusted_doh_servers()
+    candidates: list[str] = []
     if DEFAULT_DOH_SERVER and doh_is_trusted(DEFAULT_DOH_SERVER):
-        ips, err, _ = doh_query(probe_domain, DEFAULT_DOH_SERVER, timeout)
-        if ips and not err:
-            return DEFAULT_DOH_SERVER
-    for url, _name in pool:
+        candidates.append(DEFAULT_DOH_SERVER)
+    candidates.extend(url for url, _name in pool if url not in candidates)
+    for url in candidates:
         ips, err, _ = doh_query(probe_domain, url, timeout)
         if ips and not err:
             return url
-    return (pool or servers or DOH_SERVERS)[0][0]
+        log.warning(
+            "DoH probe failed for %s (%s): %s",
+            url,
+            probe_domain,
+            err or "no A records",
+        )
+    log.warning(
+        "No working trusted DoH resolver for %s (tried %d URL(s))",
+        probe_domain,
+        len(candidates),
+    )
+    return None
 
 
 @dataclass
@@ -314,10 +340,10 @@ def audit_domain(
             result.udp_error = err
 
     doh = doh_url or pick_working_doh(timeout=timeout)
-    if not doh_is_trusted(doh):
+    if not doh or not doh_is_trusted(doh):
         doh = pick_working_doh(timeout=timeout)
-    result.doh_server = doh
-    ips, err, lat = doh_query(domain, doh, timeout=timeout)
+    result.doh_server = doh or ""
+    ips, err, lat = doh_query(domain, doh, timeout=timeout) if doh else ([], "no working DoH", 0.0)
     result.doh_ips = ips
     result.doh_latency_ms = lat
     if err:
@@ -372,7 +398,7 @@ def audit_domains(
 ) -> list[DnsAuditResult]:
     """Audit multiple domains (startup preflight)."""
     doh = doh_url or pick_working_doh(timeout=timeout)
-    return [audit_domain(d, doh_url=doh, timeout=timeout) for d in domains]
+    return [audit_domain(d, doh_url=doh or None, timeout=timeout) for d in domains]
 
 
 _VERDICT_STYLE = {
@@ -569,8 +595,10 @@ class DnsRunCache:
         if cached:
             return self._pinned_first(domain, cached)
         url = doh_url or self.doh_server or pick_working_doh(timeout=timeout)
-        if not self.doh_server:
+        if url and not self.doh_server:
             self.doh_server = url
+        if not url:
+            return self._pinned_first(domain, [])
         ips, err, _ = doh_query(domain, url, timeout=timeout)
         if ips and not err:
             self.set(domain, ips)
@@ -612,7 +640,8 @@ class DnsRunCache:
     def prime(self, domains: list[str], doh_url: str | None = None) -> None:
         """Pre-resolve all domains for a batch run."""
         url = doh_url or pick_working_doh()
-        self.doh_server = url
+        if url:
+            self.doh_server = url
         for domain in domains:
             self.resolve(domain, doh_url=url)
 
@@ -655,7 +684,7 @@ def prepare_dns_for_run(
         return None, [], 0
 
     url = doh_server or pick_working_doh(timeout=timeout)
-    cache = DnsRunCache(doh_server=url)
+    cache = DnsRunCache(doh_server=url or "")
     results: list[DnsAuditResult] = []
     if not skip_audit:
         results = audit_domains(domains, doh_url=url, timeout=timeout)

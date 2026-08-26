@@ -25,6 +25,12 @@ def test_discord_family_redirects_ok():
     assert is_suspicious_redirect("discordcdn.com", 302, "https://discord.com/assets") is False
 
 
+def test_google_family_redirects_ok():
+    assert is_suspicious_redirect("youtube.com", 303, "https://accounts.google.com/") is False
+    assert is_suspicious_redirect("youtu.be", 302, "https://www.youtube.com/") is False
+    assert is_suspicious_redirect("googlevideo.com", 307, "https://google.com/") is False
+
+
 def test_spoofed_discord_domain_blocked():
     assert is_suspicious_redirect("notdiscord.com", 301, "https://discord.com") is True
     assert is_suspicious_redirect("discord.gg", 301, "https://discord.com.evil.com") is True
