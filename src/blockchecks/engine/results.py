@@ -16,6 +16,7 @@ class TcpTestResult:
     success: bool = False
     http_code: int = 0
     latency_ms: float = 0
+    settle_ms: float | None = None
     content_length: int = 0
     content_valid: bool = True
     throttled: bool = False

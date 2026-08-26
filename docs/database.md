@@ -38,6 +38,9 @@ erDiagram
     int bridge_batch_id
     int bridge_gen
     text probe_host
+    int epoch_ms
+    real settle_ms
+    int content_len
   }
   udp_results {
     int id PK
@@ -47,6 +50,7 @@ erDiagram
     real latency_ms
     text error
     text timestamp
+    int epoch_ms
   }
   pair_results {
     int id PK
@@ -127,8 +131,15 @@ erDiagram
 drains them atomically under `_flush_lock` before any await, so a concurrent
 `log_tcp` from a parallel worker is never cleared away mid-commit. On failure
 ("database is locked" retry ×5) the drained rows are re-queued — results are
-never silently lost. WAL pragmas: `synchronous=OFF`, `mmap_size`,
-`cache_size=-64000`, `temp_store=MEMORY`.
+never silently lost. Writer uses one long-lived connection (`SqliteRunStore._writer`);
+read paths may open short-lived connections (WAL allows concurrent readers).
+Periodic `PRAGMA wal_checkpoint(PASSIVE)` runs every N flushes; `close()` calls
+`compact()` (passive checkpoint + incremental vacuum pages). Schema sets
+`PRAGMA auto_vacuum=INCREMENTAL` at bootstrap.
+
+WAL pragmas on writer connections: `synchronous=NORMAL`, `mmap_size`,
+`cache_size=-64000`, `temp_store=MEMORY`, `busy_timeout=30000` (schema bootstrap
+uses 5000).
 
 ## DNS audit
 

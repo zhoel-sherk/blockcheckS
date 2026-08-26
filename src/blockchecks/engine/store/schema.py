@@ -35,7 +35,10 @@ CREATE TABLE IF NOT EXISTS tcp_results (
     read_rate_bps REAL DEFAULT 0,
     error TEXT DEFAULT '',
     fail_phase TEXT DEFAULT '',
-    timestamp TEXT NOT NULL DEFAULT ''
+    timestamp TEXT NOT NULL DEFAULT '',
+    epoch_ms INTEGER,
+    settle_ms REAL,
+    content_len INTEGER
 );
 CREATE TABLE IF NOT EXISTS udp_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +48,8 @@ CREATE TABLE IF NOT EXISTS udp_results (
     status TEXT NOT NULL,
     latency_ms REAL DEFAULT 0,
     error TEXT DEFAULT '',
-    timestamp TEXT NOT NULL DEFAULT ''
+    timestamp TEXT NOT NULL DEFAULT '',
+    epoch_ms INTEGER
 );
 CREATE TABLE IF NOT EXISTS pair_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,10 +157,19 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         ("bridge_applied", "INTEGER"),
         # SNI/хост, которым реально зондиовали (ggc-пул; пусто = домен как есть)
         ("probe_host", "TEXT DEFAULT ''"),
+        ("epoch_ms", "INTEGER"),
+        ("settle_ms", "REAL"),
+        ("content_len", "INTEGER"),
     ):
         if col not in col_names:
             await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")
     await db.commit()
+    udp_cols = await db.execute("PRAGMA table_info(udp_results)")
+    udp_col_names = {row[1] for row in await udp_cols.fetchall()}
+    if "epoch_ms" not in udp_col_names:
+        await db.execute("ALTER TABLE udp_results ADD COLUMN epoch_ms INTEGER")
+    await db.commit()
+    await db.execute("PRAGMA auto_vacuum=INCREMENTAL")
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA synchronous=NORMAL")
     await db.execute("PRAGMA mmap_size=268435456")
@@ -196,8 +209,6 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
     ):
         if col not in col_names:
             await db.execute(f"ALTER TABLE tcp_results ADD COLUMN {col} {typedef}")
-    udp_cols = await db.execute("PRAGMA table_info(udp_results)")
-    udp_col_names = {row[1] for row in await udp_cols.fetchall()}
     if "run_id" not in udp_col_names:
         await db.execute("ALTER TABLE udp_results ADD COLUMN run_id INTEGER REFERENCES runs(id)")
     await db.commit()

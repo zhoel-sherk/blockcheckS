@@ -58,6 +58,8 @@ class ProbeResultLogger:
             doh_server=doh_server,
             proto=proto_db,
             probe_host=getattr(result, "probe_host", "") or "",
+            settle_ms=getattr(result, "settle_ms", None),
+            content_len=result.content_length,
         )
         if save_data_block and result.success:
             await _save_pass_data_block(
@@ -102,6 +104,8 @@ class ProbeResultLogger:
             bridge_batch_id=result.bridge_batch_id,
             bridge_gen=result.bridge_gen,
             probe_host=getattr(result, "probe_host", "") or "",
+            settle_ms=getattr(result, "settle_ms", None),
+            content_len=result.content_length,
         )
         if status == "PASS":
             await _save_pass_data_block(
@@ -138,6 +142,8 @@ class ProbeResultLogger:
             doh_server=doh_server,
             proto="quic",
             probe_host=getattr(result, "probe_host", "") or "",
+            settle_ms=getattr(result, "settle_ms", None),
+            content_len=result.content_length,
         )
 
     async def log_udp_result(

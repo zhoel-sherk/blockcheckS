@@ -154,6 +154,30 @@ async def test_log_udp_result_saves_on_success():
 
 
 @pytest.mark.asyncio(loop_scope="package")
+async def test_log_tcp_result_passes_settle_and_content_len():
+    db = MagicMock()
+    db.log_tcp = AsyncMock()
+    logger = ProbeResultLogger(db)
+    result = _tcp_result(success=True, settle_ms=0.0, content_length=4096)
+
+    with patch(
+        "blockchecks.engine.probe_result_logger._save_pass_data_block",
+        new_callable=AsyncMock,
+    ):
+        await logger.log_tcp_result(
+            _item(),
+            "discord.com",
+            result,
+            resolved_ip="1.1.1.1",
+            dns_verdict="ok",
+            doh_server="cloudflare",
+        )
+
+    assert db.log_tcp.await_args.kwargs["settle_ms"] == 0.0
+    assert db.log_tcp.await_args.kwargs["content_len"] == 4096
+
+
+@pytest.mark.asyncio(loop_scope="package")
 async def test_logger_noop_without_db():
     logger = ProbeResultLogger(None)
     result = _tcp_result()

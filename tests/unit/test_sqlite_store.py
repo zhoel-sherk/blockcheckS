@@ -231,36 +231,22 @@ async def test_flush_retry_recovers_and_clears(tmp_path, monkeypatch):
     await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
 
     calls = {"n": 0}
-    _orig_connect = aiosqlite.connect
+    db = await store._writer()
+    orig_execute = db.execute
 
-    def _connect(*args, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return _RaiseLocked()
-        return _orig_connect(*args, **kwargs)
+    async def _execute(sql, *args, **kwargs):
+        if "BEGIN IMMEDIATE" in str(sql) and calls["n"] == 0:
+            calls["n"] += 1
+            raise aiosqlite.OperationalError("database is locked")
+        return await orig_execute(sql, *args, **kwargs)
 
-    monkeypatch.setattr(aiosqlite, "connect", _connect)
-    await store.flush()  # attempt 0 locked -> retry 1 commits
+    monkeypatch.setattr(db, "execute", _execute)
+    await store.flush()
     assert not store._tcp_pending
     con = sqlite3.connect(tmp_path / "req.db")
     rows = con.execute("SELECT COUNT(*) FROM tcp_results").fetchone()[0]
     con.close()
     assert rows == 1
-
-
-class _RaiseLocked:
-    """aiosqlite.connect() replacement that raises OperationalError on enter."""
-
-    def __init__(self):
-        import aiosqlite
-
-        self._exc = aiosqlite.OperationalError("database is locked")
-
-    async def __aenter__(self):
-        raise self._exc
-
-    async def __aexit__(self, *exc):
-        return False
 
 
 @pytest.mark.unit
@@ -273,14 +259,128 @@ async def test_flush_requeues_on_failure(tmp_path, monkeypatch):
     await store.init()
     await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
 
-    def _always_locked(*args, **kwargs):
-        return _RaiseLocked()
+    db = await store._writer()
+    orig_execute = db.execute
 
-    monkeypatch.setattr(aiosqlite, "connect", _always_locked)
+    async def _always_locked(sql, *args, **kwargs):
+        if "BEGIN IMMEDIATE" in str(sql):
+            raise aiosqlite.OperationalError("database is locked")
+        return await orig_execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", _always_locked)
     with pytest.raises(aiosqlite.OperationalError):
         await store.flush()
-    # Rows re-queued (nothing silently dropped).
     assert len(store._tcp_pending) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_writer_reuses_single_connection(tmp_path, monkeypatch):
+    import aiosqlite
+
+    calls = {"n": 0}
+    orig_connect = aiosqlite.connect
+
+    async def _counting_connect(*args, **kwargs):
+        calls["n"] += 1
+        return await orig_connect(*args, **kwargs)
+
+    monkeypatch.setattr(aiosqlite, "connect", _counting_connect)
+    store = open_run_store(tmp_path / "conn.db")
+    await store.init()
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store.log_tcp("s2", "b.com", "PASS", 20.0, 200, config_path="fake:2")
+    assert calls["n"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_epoch_ms_set_at_log_time(tmp_path, monkeypatch):
+    epochs = [1_700_000_000_000, 1_700_000_000_123]
+    store = open_run_store(tmp_path / "epoch.db")
+    await store.init()
+
+    def _epoch():
+        return epochs.pop(0)
+
+    monkeypatch.setattr(
+        "blockchecks.engine.store.sqlite_store.time.time",
+        lambda: _epoch() / 1000,
+    )
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store.log_tcp("s2", "b.com", "PASS", 20.0, 200, config_path="fake:2")
+
+    con = sqlite3.connect(tmp_path / "epoch.db")
+    rows = con.execute("SELECT domain, epoch_ms FROM tcp_results ORDER BY id").fetchall()
+    con.close()
+    assert rows == [("a.com", 1_700_000_000_000), ("b.com", 1_700_000_000_123)]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_settle_ms_zero_persisted(tmp_path):
+    store = open_run_store(tmp_path / "settle.db")
+    await store.init()
+    await store.log_tcp(
+        "s1",
+        "a.com",
+        "PASS",
+        10.0,
+        200,
+        config_path="fake:1",
+        settle_ms=0.0,
+    )
+    con = sqlite3.connect(tmp_path / "settle.db")
+    row = con.execute("SELECT settle_ms FROM tcp_results").fetchone()
+    con.close()
+    assert row is not None
+    assert row[0] == 0.0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_wal_checkpoint(tmp_path, monkeypatch):
+    from blockchecks.engine.store import sqlite_store as mod
+
+    store = open_run_store(tmp_path / "wal.db", batch_size=10)
+    await store.init()
+    monkeypatch.setattr(mod, "_WAL_CHECKPOINT_EVERY", 1)
+    calls: list[str] = []
+    db = await store._writer()
+    orig_execute = db.execute
+
+    async def _track_execute(sql, *args, **kwargs):
+        calls.append(str(sql))
+        return await orig_execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", _track_execute)
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store.flush()
+    assert any("wal_checkpoint(PASSIVE)" in c for c in calls)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_migration_adds_epoch_settle_content_columns(tmp_path):
+    con = sqlite3.connect(tmp_path / "legacy.db")
+    con.execute(
+        """CREATE TABLE tcp_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER, domain TEXT, status TEXT,
+            http_code INTEGER, latency_ms REAL, gateway_ws_ms REAL,
+            content_valid INTEGER, read_rate_bps REAL, error TEXT,
+            timestamp TEXT)"""
+    )
+    con.commit()
+    con.close()
+
+    store = open_run_store(tmp_path / "legacy.db")
+    await store.init()
+
+    con = sqlite3.connect(tmp_path / "legacy.db")
+    cols = {r[1] for r in con.execute("PRAGMA table_info(tcp_results)").fetchall()}
+    con.close()
+    assert {"epoch_ms", "settle_ms", "content_len"}.issubset(cols)
 
 
 @pytest.mark.unit

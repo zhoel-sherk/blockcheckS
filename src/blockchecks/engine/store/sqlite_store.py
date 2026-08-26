@@ -24,12 +24,13 @@ _TCP_INSERT_SQL = """INSERT INTO tcp_results
    (run_id,strategy_id,domain,status,http_code,latency_ms,
     gateway_ws_ms,content_valid,error,timestamp,read_rate_bps,
     resolved_ip,dns_verdict,doh_server,fail_phase,
-    bridge_applied,bridge_batch_id,bridge_gen,probe_host)
-   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+    bridge_applied,bridge_batch_id,bridge_gen,probe_host,
+    epoch_ms,settle_ms,content_len)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 
 _UDP_INSERT_SQL = """INSERT INTO udp_results
-   (run_id,strategy_id,target,status,latency_ms,error,timestamp)
-   VALUES(?,?,?,?,?,?,?)"""
+   (run_id,strategy_id,target,status,latency_ms,error,timestamp,epoch_ms)
+   VALUES(?,?,?,?,?,?,?,?)"""
 
 
 def matrix_fingerprint(
@@ -104,6 +105,8 @@ def _resolve_impersonate() -> str:
 
 _WORKING_STATUSES = "('PASS','THROTTLED')"
 _DEFAULT_FLUSH_INTERVAL_SEC = 15.0
+_WAL_CHECKPOINT_EVERY = 5
+_WAL_CHECKPOINT_ELAPSED_SEC = 60.0
 
 
 class SqliteRunStore:
@@ -129,6 +132,11 @@ class SqliteRunStore:
         self._tcp_pending: list[dict] = []
         self._udp_pending: list[dict] = []
         self._flush_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
+        self._conn_lock = asyncio.Lock()
+        self._conn: aiosqlite.Connection | None = None
+        self._flush_count = 0
+        self._last_checkpoint_mono: float | None = None
         self._pending_since: float | None = None
         self._flush_timer_task: asyncio.Task[None] | None = None
 
@@ -146,9 +154,64 @@ class SqliteRunStore:
         return self._run_id
 
     async def init(self) -> None:
-        async with aiosqlite.connect(self._path) as db:
+        async with self._write_lock:
+            db = await self._writer()
             await apply_schema(db)
         reclaim_sudo_ownership(self._path)
+
+    async def _writer(self) -> aiosqlite.Connection:
+        """Lazy-open the long-lived writer connection (ST-2)."""
+        if self._conn is not None:
+            return self._conn
+        async with self._conn_lock:
+            if self._conn is not None:
+                return self._conn
+            try:
+                conn = await aiosqlite.connect(self._path)
+            except Exception as exc:
+                log.error("sqlite writer connect failed path=%s: %s", self._path, exc)
+                raise
+            await SqliteRunStore._apply_pragmas(conn)
+            self._conn = conn
+            return conn
+
+    async def _close_writer(self) -> None:
+        if self._conn is None:
+            return
+        await self._conn.close()
+        self._conn = None
+
+    async def compact(self) -> None:
+        """Passive WAL checkpoint + incremental vacuum pages (ST-7)."""
+        async with self._write_lock:
+            if self._conn is None:
+                return
+            db = self._conn
+            try:
+                await db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception as exc:
+                log.warning("wal_checkpoint(PASSIVE) failed: %s", exc)
+            try:
+                await db.execute("PRAGMA incremental_vacuum(64)")
+            except Exception as exc:
+                log.warning("incremental_vacuum failed: %s", exc)
+
+    async def _maybe_wal_checkpoint(self) -> None:
+        self._flush_count += 1
+        now = time.monotonic()
+        elapsed = (
+            self._last_checkpoint_mono is not None
+            and now - self._last_checkpoint_mono >= _WAL_CHECKPOINT_ELAPSED_SEC
+        )
+        if self._flush_count % _WAL_CHECKPOINT_EVERY != 0 and not elapsed:
+            return
+        if self._conn is None:
+            return
+        try:
+            await self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            self._last_checkpoint_mono = now
+        except Exception as exc:
+            log.warning("wal_checkpoint(PASSIVE) failed: %s", exc)
 
     async def begin_run(
         self,
@@ -171,35 +234,70 @@ class SqliteRunStore:
         cv = code_version if code_version is not None else __version__
         imp = impersonate if impersonate is not None else _resolve_impersonate()
         nfv = nfqws2_version if nfqws2_version is not None else _probe_nfqws2_version()
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
-            if use_resume and fp:
-                row = await db.execute(
-                    "SELECT id FROM runs WHERE fingerprint=? ORDER BY id DESC LIMIT 1",
-                    (fp,),
-                )
-                found = await row.fetchone()
-                if found:
-                    self._run_id = int(found[0])
-                    log.info(
-                        "resume: reusing run_id=%s fingerprint=%s",
-                        self._run_id,
-                        fp,
-                    )
-                    return self._run_id
-            ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-            cur = await db.execute(
-                """INSERT INTO runs
-                   (started_at, code_version, args_hash, fingerprint,
-                    impersonate, nfqws2_version)
-                   VALUES(?,?,?,?,?,?)""",
-                (ts, cv, ah, fp, imp, nfv),
+        async with self._write_lock:
+            db = await self._writer()
+            run_id = await self._begin_run_on_db(
+                db,
+                use_resume=use_resume,
+                fp=fp,
+                ah=ah,
+                cv=cv,
+                imp=imp,
+                nfv=nfv,
             )
-            await db.commit()
-            self._run_id = int(cur.lastrowid)
-        log.info("started run_id=%s fingerprint=%s resume=%s", self._run_id, fp, use_resume)
+        log.info("started run_id=%s fingerprint=%s resume=%s", run_id, fp, use_resume)
         reclaim_sudo_ownership(self._path)
+        return run_id
+
+    async def _begin_run_on_db(
+        self,
+        db: aiosqlite.Connection,
+        *,
+        use_resume: bool,
+        fp: str,
+        ah: str,
+        cv: str,
+        imp: str,
+        nfv: str,
+    ) -> int:
+        if use_resume and fp:
+            row = await db.execute(
+                "SELECT id FROM runs WHERE fingerprint=? ORDER BY id DESC LIMIT 1",
+                (fp,),
+            )
+            found = await row.fetchone()
+            if found:
+                self._run_id = int(found[0])
+                log.info(
+                    "resume: reusing run_id=%s fingerprint=%s",
+                    self._run_id,
+                    fp,
+                )
+                return self._run_id
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        cur = await db.execute(
+            """INSERT INTO runs
+               (started_at, code_version, args_hash, fingerprint,
+                impersonate, nfqws2_version)
+               VALUES(?,?,?,?,?,?)""",
+            (ts, cv, ah, fp, imp, nfv),
+        )
+        await db.commit()
+        self._run_id = int(cur.lastrowid)
         return self._run_id
+
+    async def _ensure_run_id_on_db(self, db: aiosqlite.Connection) -> int:
+        if self._run_id is not None:
+            return self._run_id
+        return await self._begin_run_on_db(
+            db,
+            use_resume=False,
+            fp="",
+            ah="",
+            cv=__version__,
+            imp=_resolve_impersonate(),
+            nfv=_probe_nfqws2_version(),
+        )
 
     async def _ensure_run_id(self) -> int:
         if self._run_id is not None:
@@ -227,6 +325,9 @@ class SqliteRunStore:
             entry.get("bridge_batch_id") or 0,
             entry.get("bridge_gen") or 0,
             entry.get("probe_host") or "",
+            entry.get("epoch_ms"),
+            entry.get("settle_ms"),
+            entry.get("content_len"),
         )
 
     async def close(self) -> None:
@@ -238,6 +339,9 @@ class SqliteRunStore:
                 pass
             self._flush_timer_task = None
         await self.flush()
+        await self.compact()
+        async with self._write_lock:
+            await self._close_writer()
         reclaim_sudo_ownership(self._path)
 
     def _row_timestamp(self) -> str:
@@ -330,8 +434,8 @@ class SqliteRunStore:
 
         if db is not None:
             return await _body(db, commit=False)
-        async with aiosqlite.connect(self._path) as conn:
-            await SqliteRunStore._apply_pragmas(conn)
+        async with self._write_lock:
+            conn = await self._writer()
             return await _body(conn, commit=True)
 
     async def flush(self) -> None:
@@ -358,9 +462,9 @@ class SqliteRunStore:
             try:
                 for attempt in range(5):
                     try:
-                        run_id = await self._ensure_run_id()
-                        async with aiosqlite.connect(self._path) as db:
-                            await SqliteRunStore._apply_pragmas(db)
+                        async with self._write_lock:
+                            db = await self._writer()
+                            run_id = await self._ensure_run_id_on_db(db)
                             await db.execute("BEGIN IMMEDIATE")
                             try:
                                 strategy_cache: dict[tuple[str, str], int] = {}
@@ -394,6 +498,7 @@ class SqliteRunStore:
                                             entry["latency_ms"],
                                             entry["error"],
                                             entry.get("timestamp") or self._row_timestamp(),
+                                            entry.get("epoch_ms"),
                                         )
                                     )
                                 if udp_rows:
@@ -402,6 +507,7 @@ class SqliteRunStore:
                             except Exception:
                                 await db.rollback()
                                 raise
+                        await self._maybe_wal_checkpoint()
                         last_err = None
                         break
                     except aiosqlite.OperationalError as e:
@@ -441,7 +547,10 @@ class SqliteRunStore:
         bridge_batch_id: int = 0,
         bridge_gen: int = 0,
         probe_host: str = "",
+        settle_ms: float | None = None,
+        content_len: int | None = None,
     ) -> None:
+        epoch_ms = int(time.time() * 1000)
         if self.batch_size > 0:
             self._tcp_pending.append(
                 {
@@ -465,6 +574,9 @@ class SqliteRunStore:
                     "probe_host": probe_host or "",
                     "bridge_batch_id": int(bridge_batch_id or 0),
                     "bridge_gen": int(bridge_gen or 0),
+                    "epoch_ms": epoch_ms,
+                    "settle_ms": settle_ms,
+                    "content_len": content_len,
                 }
             )
             self._mark_pending()
@@ -473,9 +585,9 @@ class SqliteRunStore:
             else:
                 await self._maybe_flush_by_age()
             return
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
-            run_id = await self._ensure_run_id()
+        async with self._write_lock:
+            db = await self._writer()
+            run_id = await self._ensure_run_id_on_db(db)
             sid = await self.ensure_strategy(strategy, proto, config_path or strategy, db=db)
             ts = self._row_timestamp()
             await db.execute(
@@ -500,6 +612,9 @@ class SqliteRunStore:
                     int(bridge_batch_id or 0),
                     int(bridge_gen or 0),
                     probe_host or "",
+                    epoch_ms,
+                    settle_ms,
+                    content_len,
                 ),
             )
             await db.commit()
@@ -514,6 +629,7 @@ class SqliteRunStore:
         error: str = "",
         config_path: str = "",
     ) -> None:
+        epoch_ms = int(time.time() * 1000)
         if self.batch_size > 0:
             self._udp_pending.append(
                 {
@@ -524,6 +640,7 @@ class SqliteRunStore:
                     "latency_ms": latency_ms,
                     "error": error,
                     "timestamp": self._row_timestamp(),
+                    "epoch_ms": epoch_ms,
                 }
             )
             self._mark_pending()
@@ -532,14 +649,14 @@ class SqliteRunStore:
             else:
                 await self._maybe_flush_by_age()
             return
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
-            run_id = await self._ensure_run_id()
+        async with self._write_lock:
+            db = await self._writer()
+            run_id = await self._ensure_run_id_on_db(db)
             sid = await self.ensure_strategy(strategy, "udp", config_path or strategy, db=db)
             ts = self._row_timestamp()
             await db.execute(
                 _UDP_INSERT_SQL,
-                (run_id, sid, target, status, latency_ms, error, ts),
+                (run_id, sid, target, status, latency_ms, error, ts, epoch_ms),
             )
             await db.commit()
         reclaim_sudo_ownership(self._path)
@@ -548,8 +665,8 @@ class SqliteRunStore:
         self, domain: str, *, reason: str = "", failed: int = 0
     ) -> None:
         """Persist one quarantined domain (rare event — write immediately)."""
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+        async with self._write_lock:
+            db = await self._writer()
             await db.execute(
                 """INSERT INTO quarantined (domain, reason, failed, created)
                    VALUES(?,?,?,?)
@@ -604,7 +721,8 @@ class SqliteRunStore:
         timestamp: str = "",
     ) -> None:
         ts = timestamp or time.strftime("%Y-%m-%dT%H:%M:%S")
-        async with aiosqlite.connect(self._path) as db:
+        async with self._write_lock:
+            db = await self._writer()
             await db.execute(
                 """INSERT INTO dns_audit_results
                    (domain, udp_ips, doh_ips, verdict, doh_server, timestamp)
@@ -626,8 +744,8 @@ class SqliteRunStore:
         udp_ms: float,
         overall: str,
     ) -> None:
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+        async with self._write_lock:
+            db = await self._writer()
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
                 """INSERT INTO pair_results
@@ -660,8 +778,8 @@ class SqliteRunStore:
         tcp_label: str = "",
         udp_label: str = "",
     ) -> None:
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+        async with self._write_lock:
+            db = await self._writer()
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
             await db.execute(
                 "INSERT INTO checkpoints(tcp_idx,udp_idx,fingerprint,"
@@ -1031,8 +1149,8 @@ class SqliteRunStore:
     async def save_scan_weights(self, rows: list[tuple[str, float]]) -> None:
         """Persist AQ4 weight rows (upsert)."""
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+        async with self._write_lock:
+            db = await self._writer()
             for key, weight in rows:
                 await db.execute(
                     """INSERT INTO scan_weights(key, weight, updated_at) VALUES(?,?,?)
@@ -1045,8 +1163,8 @@ class SqliteRunStore:
     async def save_triage_snapshot(self, domain: str, payload: dict) -> None:
         """Persist a JSON triage snapshot for this run."""
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+        async with self._write_lock:
+            db = await self._writer()
             await db.execute(
                 """INSERT INTO triage_snapshots(domain, payload_json, created_at)
                    VALUES(?,?,?)""",
