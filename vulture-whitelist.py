@@ -208,3 +208,19 @@ HarvestCandidate.attempts
 GgcTarget.ip_hint
 GgcTarget.pool_size
 pick_target.domain_hint
+
+# ARC-7 хвост: эти имена используются динамически (entry-point bs → main,
+# реестр handler'ов по имени класса, legacy argparse-путь за env-флагом)
+collect_cli_shortcuts
+build_cli_root
+parse_cli_subcommand
+_main_argparse
+_explicit_cli
+_enable_ip_forward
+http3_result_dict
+can_translate
+release_curl_probe_worker
+dirty
+is_attached
+DPI_TESTER_SETTINGS
+AdaptiveJobQueue._rebuild_heap_calls

@@ -6,7 +6,6 @@ import inspect
 from pathlib import Path
 
 import aiosqlite
-import sys
 import pytest
 
 from blockchecks.engine import async_runner as ar
