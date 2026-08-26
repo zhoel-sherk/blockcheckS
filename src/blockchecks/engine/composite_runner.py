@@ -106,11 +106,6 @@ async def run(
     _bind_deadline = time.perf_counter() + 12.0
     _bound = False
     while time.perf_counter() < _bind_deadline:
-        try:
-            outs = sorted(Path(SHM_BASE).glob("../state/blockcheckS/logs/nfqws2_out_"
-                          f"{ns_name}_*.log")) if False else []
-        except Exception:
-            outs = []
         # путь захвата берём из RUNTIME_LOGS_DIR напрямую
         from blockchecks.engine.paths import RUNTIME_LOGS_DIR
         candidates = sorted(

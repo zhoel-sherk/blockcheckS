@@ -27,6 +27,6 @@ sudo env PYTHONPATH="${PWD}/src" "$PY" -m blockchecks.bs full \
   --skip-ip-block \
   --skip-port-block \
   --force \
-  --no-settle-profile \
+  --no-use-settle-profile \
   --db logs/gv1_smoke.db 2>&1 | tee -a "$LOG"
 echo "Log: $LOG"

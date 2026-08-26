@@ -74,6 +74,7 @@ def test_pair_dns_exit_code_short_circuits():
         patch("blockchecks.cli.commands.pair.prepare_dns_and_preflight") as prep,
     ):
         open_store.return_value.init = AsyncMock()
+        open_store.return_value.close = AsyncMock()
         open_store.return_value.begin_run = AsyncMock()
         resolve_preset.return_value = ([], None)
         validate.return_value = None
@@ -106,6 +107,7 @@ def test_pair_standard_phase_success():
         patch("blockchecks.cli.commands.pair.finalize_pair_run", AsyncMock()) as fin,
     ):
         open_store.return_value.init = AsyncMock()
+        open_store.return_value.close = AsyncMock()
         open_store.return_value.begin_run = AsyncMock()
         resolve_preset.return_value = ([], None)
         validate.return_value = None
@@ -152,6 +154,7 @@ def test_pair_adaptive_phase_chosen():
         patch("blockchecks.cli.commands.pair.finalize_pair_run", AsyncMock()) as fin,
     ):
         open_store.return_value.init = AsyncMock()
+        open_store.return_value.close = AsyncMock()
         open_store.return_value.begin_run = AsyncMock()
         resolve_preset.return_value = ([], None)
         validate.return_value = None
@@ -190,6 +193,7 @@ def test_pair_banner_rc_short_circuits():
         patch("blockchecks.cli.commands.pair.register_stop_handlers"),
     ):
         open_store.return_value.init = AsyncMock()
+        open_store.return_value.close = AsyncMock()
         open_store.return_value.begin_run = AsyncMock()
         resolve_preset.return_value = ([], None)
         validate.return_value = None
@@ -232,6 +236,7 @@ def test_pair_tcp_only_uses_scan_session():
         patch("blockchecks.cli.commands.pair.finalize_pair_run", AsyncMock()) as fin,
     ):
         open_store.return_value.init = AsyncMock()
+        open_store.return_value.close = AsyncMock()
         open_store.return_value.begin_run = AsyncMock()
         resolve_preset.return_value = ([], None)
         validate.return_value = None
