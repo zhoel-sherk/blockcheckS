@@ -145,7 +145,7 @@ async def test_generate_udp_game_not_in_default():
     assert not any("std_udp_game" in i.label for i in default)
     game = await MatrixGenerator().generate_udp(sources=["game"], scan_level="single", max_count=20)
     assert game
-    assert all(i.protocol == "udp_voice" for i in game)
+    assert all(i.protocol == "udp_game" for i in game)
     assert any("std_udp_game" in i.label for i in game)
     assert all("fake:blob=" in i.strategy for i in game)
 

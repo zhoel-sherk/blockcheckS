@@ -224,9 +224,18 @@ class MatrixGenerator:
             log.info("%s", f"    {src_name:20s} {len(items):5d} items  ({dt:.1f}s)")
             all_items.extend(items)
 
+        _udp_preserve = frozenset({"udp_voice", "udp_game", "quic"})
         for item in all_items:
-            if item.protocol != "udp_voice":
-                item.protocol = "udp_voice"
+            if item.protocol in _udp_preserve:
+                continue
+            log.warning(
+                "generate_udp: coercing unexpected protocol %r to udp_voice "
+                "(strategy=%r label=%r)",
+                item.protocol,
+                item.strategy,
+                item.label,
+            )
+            item.protocol = "udp_voice"
         return _finalize_generated(
             all_items, max_count, triage, scan_level, user_matrix=user_matrix
         )
