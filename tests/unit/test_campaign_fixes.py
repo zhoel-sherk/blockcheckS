@@ -55,26 +55,30 @@ async def test_adaptive_stops_mid_batch_when_deadline_sets_stop():
     calls = 0
 
     class Runner:
-        async def test_tcp(self, item, domain, timeout=5.0):
+        async def _run_probe_batch(
+            self, items, domain, timeout, backend, domains=None, stop_event=None
+        ):
             nonlocal calls
-            calls += 1
-            if calls >= 2:
-                stop.set()
-            return _FakeResult(success=True, item=item, domain=domain)
-
-        async def test_tcp_domains(self, item, domains, timeout=5.0, curl_parallel=4):
-            nonlocal calls
-            out = []
-            for d in domains:
+            results = []
+            for i, item in enumerate(items):
+                if stop_event is not None and stop_event.is_set():
+                    break
+                d = domains[i] if domains and i < len(domains) else domain
                 calls += 1
                 if calls >= 2:
                     stop.set()
-                out.append(_FakeResult(success=True, item=item, domain=d))
-            return out
+                results.append(_FakeResult(success=True, item=item, domain=d))
+            return results
 
-    result = await run_adaptive_tcp(Runner(), queue, curl_parallel=3, stop_event=stop)
-    # Stop fires mid-batch; we still mark the jobs already returned, but
-    # must not drain the rest of the matrix.
+    result = await run_adaptive_tcp(
+        Runner(),
+        queue,
+        curl_parallel=3,
+        stop_event=stop,
+        workers=1,
+        bridge_batch=3,
+    )
+    # Stop fires mid-batch; remaining jobs are not drained.
     assert result.done >= 1
     assert result.done < len(items) * len(domains)
     assert stop.is_set()

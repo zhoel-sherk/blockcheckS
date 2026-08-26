@@ -13,10 +13,9 @@ import re
 import pytest
 from tests.unit._quality_config import PROJECT_ROOT, tool_section
 
-pytestmark = [pytest.mark.unit, pytest.mark.quality]
-
-
 from blockchecks.cli.parser import _LEGACY_NO_FROM_POSITIVE, build_parser
+
+pytestmark = [pytest.mark.unit, pytest.mark.quality]
 
 _POSITIVE_TO_LEGACY = dict(_LEGACY_NO_FROM_POSITIVE)
 
@@ -69,8 +68,6 @@ def _read_bundle(paths: list[str]) -> str:
     ["tcp", "udp", "scan", "pair", "composite", "bench-settle", "stop", "serve", "preflight"],
 )
 def test_no_dead_cli_flags(command: str) -> None:
-    from blockchecks.cli.parser import build_parser
-
     cfg = tool_section("tool", "blockchecks", "dead_flags")
     ignore = set(cfg.get("ignore_dests") or [])
     allow = set(cfg.get("allow") or [])
@@ -100,8 +97,6 @@ def test_no_dead_cli_flags(command: str) -> None:
 
 
 def test_helper_bleed_quic_timeout_not_on_scan_pair() -> None:
-    from blockchecks.cli.parser import build_parser
-
     dests = _subparser_dests(build_parser())
     assert "quic_timeout" not in dests.get("scan", set())
     assert "quic_timeout" not in dests.get("pair", set())
@@ -109,8 +104,6 @@ def test_helper_bleed_quic_timeout_not_on_scan_pair() -> None:
 
 
 def test_helper_bleed_preflight_not_on_tcp() -> None:
-    from blockchecks.cli.parser import build_parser
-
     dests = _subparser_dests(build_parser()).get("tcp", set())
     for d in (
         "skip_ip_block",
@@ -124,14 +117,11 @@ def test_helper_bleed_preflight_not_on_tcp() -> None:
 
 
 def test_pair_has_no_orphan_ns() -> None:
-    from blockchecks.cli.parser import build_parser
-
     assert "ns" not in _subparser_dests(build_parser()).get("pair", set())
 
 
 def test_parity_dests_full_vs_pair() -> None:
     """Critical dests present on both full (main) and pair (parser) via shared helpers."""
-    from blockchecks.cli.parser import build_parser
     from blockchecks.main import build_arg_parser
 
     cfg = tool_section("tool", "blockchecks", "dead_flags")
@@ -172,8 +162,6 @@ def test_no_settle_profile_alias_parses() -> None:
 
 
 def test_scan_no_suppress_udp_aliases() -> None:
-    from blockchecks.cli.parser import build_parser
-
     scan = _subparser_dests(build_parser()).get("scan", set())
     for d in ("full_voice", "udp_bypass", "auto_discover", "udp_timeout"):
         assert d not in scan, f"scan must not expose suppressed pair alias {d}"
