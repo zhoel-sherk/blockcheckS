@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,6 +21,33 @@ def _session():
     s.ns_name = "bs-p0"
     s.bridge = bridge
     return s
+
+
+@pytest.mark.unit
+def test_bridge_batch_reuses_one_worker_process():
+    """N bridge domains in one ns → one persistent curl worker Popen."""
+    from blockchecks.service import probe as probe_mod
+
+    probe_mod._WORKERS.clear()
+    s = _session()
+    fake = MagicMock()
+    fake.stdin = MagicMock()
+    fake.stdout = MagicMock()
+    fake.stderr = MagicMock()
+    fake.poll.return_value = None
+    fake.pid = 4242
+    line = json.dumps({"success": True, "http_code": 200, "latency_ms": 50})
+    domains = ["discord.com", "google.com", "youtube.com"]
+    with (
+        patch("blockchecks.service.probe.sp.Popen", return_value=fake) as popen,
+        patch("blockchecks.service.probe._readline_timed", return_value=line),
+    ):
+        for i, dom in enumerate(domains, start=1):
+            run_tcp_check_bridge(
+                s, i, i, "fake:blob=stun:repeats=6:tcp_ts=-1000", dom, 5.0, "py"
+            )
+    assert popen.call_count == 1
+    assert fake.stdin.write.call_count == len(domains)
 
 
 @pytest.mark.unit
@@ -135,6 +163,19 @@ def _session_rst_in(ttl: int = 70):
     s.ns_name = "bs-p0"
     s.bridge = bridge
     return s
+
+
+@pytest.mark.unit
+def test_quic_bridge_probe_timeout():
+    import subprocess as sp
+
+    with patch(
+        "blockchecks.checkers.http3.sp.run",
+        side_effect=sp.TimeoutExpired(cmd="probe", timeout=5),
+    ):
+        data = _run_quic_bridge_probe("bs-p-0", "py", "discord.com", 5.0, None)
+    assert data["success"] is False
+    assert data["error"] == "timeout"
 
 
 @pytest.mark.unit

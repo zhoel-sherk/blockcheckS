@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess as sp
 import time
 from dataclasses import dataclass
 
@@ -12,6 +14,16 @@ from blockchecks.checkers.tcp_tls import classify_http_status
 from blockchecks.engine.config import HTTP3_TIMEOUT
 
 _HTTP3_PROBE_URL = "https://cloudflare.com"
+
+_QUIC_FAIL = {
+    "success": False,
+    "http_code": 0,
+    "latency_ms": 0,
+    "content_len": 0,
+    "content_ok": False,
+    "throttled": False,
+    "read_rate_bps": 0,
+}
 
 
 @dataclass
@@ -90,3 +102,54 @@ def check_http3(
 
     result.latency_ms = (time.perf_counter() - start) * 1000
     return result
+
+
+def http3_result_dict(result: Http3Result, *, resolve_name: str | None = None) -> dict:
+    """Map Http3Result to the probe result dict shared by classic and bridge paths."""
+    return {
+        "resolve_name": resolve_name if resolve_name is not None else result.domain.split("/")[0],
+        "success": result.success,
+        "http_code": result.http_status,
+        "latency_ms": result.latency_ms,
+        "content_len": result.content_length,
+        "content_ok": True,
+        "throttled": False,
+        "read_rate_bps": 0,
+        "error": result.error,
+        "http_version": result.http_version,
+    }
+
+
+def quic_subprocess_result(
+    ns_name: str,
+    python_bin: str,
+    domain: str,
+    timeout: float,
+    pre_resolved_ip: str | None = None,
+) -> dict:
+    """Run check_http3 inside a netns via ``python -c``; unified error mapping."""
+    resolved_ip_lit = repr(pre_resolved_ip) if pre_resolved_ip else "None"
+    check_code = f"""
+import json
+from blockchecks.checkers.http3 import check_http3, http3_result_dict
+r = check_http3({domain!r}, {timeout}, pre_resolved_ip={resolved_ip_lit})
+print(json.dumps(http3_result_dict(r)))
+"""
+    try:
+        proc = sp.run(
+            ["sudo", "ip", "netns", "exec", ns_name, python_bin, "-c", check_code],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,
+        )
+        try:
+            return json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return {
+                **_QUIC_FAIL,
+                "error": f"parse: {(proc.stdout or '')[:100]}",
+            }
+    except sp.TimeoutExpired:
+        return {**_QUIC_FAIL, "error": "timeout"}
+    except (OSError, ValueError) as exc:
+        return {**_QUIC_FAIL, "error": str(exc)[:120]}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -20,6 +21,53 @@ from blockchecks.engine.in_ns_workers import (
 
 
 @pytest.mark.unit
+def test_curl_worker_stdio_loop():
+    from blockchecks.engine.in_ns_workers import _run_curl_worker_stdio_loop
+
+    payload = {"mode": "single", "request": {"domain": "x", "timeout": 1.0}}
+    with patch(
+        "blockchecks.engine.in_ns_workers.run_curl_worker_payload",
+        return_value={"success": True, "http_code": 200},
+    ) as run_payload:
+        import io
+
+        buf = io.StringIO()
+        with patch("sys.stdout", buf), patch("sys.stdin", io.StringIO("")):
+            rc = _run_curl_worker_stdio_loop(json.dumps(payload))
+    assert rc == 0
+    run_payload.assert_called_once()
+    lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["success"] is True
+
+
+@pytest.mark.unit
+def test_curl_worker_module_avoids_heavy_imports():
+    """PERF-7: curl worker path must not pull nfqws2/conf_builder at import."""
+    import importlib
+    import sys
+
+    heavy = {
+        "blockchecks.service.nfqws2",
+        "blockchecks.engine.conf_builder",
+        "blockchecks.engine.nfqws_config",
+        "blockchecks.engine.in_ns_workers",
+    }
+    saved = {name: sys.modules.pop(name, None) for name in heavy}
+    try:
+        before = set(sys.modules)
+        importlib.import_module("blockchecks.engine.in_ns_workers")
+        new = set(sys.modules) - before
+        assert not new.intersection(heavy - {"blockchecks.engine.in_ns_workers"})
+    finally:
+        for name, mod in saved.items():
+            if mod is not None:
+                sys.modules[name] = mod
+            else:
+                sys.modules.pop(name, None)
+
+
+@pytest.mark.unit
 def test_is_quic_dropped():
     assert _is_quic_dropped("timeout after x") is True
     assert _is_quic_dropped("Connection timed out") is True
@@ -34,11 +82,11 @@ def test_run_quic_check_is_config():
         f.write("--qnum=201\n")
     try:
         with (
-            patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-            patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+            patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+            patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
             patch(
-                "blockchecks.engine.in_ns_workers.sp.run",
-                return_value=MagicMock(stdout='{"success": true, "http_version": "HTTP/3"}'),
+                "blockchecks.checkers.http3.quic_subprocess_result",
+                return_value={"success": True, "http_version": "HTTP/3"},
             ),
         ):
             data = _run_quic_check("bs-p0", conf, "discord.com", 5.0, is_config=True)
@@ -51,8 +99,8 @@ def test_run_quic_check_is_config():
 def test_run_tcp_check_multi_gv_fail():
     """googlevideo domain with prepare error short-circuits to gv_fail."""
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.engine.in_ns_workers.prepare_googlevideo_probe",
             return_value=(MagicMock(), {"success": False, "error": "gv url unavailable"}),
@@ -79,10 +127,10 @@ def test_run_tcp_check_multi_retry():
         return {"success": ip != "1.1.1.1", "http_code": 200}
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
-            "blockchecks.engine.in_ns_workers._invoke_curl_probe_worker",
+            "blockchecks.service.probe.invoke_curl_probe_worker",
             side_effect=fake_worker,
         ),
         patch("blockchecks.engine.in_ns_workers.is_googlevideo_domain", return_value=False),
@@ -102,8 +150,8 @@ def test_run_tcp_check_multi_retry():
 def test_run_udp_check_coexist():
     """coexist=True passes through to nfqws2 daemon (kill_existing=False)."""
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05) as daemon,
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05) as daemon,
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
             return_value=MagicMock(stdout='{"success": true, "latency_ms": 30}'),
@@ -145,8 +193,8 @@ def test_run_udp_check_dport_and_no_bypass():
         written["min_procs"] = kw.get("min_procs")
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", side_effect=fake_daemon),
-        patch("blockchecks.engine.in_ns_workers._sudo", side_effect=fake_sudo),
+        patch("blockchecks.service.nfqws2.start_daemon", side_effect=fake_daemon),
+        patch("blockchecks.engine.nfqws_config._sudo", side_effect=fake_sudo),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
             return_value=MagicMock(stdout='{"success": true, "latency_ms": 12}'),
@@ -179,8 +227,8 @@ def test_run_udp_check_timeout_expired():
     import subprocess as sp
 
     with (
-        patch("blockchecks.engine.in_ns_workers._nfqws2_daemon", return_value=0.05),
-        patch("blockchecks.engine.in_ns_workers._sudo", return_value=None),
+        patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
             side_effect=sp.TimeoutExpired(cmd="probe", timeout=1),

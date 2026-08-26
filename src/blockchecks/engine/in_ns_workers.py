@@ -22,26 +22,7 @@ from blockchecks.checkers.curl_probe import (
     worker_wall_timeout,
     ytcdn_probe_variants,
 )
-from blockchecks.engine.conf_builder import add_blobs_from_strategy, split_cli_args
-from blockchecks.engine.config import (
-    BLOB_DIR,
-    NFQUEUE_TCP,
-    NFQUEUE_UDP,
-    PYTHON_BIN,
-    RETRY_IP_TIMEOUT,
-    VOICE_UDP_FILTER,
-    get_lua_init_scripts,
-)
-from blockchecks.engine.nfqws_config import (
-    _build_inline_nfqws_lines,
-    _build_quic_nfqws_lines,
-    _sudo,
-)
-from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon
-from blockchecks.service.probe import (
-    invoke_curl_probe_worker as _invoke_curl_probe_worker,
-)
-from blockchecks.service.probe import probe_request_dict as _probe_request_dict
+from blockchecks.engine.config import RETRY_IP_TIMEOUT
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +38,8 @@ def udp_filter_covers_port(spec: str, port: int) -> bool:
 
 def voice_udp_filter_for_port(port: int) -> str:
     """VOICE_UDP_FILTER, plus the probe port if it lies outside that range."""
+    from blockchecks.engine.config import VOICE_UDP_FILTER
+
     base = VOICE_UDP_FILTER
     return base if udp_filter_covers_port(base, port) else f"{base},{port}"
 
@@ -76,6 +59,8 @@ def ensure_udp_filter_lines(lines: list[str], port: int) -> list[str]:
 
 
 def _udp_base_lines() -> list[str]:
+    from blockchecks.engine.config import NFQUEUE_UDP, get_lua_init_scripts
+
     return [
         f"--qnum={NFQUEUE_UDP}",
         "--filter-l3=ipv4",
@@ -86,6 +71,8 @@ def _udp_base_lines() -> list[str]:
 
 
 def _strategy_cli_tokens(strategy: str) -> list[str]:
+    from blockchecks.engine.conf_builder import split_cli_args
+
     stripped = [raw.strip() for raw in strategy.split("\n") if raw.strip()]
     return [
         tok
@@ -107,6 +94,9 @@ def _load_conf_lines(path: str) -> list[str]:
 
 def _attach_udp_queue(ns_name: str, port: int, *, coexist: bool) -> None:
     """NFQUEUE UDP to q201 after nfqws2 is up. No --queue-bypass (would skip desync)."""
+    from blockchecks.engine.config import NFQUEUE_UDP
+    from blockchecks.engine.nfqws_config import _sudo
+
     if not coexist:
         _sudo("ip", "netns", "exec", ns_name, "iptables", "-F", "OUTPUT")
     _sudo(
@@ -140,6 +130,9 @@ def _conf_from_file(strategy: str, port: int) -> str:
 
 
 def _inline_udp_lines(strategy: str, port: int) -> list[str]:
+    from blockchecks.engine.conf_builder import add_blobs_from_strategy
+    from blockchecks.engine.config import BLOB_DIR
+
     base = _udp_base_lines()
     lines = [base[0], f"--filter-udp={voice_udp_filter_for_port(port)}", *base[1:]]
     strategy = add_blobs_from_strategy(lines, strategy)
@@ -172,6 +165,11 @@ def _run_quic_check(
     resolved_ip: str | None = None,
 ) -> dict:
     """Start nfqws2 QUIC desync in ns, probe domain via HTTP/3 HEAD."""
+    from blockchecks.checkers.http3 import quic_subprocess_result
+    from blockchecks.engine.config import NFQUEUE_UDP, PYTHON_BIN
+    from blockchecks.engine.nfqws_config import _build_quic_nfqws_lines, _sudo
+    from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
+
     py = python_bin or PYTHON_BIN
     tmp_conf = None
 
@@ -183,7 +181,7 @@ def _run_quic_check(
         _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_quic_", suffix=".conf")
         os.close(_tf_fd)
         shutil.copy2(src, tmp_conf)
-        _nfqws2_daemon(ns_name, tmp_conf)
+        nfqws2_daemon(ns_name, tmp_conf)
     else:
         import tempfile as _tf
 
@@ -192,7 +190,7 @@ def _run_quic_check(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        _nfqws2_daemon(ns_name, tmp_conf)
+        nfqws2_daemon(ns_name, tmp_conf)
 
     # Flush OUTPUT first: fallback variants re-enter this function in the same
     # netns and would otherwise stack duplicate NFQUEUE rules.
@@ -216,44 +214,8 @@ def _run_quic_check(
         "--queue-bypass",
     )
 
-    resolved_ip_lit = repr(resolved_ip) if resolved_ip else "None"
-    check_code = f"""
-import json
-from blockchecks.checkers.http3 import check_http3
-r = check_http3({domain!r}, {timeout}, pre_resolved_ip={resolved_ip_lit})
-print(json.dumps({{
-    "resolve_name": {domain!r}.split("/")[0],
-    "success": r.success,
-    "http_code": r.http_status,
-    "latency_ms": r.latency_ms,
-    "content_len": r.content_length,
-    "content_ok": True,
-    "throttled": False,
-    "read_rate_bps": 0,
-    "error": r.error,
-    "http_version": r.http_version,
-}}))
-"""
     try:
-        r = sp.run(
-            ["sudo", "ip", "netns", "exec", ns_name, py, "-c", check_code],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 5,
-        )
-        try:
-            return json.loads(r.stdout)
-        except json.JSONDecodeError:
-            return {
-                "success": False,
-                "http_code": 0,
-                "latency_ms": 0,
-                "content_len": 0,
-                "content_ok": False,
-                "throttled": False,
-                "read_rate_bps": 0,
-                "error": f"parse: {r.stdout[:100]}",
-            }
+        return quic_subprocess_result(ns_name, py, domain, timeout, resolved_ip)
     finally:
         if tmp_conf:
             try:
@@ -318,6 +280,10 @@ def _run_tcp_check(
     resolved_ips: list[str] | None = None,
 ) -> dict:
     """Start nfqws2 in ns, run curl_cffi check, return result dict."""
+    from blockchecks.engine.config import NFQUEUE_TCP, PYTHON_BIN
+    from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines, _sudo
+    from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
+    from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 
     py = python_bin or PYTHON_BIN
     is_http = protocol == "http"
@@ -359,7 +325,7 @@ def _run_tcp_check(
         if extra_lua_desync:
             with open(tmp_conf, "a", encoding="utf-8") as f:
                 f.write(f"\n--lua-desync={extra_lua_desync}\n")
-        settle_elapsed = _nfqws2_daemon(
+        settle_elapsed = nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
     else:
@@ -370,7 +336,7 @@ def _run_tcp_check(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        settle_elapsed = _nfqws2_daemon(
+        settle_elapsed = nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
 
@@ -415,7 +381,7 @@ def _run_tcp_check(
                 variant.timeout = timeout if attempt == 0 else min(timeout, RETRY_IP_TIMEOUT)
                 payload = {
                     "mode": "single",
-                    "request": _probe_request_dict(variant),
+                    "request": probe_request_dict(variant),
                     "repeats": max(1, int(repeats)),
                     "parallel_repeats": bool(parallel_repeats and repeats > 1),
                     "repeats_mode": repeats_mode,
@@ -428,7 +394,7 @@ def _run_tcp_check(
                     curl_parallel=1,
                     parallel_repeats=parallel_repeats,
                 )
-                data = _invoke_curl_probe_worker(ns_name, py, payload, wall)
+                data = invoke_curl_probe_worker(ns_name, py, payload, wall)
                 data["settle_ms"] = round(settle_elapsed * 1000, 1)
                 used_ip = ip
                 if data.get("success"):
@@ -532,6 +498,11 @@ def _run_tcp_check_multi(
     quick_break: bool = False,
 ) -> dict[str, dict]:
     """One nfqws2 session, parallel curl across domains (B2)."""
+    from blockchecks.engine.config import NFQUEUE_TCP, PYTHON_BIN
+    from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines, _sudo
+    from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
+    from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
+
     if not domains:
         return {}
     py = python_bin or PYTHON_BIN
@@ -562,7 +533,7 @@ def _run_tcp_check_multi(
         if extra_lua_desync:
             with open(tmp_conf, "a", encoding="utf-8") as f:
                 f.write(f"\n--lua-desync={extra_lua_desync}\n")
-        settle_elapsed = _nfqws2_daemon(
+        settle_elapsed = nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
     else:
@@ -573,7 +544,7 @@ def _run_tcp_check_multi(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
-        settle_elapsed = _nfqws2_daemon(
+        settle_elapsed = nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
 
@@ -601,7 +572,7 @@ def _run_tcp_check_multi(
 
     payload = {
         "mode": "batch",
-        "requests": [_probe_request_dict(r) for r in probe_requests],
+        "requests": [probe_request_dict(r) for r in probe_requests],
         "curl_parallel": int(curl_parallel),
         "repeats": max(1, int(repeats)),
         "parallel_repeats": bool(parallel_repeats and repeats > 1),
@@ -616,7 +587,7 @@ def _run_tcp_check_multi(
             curl_parallel=int(curl_parallel),
             parallel_repeats=parallel_repeats,
         )
-        raw = _invoke_curl_probe_worker(ns_name, py, payload, wall)
+        raw = invoke_curl_probe_worker(ns_name, py, payload, wall)
         settle_ms = round(settle_elapsed * 1000, 1)
         out = {d: {**raw.get(d, {}), "settle_ms": settle_ms} for d in domains_active}
         # Retry-on-next-IP for failed domains: nfqws2 is already up, so
@@ -636,7 +607,7 @@ def _run_tcp_check_multi(
                     req.timeout = min(timeout, RETRY_IP_TIMEOUT)
                     retry_payload = {
                         "mode": "single",
-                        "request": _probe_request_dict(req),
+                        "request": probe_request_dict(req),
                         "repeats": max(1, int(repeats)),
                         "parallel_repeats": False,
                         "repeats_mode": repeats_mode,
@@ -645,7 +616,7 @@ def _run_tcp_check_multi(
                     retry_wall = worker_wall_timeout(
                         req.timeout, repeats, n_domains=1, curl_parallel=1
                     )
-                    retry = _invoke_curl_probe_worker(ns_name, py, retry_payload, retry_wall)
+                    retry = invoke_curl_probe_worker(ns_name, py, retry_payload, retry_wall)
                     retry["settle_ms"] = settle_ms
                     retry["used_ip"] = ip
                     out[d] = retry
@@ -677,11 +648,13 @@ def _run_udp_check(
     wait until two nfqws2 processes are visible (q200+q201) before probing.
     iptables is attached after settle, without --queue-bypass.
     """
+    from blockchecks.engine.config import PYTHON_BIN
+    from blockchecks.service.nfqws2 import start_daemon as nfqws2_daemon
 
     py = python_bin or PYTHON_BIN
     tmp_conf = _materialize_udp_conf(strategy, port, is_config=is_config)
     try:
-        _nfqws2_daemon(
+        nfqws2_daemon(
             ns_name,
             tmp_conf,
             kill_existing=not coexist,
@@ -826,6 +799,43 @@ def run_udp_worker_probe(ip: str, port: int, timeout: float, try_burst: bool = F
     }
 
 
+def _run_curl_worker_stdio_loop(argv_payload: str | None = None) -> int:
+    """JSON-lines curl worker: one request line in, one response line out."""
+    _FAIL = {
+        "success": False,
+        "http_code": 0,
+        "latency_ms": 0,
+        "content_len": 0,
+        "content_ok": False,
+        "throttled": False,
+        "read_rate_bps": 0,
+    }
+
+    def _emit(payload: dict) -> None:
+        print(json.dumps(payload), flush=True)
+
+    def _handle(raw: str) -> None:
+        line = raw.strip()
+        if not line:
+            return
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            _emit({**_FAIL, "error": f"bad request json: {exc}"[:120]})
+            return
+        try:
+            _emit(run_curl_worker_payload(payload))
+        except Exception as exc:
+            log.warning("curl worker payload failed: %s", exc)
+            _emit({**_FAIL, "error": str(exc)[:120]})
+
+    if argv_payload:
+        _handle(argv_payload)
+    for raw in sys.stdin:
+        _handle(raw)
+    return 0
+
+
 def _dispatch_worker_main(argv: list[str] | None = None) -> int:
     """Dispatch subprocess invocation by ``--mode`` (curl|udp)."""
     args = argv if argv is not None else list(sys.argv[1:])
@@ -850,17 +860,15 @@ def _dispatch_worker_main(argv: list[str] | None = None) -> int:
         data = run_udp_worker_probe(ip, int(port_s), float(timeout_s), try_burst=try_burst)
         print(json.dumps(data))
         return 0
-    # curl mode — JSON payload on stdin (or argv[0])
-    raw = sys.stdin.read() if not args else args[0]
-    if not raw:
+    # curl mode — JSON-lines on stdin (or one-shot argv[0] for back-compat)
+    argv_payload = args[0] if args else None
+    if argv_payload is None and sys.stdin.isatty():
         print(
             "usage: echo JSON | python -m blockchecks.engine.in_ns_workers --mode curl",
             file=sys.stderr,
         )
         return 2
-    payload = json.loads(raw)
-    print(json.dumps(run_curl_worker_payload(payload)))
-    return 0
+    return _run_curl_worker_stdio_loop(argv_payload)
 
 
 if __name__ == "__main__":
