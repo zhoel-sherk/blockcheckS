@@ -803,18 +803,26 @@ def test_discover_voice_endpoints_auto_discover():
     assert ctx.voice_ip == "9.9.9.9"
 
 
-def test_discover_voice_endpoints_full_voice_no_token():
+def test_discover_voice_endpoints_full_voice_no_token(caplog):
+    import logging
+
     from blockchecks.cli.commands.pair_phases import discover_voice_endpoints
 
+    caplog.set_level(logging.INFO)
     args = _args(full_voice=True)
     with (
         patch("blockchecks.checkers.voice_dns.check_discover_mutex", return_value=None),
         patch("blockchecks.checkers.voice_discovery.load_token", return_value=None),
+        patch(
+            "blockchecks.checkers.voice_discovery.discord_settings_hint",
+            return_value="/tmp/settings.ini (see settings.example.ini)",
+        ),
     ):
         ctx, rc = asyncio.run(discover_voice_endpoints(args))
     assert rc is None
     assert ctx.full_voice is False
     assert ctx.has_token is False
+    assert any("Add token to" in r.message for r in caplog.records)
 
 
 def test_register_stop_handlers(monkeypatch):

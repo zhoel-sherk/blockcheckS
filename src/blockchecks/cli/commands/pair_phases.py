@@ -24,7 +24,6 @@ from blockchecks.engine.config import (
     CONFIGS_DIR,
     DEFAULT_VOICE_IP,
     DEFAULT_VOICE_PORT,
-    DPI_TESTER_SETTINGS,
     PROJECT_DIR,
     SECURE_DNS_DEFAULT,
     resolve_probe_backend,
@@ -433,8 +432,10 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
             log.error("%s", f"  {YELLOW}Discovery error: {e}{RESET}")
 
     if args.full_voice and not has_token:
+        from blockchecks.checkers.voice_discovery import discord_settings_hint
+
         log.info("%s", f"  {YELLOW}No Discord token. --full-voice → STUN only{RESET}")
-        log.info("%s", f"  Add token to {DPI_TESTER_SETTINGS}")
+        log.info("%s", f"  Add token to {discord_settings_hint()}")
 
     if full_voice:
         log.info("%s", f"  {CYAN}Full-voice mode: gateway WS → OP2 Ready → UDP endpoint{RESET}")

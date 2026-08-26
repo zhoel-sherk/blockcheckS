@@ -473,7 +473,7 @@ def build_keenetic_conf(
     tcp_strategies: list[str],
     udp_strategies: list[str],
     quic_strategies: list[str] | None = None,
-    isp_interface: str = "eth3",
+    isp_interface: str = "",
     prefix: str = DEFAULT_KEENETIC_PREFIX,
     mode: str = "auto",
     domains: list[str] | None = None,
@@ -487,6 +487,12 @@ def build_keenetic_conf(
     ``--ipset=@{prefix}/lists/user.ipset`` plus a ``# COPY ipset:`` comment
     (the host path is never a working argument).
     """
+    if not isp_interface:
+        log.warning(
+            "%s",
+            "ISP_INTERFACE unset; set BLOCKCHECKS_ISP_IFACE / ISP_INTERFACE "
+            "or pass --isp-interface (exported conf will have empty ISP_INTERFACE)",
+        )
     quic_strategies = filter_export_strategies(
         quic_strategies or ["fake:blob=quic_initial:repeats=11"]
     )

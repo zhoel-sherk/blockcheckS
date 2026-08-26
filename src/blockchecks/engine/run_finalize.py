@@ -11,11 +11,19 @@ from typing import Any
 
 from blockchecks.engine import paths as _paths
 from blockchecks.engine.adaptive_runner import persist_adaptive_weights
+from blockchecks.engine.config import default_isp_interface
 from blockchecks.engine.run_deadline import RunDeadline
 from blockchecks.engine.store import RunStateStore
 from blockchecks.nfconf import export_configs
 
 log = logging.getLogger(__name__)
+
+
+def _resolve_isp_interface(args: Any) -> str:
+    val = getattr(args, "isp_interface", None)
+    if val is not None:
+        return val
+    return default_isp_interface()
 
 
 def rank_pass_strategies_for_export(
@@ -155,7 +163,7 @@ async def maybe_export_configs(
         domain=primary,
         limit=getattr(args, "export_limit", 3),
         out_dir=args.out_dir,
-        isp_interface=getattr(args, "isp_interface", "eth3"),
+        isp_interface=_resolve_isp_interface(args),
         prefix=getattr(args, "prefix", "/opt/etc/nfqws2"),
         mode=getattr(args, "mode", "auto"),
         domains_file=domains_file,

@@ -17,14 +17,27 @@ from blockchecks.checkers.voice_discovery import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _reset_settings_warn_flag():
+    import blockchecks.checkers.voice_discovery as vd
+
+    vd._warned_missing_settings = False
+    yield
+    vd._warned_missing_settings = False
+
+
 # ── load_token ────────────────────────────────────────────────────────
 
 
-def test_load_token_missing_settings(tmp_path, monkeypatch):
+def test_load_token_missing_settings(tmp_path, monkeypatch, caplog):
+    import logging
+
     from blockchecks.checkers import voice_discovery as vd
 
-    monkeypatch.setattr(vd, "DPI_TESTER_SETTINGS", str(tmp_path / "settings.ini"))
+    caplog.set_level(logging.WARNING)
+    monkeypatch.setattr(vd, "resolve_settings_path", lambda: str(tmp_path / "settings.ini"))
     assert load_token() is None
+    assert any("Discord settings not found" in r.message for r in caplog.records)
 
 
 def test_load_token_world_writable(tmp_path, monkeypatch):
@@ -35,7 +48,7 @@ def test_load_token_world_writable(tmp_path, monkeypatch):
     settings = tmp_path / "settings.ini"
     settings.write_text("[discord]\ntoken=abc\n")
     os.chmod(settings, 0o666)
-    monkeypatch.setattr(vd, "DPI_TESTER_SETTINGS", str(settings))
+    monkeypatch.setattr(vd, "resolve_settings_path", lambda: str(settings))
     assert load_token() is None
 
 
@@ -47,20 +60,40 @@ def test_load_token_ok(tmp_path, monkeypatch):
     settings = tmp_path / "settings.ini"
     settings.write_text("[discord]\ntoken=secret123\n")
     os.chmod(settings, 0o600)
-    monkeypatch.setattr(vd, "DPI_TESTER_SETTINGS", str(settings))
+    monkeypatch.setattr(vd, "resolve_settings_path", lambda: str(settings))
     assert load_token() == "secret123"
 
 
-def test_load_token_empty_falls_back_none(tmp_path, monkeypatch):
+def test_load_token_empty_falls_back_none(tmp_path, monkeypatch, caplog):
+    import logging
     import os
 
     from blockchecks.checkers import voice_discovery as vd
 
+    caplog.set_level(logging.WARNING)
     settings = tmp_path / "settings.ini"
     settings.write_text("[discord]\nother=1\n")
     os.chmod(settings, 0o600)
-    monkeypatch.setattr(vd, "DPI_TESTER_SETTINGS", str(settings))
+    monkeypatch.setattr(vd, "resolve_settings_path", lambda: str(settings))
     assert load_token() is None
+    assert any("token empty" in r.message for r in caplog.records)
+
+
+def test_resolve_settings_path_env_priority(monkeypatch, tmp_path):
+    from blockchecks.checkers.voice_discovery import resolve_settings_path
+
+    monkeypatch.setenv("BLOCKCHECKS_SETTINGS", str(tmp_path / "a.ini"))
+    monkeypatch.setenv("DPI_TESTER_SETTINGS", str(tmp_path / "b.ini"))
+    assert resolve_settings_path() == str(tmp_path / "a.ini")
+
+
+def test_resolve_settings_path_xdg_default(monkeypatch, tmp_path):
+    from blockchecks.checkers import voice_discovery as vd
+
+    monkeypatch.delenv("BLOCKCHECKS_SETTINGS", raising=False)
+    monkeypatch.delenv("DPI_TESTER_SETTINGS", raising=False)
+    monkeypatch.setattr(vd, "CONFIG_DIR", tmp_path)
+    assert vd.resolve_settings_path() == str(tmp_path / "settings.ini")
 
 
 # ── _load_guild_channel ───────────────────────────────────────────────
@@ -71,7 +104,7 @@ def test_load_guild_channel(tmp_path, monkeypatch):
 
     settings = tmp_path / "settings.ini"
     settings.write_text("[discord]\nguild_id=111\nchannel_id=222\n")
-    monkeypatch.setattr(vd, "DPI_TESTER_SETTINGS", str(settings))
+    monkeypatch.setattr(vd, "resolve_settings_path", lambda: str(settings))
     assert _load_guild_channel() == ("111", "222")
 
 

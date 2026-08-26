@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from blockchecks.engine.run_spec import CampaignContext, RunSpec
 
 
-def test_run_spec_defaults():
+def test_run_spec_defaults(monkeypatch):
+    monkeypatch.delenv("BLOCKCHECKS_ISP_IFACE", raising=False)
+    monkeypatch.delenv("ISP_INTERFACE", raising=False)
     spec = RunSpec()
     assert spec.command == "full"
     assert spec.scan_level == "fast"
@@ -17,6 +19,28 @@ def test_run_spec_defaults():
     assert spec.save_weights is True
     assert spec.no_preflight is False
     assert spec.quick is False
+    assert spec.isp_interface == ""
+
+
+def test_run_spec_isp_interface_from_env(monkeypatch):
+    monkeypatch.delenv("ISP_INTERFACE", raising=False)
+    monkeypatch.setenv("BLOCKCHECKS_ISP_IFACE", "wlp4s0")
+    spec = RunSpec()
+    assert spec.isp_interface == "wlp4s0"
+
+
+def test_run_spec_from_args_preserves_empty_isp_interface():
+    args = SimpleNamespace(isp_interface="")
+    spec = RunSpec.from_args(args)
+    assert spec.isp_interface == ""
+
+
+def test_run_spec_from_args_isp_interface_fallback_env(monkeypatch):
+    monkeypatch.delenv("BLOCKCHECKS_ISP_IFACE", raising=False)
+    monkeypatch.setenv("ISP_INTERFACE", "eth0")
+    args = SimpleNamespace()
+    spec = RunSpec.from_args(args)
+    assert spec.isp_interface == "eth0"
 
 
 def test_run_spec_from_args_basic():

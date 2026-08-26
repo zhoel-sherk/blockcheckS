@@ -102,6 +102,12 @@ YTDLP_BIN = _env_or("BLOCKCHECKS_YTDLP", "")
 
 DPI_TESTER_SETTINGS = os.environ.get("BLOCKCHECKS_SETTINGS", "")
 
+
+def default_isp_interface() -> str:
+    """Router WAN iface for exported conf; empty if unset (env: BLOCKCHECKS_ISP_IFACE / ISP_INTERFACE)."""
+    return os.environ.get("BLOCKCHECKS_ISP_IFACE") or os.environ.get("ISP_INTERFACE") or ""
+
+
 # Blob directory — repo blobs/ by default (baked); override with BLOCKCHECKS_BLOBS
 BLOB_DIR = _env_or("BLOCKCHECKS_BLOBS", _default_blobs_dir())
 

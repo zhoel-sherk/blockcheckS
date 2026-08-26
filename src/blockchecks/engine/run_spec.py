@@ -11,6 +11,7 @@ from blockchecks.engine.config import (
     DEFAULT_VOICE_PORT,
     MAX_CURL_PARALLEL,
     SECURE_DNS_DEFAULT,
+    default_isp_interface,
     effective_default_pool_size,
 )
 from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR
@@ -80,7 +81,7 @@ class RunSpec:
     no_quarantine: bool = False
     quarantine_min: int = 300
     quarantine_auto_denylist: bool = False
-    isp_interface: str = "eth3"
+    isp_interface: str = field(default_factory=default_isp_interface)
     prefix: str = "/opt/etc/nfqws2"
     mode: str = "auto"
     profile: str | None = None
@@ -167,7 +168,11 @@ class RunSpec:
             quarantine_auto_denylist=bool(
                 getattr(args, "quarantine_auto_denylist", False)
             ),
-            isp_interface=getattr(args, "isp_interface", "eth3") or "eth3",
+            isp_interface=(
+                iface
+                if (iface := getattr(args, "isp_interface", None)) is not None
+                else default_isp_interface()
+            ),
             prefix=getattr(args, "prefix", "/opt/etc/nfqws2") or "/opt/etc/nfqws2",
             mode=getattr(args, "mode", "auto") or "auto",
             profile=getattr(args, "profile", None),

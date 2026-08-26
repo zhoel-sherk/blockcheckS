@@ -58,7 +58,10 @@ def test_quote_multiline():
     assert _quote_multiline("simple") == '"simple"'
 
 
-def test_build_keenetic_conf_structure(tmp_path):
+def test_build_keenetic_conf_structure(tmp_path, caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING)
     conf = build_keenetic_conf(
         tcp_strategies=["fake:blob=stun:repeats=6"],
         udp_strategies=["fake:blob=discord_udp:repeats=6"],
@@ -70,6 +73,8 @@ def test_build_keenetic_conf_structure(tmp_path):
         comment="test",
     )
     assert "ISP_INTERFACE=" in conf
+    assert 'ISP_INTERFACE="eth3"' in conf
+    assert not any("ISP_INTERFACE unset" in r.message for r in caplog.records)
     assert "NFQWS_BASE_ARGS=" in conf
     assert "NFQWS_ARGS=" in conf
     assert "NFQWS_ARGS_QUIC=" in conf
@@ -79,6 +84,20 @@ def test_build_keenetic_conf_structure(tmp_path):
     assert "fake:blob=stun:repeats=6:strategy=1" in conf
     assert "# test" in conf
     assert "# domains (2)" in conf
+
+
+def test_build_keenetic_conf_warns_when_isp_unset(tmp_path, caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING)
+    conf = build_keenetic_conf(
+        tcp_strategies=["fake:blob=stun:repeats=6"],
+        udp_strategies=[],
+        isp_interface="",
+        prefix=str(tmp_path),
+    )
+    assert 'ISP_INTERFACE=""' in conf
+    assert any("ISP_INTERFACE unset" in r.message for r in caplog.records)
 
 
 def test_build_keenetic_conf_mode_list():

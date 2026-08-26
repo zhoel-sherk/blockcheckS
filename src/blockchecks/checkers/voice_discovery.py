@@ -14,14 +14,48 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from blockchecks.checkers.voice_dns import discover_voice_endpoints as dns_discover
-from blockchecks.engine.config import (
-    DPI_TESTER_SETTINGS,
-    SING_BOX_BIN,
-    SING_BOX_CONFIG,
-    SOCKS5_PROXY,
-)
+from blockchecks.engine.config import PROJECT_DIR, SING_BOX_BIN, SING_BOX_CONFIG, SOCKS5_PROXY
+from blockchecks.engine.paths import CONFIG_DIR
 
 log = logging.getLogger(__name__)
+
+SETTINGS_EXAMPLE_INI = os.path.join(PROJECT_DIR, "settings.example.ini")
+_warned_missing_settings = False
+
+
+def resolve_settings_path() -> str:
+    """Resolve Discord settings INI (env → XDG settings.ini)."""
+    for key in ("BLOCKCHECKS_SETTINGS", "DPI_TESTER_SETTINGS"):
+        val = os.environ.get(key)
+        if val:
+            return val
+    return str(CONFIG_DIR / "settings.ini")
+
+
+def discord_settings_hint() -> str:
+    """Operator-facing path hint for missing Discord token."""
+    path = resolve_settings_path()
+    return f"{path} (see {SETTINGS_EXAMPLE_INI})"
+
+
+def _warn_settings_missing(path: str) -> None:
+    global _warned_missing_settings
+    if _warned_missing_settings:
+        return
+    _warned_missing_settings = True
+    env_bits = [
+        f"{key}={os.environ[key]}"
+        for key in ("BLOCKCHECKS_SETTINGS", "DPI_TESTER_SETTINGS")
+        if os.environ.get(key)
+    ]
+    log.warning(
+        "Discord settings not found at %s (env: %s). "
+        "Copy %s to %s or set BLOCKCHECKS_SETTINGS.",
+        path,
+        ", ".join(env_bits) if env_bits else "none",
+        SETTINGS_EXAMPLE_INI,
+        path,
+    )
 
 
 _singbox_lock = threading.Lock()
@@ -76,8 +110,9 @@ async def _singbox_session() -> AsyncIterator[subprocess.Popen | None]:
 
 
 def load_token() -> str | None:
-    settings = DPI_TESTER_SETTINGS
+    settings = resolve_settings_path()
     if not os.path.exists(settings):
+        _warn_settings_missing(settings)
         return None
     try:
         mode = os.stat(settings).st_mode
@@ -96,13 +131,18 @@ def load_token() -> str | None:
     )
     cfg.optionxform = str
     cfg.read(settings, encoding="utf-8")
-    return cfg.get("discord", "token", fallback="") or None
+    token = cfg.get("discord", "token", fallback="")
+    if not token:
+        log.warning("[discovery] Discord token empty in %s", settings)
+        return None
+    return token
 
 
 def _load_guild_channel() -> tuple[str, str]:
     import configparser as cp
 
-    if not DPI_TESTER_SETTINGS or not os.path.exists(DPI_TESTER_SETTINGS):
+    settings = resolve_settings_path()
+    if not settings or not os.path.exists(settings):
         return ("", "")
     cfg = cp.ConfigParser(
         interpolation=None,
@@ -111,7 +151,7 @@ def _load_guild_channel() -> tuple[str, str]:
         inline_comment_prefixes=("#", ";"),
     )
     cfg.optionxform = str
-    cfg.read(DPI_TESTER_SETTINGS, encoding="utf-8")
+    cfg.read(settings, encoding="utf-8")
     return (
         cfg.get("discord", "guild_id", fallback=""),
         cfg.get("discord", "channel_id", fallback=""),
