@@ -8,8 +8,32 @@ import pytest
 
 from blockchecks.engine.async_runner import _run_tcp_check, tcp_results_from_details
 from blockchecks.engine.generators.base import StrategyItem
+from blockchecks.engine.probe_executors import TcpProbeExecutor
+from blockchecks.engine.probe_result_logger import ProbeResultLogger
 
 pytestmark = pytest.mark.unit
+
+
+def _tcp_executor_for_data() -> TcpProbeExecutor:
+    host = type(
+        "_DataHost",
+        (),
+        {
+            "settle_profile": None,
+            "_timing_override_logged": set(),
+            "secure_dns": False,
+            "dns_cache": None,
+            "dns_audit": {},
+            "python": "",
+            "disable_ech": False,
+            "repeats": 1,
+            "parallel_repeats": False,
+            "repeats_mode": "fast",
+            "quick_break": False,
+            "try_wssize": False,
+        },
+    )()
+    return TcpProbeExecutor(host, None, None, ProbeResultLogger(None))
 
 
 def test_run_tcp_check_success_path():
@@ -24,8 +48,10 @@ def test_run_tcp_check_success_path():
     def fake_sudo(*args):
         sudo_cmds.append(args)
 
+    fw = MagicMock()
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05) as daemon,
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
         patch("blockchecks.engine.nfqws_config._sudo", side_effect=fake_sudo),
         patch(
             "blockchecks.service.probe.invoke_curl_probe_worker",
@@ -57,16 +83,15 @@ def test_run_tcp_check_success_path():
     assert payload["mode"] == "single"
     assert payload["request"]["domain"] == "discord.com"
 
-    assert any(c[:4] == ("ip", "netns", "exec", "bs-p0") for c in sudo_cmds)
-    ipt = [c for c in sudo_cmds if "iptables" in c]
-    assert ipt
-    assert "--queue-bypass" in ipt[0]
-    assert "NFQUEUE" in ipt[0]
+    fw.attach.assert_called_once_with(proto="tcp", port="443", queue=200, bypass=True)
+    fw.detach_one.assert_called_once_with(proto="tcp", port="443", queue=200, bypass=True)
 
 
 def test_run_tcp_check_worker_failure():
+    fw = MagicMock()
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.01),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
         patch("blockchecks.engine.nfqws_config._sudo"),
         patch(
             "blockchecks.service.probe.invoke_curl_probe_worker",
@@ -116,6 +141,7 @@ def test_run_tcp_check_retry_on_next_ip():
 
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.service.probe.invoke_curl_probe_worker",
@@ -141,6 +167,7 @@ def test_run_tcp_check_all_ips_fail():
 
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.service.probe.invoke_curl_probe_worker",
@@ -172,6 +199,7 @@ def test_run_tcp_check_config_path():
     try:
         with (
             patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05) as daemon,
+            patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
             patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
             patch(
                 "blockchecks.service.probe.invoke_curl_probe_worker",
@@ -199,12 +227,11 @@ def test_run_quic_check_success():
 
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
-            "blockchecks.engine.in_ns_workers.sp.run",
-            return_value=MagicMock(
-                stdout='{"success": true, "http_code": 0, "http_version": "HTTP/3"}'
-            ),
+            "blockchecks.checkers.http3.quic_subprocess_result",
+            return_value={"success": True, "http_version": "HTTP/3"},
         ),
     ):
         data = _run_quic_check("bs-p0", "fake:blob=quic_initial:repeats=11", "discord.com", 5.0)
@@ -216,8 +243,12 @@ def test_run_quic_check_bad_json():
 
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
-        patch("blockchecks.engine.in_ns_workers.sp.run", return_value=MagicMock(stdout="oops")),
+        patch(
+            "blockchecks.checkers.http3.quic_subprocess_result",
+            return_value={"success": False, "error": "parse error"},
+        ),
     ):
         data = _run_quic_check("bs-p0", "fake:blob=quic_initial:repeats=11", "discord.com", 5.0)
     assert data["success"] is False
@@ -229,6 +260,7 @@ def test_run_tcp_check_multi_success():
     worker_payload = {"discord.com": {"success": True, "http_code": 200}}
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.service.probe.invoke_curl_probe_worker",
@@ -276,6 +308,7 @@ def test_run_udp_check_success():
 
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
+        patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=MagicMock()),
         patch("blockchecks.engine.nfqws_config._sudo", return_value=None),
         patch(
             "blockchecks.engine.in_ns_workers.sp.run",
@@ -289,12 +322,9 @@ def test_run_udp_check_success():
 
 
 def test_tcp_result_from_data_used_ip():
-    from blockchecks.engine.async_runner import AsyncTestRunner
-
-    runner = AsyncTestRunner.__new__(AsyncTestRunner)
     item = StrategyItem(label="fake", strategy="fake:blob=stun:repeats=6")
     data = {"success": True, "http_code": 200, "used_ip": "1.2.3.4"}
-    r = runner._tcp_result_from_data(item, "discord.com", data)
+    r = _tcp_executor_for_data().tcp_result_from_data(item, "discord.com", data)
     assert r.used_ip == "1.2.3.4"
     assert r.success is True
 

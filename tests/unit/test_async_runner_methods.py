@@ -6,8 +6,9 @@ import logging
 
 import pytest
 
-from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.generators.base import StrategyItem
+from blockchecks.engine.probe_executors import TcpProbeExecutor
+from blockchecks.engine.probe_result_logger import ProbeResultLogger
 from blockchecks.engine.settle_profile import SettleProfile, TimingOverride
 
 pytestmark = pytest.mark.unit
@@ -120,11 +121,26 @@ async def test_runner_batch_tcp_classic(mock_runner):
     assert len(results) == 2
 
 
-def _timing_runner(profile: SettleProfile) -> AsyncTestRunner:
-    runner = AsyncTestRunner.__new__(AsyncTestRunner)
-    runner.settle_profile = profile
-    runner._timing_override_logged = set()
-    return runner
+def _timing_runner(profile: SettleProfile) -> TcpProbeExecutor:
+    host = type(
+        "_TimingHost",
+        (),
+        {
+            "settle_profile": profile,
+            "_timing_override_logged": set(),
+            "secure_dns": False,
+            "dns_cache": None,
+            "dns_audit": {},
+            "python": "",
+            "disable_ech": False,
+            "repeats": 1,
+            "parallel_repeats": False,
+            "repeats_mode": "fast",
+            "quick_break": False,
+            "try_wssize": False,
+        },
+    )()
+    return TcpProbeExecutor(host, None, None, ProbeResultLogger(None))
 
 
 def test_timing_for_explicit_override(caplog):
@@ -136,7 +152,7 @@ def test_timing_for_explicit_override(caplog):
     runner = _timing_runner(profile)
     item = StrategyItem(label="x", strategy="fake:blob=stun")
     with caplog.at_level(logging.INFO):
-        timeout, settle_max = runner._timing_for(item, 10.0)
+        timeout, settle_max = runner.timing_for(item, 10.0)
     assert timeout == 1.5
     assert settle_max == 0.2
     assert "settle profile override" in caplog.text
@@ -144,7 +160,7 @@ def test_timing_for_explicit_override(caplog):
 
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        runner._timing_for(item, 10.0)
+        runner.timing_for(item, 10.0)
     assert "settle profile override" not in caplog.text
 
 
@@ -157,7 +173,7 @@ def test_timing_for_defaults_fallback(caplog):
     runner = _timing_runner(profile)
     item = StrategyItem(label="x", strategy="unknown:strategy")
     with caplog.at_level(logging.WARNING):
-        timeout, settle_max = runner._timing_for(item, 10.0)
+        timeout, settle_max = runner.timing_for(item, 10.0)
     assert timeout == 3.0
     assert settle_max == 0.5
     assert "defaults fallback" in caplog.text
@@ -172,6 +188,6 @@ def test_timing_for_preserves_zero_curl_timeout():
     )
     runner = _timing_runner(profile)
     item = StrategyItem(label="x", strategy="fake:blob=stun")
-    timeout, settle_max = runner._timing_for(item, 10.0)
+    timeout, settle_max = runner.timing_for(item, 10.0)
     assert timeout == 0.0
     assert settle_max == 0.1

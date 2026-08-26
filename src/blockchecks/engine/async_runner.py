@@ -11,6 +11,12 @@ from blockchecks.engine.config import BLOB_DIR, PYTHON_BIN  # noqa: F401
 from blockchecks.engine.dns_pin_service import DnsPinService, pin_candidate_l3_ok
 from blockchecks.engine.in_ns_workers import RETRY_IP_TIMEOUT  # noqa: F401
 from blockchecks.engine.matrix_generator import StrategyItem
+from blockchecks.engine.pair_matrix_runner import PairMatrixRunner
+from blockchecks.engine.probe_executors import (
+    QuicProbeExecutor,
+    TcpProbeExecutor,
+    UdpProbeExecutor,
+)
 from blockchecks.engine.probe_result_logger import ProbeResultLogger, tcp_row_status
 from blockchecks.engine.settle_profile import SettleProfile
 from blockchecks.engine.store import RunStateStore
@@ -19,7 +25,7 @@ from blockchecks.service.batch_scheduler import BatchScheduler
 from blockchecks.service.batch_service import ProbeBatchService
 from blockchecks.service.netns_pool import NetNsPool
 from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon  # noqa: F401
-from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW, status_tag
+from blockchecks.terminal import RED, RESET, status_tag
 
 log = logging.getLogger(__name__)
 
@@ -27,13 +33,13 @@ _pin_candidate_l3_ok = pin_candidate_l3_ok
 
 from blockchecks.engine.conf_builder import add_blobs_from_strategy, split_cli_args
 from blockchecks.engine.in_ns_workers import (
-    _is_quic_dropped,
-    _quic_fallback_variants,
-    _run_quic_check,
+    _is_quic_dropped,  # noqa: F401 — re-export for tests / lazy workers
+    _quic_fallback_variants,  # noqa: F401
+    _run_quic_check,  # noqa: F401
     _run_tcp_check,
-    _run_tcp_check_multi,
-    _run_udp_check,
-    _save_pass_strategy_data_block,
+    _run_tcp_check_multi,  # noqa: F401
+    _run_udp_check,  # noqa: F401
+    _save_pass_strategy_data_block,  # noqa: F401
 )
 from blockchecks.engine.nfqws_config import (  # noqa: F401
     _build_inline_nfqws_lines,
@@ -47,7 +53,6 @@ from blockchecks.engine.results import (
     UdpTestResult,
     tcp_results_from_details,
 )
-from blockchecks.engine.wssize_retry import WSSIZE_RETRY
 
 __all__ = [
     "AsyncTestRunner",
@@ -61,7 +66,7 @@ __all__ = [
 
 _tcp_row_status = tcp_row_status
 
-# Private names kept as aliases.
+# Backward-compat module aliases (not in __all__).
 _add_blobs_from_strategy = add_blobs_from_strategy
 _split_cli_args = split_cli_args
 
@@ -136,6 +141,16 @@ class AsyncTestRunner:
             )
             if dns_cache is not None
             else None
+        )
+        self._tcp_executor = TcpProbeExecutor(self, self.pool, self.semaphore, self._result_logger)
+        self._quic_executor = QuicProbeExecutor(self, self.pool, self.semaphore, self._result_logger)
+        self._udp_executor = UdpProbeExecutor(self, self.pool, self.semaphore, self._result_logger)
+        self._pair_runner = PairMatrixRunner(
+            self.pool,
+            self.db,
+            python=self.python,
+            disable_ech=self.disable_ech,
+            matrix_fingerprint=self.matrix_fingerprint,
         )
 
     def ensure_memory_monitor(self):
@@ -216,47 +231,7 @@ class AsyncTestRunner:
         return self._probe_gen
 
     def _timing_for(self, item: StrategyItem, timeout: float) -> tuple[float, float | None]:
-        """Return (curl_timeout, settle_max override) from B11 profile if set."""
-        cli_timeout = timeout
-        settle_max: float | None = None
-        profile = self.settle_profile
-        if profile is None:
-            return timeout, settle_max
-
-        override = profile.lookup(item.strategy)
-        if override is None:
-            return timeout, settle_max
-
-        settle_max = override.settle_max
-        if override.curl_timeout is not None:
-            timeout = override.curl_timeout
-
-        source_path = profile.source_path or "?"
-        explicit_key = profile.match_key(item.strategy)
-        snippet = (explicit_key or item.strategy.strip())[:80]
-
-        if explicit_key is not None:
-            if explicit_key not in self._timing_override_logged:
-                self._timing_override_logged.add(explicit_key)
-                log.info(
-                    "settle profile override: strategy=%r settle_max=%s curl_timeout=%s source=%s",
-                    snippet,
-                    settle_max,
-                    timeout,
-                    source_path,
-                )
-        elif item.strategy.strip() not in self._timing_override_logged:
-            self._timing_override_logged.add(item.strategy.strip())
-            log.warning(
-                "settle profile defaults fallback: strategy=%r settle_max=%s "
-                "curl_timeout=%s cli_timeout=%s source=%s",
-                snippet,
-                settle_max,
-                timeout,
-                cli_timeout,
-                source_path,
-            )
-        return timeout, settle_max
+        return self._tcp_executor.timing_for(item, timeout)
 
     async def start(self):
         """Create netns pool, seed the Queue, and auto-pin working IPs."""
@@ -289,218 +264,22 @@ class AsyncTestRunner:
         self, item: StrategyItem, domain: str, timeout: float = 5.0
     ) -> TcpTestResult:
         """Test one TCP strategy in an isolated netns."""
-        result = TcpTestResult(item=item, domain=domain)
-        timeout, settle_max = self._timing_for(item, timeout)
-
-        async with self.semaphore:
-            ns_name = await self.pool.acquire()
-            try:
-                resolved_ip = None
-                dns_verdict = ""
-                doh_server = ""
-                if self.secure_dns and self.dns_cache:
-                    resolved_ip = self.dns_cache.primary_ip(domain)
-                    audit = self.dns_audit.get(domain)
-                    if audit:
-                        dns_verdict = audit.verdict
-                        doh_server = audit.doh_server or self.dns_cache.doh_server
-                protocol = getattr(item, "protocol", "tls12") or "tls12"
-                ip_candidates = self._resolve_domain_ips(domain)
-                data = await asyncio.to_thread(
-                    _run_tcp_check,
-                    ns_name,
-                    item.strategy,
-                    domain,
-                    timeout,
-                    item.is_config,
-                    self.python,
-                    self.disable_ech,
-                    resolved_ip,
-                    self.repeats,
-                    self.parallel_repeats,
-                    "",
-                    protocol,
-                    settle_max,
-                    None,
-                    self.repeats_mode,
-                    self.quick_break,
-                    resolved_ips=ip_candidates,
-                )
-                if WSSIZE_RETRY.should_retry(
-                    data,
-                    try_wssize=self.try_wssize,
-                    protocol=protocol,
-                    strategy=item.strategy,
-                    is_config=item.is_config,
-                ):
-                    data = await asyncio.to_thread(
-                        _run_tcp_check,
-                        ns_name,
-                        item.strategy,
-                        domain,
-                        WSSIZE_RETRY.retry_timeout(timeout),
-                        item.is_config,
-                        self.python,
-                        self.disable_ech,
-                        resolved_ip,
-                        self.repeats,
-                        self.parallel_repeats,
-                        WSSIZE_RETRY.cmd,
-                        protocol,
-                        settle_max,
-                        None,
-                        self.repeats_mode,
-                        self.quick_break,
-                        resolved_ips=ip_candidates,
-                    )
-                result.success = data.get("success", False)
-                result.http_code = data.get("http_code", 0)
-                result.latency_ms = data.get("latency_ms", 0)
-                result.content_length = data.get("content_len", 0)
-                result.content_valid = data.get("content_ok", True)
-                result.throttled = data.get("throttled", False)
-                result.read_rate_bps = data.get("read_rate_bps", 0)
-                result.used_ip = data.get("used_ip") or ""
-                result.probe_host = data.get("resolve_name") or ""
-                result.error = data.get("error", "") or ""
-
-                await self._result_logger.log_tcp_probe(
-                    item,
-                    domain,
-                    result,
-                    resolved_ip=resolved_ip,
-                    dns_verdict=dns_verdict,
-                    doh_server=doh_server,
-                )
-            except Exception as e:
-                result.error = str(e)[:200]
-            finally:
-                await self.pool.release(ns_name)
-
-        return result
+        return await self._tcp_executor.test_tcp(item, domain, timeout=timeout)
 
     async def test_quic(
         self, item: StrategyItem, domain: str, timeout: float = 8.0
     ) -> TcpTestResult:
         """Test one QUIC/HTTP3 strategy in an isolated netns."""
-        result = TcpTestResult(item=item, domain=domain)
-
-        async with self.semaphore:
-            ns_name = await self.pool.acquire()
-            try:
-                resolved_ip = None
-                dns_verdict = ""
-                doh_server = ""
-                if self.secure_dns and self.dns_cache:
-                    resolved_ip = self.dns_cache.primary_ip(domain)
-                    audit = self.dns_audit.get(domain)
-                    if audit:
-                        dns_verdict = audit.verdict
-                        doh_server = audit.doh_server or self.dns_cache.doh_server
-
-                variants = [item.strategy] + _quic_fallback_variants(item.strategy)
-                for idx, variant in enumerate(variants):
-                    # Base strategy uses the full timeout; fallback variants are
-                    # quick drop-checks — a TSPU drop happens immediately, so a
-                    # shorter budget avoids 3× wall time when everything drops.
-                    variant_timeout = timeout if idx == 0 else min(timeout, 3.0)
-                    data = await asyncio.to_thread(
-                        _run_quic_check,
-                        ns_name,
-                        variant,
-                        domain,
-                        variant_timeout,
-                        item.is_config,
-                        self.python,
-                        resolved_ip,
-                    )
-                    result.success = data.get("success", False)
-                    result.http_code = data.get("http_code", 0)
-                    result.latency_ms = data.get("latency_ms", 0)
-                    result.content_length = data.get("content_len", 0)
-                    result.error = data.get("error", "") or ""
-                    result.probe_host = data.get("resolve_name") or ""
-                    if result.success or not _is_quic_dropped(result.error):
-                        break
-                    # timeout = TSPU dropped this variant; try the next fallback.
-                    if variant != variants[-1]:
-                        log.info(
-                            "%s",
-                            f"  {YELLOW}[quic] {item.label[:24]} timeout "
-                            f"— trying fallback: {variant[:40]}...{RESET}",
-                        )
-
-                await self._result_logger.log_quic_result(
-                    item,
-                    domain,
-                    result,
-                    resolved_ip=resolved_ip,
-                    dns_verdict=dns_verdict,
-                    doh_server=doh_server,
-                )
-            except Exception as e:
-                result.error = str(e)[:200]
-            finally:
-                await self.pool.release(ns_name)
-
-        return result
+        return await self._quic_executor.test_quic(item, domain, timeout=timeout)
 
     async def _resolve_domain_dns(self, domain: str) -> tuple[str | None, str, str]:
-        resolved_ip = None
-        dns_verdict = ""
-        doh_server = ""
-        if self.secure_dns and self.dns_cache:
-            resolved_ip = self.dns_cache.primary_ip(domain)
-            audit = self.dns_audit.get(domain)
-            if audit:
-                dns_verdict = audit.verdict
-                doh_server = audit.doh_server or self.dns_cache.doh_server
-        return resolved_ip, dns_verdict, doh_server
+        return await self._tcp_executor.resolve_domain_dns(domain)
 
     def _resolve_domain_ips(self, domain: str) -> list[str]:
-        """Full candidate IP list for retry-on-next-IP (pinned first)."""
-        if self.dns_cache:
-            try:
-                return self.dns_cache.resolve(domain)
-            except Exception as exc:
-                log.warning("%s", f"  WARNING: DNS resolve failed for {domain} ({exc})")
-        return []
+        return self._tcp_executor.resolve_domain_ips(domain)
 
     def _tcp_result_from_data(self, item: StrategyItem, domain: str, data: dict) -> TcpTestResult:
-        result = TcpTestResult(item=item, domain=domain)
-        result.success = data.get("success", False)
-        result.http_code = data.get("http_code", 0)
-        result.latency_ms = data.get("latency_ms", 0)
-        result.content_length = data.get("content_len", 0)
-        result.content_valid = data.get("content_ok", True)
-        result.throttled = data.get("throttled", False)
-        result.read_rate_bps = data.get("read_rate_bps", 0)
-        result.error = data.get("error", "") or ""
-        result.used_ip = data.get("used_ip") or ""
-        result.probe_host = data.get("resolve_name") or ""
-        result.rst_in_ttl = int(data.get("bridge_rst_in_ttl") or 0)
-        ba = data.get("bridge_applied")
-        result.bridge_applied = None if ba is None else bool(ba)
-        result.bridge_batch_id = int(data.get("batch_id") or 0)
-        result.bridge_gen = int(data.get("bridge_gen") or 0)
-        if data.get("bridge_rst_in") and not result.success:
-            # DPI injected a RST after the SNI was seen (scan_bridge detector).
-            from blockchecks.engine.fail_phase import FailPhase
-
-            result.fail_phase = FailPhase.TLS_RST_AT_SNI.value
-        elif result.error and not result.success:
-            from blockchecks.engine.fail_phase import classify_fail_phase
-
-            result.fail_phase = classify_fail_phase(result.error, result.http_code).value
-        if "bridge_applied" in data and data.get("bridge_applied") is False and result.success:
-            tail = data.get("bridge_raw_tail") or ""
-            log.warning(
-                "%s",
-                f"  {YELLOW}WARN: bridge PASS without APPLIED event for "
-                f"{item.label[:24]} (strategy may not have been picked up by nfqws2)"
-                f"{(' raw=[' + tail + ']') if tail else ''}{RESET}",
-            )
-        return result
+        return self._tcp_executor.tcp_result_from_data(item, domain, data)
 
     async def _log_tcp_result(
         self,
@@ -512,7 +291,7 @@ class AsyncTestRunner:
         dns_verdict: str,
         doh_server: str,
     ) -> None:
-        await self._result_logger.log_tcp_result(
+        await self._tcp_executor.log_tcp_result(
             item,
             domain,
             result,
@@ -530,118 +309,15 @@ class AsyncTestRunner:
         curl_parallel: int = 4,
     ) -> list[TcpTestResult]:
         """B2: one nfqws2 session, parallel curl for multiple domains."""
-        if not domains:
-            return []
-        results: list[TcpTestResult] = []
-        timeout, settle_max = self._timing_for(item, timeout)
-        async with self.semaphore:
-            ns_name = await self.pool.acquire()
-            try:
-                resolved_ips: dict[str, str | None] = {}
-                resolved_ip_lists: dict[str, list[str]] = {}
-                dns_meta: dict[str, tuple[str, str]] = {}
-                for domain in domains:
-                    rip, dv, ds = await self._resolve_domain_dns(domain)
-                    resolved_ips[domain] = rip
-                    resolved_ip_lists[domain] = self._resolve_domain_ips(domain)
-                    dns_meta[domain] = (dv, ds)
-                protocol = getattr(item, "protocol", "tls12") or "tls12"
-                data_map = await asyncio.to_thread(
-                    _run_tcp_check_multi,
-                    ns_name,
-                    item.strategy,
-                    domains,
-                    timeout,
-                    is_config=item.is_config,
-                    python_bin=self.python,
-                    disable_ech=self.disable_ech,
-                    resolved_ips=resolved_ips,
-                    resolved_ip_lists=resolved_ip_lists,
-                    repeats=self.repeats,
-                    extra_lua_desync="",
-                    protocol=protocol,
-                    curl_parallel=curl_parallel,
-                    settle_max=settle_max,
-                    parallel_repeats=self.parallel_repeats,
-                    repeats_mode=self.repeats_mode,
-                    quick_break=self.quick_break,
-                )
-                for domain in domains:
-                    data = data_map.get(domain, {})
-                    if WSSIZE_RETRY.should_retry(
-                        data,
-                        try_wssize=self.try_wssize,
-                        protocol=protocol,
-                        strategy=item.strategy,
-                        is_config=item.is_config,
-                    ):
-                        data = await asyncio.to_thread(
-                            _run_tcp_check,
-                            ns_name,
-                            item.strategy,
-                            domain,
-                            WSSIZE_RETRY.retry_timeout(timeout),
-                            item.is_config,
-                            self.python,
-                            self.disable_ech,
-                            resolved_ips.get(domain),
-                            self.repeats,
-                            self.parallel_repeats,
-                            WSSIZE_RETRY.cmd,
-                            protocol,
-                            settle_max,
-                            None,
-                            self.repeats_mode,
-                            self.quick_break,
-                            resolved_ips=resolved_ip_lists.get(domain),
-                        )
-                    result = self._tcp_result_from_data(item, domain, data)
-                    rip = resolved_ips.get(domain)
-                    dv, ds = dns_meta.get(domain, ("", ""))
-                    await self._log_tcp_result(
-                        item, domain, result, resolved_ip=rip, dns_verdict=dv, doh_server=ds
-                    )
-                    results.append(result)
-            except Exception as e:
-                for domain in domains:
-                    if not any(r.domain == domain for r in results):
-                        err = TcpTestResult(item=item, domain=domain, error=str(e)[:200])
-                        results.append(err)
-            finally:
-                await self.pool.release(ns_name)
-        return results
+        return await self._tcp_executor.test_tcp_domains(
+            item, domains, timeout=timeout, curl_parallel=curl_parallel
+        )
 
     async def test_udp(
         self, item: StrategyItem, ip: str, port: int, timeout: float = 3.0
     ) -> UdpTestResult:
         """Test one UDP strategy."""
-        target = f"{ip}:{port}"
-        result = UdpTestResult(item=item, target=target)
-
-        async with self.semaphore:
-            ns_name = await self.pool.acquire()
-            try:
-                data = await asyncio.to_thread(
-                    _run_udp_check,
-                    ns_name,
-                    item.strategy,
-                    ip,
-                    port,
-                    timeout,
-                    item.is_config,
-                    self.python,
-                )
-                result.success = data.get("success", False)
-                result.latency_ms = data.get("latency_ms", 0)
-                result.error = data.get("detail", "") or ""
-
-                await self._result_logger.log_udp_result(item, target, result)
-            except Exception as e:
-                result.error = str(e)[:200]
-            finally:
-                await self.pool.release(ns_name)
-
-        return result
+        return await self._udp_executor.test_udp(item, ip, port, timeout=timeout)
 
     async def test_batch_tcp(
         self, strategies: list[StrategyItem], domain: str, timeout: float = 5.0
@@ -719,211 +395,23 @@ class AsyncTestRunner:
         *,
         pair_domain: str | None = None,
     ) -> list[PairResult]:
-        """Parallel UDP probes for each PASS TCP × each UDP strategy.
-
-        Each pair runs in its own netns via asyncio.create_task + Semaphore.
-        TCP nfqws2 started once per pair, UDP nfqws2 per strategy.
-        DB writes serialized via asyncio.Lock.
-
-        ``pair_domain`` overrides the domain key used for pair_results /
-        resume (e.g. ``discord.com@1.2.3.4:50004`` for multi-EP fan-out);
-        TCP curl still uses ``domain``.
-        """
-        from blockchecks.engine.store.models import Checkpoint
-
-        pairs: list[PairResult] = []
-        db_lock = asyncio.Lock()
-        pair_sem = asyncio.Semaphore(self.pool.size)
-        fp = fingerprint or self.matrix_fingerprint
-        log_domain = pair_domain or domain
-
-        if udp_bypass:
-            working = list(enumerate(tcp_results))
-        else:
-            working = [(i, r) for i, r in enumerate(tcp_results) if r.success]
-
-        if not working:
-            log.info("%s", f"\n  {RED}No PASS TCP — UDP skipped{RESET}")
-            return pairs
-
-        total = len(working) * len(udp_strategies)
-
-        # Resume: skip only pairs already in DB (completed-set).
-        # Checkpoint idx is NOT used for skip — parallel pairs make idx a non-frontier.
-        completed: set[tuple[str, str]] = set()
-        if self.db:
-            try:
-                completed = await self.db.get_completed_pair_keys(log_domain)
-            except Exception as exc:
-                log.warning("%s", f"  WARNING: pair resume keys unavailable ({exc})")
-                completed = set()
-        if isinstance(resume_from, Checkpoint) and resume_from.tcp_label:
-            log.info(
-                "%s",
-                f"  {YELLOW}Resuming after "
-                f"{resume_from.tcp_label}+{resume_from.udp_label} "
-                f"({len(completed)} pairs in DB){RESET}",
-            )
-        elif resume_from is not None and getattr(resume_from, "tcp_label", None):
-            log.info(
-                "%s",
-                f"  {YELLOW}Resuming after "
-                f"{resume_from.tcp_label}+{getattr(resume_from, 'udp_label', '')} "
-                f"({len(completed)} pairs in DB){RESET}",
-            )
-        elif completed:
-            log.info("%s", f"  {YELLOW}Resuming: {len(completed)} pairs already in DB{RESET}")
-        ep_tag = f" ep={voice_ip}:{voice_port}" if pair_domain else ""
-        log.info(
-            "%s",
-            f"  {CYAN}Pair matrix: {len(working)} TCP × {len(udp_strategies)} UDP "
-            f"= {total} pairs, {self.pool.size} parallel{ep_tag}{RESET}",
+        """Parallel UDP probes for each PASS TCP × each UDP strategy."""
+        self._pair_runner.matrix_fingerprint = self.matrix_fingerprint
+        return await self._pair_runner.run(
+            tcp_results,
+            udp_strategies,
+            domain,
+            voice_ip,
+            voice_port,
+            udp_timeout=udp_timeout,
+            udp_bypass=udp_bypass,
+            resume_from=resume_from,
+            full_voice=full_voice,
+            fingerprint=fingerprint,
+            pair_domain=pair_domain,
         )
-
-        async def run_pair(tcp_i: int, tcp_r: TcpTestResult, udp_s: StrategyItem, pair_idx: int):
-            key = (tcp_r.item.label, udp_s.label)
-            if key in completed:
-                return
-            async with pair_sem:
-                ns_name = await self.pool.acquire()
-                try:
-                    await asyncio.to_thread(
-                        _run_tcp_check,
-                        ns_name,
-                        tcp_r.item.strategy,
-                        domain,
-                        0.1,
-                        tcp_r.item.is_config,
-                        self.python,
-                        self.disable_ech,
-                    )
-                    data = await asyncio.to_thread(
-                        _run_udp_check,
-                        ns_name,
-                        udp_s.strategy,
-                        voice_ip,
-                        voice_port,
-                        udp_timeout,
-                        udp_s.is_config,
-                        self.python,
-                        True,  # coexist — keep TCP nfqws2 (qnum 200) alive
-                    )
-                    udp_ok = data.get("success", False)
-                    udp_ms = data.get("latency_ms", 0)
-
-                    pair = PairResult(
-                        tcp_item=tcp_r.item,
-                        udp_item=udp_s,
-                        tcp_ok=tcp_r.success,
-                        udp_ok=udp_ok,
-                        tcp_ms=tcp_r.latency_ms,
-                        udp_ms=udp_ms,
-                    )
-                    if tcp_r.throttled and udp_ok:
-                        pair.overall = "THROTTLED"
-                    elif tcp_r.success and udp_ok:
-                        pair.overall = "PASS"
-                    elif tcp_r.success and not udp_ok:
-                        pair.overall = "PARTIAL"
-                    else:
-                        pair.overall = "FAIL"
-
-                    pairs.append(pair)
-
-                    pair_tag = {
-                        "PASS": f"{GREEN}PASS{RESET}",
-                        "PARTIAL": f"{YELLOW}PARTIAL{RESET}",
-                        "THROTTLED": f"{YELLOW}THROTTLED{RESET}",
-                        "FAIL": f"{RED}FAIL{RESET}",
-                    }[pair.overall]
-                    udp_tag = f"{GREEN}{udp_ms:.0f}ms{RESET}" if udp_ok else f"{RED}timeout{RESET}"
-                    voice_tag = " [voice]" if full_voice else ""
-                    log.info(
-                        "%s",
-                        f"  [{pair_tag}] {tcp_r.item.label[:22]:22s} "
-                        f"+ {udp_s.label[:22]:22s}  udp={udp_tag}{voice_tag}",
-                    )
-
-                    if udp_ok:
-                        await _save_pass_strategy_data_block(
-                            udp_s.strategy,
-                            f"{voice_ip}:{voice_port}",
-                            protocol="udp",
-                            latency_ms=udp_ms,
-                            http_code=0,
-                        )
-                    if self.db:
-                        async with db_lock:
-                            await self.db.log_udp(
-                                udp_s.label,
-                                f"{voice_ip}:{voice_port}",
-                                "PASS" if udp_ok else "FAIL",
-                                udp_ms,
-                                data.get("detail", "") or "",
-                                config_path=udp_s.strategy,
-                            )
-                            await self.db.log_pair(
-                                tcp_r.item.label,
-                                udp_s.label,
-                                log_domain,
-                                tcp_r.success,
-                                False,
-                                udp_ok,
-                                tcp_r.latency_ms,
-                                0,
-                                udp_ms,
-                                pair.overall,
-                            )
-                            await self.db.save_checkpoint(
-                                tcp_i,
-                                pair_idx,
-                                f"{tcp_r.item.label}+{udp_s.label}@{voice_ip}:{voice_port}",
-                                fingerprint=fp,
-                                tcp_label=tcp_r.item.label,
-                                udp_label=udp_s.label,
-                            )
-                finally:
-                    await self.pool.release(ns_name)
-
-        tasks = []
-        for tcp_i, tcp_r in working:
-            for udp_ord, udp_s in enumerate(udp_strategies):
-                tasks.append(asyncio.create_task(run_pair(tcp_i, tcp_r, udp_s, udp_ord)))
-
-        for res in await asyncio.gather(*tasks, return_exceptions=True):
-            if isinstance(res, BaseException):
-                log.error("%s", f"  {RED}pair task error: {type(res).__name__}: {res}{RESET}")
-        return pairs
-
-    # Matrix display
 
     @staticmethod
     def print_matrix(pairs: list[PairResult]):
         """Print colored pair matrix to console."""
-        if not pairs:
-            return
-        tcp_names = sorted(set(p.tcp_item.label for p in pairs))
-        udp_names = sorted(set(p.udp_item.label for p in pairs))
-        pair_map = {f"{p.tcp_item.label}|{p.udp_item.label}": p for p in pairs}
-
-        log.info("%s", f"\n  {CYAN}╔{'═' * 60}╗{RESET}")
-        log.info("%s", f"  {CYAN}║{'TCP×UDP Pair Matrix':^60s}║{RESET}")
-
-        passed = 0
-        for tcp in tcp_names:
-            for udp in udp_names:
-                p = pair_map.get(f"{tcp}|{udp}")
-                if not p:
-                    continue
-                if p.overall == "PASS":
-                    passed += 1
-                    tag = f"{GREEN}PASS{RESET}"
-                elif p.overall in ("PARTIAL", "THROTTLED"):
-                    tag = f"{YELLOW}{p.overall}{RESET}"
-                else:
-                    tag = f"{RED}FAIL{RESET}"
-                udp_lat = f"{p.udp_ms:.0f}ms" if p.udp_ok else "timeout"
-                log.info("%s", f"  {tag:12s} {tcp[:22]:22s} + {udp[:22]:22s}  udp={udp_lat}")
-
-        log.info("%s", f"  {CYAN}{'═' * 60}{RESET}")
-        log.info("%s", f"  {GREEN}{passed} PASS{RESET} / {len(pairs)} pairs")
+        PairMatrixRunner.print_matrix(pairs)
