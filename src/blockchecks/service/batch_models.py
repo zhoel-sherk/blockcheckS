@@ -22,7 +22,11 @@ class BatchContext:
     domains: list[str] | None = None  # parallel to items; defaults to domain
 
     def item_domains(self) -> list[str]:
-        if self.domains is not None and len(self.domains) == len(self.items):
+        if self.domains is not None:
+            if len(self.domains) != len(self.items):
+                raise ValueError(
+                    f"domains length {len(self.domains)} != items length {len(self.items)}"
+                )
             return list(self.domains)
         return [self.domain] * len(self.items)
 

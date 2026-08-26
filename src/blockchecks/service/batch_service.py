@@ -33,8 +33,15 @@ log = logging.getLogger(__name__)
 ACQUIRE_NS_TIMEOUT = 30.0
 
 STOPPED_BEFORE_PROBE = "stopped before probe"
-POOL_ACQUIRE_TIMEOUT = "pool acquire timeout"
-PROBE_SKIP_ERRORS = frozenset({STOPPED_BEFORE_PROBE, POOL_ACQUIRE_TIMEOUT})
+NS_POOL_EXHAUSTED = "ns pool exhausted"
+PROBE_SKIP_ERRORS = frozenset({STOPPED_BEFORE_PROBE, NS_POOL_EXHAUSTED})
+
+_pool_exhausted_total = 0
+
+
+def pool_exhausted_total() -> int:
+    """Cumulative netns pool acquire timeouts (for triage/metrics)."""
+    return _pool_exhausted_total
 
 
 def _debug_env() -> str:
@@ -71,9 +78,15 @@ class ProbeBatchService:
         try:
             ns = await asyncio.wait_for(self.deps.acquire_ns(), timeout=ACQUIRE_NS_TIMEOUT)
         except TimeoutError:
-            return await self._finalize_batch(
-                ctx, self._empty_stopped_result(ctx, error=POOL_ACQUIRE_TIMEOUT)
+            global _pool_exhausted_total
+            _pool_exhausted_total += 1
+            log.warning(
+                "netns pool exhausted after %.1fs (batch_id=%s, total=%d)",
+                ACQUIRE_NS_TIMEOUT,
+                ctx.batch_id,
+                _pool_exhausted_total,
             )
+            return await self._finalize_batch(ctx, self._pool_exhausted_result(ctx))
         try:
             domains = ctx.item_domains()
             resolved_by_domain: dict[str, tuple[str | None, str, str]] = {}
@@ -153,12 +166,17 @@ class ProbeBatchService:
         return result
 
     @staticmethod
-    def _empty_stopped_result(
-        ctx: BatchContext,
-        *,
-        error: str = STOPPED_BEFORE_PROBE,
-    ) -> BatchProbeResult:
+    def _empty_stopped_result(ctx: BatchContext) -> BatchProbeResult:
         """Empty result when a stop was requested before the batch started."""
+        return ProbeBatchService._skipped_batch_result(ctx, STOPPED_BEFORE_PROBE)
+
+    @staticmethod
+    def _pool_exhausted_result(ctx: BatchContext) -> BatchProbeResult:
+        """Empty result when no netns could be acquired within the pool timeout."""
+        return ProbeBatchService._skipped_batch_result(ctx, NS_POOL_EXHAUSTED)
+
+    @staticmethod
+    def _skipped_batch_result(ctx: BatchContext, error: str) -> BatchProbeResult:
         from blockchecks.engine.results import TcpTestResult
 
         results = [
@@ -225,7 +243,7 @@ class ProbeBatchService:
         stop_event: asyncio.Event | None = None,
     ) -> BatchProbeResult:
         results: list = []
-        for item, dom in zip(ctx.items, ctx.item_domains(), strict=False):
+        for item, dom in zip(ctx.items, ctx.item_domains(), strict=True):
             if stop_event is not None and stop_event.is_set():
                 break
             timeout_i, settle_max = self.deps.timing_for(item, timeout)
@@ -297,7 +315,7 @@ class ProbeBatchService:
 
     def _batch_fail_results(self, ctx: BatchContext, error: str) -> list:
         results = []
-        for item, dom in zip(ctx.items, ctx.item_domains(), strict=False):
+        for item, dom in zip(ctx.items, ctx.item_domains(), strict=True):
             data = {"success": False, "error": error, "batch_id": ctx.batch_id}
             result = self.deps.tcp_result_from_data(item, dom, data)
             results.append(result)
@@ -332,7 +350,7 @@ class ProbeBatchService:
             boot_debug = _debug_env()
             self._record_daemon_mem(ns_name)
             for idx, (item, dom) in enumerate(
-                zip(ctx.items, ctx.item_domains(), strict=False), start=1
+                zip(ctx.items, ctx.item_domains(), strict=True), start=1
             ):
                 if stop_event is not None and stop_event.is_set():
                     break
@@ -347,7 +365,7 @@ class ProbeBatchService:
                         f"  {YELLOW}[debug] restarting nfqws2 in {ns_name} "
                         f"(debug={'1' if _debug_env() else '0'}){RESET}",
                     )
-                    session.boot()
+                    self._reboot_daemon(session)
                     boot_debug = _debug_env()
                     recycled += 1
                 elif self._daemon_heartbeat_stale(session):
@@ -359,7 +377,7 @@ class ProbeBatchService:
                         f"  {YELLOW}[bridge] heartbeat stale in {ns_name} — "
                         f"rebooting daemon before probe{RESET}",
                     )
-                    session.boot()
+                    self._reboot_daemon(session)
                     recycled += 1
                 gen = self.deps.next_probe_gen()
                 timeout_i, _ = self.deps.timing_for(item, timeout)
@@ -400,10 +418,7 @@ class ProbeBatchService:
                         f"in {ns_name} — daemon presumed dead, rebooting and retrying once"
                         f"{RESET}",
                     )
-                    session.boot()
-                    # Give Lua time to finish init/plan-build before the retry
-                    # probe; otherwise it runs clean again and cascades.
-                    self._wait_heartbeat(session)
+                    self._reboot_daemon(session)
                     gen = self.deps.next_probe_gen()
                     data = run_tcp_check_bridge(
                         session,
@@ -512,14 +527,19 @@ class ProbeBatchService:
             f"  {YELLOW}[bridge] no heartbeat from {session.ns_name} within 1.2s "
             f"— rebooting daemon and waiting again{RESET}",
         )
-        session.boot()
-        if self._wait_heartbeat(session):
-            return
-        log.warning(
-            "%s",
-            f"  {YELLOW}[bridge] daemon in {session.ns_name} unresponsive to fence — "
-            f"probes may run clean (queue-bypass){RESET}",
-        )
+        self._reboot_daemon(session)
+        if self._daemon_heartbeat_stale(session):
+            log.warning(
+                "%s",
+                f"  {YELLOW}[bridge] daemon in {session.ns_name} unresponsive to fence — "
+                f"probes may run clean (queue-bypass){RESET}",
+            )
+
+    def _reboot_daemon(self, session: BridgeSession) -> float:
+        """Boot nfqws2 and wait for Lua heartbeat before the next probe."""
+        settle = session.boot()
+        self._wait_heartbeat(session)
+        return settle
 
     def _record_daemon_mem(self, ns_name: str) -> None:
         if self.memory_monitor is None or self.config.backend != "lua_bridge":
@@ -547,7 +567,7 @@ class ProbeBatchService:
             log.info(
                 "%s", f"  {YELLOW}[mem] recycle nfqws2 pid={pid} ({reason}) in {ns_name}{RESET}"
             )
-        session.boot()
+        self._reboot_daemon(session)
         self._record_daemon_mem(ns_name)
         return True
 
@@ -635,6 +655,13 @@ def warn_fanout_bridge_once() -> None:
 
 
 __all__ = [
+    "NS_POOL_EXHAUSTED",
+    "POOL_ACQUIRE_TIMEOUT",
     "ProbeBatchService",
+    "STOPPED_BEFORE_PROBE",
+    "pool_exhausted_total",
     "warn_fanout_bridge_once",
 ]
+
+# Back-compat alias (audit RT-16 renamed marker).
+POOL_ACQUIRE_TIMEOUT = NS_POOL_EXHAUSTED

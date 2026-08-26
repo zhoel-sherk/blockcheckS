@@ -15,9 +15,10 @@ from blockchecks.service.batch_models import (
 )
 from blockchecks.service.batch_scheduler import BatchJobAccumulator, BatchScheduler
 from blockchecks.service.batch_service import (
-    POOL_ACQUIRE_TIMEOUT,
+    NS_POOL_EXHAUSTED,
     STOPPED_BEFORE_PROBE,
     ProbeBatchService,
+    pool_exhausted_total,
     warn_fanout_bridge_once,
 )
 
@@ -722,6 +723,10 @@ async def test_run_batch_acquire_timeout_returns_empty() -> None:
     """A busy pool (acquire never resolves) must not deadlock the stop."""
     import asyncio
 
+    import blockchecks.service.batch_service as bp
+
+    bp._pool_exhausted_total = 0
+
     async def never_acquire():
         await asyncio.sleep(3600)
         return "bs-p-0"
@@ -738,7 +743,103 @@ async def test_run_batch_acquire_timeout_returns_empty() -> None:
         result = await svc.run_batch(ctx, timeout=5.0)
     assert len(result.results) == 1
     assert not result.results[0].success
-    assert result.results[0].error == POOL_ACQUIRE_TIMEOUT
+    assert result.results[0].error == NS_POOL_EXHAUSTED
+    assert result.results[0].error != STOPPED_BEFORE_PROBE
+    assert pool_exhausted_total() == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio(loop_scope="package")
+async def test_item_domains_length_mismatch_raises() -> None:
+    ctx = BatchContext(
+        ns_name="",
+        items=[_item("a"), _item("b")],
+        domain="discord.com",
+        domains=["discord.com"],
+        batch_id=1,
+    )
+    with pytest.raises(ValueError, match="domains length"):
+        ctx.item_domains()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio(loop_scope="package")
+async def test_reboot_daemon_waits_heartbeat_after_recycle() -> None:
+    """Memory recycle must boot then wait for heartbeat before probing."""
+    wait_calls = {"n": 0}
+
+    class FakeSession:
+        ns_name = "bs-p-0"
+
+        def __init__(self, **_k) -> None:
+            self.bridge = MagicMock()
+            self.bridge.truncate_events = MagicMock()
+            self.bridge.heartbeat_age = MagicMock(return_value=0.0)
+            self.bridge.publish = MagicMock()
+            self.bridge.drain_events = MagicMock(return_value=[])
+
+        def boot(self) -> float:
+            return 0.1
+
+        def shutdown(self) -> None:
+            pass
+
+    class FakeMonitor:
+        _recycle_once = True
+
+        def should_sample(self) -> bool:
+            return True
+
+        def record_ns(self, ns_name, pids=None) -> None:
+            pass
+
+        def worker_over_limit(self) -> bool:
+            return False
+
+        def recycle_candidates(self) -> list[tuple[int, str]]:
+            if self._recycle_once:
+                self._recycle_once = False
+                return [(99, "rss high")]
+            return []
+
+        def clear(self, pid=None) -> None:
+            pass
+
+    import blockchecks.service.batch_service as bp
+
+    original_session = bp.BridgeSession
+    original_wait = bp.ProbeBatchService._wait_heartbeat
+    bp.BridgeSession = FakeSession
+    real_bridge_probe = bp.run_tcp_check_bridge
+    bp.run_tcp_check_bridge = lambda *a, **k: {
+        "success": True,
+        "bridge_applied": True,
+        "bridge_events": ["APPLIED"],
+    }
+
+    def counting_wait(self, session, within=1.2):
+        wait_calls["n"] += 1
+        return original_wait(self, session, within=within)
+
+    bp.ProbeBatchService._wait_heartbeat = counting_wait
+    try:
+        deps = _minimal_deps()
+        svc = ProbeBatchService(
+            BatchProbeConfig(backend="lua_bridge"), deps, memory_monitor=FakeMonitor()
+        )
+        ctx = BatchContext(
+            ns_name="",
+            items=[_item("a")],
+            domain="discord.com",
+            batch_id=6,
+        )
+        await svc.run_batch(ctx, 5.0)
+        # initial fence wait + recycle reboot wait (at least one post-boot wait)
+        assert wait_calls["n"] >= 2
+    finally:
+        bp.ProbeBatchService._wait_heartbeat = original_wait
+        bp.run_tcp_check_bridge = real_bridge_probe
+        bp.BridgeSession = original_session
 
 
 @pytest.mark.unit
