@@ -4,7 +4,7 @@
 fake:blob=stun:repeats=6:tcp_ts=-1000
 fake:blob=max_ru:repeats=6:tcp_ts=-1000
 fake:blob=google:repeats=6:tcp_ts=-1000
-fake:blob=4pda:repeats=6:tcp_ts=-1000
+fake:blob=b4pda:repeats=6:tcp_ts=-1000
 hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up:repeats=1
 hostfakesplit:nofake2:tcp_ts=-1000:repeats=1
 hostfakesplit:nofake2:tcp_md5:repeats=1

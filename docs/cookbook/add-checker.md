@@ -30,7 +30,6 @@ Keep I/O in the checker; runners orchestrate netns/nfqueue, workers run probes.
 | [`async_runner.py`](../src/blockchecks/engine/async_runner.py) | `bs scan`, `bs pair`, `bs full` |
 | [`test_runner.py`](../src/blockchecks/engine/test_runner.py) | `bs tcp`, `bs udp` (sync) |
 | [`in_ns_workers.py`](../src/blockchecks/engine/in_ns_workers.py) | subprocess probe worker (`--mode curl\|udp`) |
-| [`base_worker.py`](../src/blockchecks/engine/base_worker.py) | `Worker` ABC (`execute_probe` step) |
 
 For async batch tests, prefer calling the checker from the subprocess worker
 (`python -m blockchecks.engine.in_ns_workers --mode curl`, see

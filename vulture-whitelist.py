@@ -34,7 +34,6 @@ _.total_enqueued  # unused attribute (src/blockchecks/engine/adaptive_queue.py:2
 GREY  # unused variable (src/blockchecks/engine/async_runner.py:35)
 _.rst_in_ttl  # unused attribute (src/blockchecks/engine/async_runner.py:552)
 _.test_udp  # unused method (src/blockchecks/engine/async_runner.py:703)
-BaseInNsWorker  # unused class (src/blockchecks/engine/base_worker.py:67)
 FLOWSEAL_CORE_ALIASES  # unused variable (src/blockchecks/engine/blob_aliases.py:58)
 include_http  # unused variable (src/blockchecks/engine/byedpi_matrix_generator.py:92)
 TRANSLATION_NONE  # unused variable (src/blockchecks/engine/byedpi_translator.py:38)

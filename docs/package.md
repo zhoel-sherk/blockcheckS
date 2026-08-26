@@ -24,7 +24,6 @@ blockcheckS/
 │   │   ├── config.py
 │   │   ├── fail_phase.py      # FailPhase enum (32 tokens) + classifier
 │   │   ├── triage.py          # TriageProfile (preflight interference profile)
-│   │   ├── base_worker.py     # Worker ABC + BaseInNsWorker (probe lifecycle)
 │   │   ├── generators/        # StrategyItem + Standard facade + families/
 │   │   │   └── families/      # split.py / fake.py / tamper.py / _helpers.py (StrategyParams)
 │   │   ├── matrix_generator.py  # facade: generate_tcp/udp
@@ -110,7 +109,7 @@ bs ──► cli.parser (pydantic CliApp) ──► commands + async_runner / te
      └── add_campaign_args (scan/pair/full) + profiles.apply_profile
 main ──► RunSpec.from_args ──► CampaignContext ──► async_runner + nfconf
 async_runner ──► service.probe.invoke_curl_probe_worker ──► in_ns_workers --mode curl|udp
-in_ns_workers ──► checkers + service.netns_pool + service.nfqws2 (+ base_worker)
+in_ns_workers ──► checkers + service.netns_pool + service.nfqws2
 matrix_generator ──► generators/* (standard facade → families/)
 ```
 
@@ -140,7 +139,7 @@ src/blockchecks/                      (≈25 700 строк, 108+ py-файло�
 │   voice_dns 562 | youtube_url 195
 ├── data_block/  provider 167 | store 362
 ├── engine/  adaptive_queue 468 | adaptive_runner 353 | async_runner 1007 |
-│   base_worker 84 | blob_aliases 169 | byedpi_matrix_generator 144 |
+│   blob_aliases 169 | byedpi_matrix_generator 144 |
 │   byedpi_translator 323 | conf_builder 361 | config 433 | db_logger 22 |
 │   domain_loader 175 | fail_phase 128 | family_needs 192 | in_ns_workers 784 |
 │   matrix_generator 287 | nfqws_config 94 | paths 322 | preflight 487 |

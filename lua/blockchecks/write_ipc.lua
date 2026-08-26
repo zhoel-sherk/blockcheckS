@@ -9,10 +9,23 @@ function bs_json_escape(s)
 	return s
 end
 
+_G.bs_ipc_open_fail = _G.bs_ipc_open_fail or 0
+
 function bs_write_ipc(event_tbl)
 	local path = writable_file_name("events.ndjson")
 	local f = io.open(path, "a")
-	if not f then return end
+	if not f then
+		_G.bs_ipc_open_fail = _G.bs_ipc_open_fail + 1
+		io.stderr:write(
+			"blockcheckS: bs_write_ipc open failed: "
+				.. tostring(path)
+				.. " (count="
+				.. tostring(_G.bs_ipc_open_fail)
+				.. ")\n"
+		)
+		io.stderr:flush()
+		return
+	end
 	local parts = {}
 	for k, v in pairs(event_tbl) do
 		if type(v) == "number" then

@@ -5,12 +5,17 @@ from __future__ import annotations
 import errno
 import json
 import logging
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from blockchecks.service.lua_bridge_ipc import BridgeEvent, BridgePaths, LuaBridge
+
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+SCAN_BRIDGE_LUA = PROJECT_DIR / "lua" / "blockchecks" / "scan_bridge.lua"
+WRITE_IPC_LUA = PROJECT_DIR / "lua" / "blockchecks" / "write_ipc.lua"
 
 
 class TestBridgeEventParsing:
@@ -23,11 +28,19 @@ class TestBridgeEventParsing:
         assert evt.id == 7
 
     def test_valid_fail_event(self):
-        line = json.dumps({"event": "STRATEGY_FAIL", "reason": "retrans", "gen": 5})
+        line = json.dumps(
+            {
+                "event": "STRATEGY_FAIL",
+                "reason": "retrans",
+                "id": 3,
+                "gen": 5,
+            }
+        )
         evt = BridgeEvent.from_line(line)
         assert evt is not None
         assert evt.event == "STRATEGY_FAIL"
         assert evt.reason == "retrans"
+        assert evt.id == 3
         assert evt.gen == 5
 
     def test_invalid_json_returns_none(self):
@@ -92,6 +105,24 @@ class TestLuaBridgeDrain:
         assert len(result) == 2
         fail_events = [e for e in result if e.event == "STRATEGY_FAIL"]
         assert len(fail_events) == 2
+
+
+class TestLuaSourceContracts:
+    def test_scan_bridge_strategy_fail_includes_id(self) -> None:
+        text = SCAN_BRIDGE_LUA.read_text(encoding="utf-8")
+        blocks = re.findall(
+            r'bs_write_ipc\(\{[^}]*event\s*=\s*"STRATEGY_FAIL"[^}]*\}\)',
+            text,
+            flags=re.DOTALL,
+        )
+        assert len(blocks) >= 2
+        for block in blocks:
+            assert "id =" in block or "id=" in block, block
+
+    def test_write_ipc_reports_open_fail(self) -> None:
+        text = WRITE_IPC_LUA.read_text(encoding="utf-8")
+        assert "bs_ipc_open_fail" in text
+        assert "io.stderr" in text
 
 
 class TestLuaBridgePublish:

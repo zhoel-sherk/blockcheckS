@@ -418,7 +418,7 @@ flowchart LR
 | Family gates | `family_needs.py`, `family_registry.py` |
 | Fan-out | `tcp_fanout.py` |
 | Async / sync раннер | `async_runner.py`, `test_runner.py` |
-| Воркеры в ns | `in_ns_workers.py`, `base_worker.py` |
+| Воркеры в ns | `in_ns_workers.py` |
 | Конф nfqws2 | `conf_builder.py`, `nfqws_config.py` |
 | Settle | `settle_profile.py`, `service/nfqws2_settle.py` |
 | XDG / deps | `paths.py`, `system_deps.py` |

@@ -6,8 +6,8 @@
 fake:blob=stun:repeats=6:tcp_ts=-1000\nfake:blob=max_ru:repeats=6:tcp_ts=-1000
 fake:blob=stun:repeats=6:tcp_ts=-1000\nfake:blob=google:repeats=6:tcp_ts=-1000
 fake:blob=google:repeats=6:tcp_ts=-1000
-fake:blob=4pda:repeats=6:tcp_ts=-1000
-multisplit:pos=1:seqovl=568:seqovl_pattern=4pda
+fake:blob=b4pda:repeats=6:tcp_ts=-1000
+multisplit:pos=1:seqovl=568:seqovl_pattern=b4pda
 multisplit:pos=1:seqovl=480:seqovl_pattern=stun2
 fakedsplit:pos=1:pattern=0x00000000:tcp_ts=-1000:repeats=1
 hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=1

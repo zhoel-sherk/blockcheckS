@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 import tomllib
 
+from blockchecks.engine.blob_aliases import extract_blob_names, safe_blob_name
 from blockchecks.engine.conf_builder import sanitize_arg_for_conf, split_cli_args
 from blockchecks.engine.strategy_loader import StrategyLoader
 
@@ -14,6 +16,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 STRATEGIES_DIR = PROJECT_DIR / "presets" / "strategies"
 DOMAINS_DIR = PROJECT_DIR / "presets" / "domains"
 MANIFEST = PROJECT_DIR / "presets" / "manifest.toml"
+_HEX_BLOB_RE = re.compile(r"^0x[0-9a-fA-F]+$")
 
 
 def _load_manifest() -> dict:
@@ -95,6 +98,28 @@ def test_every_strategy_line_parses(path: Path):
         # flags; a bare spec (no leading --) is wrapped as lua-desync.
         if line.startswith("--"):
             assert all(p.startswith("--") for p in split_cli_args(line))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    sorted(STRATEGIES_DIR.glob("*.tls"))
+    + sorted(STRATEGIES_DIR.glob("*.txt"))
+    + sorted(STRATEGIES_DIR.glob("*.http"))
+    + sorted(STRATEGIES_DIR.glob("*.quic"))
+    + sorted(STRATEGIES_DIR.glob("*.udp")),
+    ids=lambda p: p.name,
+)
+def test_preset_blob_names_are_safe(path: Path) -> None:
+    """Blob identifiers in presets must be nfqws2-safe (no leading digit)."""
+    for line in _nonempty_lines(path):
+        for name in extract_blob_names(line):
+            if _HEX_BLOB_RE.match(name):
+                continue
+            safe = safe_blob_name(name)
+            assert name == safe, (
+                f"{path.name}: blob {name!r} must use safe name {safe!r}"
+            )
 
 
 @pytest.mark.unit

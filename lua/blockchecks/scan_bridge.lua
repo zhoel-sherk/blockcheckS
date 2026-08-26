@@ -68,6 +68,7 @@ function smart_fallback(ctx, desync)
 			bs_write_ipc({
 				event = "STRATEGY_FAIL",
 				reason = "rst_in",
+				id = tonumber(_G.bs_active_id) or 1,
 				gen = tonumber(_G.bs_active_gen) or 0,
 				ttl = ttl,
 			})
@@ -85,6 +86,7 @@ function smart_fallback(ctx, desync)
 			bs_write_ipc({
 				event = "STRATEGY_FAIL",
 				reason = "retrans",
+				id = tonumber(_G.bs_active_id) or 1,
 				gen = tonumber(_G.bs_active_gen) or 0,
 				ms = 0,
 			})
