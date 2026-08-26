@@ -17,7 +17,6 @@ from blockchecks.engine.adaptive_queue import (
 from blockchecks.engine.bridge_worker_pool import (
     BridgeJob,
     BridgeWorkerPool,
-    persist_quarantine,
 )
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.store import RunStateStore
@@ -50,8 +49,14 @@ async def build_adaptive_queue(
     provider_store: Any = None,
     triage: Any = None,
     quarantine=None,
+    skip_keys: set[tuple[str, str]] | None = None,
 ) -> tuple[AdaptiveJobQueue, int]:
-    """Create queue, optionally loading persisted weights and applying resume skip."""
+    """Create queue, optionally loading persisted weights and applying resume skip.
+
+    ``quarantine.exclude_domains()`` is snapshotted *before* the matrix is
+    packed so dead domains are never allocated. Callers that later
+    ``seed_from_rows`` must re-sync ``queue.excluded_domains``.
+    """
     weights = ScanWeights()
     if load_weights and db is not None:
         rows = await db.load_scan_weights()
@@ -64,15 +69,20 @@ async def build_adaptive_queue(
     if triage is not None:
         weights.seed_from_triage(triage)
 
-    queue = AdaptiveJobQueue.build(items, domains, weights=weights, epsilon=epsilon)
+    skip_domains: set[str] = set()
     if quarantine is not None:
-        # Hard-exclude quarantined domains BEFORE resume filtering so dead
-        # domains never enter the heap at all.
-        queue.excluded_domains |= quarantine.exclude_domains()
-    skipped = 0
+        skip_domains |= quarantine.exclude_domains()
+    queue = AdaptiveJobQueue.build(
+        items,
+        domains,
+        weights=weights,
+        epsilon=epsilon,
+        skip_domains=skip_domains,
+        skip_keys=skip_keys,
+    )
     if resume_check:
-        skipped = await queue.filter_resume(resume_check)
-    return queue, skipped
+        await queue.filter_resume(resume_check)
+    return queue, len(queue._done)
 
 
 async def _apply_provider_weights(
@@ -307,92 +317,25 @@ async def run_adaptive_tcp(
     disable_ech: bool = False,
     stop_event: asyncio.Event | None = None,
     on_progress: ProgressCb | None = None,
-    lua_bridge: bool = False,
+    lua_bridge: bool = True,
     bridge_batch: int = 500,
     workers: int = 4,
     quarantine=None,
 ) -> AdaptiveRunResult:
-    """Run TCP jobs from *queue* until empty or stopped (AQ5)."""
-    backend = "lua_bridge" if lua_bridge else "classic"
-    log.info("%s", f"  AQ backend={backend}")
-    if lua_bridge:
-        return await run_adaptive_tcp_bridge(
-            runner,
-            queue,
-            timeout=timeout,
-            bridge_batch=bridge_batch,
-            stop_event=stop_event,
-            on_progress=on_progress,
-            workers=workers,
-            quarantine=quarantine,
-        )
-
-    done = 0
-    skipped = 0
-    passed = 0
-    batch_size = max(1, int(curl_parallel))
-
-    while True:
-        if stop_event and stop_event.is_set():
-            break
-        batch = queue.pop_batch(
-            batch_size,
-            protocol=protocol,
-            disable_ech=disable_ech,
-        )
-        if not batch:
-            break
-
-        if quarantine is not None:
-            dead = quarantine.exclude_domains()
-            if dead:
-                quarantined_jobs = [j for j in batch if j.domain in dead]
-                batch = [j for j in batch if j.domain not in dead]
-                for job in quarantined_jobs:
-                    queue.mark_done(job, passed=False)
-                    skipped += 1
-                    done += 1
-                if not batch:
-                    continue
-
-        item = batch[0].item
-        doms = [j.domain for j in batch]
-        results = await _classic_aq_probe(runner, item, doms, timeout)
-
-        for job, result in zip(batch, results):
-            ok = bool(result.success)
-            queue.mark_done(job, passed=ok)
-            done += 1
-            if ok:
-                passed += 1
-            if quarantine is not None:
-                newly = quarantine.record(job.domain, ok)
-                if newly:
-                    await persist_quarantine(runner, quarantine, newly)
-            if on_progress:
-                on_progress(done, skipped, passed)
-            if stop_event and stop_event.is_set():
-                break
-
-        if stop_event and stop_event.is_set():
-            break
-
-    return AdaptiveRunResult(
-        done=done,
-        skipped=skipped,
-        passed=passed,
-        metrics=queue.metrics,
-        weights=queue.weights,
-    )
-
-
-async def _classic_aq_probe(runner, item, doms: list[str], timeout: float):
-    """One classic AQ pop: ProbeBatchService for a single domain, B2 otherwise."""
-    if len(doms) == 1:
-        return await runner._run_probe_batch([item], doms[0], timeout, "classic")
-    log.info("%s", f"  [AQ] backend=classic n={len(doms)}")
-    return await runner.test_tcp_domains(
-        item, doms, timeout=timeout, curl_parallel=len(doms)
+    """Run TCP jobs from *queue* until empty or stopped (lua_bridge AQ)."""
+    del curl_parallel, protocol, disable_ech
+    if not lua_bridge:
+        log.warning("AQ classic backend is retired; using lua_bridge")
+    log.info("%s", "  AQ backend=lua_bridge")
+    return await run_adaptive_tcp_bridge(
+        runner,
+        queue,
+        timeout=timeout,
+        bridge_batch=bridge_batch,
+        stop_event=stop_event,
+        on_progress=on_progress,
+        workers=workers,
+        quarantine=quarantine,
     )
 
 

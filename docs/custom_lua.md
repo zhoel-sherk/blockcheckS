@@ -808,9 +808,7 @@ Preset: `presets/strategies/gp-custom-dupfake.tls` (dupfake-строки акт�
 
 | Backend | Когда | nfqws2 lifecycle |
 |---------|-------|------------------|
-| `lua_bridge` | **default** (с 1.3.1), fan-out, pair UDP bootstrap | one daemon per batch (rolling conf) |
-| `classic` | явный `--classic` / `--probe-backend classic` | restart per probe (внутри batch — sequential) |
-| `lua_bridge` | `--lua-bridge` | один daemon на batch N (`scan_pick` + shm) |
+| `lua_bridge` | campaign TCP (scan/pair/full) | one daemon per batch (`scan_pick` + shm) |
 
 ```python
 # BatchContext + ProbeBatchService
@@ -819,9 +817,9 @@ result = await probe_batch_service.run_batch(ctx, timeout)
 # result: results, settle_ms, batch_wall_ms, backend, batch_fill_ratio
 ```
 
-CLI: `scan`/`pair`/`full` — `--lua-bridge`, `--bridge-batch`, `--lua-bridge-compare`, `--lua-extra`.
+CLI: `scan`/`pair`/`full` — `--bridge-batch`, `--lua-extra`. `--classic` deprecated (maps to lua_bridge).
 
-`bs full`: sequential + adaptive AQ используют batch service при `--lua-bridge`; fan-out остаётся classic (WARN once).
+`bs full`: sequential + adaptive AQ используют batch service; fan-out остаётся one-shot (WARN once).
 
 Поэтапный flip default → `lua_bridge`: см. [todo.md](todo.md) (открытое / lua_bridge).
 

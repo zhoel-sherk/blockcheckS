@@ -3,7 +3,7 @@
 # on the live host (sudo + nfqws2 + netns). Run after code changes.
 #
 # Covers:
-#   bs preflight · bs tcp · bs udp · bs composite · bs scan (classic+bridge) ·
+#   bs preflight · bs tcp · bs udp · bs composite · bs scan (lua_bridge) ·
 #   bs pair (tcp-only) · bs bench-settle · bs full (quick) · bs stop ·
 #   bc-nfconf export · shortlist round-trip
 #
@@ -56,28 +56,17 @@ OUT=$(timeout 60 sudo -n "$BS" composite -c configs/composite_discord.conf -d di
   --skip-deps-check 2>&1 || true)
 if echo "$OUT" | grep -q "HTTP 200\|1/1 passed"; then report "bs composite" 1; else report "bs composite" 0; fi
 
-# ── bs scan: classic ─────────────────────────────────────────
-echo "--- bs scan --classic ---" | tee -a "$LOG"
+# ── bs scan: lua_bridge ──────────────────────────────────────
+echo "--- bs scan (lua_bridge) ---" | tee -a "$LOG"
 MATRIX=$(mktemp); trap 'rm -f "$MATRIX"' EXIT
 printf 'fake:blob=stun:repeats=6:tcp_ts=-1000\nfake:blob=max_ru:repeats=6:tcp_ts=-1000\n' >"$MATRIX"
-OUT=$(timeout 90 sudo -n "$BS" scan -d discord.com --user-matrix "$MATRIX" --max 2 --parallel 1 \
-  --scan-level fast --classic --quick --skip-deps-check --skip-dns-audit --skip-prolog \
-  --skip-ip-block --skip-port-block --skip-baseline --no-wssize --timeout 8 2>&1 || true)
-if echo "$OUT" | grep -q "backend=classic" && echo "$OUT" | grep -q "passed"; then
-  report "bs scan --classic" 1
-else
-  report "bs scan --classic" 0
-fi
-
-# ── bs scan: default lua_bridge ──────────────────────────────
-echo "--- bs scan default (lua_bridge) ---" | tee -a "$LOG"
 OUT=$(timeout 90 sudo -n "$BS" scan -d discord.com --user-matrix "$MATRIX" --max 2 --parallel 1 \
   --scan-level fast --quick --skip-deps-check --skip-dns-audit --skip-prolog \
   --skip-ip-block --skip-port-block --skip-baseline --no-wssize --timeout 8 2>&1 || true)
 if echo "$OUT" | grep -q "backend=lua_bridge" && echo "$OUT" | grep -q "passed"; then
-  report "bs scan default (lua_bridge)" 1
+  report "bs scan lua_bridge" 1
 else
-  report "bs scan default (lua_bridge)" 0
+  report "bs scan lua_bridge" 0
 fi
 
 # ── bs pair (tcp-only) ───────────────────────────────────────

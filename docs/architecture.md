@@ -10,6 +10,7 @@
 | [custom_lua.md](custom_lua.md) | Lua IPC, `scan_pick`, Mode A/B |
 | [api.md](api.md) | контракт socket / HTTP / MCP |
 | [mcp.md](mcp.md) | установка MCP-клиентов |
+| [ci-selfhosted.md](ci-selfhosted.md) | self-hosted `[probe]` runner, week_cov / run.lock |
 
 ---
 
@@ -73,7 +74,7 @@ flowchart TB
 
 ## Вход CLI
 
-Дефолт — **pydantic CliApp** (`cli/cliapp.py`). Флаги по-прежнему описываются в `cli/parser.py` (`add_campaign_args`, `add_backend_args`, …). Старый argparse: `BLOCKCHECKS_ARGPARSE=1`.
+Дефолт — **pydantic CliApp** (`cli/cliapp.py`). Флаги по-прежнему описываются в `cli/parser.py` (`add_campaign_args`, `add_lua_bridge_args`, …). Старый argparse: `BLOCKCHECKS_ARGPARSE=1`.
 
 `bs.py` — тонкий entry → `cli.parser.main` (или CliApp). Console scripts: `bs`, `bs-mcp`, `bc-nfconf`, `bc-main`.
 
@@ -160,20 +161,17 @@ sequenceDiagram
 
 ---
 
-## Два бэкенда пробы
+## Campaign TCP: lua_bridge
 
-Один и тот же `AsyncTestRunner`, разный способ крутить nfqws2.
+Campaign `scan`/`pair`/`full` крутит nfqws2 только через **lua_bridge** (один демон на батч, Lua `scan_pick` + `/dev/shm`). `--classic` больше не переключает рестарт-на-стратегию.
 
-| | **lua_bridge** (дефолт с 1.3.1) | **classic** |
+| | **lua_bridge** (campaign TCP) | **one-shot** (`bs tcp`, composite, fan-out) |
 |---|---|---|
-| nfqws2 | один демон на **батч** стратегий | рестарт на **каждую** стратегию |
-| выбор стратегии | Lua `scan_pick` читает id из `/dev/shm` | аргументы `--lua-desync` в новом процессе |
-| когда | обычный `scan`/`pair`/`full` | `--classic`, `--probe-backend classic`, fan-out волны |
-| код | `batch_service` + `lua_bridge_ipc` | `nfqws2.start_daemon` на item |
+| nfqws2 | один демон на **батч** стратегий | `start_daemon` на conf / стратегию |
+| выбор стратегии | Lua `scan_pick` читает id из `/dev/shm` | аргументы `--lua-desync` в процессе |
+| код | `batch_service` + `lua_bridge_ipc` | `nfqws2.start_daemon` / `TestRunner` |
 
-Приоритет выбора: `--classic` > `--probe-backend` > `--lua-bridge` > `BLOCKCHECKS_PROBE_BACKEND` > дефолт `lua_bridge`.
-
-`--lua-bridge-compare` гоняет **оба** и пишет drift (для `dev/release_smoke.sh`, не для ежедневного скана). Fan-out (`--fan-out` / `curl_parallel>1` без AQ) всегда ходит в classic на волне — смешанный curl-батч не умеет горячую смену instance id.
+`--classic` / `--probe-backend classic` / `BLOCKCHECKS_PROBE_BACKEND=classic` → warning + map на lua_bridge. Fan-out (`--fan-out` / `--curl-parallel N`) — one-shot на волне доменов, не scan_pick.
 
 Подробности shm-файлов и `smart_fallback`: [custom_lua.md](custom_lua.md).
 

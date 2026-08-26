@@ -62,9 +62,8 @@ def _args(**over):
         skip_dns_audit=False,
         allow_dns_hijack=False,
         doh_server=None,
-        lua_bridge=False,
+        lua_bridge=True,
         bridge_batch=500,
-        lua_bridge_compare=False,
         lua_extra=None,
     )
     base.update(over)

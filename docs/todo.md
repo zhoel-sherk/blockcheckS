@@ -17,15 +17,13 @@
 
 ### lua_bridge
 
-Один процесс nfqws2 на батч стратегий: Python пишет id в `/dev/shm`, Lua `scan_pick` выбирает instance. Дефолт с 1.3.1 (`--classic` — старый путь «рестарт на каждую стратегию»). Документ: [custom_lua.md](custom_lua.md).
+Дефолт с 1.3.1 — lua_bridge. Campaign `--classic` (рестарт nfqws2 на каждую стратегию) **удалён**. Документ: [custom_lua.md](custom_lua.md).
 
 Lua `smart_fallback` уже пишет в `events.ndjson` события вроде `rst_in` / `retrans` — «DPI уже убил поток, ждать curl timeout бессмысленно». Python **ещё не** читает этот поток во время пробы: `ProbeBatchService` ждёт полный curl timeout даже когда Lua уже знает FAIL.
 
 - [ ] **Ранний abort по IPC.** Пока идёт curl, поллить `events.ndjson` (десятки мс). При `STRATEGY_FAIL` оборвать пробу и записать `fail_phase`, не дожидаясь `--timeout`. Код: `service/batch_service.py`, `lua/blockchecks/scan_bridge.lua`. Готово, когда FAIL-тяжёлый `bs scan` заметно короче wall-time и нет ложных PASS из-за гонки.
 
-Флаг `--lua-bridge-compare` гоняет classic **и** bridge и логирует расхождение вердиктов. Нужен для отладки и `dev/release_smoke.sh`, не для обычного `bs scan`.
-
-- [ ] **Compare убрать с пользовательского CLI.** Оставить в smoke/CI. В `--help` не светить как основной путь. Не путать с `--classic` (это другой backend). Не строить `classic_persistent` (демон без shm) — низкий ROI. UDP voice (очередь 201) и unix-socket reload nfqws2 — не этот пункт.
+- [x] **Compare убрать с пользовательского CLI.** `--lua-bridge-compare` снят; campaign classic batch вырезан. UDP voice (очередь 201) и unix-socket reload nfqws2 — не этот пункт.
 
 
 

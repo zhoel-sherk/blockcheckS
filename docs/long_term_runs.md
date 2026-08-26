@@ -11,7 +11,7 @@ the full pool (incl. the new Geneva/Flowseal audit families).
 | A | `logs/run_A_base.db` | Adaptive baseline | coverage.txt, bridge-batch 10, timeout 2, lua-bridge (AQ default ON since 1.3.1; scripts pass `--adaptive-epsilon 0.1` explicitly) |
 | B | `logs/run_B_new.db` | Full new pool | coverage.txt, `--max 30000`, timeout 2, `--scan-level full`, `geneva.lua` |
 | C | `logs/run_C_adaptive.db` | Adaptive + fan-out | `--fan-out --adaptive-epsilon 0.1` (AQ + fan-out; `--adaptive` redundant — default ON) |
-| D | `logs/run_D_classic.db` | Classic backend | `--classic` (no lua-bridge) |
+| D | *(retired)* | Campaign classic | per-strategy nfqws2 restart — **removed**; use A |
 | E | `logs/run_E_flowseal.db` | Flowseal-only | `--tcp-sources flowseal` |
 | F | `logs/run_F_stable.db` | Stable repeats | `--repeats 3 --repeats-mode stable` |
 | G | `logs/run_G_udp_voice.db` | Discord-voice UDP | `bs pair` generate_udp full, `custom,standard_udp,configs,flowseal`, `--udp-bypass`, EP `35.217.48.152:50004` + `--discover-dns`; **not** in A→F |

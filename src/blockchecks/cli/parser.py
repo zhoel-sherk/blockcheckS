@@ -98,7 +98,7 @@ def add_adaptive_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument(
         "--fan-out",
         action="store_true",
-        help="Shorthand: adaptive with curl-parallel>=4",
+        help="Alias: raise --curl-parallel to at least 4 (one strategy × N domains)",
     )
     g.add_argument(
         "--adaptive-epsilon",
@@ -177,42 +177,25 @@ def add_curl_repeats_args(
         )
 
 
-def add_backend_args(parser: argparse.ArgumentParser) -> None:
-    """Probe-backend selection shared by all commands.
-
-    Precedence: ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` >
-    ``BLOCKCHECKS_PROBE_BACKEND`` (default lua_bridge). ``--classic`` /
-    ``--probe-backend`` are meaningful everywhere (incl. single tcp/udp);
-    lua-specific flags are added only by ``add_lua_bridge_args``.
-    """
-    g = parser.add_argument_group("probe backend")
+def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
+    """Campaign TCP uses lua_bridge (scan_pick IPC). ``--classic`` is a no-op map."""
+    g = parser.add_argument_group("lua bridge (scan_pick IPC)")
     g.add_argument(
         "--classic",
         action="store_true",
-        help="Force legacy classic backend (per-strategy nfqws2 restart); "
-        "overrides --probe-backend / --lua-bridge / BLOCKCHECKS_PROBE_BACKEND",
+        help="Deprecated: ignored; campaign TCP always uses lua_bridge",
     )
     g.add_argument(
         "--probe-backend",
         choices=("classic", "lua_bridge"),
         default=None,
         metavar="{classic,lua_bridge}",
-        help="Explicit probe backend (default lua_bridge unless overridden)",
+        help="Deprecated: classic is mapped to lua_bridge",
     )
-
-
-def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
-    """nfqws2 Lua bridge: /dev/shm IPC and scan_pick batch (no per-strategy restart).
-
-    Precedence: ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` >
-    ``BLOCKCHECKS_PROBE_BACKEND``. Default backend is lua_bridge.
-    """
-    add_backend_args(parser)
-    g = parser.add_argument_group("lua bridge (scan_pick IPC)")
     g.add_argument(
         "--lua-bridge",
         action="store_true",
-        help="Hot-swap strategies via WRITABLE/shm (persistent nfqws2 per batch)",
+        help="Deprecated no-op (lua_bridge is the only campaign TCP backend)",
     )
     g.add_argument(
         "--bridge-batch",
@@ -222,16 +205,11 @@ def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
         help=f"Strategies per bridge conf window (default {DEFAULT_BRIDGE_BATCH})",
     )
     g.add_argument(
-        "--lua-bridge-compare",
-        action="store_true",
-        help="Run classic + bridge paths and log verdict drift",
-    )
-    g.add_argument(
         "--lua-extra",
         nargs="*",
         default=[],
         metavar="PATH",
-        help="Extra --lua-init=@ paths after zapret-auto (custom Lua hooks)",
+        help="Extra --lua-init=@ paths after zapret-auto (or BLOCKCHECKS_LUA_EXTRA)",
     )
 
 
@@ -246,10 +224,22 @@ def add_domain_filter_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_protocol_phase_args(parser: argparse.ArgumentParser) -> None:
-    """Skip HTTP / HTTP3 / TLS12 / TLS13 phases (same idea as GP ENABLE_*)."""
-    g = parser.add_argument_group("protocol phases (GP mirror)")
-    g.add_argument("--http-off", action="store_true", help="Skip HTTP :80 phase (= --no-http)")
-    g.add_argument("--http3-off", action="store_true", help="Skip QUIC HTTP/3 phase (= --no-quic)")
+    """GP leftover aliases: ``--http-off``/``--http3-off`` share dests with ``--no-*``."""
+    g = parser.add_argument_group("protocol phases (GP aliases)")
+    g.add_argument(
+        "--http-off",
+        dest="http",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="Alias of --no-http",
+    )
+    g.add_argument(
+        "--http3-off",
+        dest="quic",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="Alias of --no-quic",
+    )
     g.add_argument(
         "--tls12-off",
         action="store_true",
@@ -294,7 +284,11 @@ def add_ip_pin_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_secure_dns_args(
-    parser: argparse.ArgumentParser, *, include_preflight: bool = False
+    parser: argparse.ArgumentParser,
+    *,
+    include_preflight: bool = False,
+    include_preflight_toggle: bool = True,
+    include_data_block_sync: bool = True,
 ) -> None:
     """DoH / UDP DNS flags; optional preflight group."""
     g = parser.add_argument_group("secure DNS")
@@ -311,20 +305,22 @@ def add_secure_dns_args(
         action="store_true",
         help="Continue even on sinkhole/bogon DNS (UDP≠DoH is a warning; DoH+auto-pin is the mitigation)",
     )
-    g.add_argument(
-        "--data-block-sync",
-        action="store_true",
-        help="Export XDG providers into data_block/.git (commit+push); warning if missing",
-    )
+    if include_data_block_sync:
+        g.add_argument(
+            "--data-block-sync",
+            action="store_true",
+            help="Export XDG providers into data_block/.git (commit+push); warning if missing",
+        )
     if not include_preflight:
         return
     g = parser.add_argument_group("preflight")
-    g.add_argument(
-        "--preflight",
-        action=_BOOL,
-        default=True,
-        help="Run preflight checks (prolog, IP-block, port-block, baseline; default: ON)",
-    )
+    if include_preflight_toggle:
+        g.add_argument(
+            "--preflight",
+            action=_BOOL,
+            default=True,
+            help="Run preflight checks (prolog, IP-block, port-block, baseline; default: ON)",
+        )
     g.add_argument(
         "--quick",
         action="store_true",
@@ -546,7 +542,7 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     parser.add_argument(
         "--migrate-cwd-db",
         action="store_true",
-        help="Copy ./state.db into XDG state.db if missing (off by default)",
+        help="Copy ./state.db into XDG state.db if missing (or BLOCKCHECKS_MIGRATE_CWD_DB=1)",
     )
 
     add_secure_dns_args(parser, include_preflight=True)
@@ -559,17 +555,18 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     add_curl_fanout_args(parser)
     add_profile_args(parser)
     add_lua_bridge_args(parser)
-    add_time_limit_args(parser, include_export=True)
+    add_time_limit_args(parser, include_export=(mode != "scan"))
 
-    parser.add_argument(
-        "--export-limit", type=int, default=3, help="Max strategies to export per category"
-    )
-    parser.add_argument(
-        "--common-only",
-        action=_BOOL,
-        default=True,
-        help="Export COMMON intersection (default: ON; --no-common-only for per-domain)",
-    )
+    if mode != "scan":
+        parser.add_argument(
+            "--export-limit", type=int, default=3, help="Max strategies to export per category"
+        )
+        parser.add_argument(
+            "--common-only",
+            action=_BOOL,
+            default=True,
+            help="Export COMMON intersection (default: ON; --no-common-only for per-domain)",
+        )
 
     if mode in ("pair", "full"):
         parser.add_argument("--ip", default=DEFAULT_VOICE_IP, help="Discord voice server IP")
@@ -649,6 +646,13 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
             action=_BOOL,
             default=True,
             help="Use settle profile when logs/settle_profile.json exists (default: ON)",
+        )
+        g.add_argument(
+            "--no-settle-profile",
+            dest="use_settle_profile",
+            action="store_false",
+            default=argparse.SUPPRESS,
+            help="Disable auto-load of settle profile (alias of --no-use-settle-profile)",
         )
 
     parser.add_argument(
@@ -731,7 +735,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--classic",
         action="store_true",
-        help="Use classic backend instead of lua_bridge",
+        help="Deprecated: ignored; serve always uses lua_bridge",
     )
     serve.add_argument(
         "--http-port",
@@ -772,11 +776,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tcp.add_argument("--qnum", type=int, default=200)
     tcp.add_argument("--ns")
-    add_secure_dns_args(tcp)
+    add_secure_dns_args(tcp, include_data_block_sync=False)
     add_system_deps_args(tcp)
     add_time_limit_args(tcp)
     add_curl_repeats_args(tcp)
-    add_backend_args(tcp)
     tcp.add_argument(
         "--debug",
         action="store_true",
@@ -844,7 +847,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
     )
-    add_backend_args(udp)
     add_system_deps_args(udp)
 
     scan = sub.add_parser("scan", help="Async TCP strategy batch scan")
@@ -886,7 +888,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
     )
-    add_secure_dns_args(preflight, include_preflight=True)
+    add_secure_dns_args(
+        preflight, include_preflight=True, include_preflight_toggle=False
+    )
     add_domain_filter_args(preflight)
     add_system_deps_args(preflight)
 

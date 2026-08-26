@@ -3,14 +3,8 @@
 #
 # Usage:
 #   bash dev/smoke_scan.sh [backend] [domain]
-#     backend: default | classic | bridge | compare   (default: default)
-#     domain:  host to scan (default discord.com)
-#
-# Backend selection:
-#   default  → no flag (lua_bridge is standard)
-#   classic  → --classic
-#   bridge   → --probe-backend lua_bridge
-#   compare  → --lua-bridge-compare (dual path + drift log)
+#     backend: default | classic | bridge   (default: default)
+#   classic is accepted but maps to lua_bridge.
 #
 # Verifies the chosen backend appears in the batch line and prints PASS/FAIL.
 set -euo pipefail
@@ -36,8 +30,7 @@ case "$BACKEND" in
   default)  BACKEND_ARGS=() ;;
   classic)  BACKEND_ARGS=(--classic) ;;
   bridge)   BACKEND_ARGS=(--probe-backend lua_bridge) ;;
-  compare)  BACKEND_ARGS=(--lua-bridge-compare) ;;
-  *) echo "ERROR: unknown backend '$BACKEND' (default|classic|bridge|compare)" >&2; exit 2 ;;
+  *) echo "ERROR: unknown backend '$BACKEND' (default|classic|bridge)" >&2; exit 2 ;;
 esac
 
 echo "=== smoke_scan backend=$BACKEND domain=$DOMAIN $(date -Is) ===" | tee "$LOG"

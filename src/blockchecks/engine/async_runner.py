@@ -25,7 +25,7 @@ from blockchecks.service.batch_service import ProbeBatchService
 from blockchecks.service.in_ns_workers import RETRY_IP_TIMEOUT  # noqa: F401
 from blockchecks.service.netns_pool import NetNsPool
 from blockchecks.service.nfqws2 import start_daemon as _nfqws2_daemon  # noqa: F401
-from blockchecks.terminal import RED, RESET, status_tag
+from blockchecks.terminal import status_tag
 
 log = logging.getLogger(__name__)
 
@@ -91,9 +91,8 @@ class AsyncTestRunner:
         quick_break: bool = False,
         try_wssize: bool = False,
         settle_profile: SettleProfile | None = None,
-        lua_bridge: bool = False,
+        lua_bridge: bool = True,
         bridge_batch: int = 500,
-        lua_bridge_compare: bool = False,
         lua_extra: list[str] | None = None,
         netns_base: str | None = None,
     ):
@@ -124,7 +123,6 @@ class AsyncTestRunner:
         self._timing_override_logged: set[str] = set()
         self.lua_bridge = lua_bridge
         self.bridge_batch = max(1, bridge_batch)
-        self.lua_bridge_compare = lua_bridge_compare
         self.lua_extra = list(lua_extra or [])
         self._probe_gen = 0
         self._batch_id = 0
@@ -187,17 +185,15 @@ class AsyncTestRunner:
         )
 
     def _probe_service(self, backend: str) -> ProbeBatchService:
-        monitor = self.memory_monitor
-        if backend == "lua_bridge":
-            monitor = self.ensure_memory_monitor()
+        del backend
         return ProbeBatchService(
             BatchProbeConfig(
-                backend=backend,
+                backend="lua_bridge",
                 batch_size=self.bridge_batch,
                 lua_extra=tuple(self.lua_extra),
             ),
             self._make_probe_deps(),
-            memory_monitor=monitor,
+            memory_monitor=self.ensure_memory_monitor(),
         )
 
     async def _run_probe_batch(
@@ -256,7 +252,11 @@ class AsyncTestRunner:
         return await self._dns_pin.probe_pin_ip(domain, ip)
 
     async def stop(self):
-        """Drain queue then destroy netns pool."""
+        """Drain queue then destroy netns pool (kills persistent curl workers)."""
+        from blockchecks.service.probe import release_curl_probe_worker
+
+        for ns_name in list(self.pool._names):
+            release_curl_probe_worker(ns_name)
         await self.pool.drain()
         await asyncio.to_thread(self.pool.destroy_all)
 
@@ -322,40 +322,10 @@ class AsyncTestRunner:
     async def test_batch_tcp(
         self, strategies: list[StrategyItem], domain: str, timeout: float = 5.0
     ) -> list[TcpTestResult]:
-        """Parallel batch of TCP strategy tests (results in input order)."""
+        """Parallel batch of TCP strategy tests (lua_bridge, results in input order)."""
         if not strategies:
             return []
-
-        if self.lua_bridge_compare:
-            classic = await self._test_batch_tcp_classic(strategies, domain, timeout)
-            bridge = await self._test_batch_tcp_bridge(strategies, domain, timeout)
-            for c, b in zip(classic, bridge, strict=False):
-                if c.success != b.success or c.http_code != b.http_code:
-                    log.info(
-                        "%s",
-                        f"  {RED}BRIDGE_COMPARE drift: {c.item.label[:24]} "
-                        f"classic={c.success}/{c.http_code} bridge={b.success}/{b.http_code}{RESET}",
-                    )
-            return bridge
-
-        if self.lua_bridge:
-            return await self._test_batch_tcp_bridge(strategies, domain, timeout)
-
-        return await self._test_batch_tcp_classic(strategies, domain, timeout)
-
-    async def _test_batch_tcp_classic(
-        self, strategies: list[StrategyItem], domain: str, timeout: float = 5.0
-    ) -> list[TcpTestResult]:
-        if not strategies:
-            return []
-        scheduler = BatchScheduler(self.bridge_batch)
-        batches = scheduler.iter_batches(strategies)
-        nested = await asyncio.gather(
-            *(self._run_probe_batch(batch, domain, timeout, "classic") for batch in batches)
-        )
-        all_results = [r for batch_out in nested for r in batch_out]
-        self._print_tcp_batch_results(all_results)
-        return all_results
+        return await self._test_batch_tcp_bridge(strategies, domain, timeout)
 
     async def _test_batch_tcp_bridge(
         self, strategies: list[StrategyItem], domain: str, timeout: float = 5.0

@@ -411,7 +411,7 @@ async def get_series_status() -> dict[str, Any]:
         val = _argv_flag_value(argv, flag)
         if val is not None:
             payload[dest] = val
-    payload["backend"] = "classic" if "--classic" in argv else "lua_bridge"
+    payload["backend"] = "lua_bridge"
     # Adaptive queue is ON by default (1.3.1+): it is disabled only by an
     # explicit --no-adaptive. The legacy "--adaptive"/"--fan-out" flags are
     # optional and their absence says nothing about the queue state.

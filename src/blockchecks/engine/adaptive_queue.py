@@ -551,14 +551,33 @@ class AdaptiveJobQueue:
         weights: ScanWeights | None = None,
         epsilon: float = 0.1,
         seed: int | None = None,
+        skip_domains: set[str] | None = None,
+        skip_keys: set[tuple[str, str]] | None = None,
     ) -> AdaptiveJobQueue:
-        """Seed queue with full strategy × domain matrix."""
+        """Seed queue with strategy × domain matrix, skipping known-dead work.
+
+        Quarantined domains (``skip_domains``) and resume-complete pairs
+        (``skip_keys``) are never packed into ``AdaptiveJob``. Resume keys are
+        recorded in ``_done`` so fan-out cannot re-enqueue them.
+        """
+        skip_domains = set() if skip_domains is None else skip_domains
+        skip_keys = set() if skip_keys is None else skip_keys
         q = cls(weights=weights, epsilon=epsilon, seed=seed)
         q._all_domains = list(domains)
         q._cluster_index = _cluster_domain_index(domains)
-        jobs = [AdaptiveJob.from_item(item, dom) for item in items for dom in domains]
-        q.enqueue_many(jobs)
-        q.metrics.set_half_mark(len(jobs))
+        if skip_domains:
+            q.excluded_domains |= skip_domains
+        for item in items:
+            label = item.label
+            for dom in domains:
+                if dom in skip_domains:
+                    continue
+                key = (label, dom)
+                if key in skip_keys:
+                    q._done.add(key)
+                    continue
+                q.enqueue(AdaptiveJob.from_item(item, dom))
+        q.metrics.set_half_mark(q.metrics.total_enqueued)
         return q
 
     def pending_domains_for_strategy(self, label: str) -> list[str]:

@@ -122,7 +122,7 @@ def bench_nfqws2(strategies: list[str], domain: str) -> dict:
             "sudo", "-n", str(ROOT / ".venv/bin/bs"), "scan",
             "-d", domain, "--user-matrix", matrix,
             "--max", str(len(strategies)), "--parallel", "2",
-            "--scan-level", "fast", "--classic",
+            "--scan-level", "fast",
             "--skip-deps-check", "--skip-dns-audit", "--skip-prolog",
             "--skip-ip-block", "--skip-port-block", "--skip-baseline",
             "--no-wssize", "--timeout", "4",

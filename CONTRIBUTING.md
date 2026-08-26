@@ -99,10 +99,10 @@ See [`.gitignore`](.gitignore). Never commit:
 
 ## Known limitations
 
-- Live integration tests (`tests/integration/test_lua_bridge_compare.py`) run
-  real `bs scan` subprocesses under `sudo -n`; they must run with a **clean
-  `run.lock`** (no concurrent/leftover `bs scan`) or the active-run lock makes
-  them fail fast. Use `bs stop --force` before a full `-m integration` run.
+- Live integration tests under `tests/integration/` (sqlite, firewall) run
+  without campaign `--classic` / `--lua-bridge-compare` (those paths are gone).
+  Full nfqws2 scans still need a **clean `run.lock`**. Use `bs stop --force`
+  before a full `-m integration` run.
 
 ## Install note
 

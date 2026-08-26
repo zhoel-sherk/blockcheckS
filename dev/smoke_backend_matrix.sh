@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-# smoke_backend_matrix.sh — functional test of probe-backend selection.
+# smoke_backend_matrix.sh — campaign TCP is lua_bridge only.
 #
-# Runs the same tiny user matrix through every backend mode and asserts the
-# correct backend appears in the batch line:
-#   default → backend=lua_bridge
-#   classic → backend=classic          (--classic)
-#   probe   → backend=classic          (--probe-backend)
-#   env     → lua_bridge or classic    (BLOCKCHECKS_PROBE_BACKEND)
-#   compare → two batches (classic + lua_bridge), no BRIDGE_DRIFT
-#
-# Fails (exit 1) if any backend line is missing or wrong.
+# --classic / env classic still parse and must log mapping + backend=lua_bridge.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -38,7 +30,7 @@ run_and_check() {
   local out
   out=$(sudo -n env -u BLOCKCHECKS_PROBE_BACKEND "$BS" scan "${COMMON[@]}" "$@" 2>&1 || true)
   echo "--- $label ---" | tee -a "$LOG"
-  echo "$out" | grep -E "backend=|DRIFT|drift" | tee -a "$LOG"
+  echo "$out" | grep -E "backend=|deprecated|mapping to lua_bridge" | tee -a "$LOG"
   if ! echo "$out" | grep -q "backend=$expected"; then
     echo "FAIL: expected backend=$expected, got:" | tee -a "$LOG"
     echo "$out" | tail -5 | tee -a "$LOG"
@@ -50,26 +42,17 @@ run_and_check() {
 FAILED=0
 
 run_and_check "default(no flag)" "lua_bridge" || FAILED=1
-run_and_check "--classic" "classic" --classic || FAILED=1
-run_and_check "--probe-backend classic" "classic" --probe-backend classic || FAILED=1
+run_and_check "--classic (maps)" "lua_bridge" --classic || FAILED=1
+run_and_check "--probe-backend classic (maps)" "lua_bridge" --probe-backend classic || FAILED=1
 run_and_check "--probe-backend lua_bridge" "lua_bridge" --probe-backend lua_bridge || FAILED=1
 
-echo "--- env BLOCKCHECKS_PROBE_BACKEND=classic (no flag) ---" | tee -a "$LOG"
+echo "--- env BLOCKCHECKS_PROBE_BACKEND=classic (maps) ---" | tee -a "$LOG"
 OUT_ENV=$(sudo -n env BLOCKCHECKS_PROBE_BACKEND=classic "$BS" scan "${COMMON[@]}" 2>&1 || true)
-echo "$OUT_ENV" | grep "backend=" | tee -a "$LOG"
-if ! echo "$OUT_ENV" | grep -q "backend=classic"; then
-  echo "FAIL: env override did not force classic" | tee -a "$LOG"; FAILED=1
+echo "$OUT_ENV" | grep -E "backend=|mapping to lua_bridge" | tee -a "$LOG"
+if ! echo "$OUT_ENV" | grep -q "backend=lua_bridge"; then
+  echo "FAIL: env classic did not map to lua_bridge" | tee -a "$LOG"; FAILED=1
 else
-  echo "OK: env → backend=classic" | tee -a "$LOG"
-fi
-
-echo "--- compare (dual classic + lua_bridge) ---" | tee -a "$LOG"
-OUT_CMP=$(sudo -n env -u BLOCKCHECKS_PROBE_BACKEND "$BS" scan "${COMMON[@]}" --lua-bridge-compare 2>&1 || true)
-echo "$OUT_CMP" | grep -E "backend=|DRIFT" | tee -a "$LOG"
-if echo "$OUT_CMP" | grep -q "DRIFT"; then
-  echo "FAIL: BRIDGE_DRIFT detected in compare" | tee -a "$LOG"; FAILED=1
-else
-  echo "OK: compare — no drift" | tee -a "$LOG"
+  echo "OK: env classic → backend=lua_bridge" | tee -a "$LOG"
 fi
 
 echo ""

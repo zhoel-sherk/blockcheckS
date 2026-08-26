@@ -91,7 +91,6 @@ def _args(**over):
         settle_profile=None,
         lua_bridge=False,
         bridge_batch=500,
-        lua_bridge_compare=False,
         lua_extra=None,
     )
     base.update(over)
@@ -427,7 +426,7 @@ def test_build_async_runner():
     args = _args()
     ctx = build_full_run_context(args, MagicMock(), ["a.com"], "f", None, [])
     with (
-        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="lua_bridge"),
         patch("blockchecks.main_phases.AsyncTestRunner") as RunnerCls,
     ):
         build_async_runner(ctx)
@@ -502,7 +501,7 @@ def test_tcp_coverage_phase_sequential():
     ctx.total_tcp_jobs = 1
     with (
         patch("blockchecks.main_phases.warn_zero_pass_domains", new=AsyncMock(return_value=[])),
-        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+        patch("blockchecks.main_phases._run_tcp_sequential_bridge", new=AsyncMock()),
     ):
         asyncio.run(run_tcp_coverage_phase(ctx))
 
@@ -591,13 +590,12 @@ def test_run_quic_phase_runs():
     ctx = _mk_ctx(quic_items=[MagicMock()])
     ctx.args.tcp_only = False
     ctx.args.no_quic = False
-    ctx.runner.test_quic = AsyncMock(return_value=MagicMock(success=True))
+    ctx.runner._run_probe_batch = AsyncMock(return_value=[MagicMock(success=True)])
     with (
         patch("blockchecks.main_phases.supports_http3", return_value=True),
-        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
     ):
         asyncio.run(run_quic_phase(ctx))
-    ctx.runner.test_quic.assert_awaited()
+    ctx.runner._run_probe_batch.assert_awaited()
 
 
 def test_run_pairs_phase_skipped_tcp_only():
@@ -732,10 +730,9 @@ def test_tcp_sequential_runs_jobs():
     ctx = _mk_ctx()
     ctx.tcp_items = [MagicMock()]
     progress = MagicMock()
-    ctx.runner.test_tcp = AsyncMock(return_value=MagicMock(success=True))
-    with patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
+    with patch("blockchecks.main_phases._run_tcp_sequential_bridge", new=AsyncMock()) as br:
         asyncio.run(_run_tcp_sequential(ctx, progress))
-    ctx.runner.test_tcp.assert_awaited()
+    br.assert_awaited()
 
 
 def test_tcp_sequential_stop_event():
@@ -745,7 +742,7 @@ def test_tcp_sequential_stop_event():
     ctx.tcp_items = [MagicMock()]
     ctx.stop.set()
     progress = MagicMock()
-    with patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
+    with patch("blockchecks.main_phases._run_tcp_sequential_bridge", new=AsyncMock()):
         asyncio.run(_run_tcp_sequential(ctx, progress))
     ctx.runner.test_tcp.assert_not_awaited()
 
@@ -760,7 +757,7 @@ def test_tcp_sequential_stop_does_not_leak_coroutines():
     progress = MagicMock()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        with patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"):
+        with patch("blockchecks.main_phases._run_tcp_sequential_bridge", new=AsyncMock()):
             asyncio.run(_run_tcp_sequential(ctx, progress))
     assert not any("never awaited" in str(w.message) for w in caught)
 
@@ -797,7 +794,7 @@ def test_tcp_adaptive():
             new=AsyncMock(return_value=([MagicMock()], 0)),
         ),
         patch("blockchecks.main_phases.run_adaptive_tcp", new=AsyncMock(return_value=aq)) as run_tcp,
-        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="lua_bridge"),
         patch("blockchecks.main_phases.persist_adaptive_weights", new=AsyncMock()),
     ):
         asyncio.run(_run_tcp_adaptive(ctx, progress))
@@ -835,7 +832,7 @@ def test_tcp_fanout():
     ctx.curl_parallel = 2
     progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
     with (
-        patch("blockchecks.main_phases.resolve_probe_backend", return_value="classic"),
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="lua_bridge"),
         patch("blockchecks.main_phases.fanout_batches", return_value=[["a.com", "b.com"]]),
         patch.object(
             ctx.runner,

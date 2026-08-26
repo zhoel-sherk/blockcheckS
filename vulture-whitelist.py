@@ -152,7 +152,6 @@ dbg_validate_strategy_syntax  # unused function (src/blockchecks/mcp/server.py:6
 dbg_dump_pool_state  # unused function (src/blockchecks/mcp/server.py:665)
 get_presets_manifest  # unused function (src/blockchecks/mcp/server.py:682)
 get_active_run_telemetry  # unused function (src/blockchecks/mcp/server.py:691)
-compare_classic  # unused variable (src/blockchecks/service/batch_models.py:35)
 _.group_jobs_by_domain  # unused method (src/blockchecks/service/batch_scheduler.py:26)
 recycled  # unused variable (src/blockchecks/service/batch_service.py:186)
 recycled  # unused variable (src/blockchecks/service/batch_service.py:195)

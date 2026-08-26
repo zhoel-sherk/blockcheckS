@@ -520,7 +520,6 @@ def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
         settle_profile=ctx.settle_profile,
         lua_bridge=resolve_probe_backend(args) == "lua_bridge",
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
-        lua_bridge_compare=bool(getattr(args, "lua_bridge_compare", False)),
         lua_extra=_lua_extra_for(args, getattr(ctx, "triage", None)),
         disable_ech=disable_ech_from(args, getattr(ctx, "triage", None)),
     )
@@ -625,9 +624,6 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
             reprobe_failed=reprobe_failed
         )
 
-    async def _resume_job(job):
-        return (job.item.label, job.domain) in completed_tcp
-
     provider_store = None
     try:
         from blockchecks.data_block.provider import get_provider_dir
@@ -645,25 +641,11 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     if qcfg is not None:
         quarantine = DomainQuarantine(qcfg)
 
-    queue, skipped = await build_adaptive_queue(
-        ctx.tcp_items,
-        ctx.domains,
-        ctx.db,
-        epsilon=getattr(args, "adaptive_epsilon", 0.1),
-        load_weights=not getattr(args, "no_adaptive_weights", False),
-        resume_check=_resume_job if args.resume else None,
-        provider_store=provider_store,
-        triage=ctx.triage,
-        quarantine=quarantine,
-    )
+    # Seed from DB *before* packing so dead domains never become AdaptiveJob.
     if qcfg is not None and ctx.db is not None and quarantine is not None:
         try:
             rows = await ctx.db.domain_pass_rows()
             seeded = quarantine.seed_from_rows(rows)
-            # Re-sync hard exclusions: build_adaptive_queue snapshotted
-            # exclude_domains BEFORE seeding filled the quarantine object.
-            if hasattr(queue, "excluded_domains"):
-                queue.excluded_domains |= quarantine.exclude_domains()
             if seeded:
                 log.warning(
                     "%s",
@@ -688,6 +670,20 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
                         break
         except Exception as exc:
             log.warning("%s", f"  [quarantine] seed skipped ({exc})")
+
+    queue, skipped = await build_adaptive_queue(
+        ctx.tcp_items,
+        ctx.domains,
+        ctx.db,
+        epsilon=getattr(args, "adaptive_epsilon", 0.1),
+        load_weights=not getattr(args, "no_adaptive_weights", False),
+        skip_keys=completed_tcp if args.resume else None,
+        provider_store=provider_store,
+        triage=ctx.triage,
+        quarantine=quarantine,
+    )
+    if quarantine is not None and hasattr(queue, "excluded_domains"):
+        queue.excluded_domains |= quarantine.exclude_domains()
     ctx.quarantine = quarantine
     progress.done = skipped
     progress.report()
@@ -823,37 +819,7 @@ async def _run_tcp_fanout(ctx: FullRunContext, progress: TcpProgress) -> None:
 
 
 async def _run_tcp_sequential(ctx: FullRunContext, progress: TcpProgress) -> None:
-    args = ctx.args
-    if resolve_probe_backend(args) == "lua_bridge":
-        await _run_tcp_sequential_bridge(ctx, progress)
-        return
-
-    async def _one(item: StrategyItem, domain: str):
-        if ctx.stop.is_set():
-            return
-        if args.resume and await ctx.db.has_tcp_result(item.label, domain):
-            progress.skipped += 1
-            progress.done += 1
-            return
-        r = await ctx.runner.test_tcp(item, domain, timeout=args.timeout)
-        progress.done += 1
-        if r.success:
-            progress.passed += 1
-        progress.report()
-
-    async def _one_pair(pair: tuple[StrategyItem, str]):
-        item, domain = pair
-        await _one(item, domain)
-
-    stop_msg = f"  {YELLOW}Stopped by signal{RESET}"
-    qdead = ctx.quarantine.exclude_domains() if ctx.quarantine else set()
-    jobs = [
-        (item, domain)
-        for item in ctx.tcp_items
-        for domain in ctx.domains
-        if domain not in qdead
-    ]
-    await _run_in_chunks(jobs, _one_pair, chunk=200, stop=ctx.stop, on_stop=stop_msg)
+    await _run_tcp_sequential_bridge(ctx, progress)
 
 
 async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress) -> None:
@@ -1091,7 +1057,7 @@ async def run_quic_phase(ctx: FullRunContext) -> None:
 
         quic_done = quic_passed = quic_skipped = 0
 
-        use_bridge = resolve_probe_backend(args) == "lua_bridge" and not args.tcp_only
+        use_bridge = not args.tcp_only
 
         async def _one_quic(item: StrategyItem, domain: str):
             nonlocal quic_done, quic_skipped, quic_passed

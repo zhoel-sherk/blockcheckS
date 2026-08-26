@@ -51,12 +51,12 @@ check_backend() {
   else bad "backend '$label' expected=$expected"; echo "$out" | tail -4; fi
 }
 check_backend "default" "lua_bridge"
-check_backend "--classic" "classic" --classic
-check_backend "--probe-backend classic" "classic" --probe-backend classic
+check_backend "--classic maps" "lua_bridge" --classic
+check_backend "--probe-backend classic maps" "lua_bridge" --probe-backend classic
 sudo -n "$BS" stop --force >/dev/null 2>&1 || true
 OUT_ENV=$(sudo -n env BLOCKCHECKS_PROBE_BACKEND=classic "$BS" scan "${COMMON[@]}" 2>&1 || true)
-if echo "$OUT_ENV" | grep -q "backend=classic"; then ok "env BLOCKCHECKS_PROBE_BACKEND=classic"
-else bad "env BLOCKCHECKS_PROBE_BACKEND=classic"; echo "$OUT_ENV" | tail -4; fi
+if echo "$OUT_ENV" | grep -q "backend=lua_bridge"; then ok "env BLOCKCHECKS_PROBE_BACKEND=classic maps"
+else bad "env BLOCKCHECKS_PROBE_BACKEND=classic maps"; echo "$OUT_ENV" | tail -4; fi
 rm -f "$MATRIX"
 
 # ────────────────────────────────────────────────────────────────
@@ -155,7 +155,7 @@ else bad "host UDP $VOICE_IP:$VOICE_PORT not PASS"; tail -8 "$LOG7"; fi
 
 LOG7B="$DIR/step7_pair.log"
 PAIR_DB="$DIR/step7_pair.db"
-sudo -n "$BS" pair -d discord.com --classic --generate --tcp-sources flowseal,fake --udp-sources custom,standard_udp,configs \
+sudo -n "$BS" pair -d discord.com --generate --tcp-sources flowseal,fake --udp-sources custom,standard_udp,configs \
   --max 5 --udp-bypass --ip "$VOICE_IP" --port "$VOICE_PORT" --parallel 2 --udp-timeout 3 \
   --scan-level fast --skip-deps-check --skip-dns-audit --skip-prolog --skip-ip-block --skip-port-block \
   --skip-baseline --allow-dns-hijack --db "$PAIR_DB" \

@@ -35,7 +35,7 @@ bash dev/mutmut_gate.sh
 |---|---|---|---|
 | `smoke_scan.sh` | Короткий `bs scan` на 3 fake-стратегиях × discord.com (`fast --quick`). Аргумент: `default\|classic\|bridge\|compare` | ~1 мин | минимальные риски |
 | `smoke_full_quick.sh <домен> <N>` | Time-boxed `bs full` через всю вертикаль: пул netns → lua_bridge → deadline `--max-timem` → БД → экспорт conf/user.list/summary; EXIT-trap = полный reset хоста | 1–3 мин | лучший «жив ли стек» после правок |
-| `smoke_backend_matrix.sh` | 6 прогонов одной матрицы: default / `--classic` / `--probe-backend *` / env / compare-drift | 3–6 мин | главный тест lua-моста |
+| `smoke_backend_matrix.sh` | lua_bridge + deprecated `--classic` maps | 3–6 мин | главный тест lua-моста |
 | `smoke_flags.sh` | CLI-surface: `-h` всех подкоманд, отказ на мусорных флагах, ~18 live-прогонов редких флагов, `bs serve` + HTTP health/auth | 15–30 мин | каждый шаг делает `bs stop --force` |
 | `smoke_20min.sh` | 9 шагов: backend-matrix, TLS-классификация 4xx, живой прогресс `[N/M]`, export, `--resume`, GV1, UDP voice+pair, HTTP plaintext, serve | 20–35 мин | без trap; `stop --force` на старте |
 | `release_smoke.sh` | Релизный `bs full --fan-out` benchmark preset → chown → `aq_benchmark.py` → shortlist round-trip | ~20 мин | fan-out жёстче всех к хосту; внешний timeout есть |

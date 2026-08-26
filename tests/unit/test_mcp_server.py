@@ -390,7 +390,7 @@ async def test_get_series_status_classic_backend(tmp_path, monkeypatch):
     _patch_run_control(monkeypatch, info)
 
     result = await get_series_status()
-    assert result["backend"] == "classic"
+    assert result["backend"] == "lua_bridge"
     assert result["scan_level"] == "full"
 
 

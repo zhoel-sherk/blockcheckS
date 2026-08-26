@@ -244,14 +244,8 @@ HTTP3_TIMEOUT = float(_env_or("BLOCKCHECKS_HTTP3_TIMEOUT", "3.0"))
 PROBE_DEFAULT_TIMEOUT = float(_env_or("BLOCKCHECKS_PROBE_TIMEOUT", "5.0"))
 
 
-def resolve_probe_backend(args) -> str:
-    """Resolve probe backend from flags/env.
-
-    Precedence: ``--classic`` > ``--probe-backend`` > ``--lua-bridge`` >
-    ``BLOCKCHECKS_PROBE_BACKEND`` > default ``lua_bridge``.
-
-    Returns one of ``"classic"`` / ``"lua_bridge"``.
-    """
+def _requested_probe_backend(args) -> str | None:
+    """Return the backend the operator asked for, or None for default."""
     if getattr(args, "classic", False):
         return "classic"
     pb = getattr(args, "probe_backend", None)
@@ -262,7 +256,23 @@ def resolve_probe_backend(args) -> str:
     env = os.environ.get("BLOCKCHECKS_PROBE_BACKEND", "").strip().lower()
     if env in ("classic", "lua_bridge"):
         return env
-    return DEFAULT_PROBE_BACKEND
+    return None
+
+
+def resolve_probe_backend(args) -> str:
+    """Campaign TCP backend is always ``lua_bridge``.
+
+    ``--classic`` / ``--probe-backend classic`` / ``BLOCKCHECKS_PROBE_BACKEND=classic``
+    log a warning and map to lua_bridge. One-shot ``bs tcp`` / fan-out / composite
+    still use ``start_daemon`` and are not this resolver.
+    """
+    requested = _requested_probe_backend(args)
+    if requested == "classic":
+        log.warning(
+            "campaign --classic / probe-backend=classic is deprecated; "
+            "mapping to lua_bridge (per-strategy nfqws2 restart is gone)"
+        )
+    return "lua_bridge"
 
 
 def effective_default_pool_size(*, mem_soft_cap_kb: int = 1_500_000) -> int:

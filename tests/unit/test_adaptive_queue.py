@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from blockchecks.engine.adaptive_queue import (
@@ -259,3 +261,68 @@ async def test_filter_resume_pure_check():
     remaining = q.pop()
     assert remaining is not None
     assert remaining.domain == "youtube.com"
+
+
+def test_build_skips_quarantined_domains_not_pending():
+    """PERF-3: quarantined domains are never packed into AdaptiveJob."""
+    created: list[str] = []
+    orig = AdaptiveJob.from_item
+
+    def _spy(item, domain, *, fanout=False):
+        created.append(domain)
+        return orig(item, domain, fanout=fanout)
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    with patch.object(AdaptiveJob, "from_item", _spy):
+        q = AdaptiveJobQueue.build(
+            [item],
+            ["discord.com", "dead.example"],
+            skip_domains={"dead.example"},
+            epsilon=0.0,
+        )
+    assert "dead.example" not in created
+    assert all(job.domain != "dead.example" for job in q._pending.values())
+    assert "dead.example" in q.excluded_domains
+    assert len(q) == 1
+
+
+def test_build_skip_keys_never_allocated():
+    """PERF-3: resume-complete (label, domain) keys are not allocated."""
+    created: list[tuple[str, str]] = []
+    orig = AdaptiveJob.from_item
+
+    def _spy(item, domain, *, fanout=False):
+        created.append((item.label, domain))
+        return orig(item, domain, fanout=fanout)
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    with patch.object(AdaptiveJob, "from_item", _spy):
+        q = AdaptiveJobQueue.build(
+            [item],
+            ["discord.com", "discord.gg"],
+            skip_keys={("s1", "discord.com")},
+            epsilon=0.0,
+        )
+    assert ("s1", "discord.com") not in created
+    assert ("s1", "discord.com") not in q._pending
+    assert ("s1", "discord.com") in q._done
+    assert len(q) == 1
+
+
+def test_fanout_blocked_by_done_after_skip_keys():
+    """Resume skip_keys stay in _done so PASS fan-out cannot re-enqueue them."""
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue.build(
+        [item],
+        ["discord.com", "discord.gg"],
+        skip_keys={("s1", "discord.gg")},
+        epsilon=0.0,
+        seed=1,
+    )
+    job = q.pop()
+    assert job is not None
+    assert job.domain == "discord.com"
+    added = q.mark_done(job, passed=True)
+    assert added == 0
+    assert ("s1", "discord.gg") not in q._pending
+    assert ("s1", "discord.gg") in q._done

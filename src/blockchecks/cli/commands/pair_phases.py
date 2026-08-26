@@ -267,7 +267,6 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         and getattr(args, "protocol", "tls12") == "tls12",
         lua_bridge=resolve_probe_backend(args) == "lua_bridge",
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
-        lua_bridge_compare=bool(getattr(args, "lua_bridge_compare", False)),
         lua_extra=lua_extra,
     )
 
@@ -657,13 +656,13 @@ async def _run_pair_matrix_multi_ep(
 
 
 async def _seed_quarantine_from_db(db, quarantine, queue, qcfg) -> None:
-    """Pre-seed quarantine from campaign DB and re-sync AQ hard exclusions."""
+    """Pre-seed quarantine from campaign DB; re-sync AQ if *queue* is set."""
     if qcfg is None or db is None or quarantine is None:
         return
     try:
         rows = await db.domain_pass_rows()
         seeded = quarantine.seed_from_rows(rows)
-        if hasattr(queue, "excluded_domains"):
+        if queue is not None and hasattr(queue, "excluded_domains"):
             queue.excluded_domains |= quarantine.exclude_domains()
         if seeded:
             log.warning(
@@ -715,9 +714,6 @@ async def run_adaptive_pair_phase(
         + (f", curl-parallel={curl_parallel}" if curl_parallel > 1 else ""),
     )
 
-    async def _resume_job(job):
-        return (job.item.label, job.domain) in completed_tcp
-
     completed_tcp: set[tuple[str, str]] = set()
     if getattr(args, "resume", False):
         reprobe = getattr(args, "reprobe_failed", 0)
@@ -730,6 +726,7 @@ async def run_adaptive_pair_phase(
     qcfg = quarantine_from_args(args)
     if qcfg is not None:
         quarantine = DomainQuarantine(qcfg)
+        await _seed_quarantine_from_db(db, quarantine, None, qcfg)
 
     queue, skipped = await build_adaptive_queue(
         tcp_items,
@@ -737,11 +734,12 @@ async def run_adaptive_pair_phase(
         db,
         epsilon=getattr(args, "adaptive_epsilon", 0.1),
         load_weights=not getattr(args, "no_adaptive_weights", False),
-        resume_check=_resume_job if getattr(args, "resume", False) else None,
+        skip_keys=completed_tcp if getattr(args, "resume", False) else None,
         triage=getattr(args, "triage", None),
         quarantine=quarantine,
     )
-    await _seed_quarantine_from_db(db, quarantine, queue, qcfg)
+    if quarantine is not None and hasattr(queue, "excluded_domains"):
+        queue.excluded_domains |= quarantine.exclude_domains()
     log.info("%s", f"  AQ pending jobs: {len(queue)} (+{skipped} resume skip)")
     aq_result = await run_adaptive_tcp(
         runner,

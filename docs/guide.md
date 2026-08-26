@@ -203,22 +203,17 @@ sudo bs full --preset coverage-tcp --profile 20h   # только если ну�
 
 ---
 
-## Бэкенд пробы
+## Бэкенд пробы (campaign TCP)
 
-Дефолт с 1.3.1 — **lua_bridge**: один nfqws2 на батч, стратегия выбирается через
-`/dev/shm`. Старый путь (рестарт демона на каждую стратегию): `--classic`.
+Campaign `scan`/`pair`/`full` TCP всегда **lua_bridge**: один nfqws2 на батч, стратегия через `/dev/shm`. `--classic` / `--probe-backend classic` логируют warning и мапятся на lua_bridge.
+
+One-shot (`bs tcp`, `bs composite`, fan-out `--curl-parallel`) по-прежнему поднимает nfqws2 через `start_daemon` (не campaign-batch).
 
 ```bash
-sudo bs scan -d discord.com --generate --max 50          # lua_bridge
-sudo bs scan -d discord.com --generate --classic --max 50
+sudo bs scan -d discord.com --generate --max 50
 ```
 
-Приоритет: `--classic` > `--probe-backend` > `--lua-bridge` >
-`BLOCKCHECKS_PROBE_BACKEND`. Fan-out волны всегда classic. Сравнение обоих:
-`--lua-bridge-compare` (для `dev/release_smoke.sh`, не для ежедневного скана).
-
-Как это устроено: [architecture.md](architecture.md), Lua IPC:
-[custom_lua.md](custom_lua.md).
+Подробности: [architecture.md](architecture.md), Lua IPC: [custom_lua.md](custom_lua.md).
 
 ---
 

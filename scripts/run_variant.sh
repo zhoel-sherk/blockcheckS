@@ -4,7 +4,7 @@
 #   A  base          coverage.txt, bridge-batch 10, timeout 2, lua-bridge
 #   B  new           coverage.txt, full pool 30000, timeout 2, geneva.lua
 #   C  adaptive      base + --fan-out --adaptive (genetics boost)
-#   D  classic       base + --classic (no lua-bridge backend)
+#   D  retired       campaign --classic (per-strategy restart) removed
 #   E  flowseal      coverage.txt, --tcp-sources flowseal
 #   F  stable        base + --repeats 3 --repeats-mode stable
 #   G  udp_voice     bs pair Discord-UDP, --discover-dns, full generate_udp, loop to 20h
@@ -42,10 +42,8 @@ case "$VAR" in
     EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 2 --fan-out --adaptive --adaptive-epsilon 0.1"
     ;;
   D)
-    SESSION="bs-run-D"
-    DB="logs/run_D_classic.db"
-    OUT="logs/run_D_classic_export"
-    EXTRA="--bridge-batch 10 --no-wssize --no-settle-profile --timeout 2 --classic"
+    echo "variant D (campaign classic backend) is retired; use A (lua_bridge)" >&2
+    exit 2
     ;;
   E)
     SESSION="bs-run-E"

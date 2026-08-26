@@ -38,9 +38,11 @@ def _resolve_http_token(args) -> str | None:
 
 def cmd_serve(args) -> int:
     pool = int(getattr(args, "pool", 0) or 0) or None
+    if getattr(args, "classic", False):
+        log.warning("  [serve] --classic is deprecated; serve always uses lua_bridge")
     service = ProbeService(
         pool_size=pool,
-        lua_bridge=not bool(getattr(args, "classic", False)),
+        lua_bridge=True,
         bridge_batch=int(getattr(args, "bridge_batch", 500) or 500),
         default_timeout=float(getattr(args, "timeout", 3.0) or 3.0),
     )

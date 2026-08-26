@@ -32,51 +32,25 @@ lua/
 /opt/etc/nfqws2/lua/<file>` и рабочий `--lua-init=@/opt/etc/nfqws2/lua/<file>`,
 если стратегия использует такую функцию. См. `lua/custom/README.md`.
 
-## Backend map: что через Lua bridge, что через classic
+## Backend map: lua_bridge (campaign) vs one-shot
 
-Выбор backend: `--classic` > `--probe-backend` > `--lua-bridge` >
-`BLOCKCHECKS_PROBE_BACKEND` > default `lua_bridge` (`config.resolve_probe_backend`).
+Campaign TCP always uses lua_bridge (`config.resolve_probe_backend` maps `--classic` away).
 
 ```
 ┌─ Lua bridge (persistent nfqws2, /dev/shm IPC, один демон на батч) ─┐
-│                                                                     │
-│  • TCP массовый батч                                                │
-│      bs scan / bs pair        → test_batch_tcp  → lua_bridge        │
-│      bs full sequential       → _run_tcp_sequential_bridge          │
-│      bs full adaptive (AQ)    → run_adaptive_tcp_bridge             │
-│      --lua-bridge-compare     → dual (classic + bridge) + drift     │
-│  • QUIC/HTTP3 батч (при --lua-bridge)                               │
-│      bs full QUIC-фаза        → _run_probe_batch("lua_bridge")      │
-│        (bridge conf: --filter-udp=443 --filter-l7=quic              │
-│         --payload=quic_initial; probe через check_http3)            │
-│                                                                     │
+│  • TCP массовый батч  bs scan / pair / full sequential / AQ         │
+│  • QUIC/HTTP3 батч    bs full QUIC-фаза → _run_probe_batch          │
 └─────────────────────────────────────────────────────────────────────┘
 
-┌─ Classic (per-strategy nfqws2 restart) ───────────────────────────┐
-│                                                                   │
-│  • single TCP   bs tcp             → test_tcp → _run_tcp_check     │
-│  • fan-out      (несовместим с bridge)                             │
-│                  bs full --fan-out → test_tcp_domains              │
-│  • QUIC/HTTP3   bs full QUIC (classic)                             │
-│                  → test_quic → _run_quic_check (+ fallback         │
-│                    fake→badsum→ip_ttl при дропе)                   │
-│  • pair matrix  bs full / bs pair  → test_pair_matrix              │
-│                  (_run_tcp_check + _run_udp_check)                 │
-│  • UDP voice    discover / bs udp  → voice_udp_probe               │
-│                  (STUN → IP-discovery → burst >16KB)               │
-│                                                                   │
+┌─ One-shot nfqws2 (start_daemon, не campaign-batch) ───────────────┐
+│  • bs tcp / bs composite / fan-out (одна стратегия × N доменов)    │
+│  • pair matrix UDP + bs udp / voice                                │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
 ### Почему так
 
-- **Lua bridge** даёт выигрыш там, где много стратегий и их можно хот-свопить
-  в одном nfqws2: массовый TCP-батч (scan/pair/full), и теперь QUIC-батч.
-- **Classic остаётся** для:
-  - одиночных тестов (`bs tcp`/`bs udp`) — bridge не нужен;
-  - fan-out (одна стратегия × много доменов с curl_parallel — bridge
-    domain-agnostic, но fanout-волны несовместимы);
-  - pair matrix (нужны TCP- и UDP-демоны одновременно);
-  - UDP voice (единичный UDP-probe, не стратегия).
-- **QUIC fallback** (`fake→badsum→ip_ttl`) живёт в classic `test_quic`;
-  при bridge-батче fallback не применяется (используется базовая стратегия).
+- **Lua bridge** — массовый TCP/QUIC батч (scan/pair/full).
+- **One-shot** (`start_daemon`) — `bs tcp`/`bs udp`, fan-out, pair UDP, voice.
+- **QUIC fallback** (`fake→badsum→ip_ttl`) живёт в one-shot `test_quic`;
+  при bridge-батче fallback не применяется.

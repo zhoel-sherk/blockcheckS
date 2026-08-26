@@ -69,7 +69,6 @@ def _args(**over):
         no_wssize=False,
         lua_bridge=False,
         bridge_batch=500,
-        lua_bridge_compare=False,
         lua_extra=None,
         out_dir=None,
         db=":memory:",
@@ -254,7 +253,7 @@ def test_build_pair_runner_passes_settings():
         ),
         patch(
             "blockchecks.cli.commands.pair_phases.resolve_probe_backend",
-            return_value="classic",
+            return_value="lua_bridge",
         ),
         patch("blockchecks.cli.commands.pair_phases.AsyncTestRunner") as RunnerCls,
     ):
@@ -590,7 +589,7 @@ def test_run_adaptive_pair_phase(caplog):
         ),
         patch(
             "blockchecks.cli.commands.pair_phases.resolve_probe_backend",
-            return_value="classic",
+            return_value="lua_bridge",
         ),
         patch(
             "blockchecks.cli.commands.pair_phases.persist_adaptive_weights",
@@ -618,7 +617,7 @@ def test_run_adaptive_pair_phase(caplog):
         )
     assert phase.tcp_passed == 3
     assert "passed" in caplog.text
-    assert "backend=classic" in caplog.text
+    assert "backend=lua_bridge" in caplog.text
 
 
 def test_run_adaptive_pair_phase_passes_quarantine():
@@ -656,7 +655,7 @@ def test_run_adaptive_pair_phase_passes_quarantine():
         ) as run_aq,
         patch(
             "blockchecks.cli.commands.pair_phases.resolve_probe_backend",
-            return_value="classic",
+            return_value="lua_bridge",
         ),
         patch(
             "blockchecks.cli.commands.pair_phases.persist_adaptive_weights",

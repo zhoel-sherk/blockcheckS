@@ -1,4 +1,4 @@
-"""Boot a batch, probe each item, shut down. Backends: classic or lua_bridge."""
+"""Boot a batch, probe each item, shut down. Campaign TCP is lua_bridge only."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from blockchecks.service.batch_models import (
 )
 from blockchecks.service.batch_scheduler import BatchScheduler
 from blockchecks.service.lua_bridge_ipc import LuaBridge
-from blockchecks.service.lua_netns import _netns_tcp_probe_cleanup
 from blockchecks.service.lua_session import BridgeSession, strategy_text_from_item
 from blockchecks.terminal import CYAN, RESET, YELLOW
 
@@ -50,7 +49,7 @@ def _debug_env() -> str:
 
 
 class ProbeBatchService:
-    """Boot batch → probe ×N → shutdown with classic or lua_bridge backend."""
+    """Boot batch → probe ×N → shutdown (lua_bridge)."""
 
     def __init__(
         self,
@@ -225,92 +224,8 @@ class ProbeBatchService:
         ip_lists_by_domain: dict[str, list[str]] | None = None,
         stop_event: asyncio.Event | None = None,
     ) -> BatchProbeResult:
-        if self.config.backend == "lua_bridge":
-            return self._run_lua_bridge_batch(
-                ctx, timeout, ns_name, resolved_by_domain, ip_lists_by_domain, stop_event
-            )
-        return self._run_classic_batch(
+        return self._run_lua_bridge_batch(
             ctx, timeout, ns_name, resolved_by_domain, ip_lists_by_domain, stop_event
-        )
-
-    def _run_classic_batch(
-        self,
-        ctx: BatchContext,
-        timeout: float,
-        ns_name: str,
-        resolved_by_domain: dict[str, tuple[str | None, str, str]],
-        ip_lists_by_domain: dict[str, list[str]] | None = None,
-        stop_event: asyncio.Event | None = None,
-    ) -> BatchProbeResult:
-        results: list = []
-        for item, dom in zip(ctx.items, ctx.item_domains(), strict=True):
-            if stop_event is not None and stop_event.is_set():
-                break
-            timeout_i, settle_max = self.deps.timing_for(item, timeout)
-            protocol = getattr(item, "protocol", ctx.protocol) or ctx.protocol
-            resolved_ip, _, _ = resolved_by_domain[dom]
-            live_events.set_current(
-                domain=dom,
-                strategy=getattr(item, "label", item.strategy),
-                ns=ns_name,
-                backend="classic",
-            )
-            data = self.deps.run_tcp_check(
-                ns_name,
-                item.strategy,
-                dom,
-                timeout_i,
-                item.is_config,
-                self.deps.python,
-                self.deps.disable_ech,
-                resolved_ip,
-                self.deps.repeats,
-                self.deps.parallel_repeats,
-                "",
-                protocol,
-                settle_max,
-                None,
-                self.deps.repeats_mode,
-                self.deps.quick_break,
-                resolved_ips=(ip_lists_by_domain or {}).get(dom),
-            )
-            data = self._maybe_wssize_retry(
-                item,
-                ctx,
-                timeout_i,
-                ns_name,
-                resolved_ip,
-                protocol,
-                settle_max,
-                data,
-                ip_lists=(ip_lists_by_domain or {}).get(dom),
-            )
-            data["batch_id"] = ctx.batch_id
-            result = self.deps.tcp_result_from_data(item, dom, data)
-            live_events.write_probe(
-                domain=dom,
-                strategy=getattr(item, "label", item.strategy),
-                ns=ns_name,
-                backend="classic",
-                status=(
-                    "SKIPPED"
-                    if result.error in PROBE_SKIP_ERRORS
-                    else (
-                        "THROTTLED"
-                        if result.throttled
-                        else ("PASS" if result.success else "FAIL")
-                    )
-                ),
-                http_code=result.http_code,
-                latency_ms=result.latency_ms,
-                applied=result.bridge_applied,
-            )
-            results.append(result)
-        _netns_tcp_probe_cleanup(ns_name)
-        return BatchProbeResult(
-            results=results,
-            settle_ms=0.0,
-            backend="classic",
         )
 
     def _batch_fail_results(self, ctx: BatchContext, error: str) -> list:
@@ -571,49 +486,6 @@ class ProbeBatchService:
         self._record_daemon_mem(ns_name)
         return True
 
-    def _maybe_wssize_retry(
-        self,
-        item,
-        ctx: BatchContext,
-        timeout_i: float,
-        ns_name: str,
-        resolved_ip: str | None,
-        protocol: str,
-        settle_max: float | None,
-        data: dict,
-        *,
-        ip_lists: list[str] | None = None,
-    ) -> dict:
-        from blockchecks.engine.wssize_retry import WSSIZE_RETRY
-
-        if WSSIZE_RETRY.should_retry(
-            data,
-            try_wssize=self.deps.try_wssize,
-            protocol=protocol,
-            strategy=item.strategy,
-            is_config=item.is_config,
-        ):
-            return self.deps.run_tcp_check(
-                ns_name,
-                item.strategy,
-                ctx.domain,
-                WSSIZE_RETRY.retry_timeout(timeout_i),
-                item.is_config,
-                self.deps.python,
-                self.deps.disable_ech,
-                resolved_ip,
-                self.deps.repeats,
-                self.deps.parallel_repeats,
-                WSSIZE_RETRY.cmd,
-                protocol,
-                settle_max,
-                None,
-                self.deps.repeats_mode,
-                self.deps.quick_break,
-                resolved_ips=ip_lists,
-            )
-        return data
-
     def _log_batch(self, ctx: BatchContext, ns_name: str, result: BatchProbeResult) -> None:
         fill = f" fill={result.batch_fill_ratio:.0%}"
         log.info(
@@ -635,22 +507,22 @@ def _bridge_silent(data: dict) -> bool:
         return False
     if data.get("bridge_events") or data.get("bridge_rst_in"):
         return False
-    return "bridge_applied" in data  # absent key = non-bridge path (classic)
+    return "bridge_applied" in data  # absent key = non-bridge one-shot path
 
 
 _FANOUT_BRIDGE_WARNED = False
 
 
 def warn_fanout_bridge_once() -> None:
-    """Fan-out waves use classic per-strategy nfqws2 (bridge incompatible)."""
+    """Fan-out waves use one-shot nfqws2 (bridge scan_pick is strategy-batch, not domain-batch)."""
     global _FANOUT_BRIDGE_WARNED
     if _FANOUT_BRIDGE_WARNED:
         return
     _FANOUT_BRIDGE_WARNED = True
     log.warning(
         "%s",
-        f"  {YELLOW}WARN: --lua-bridge ignored for fan-out waves "
-        f"(classic per-strategy nfqws2){RESET}",
+        f"  {YELLOW}WARN: lua_bridge ignored for fan-out waves "
+        f"(one-shot nfqws2 × N domains){RESET}",
     )
 
 

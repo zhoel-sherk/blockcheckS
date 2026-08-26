@@ -13,7 +13,7 @@ cd "$ROOT"
 
 HOURS="${1:-20}"
 FIRST="${2:-A}"
-VARIANTS="A B C D E F"
+VARIANTS="A B C E F"
 # trim before FIRST
 STARTED=0
 LIST=""

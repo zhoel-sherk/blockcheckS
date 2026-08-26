@@ -76,52 +76,15 @@ def test_warn_fanout_bridge_once() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio(loop_scope="package")
-async def test_probe_batch_service_classic_mock() -> None:
-    calls: list[str] = []
+async def test_probe_batch_service_classic_removed() -> None:
+    """Campaign batch no longer restarts nfqws2 per strategy."""
+    import inspect
 
-    async def acquire() -> str:
-        return "bs-p-0"
+    from blockchecks.service import batch_service as bp
 
-    async def release(ns: str) -> None:
-        calls.append(f"release:{ns}")
-
-    async def resolve(domain: str) -> tuple[str | None, str, str]:
-        return "1.2.3.4", "ok", "doh"
-
-    async def log_tcp_result(*_a, **_k) -> None:
-        calls.append("log")
-
-    deps = RunnerProbeDeps(
-        python="python3",
-        disable_ech=False,
-        repeats=1,
-        parallel_repeats=False,
-        repeats_mode="fast",
-        quick_break=False,
-        try_wssize=False,
-        lua_extra=[],
-        timing_for=lambda item, t: (t, None),
-        resolve_domain_ips=lambda domain: [],
-        resolve_domain_dns=resolve,
-        tcp_result_from_data=lambda item, domain, data: MagicMock(success=data.get("success")),
-        log_tcp_result=log_tcp_result,
-        next_probe_gen=lambda: 1,
-        run_tcp_check=lambda *a, **k: {"success": True, "http_code": 200, "latency_ms": 50},
-        acquire_ns=acquire,
-        release_ns=release,
-    )
-    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
-    ctx = BatchContext(
-        ns_name="",
-        items=[_item("a"), _item("b")],
-        domain="discord.com",
-        batch_id=1,
-    )
-    result = await svc.run_batch(ctx, timeout=5.0)
-    assert len(result.results) == 2
-    assert result.backend == "classic"
-    assert calls.count("log") == 2
-    assert "release:bs-p-0" in calls
+    src = inspect.getsource(bp.ProbeBatchService)
+    assert "_run_classic_batch" not in src
+    assert "_run_lua_bridge_batch" in src
 
 
 @pytest.mark.unit
@@ -294,98 +257,58 @@ async def test_run_batch_generic_exception_yields_fail_results() -> None:
     async def log_tcp_result(item, dom, probe_result, **_k) -> None:
         logged.append(dom)
 
-    async def acquire() -> str:
-        return "bs-p-0"
+    class BoomSession:
+        def __init__(self, **_k) -> None:
+            raise RuntimeError("boom")
 
-    async def release(ns: str) -> None:
-        pass
+    import blockchecks.service.batch_service as bp
 
-    deps = RunnerProbeDeps(
-        python="python3",
-        disable_ech=False,
-        repeats=1,
-        parallel_repeats=False,
-        repeats_mode="fast",
-        quick_break=False,
-        resolve_domain_ips=lambda domain: [],
-        try_wssize=False,
-        lua_extra=[],
-        timing_for=lambda item, t: (t, None),
-        resolve_domain_dns=AsyncMock(return_value=(None, "", "")),
-        tcp_result_from_data=lambda item, domain, data: MagicMock(
-            success=False, error=data.get("error", "")
-        ),
-        log_tcp_result=log_tcp_result,
-        next_probe_gen=lambda: 1,
-        run_tcp_check=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
-        acquire_ns=acquire,
-        release_ns=release,
-    )
-    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
-    ctx = BatchContext(
-        ns_name="",
-        items=[_item("a"), _item("b")],
-        domain="discord.com",
-        batch_id=9,
-    )
-    result = await svc.run_batch(ctx, 5.0)
-    assert len(result.results) == 2
-    assert all(not r.success for r in result.results)
-    assert logged == ["discord.com", "discord.com"]
+    original = bp.BridgeSession
+    bp.BridgeSession = BoomSession
+    try:
+        deps = RunnerProbeDeps(
+            python="python3",
+            disable_ech=False,
+            repeats=1,
+            parallel_repeats=False,
+            repeats_mode="fast",
+            quick_break=False,
+            resolve_domain_ips=lambda domain: [],
+            try_wssize=False,
+            lua_extra=[],
+            timing_for=lambda item, t: (t, None),
+            resolve_domain_dns=AsyncMock(return_value=(None, "", "")),
+            tcp_result_from_data=lambda item, domain, data: MagicMock(
+                success=False, error=data.get("error", "")
+            ),
+            log_tcp_result=log_tcp_result,
+            next_probe_gen=lambda: 1,
+            run_tcp_check=lambda *a, **k: {"success": False},
+            acquire_ns=AsyncMock(return_value="bs-p-0"),
+            release_ns=AsyncMock(),
+        )
+        svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), deps)
+        ctx = BatchContext(
+            ns_name="",
+            items=[_item("a"), _item("b")],
+            domain="discord.com",
+            batch_id=9,
+        )
+        result = await svc.run_batch(ctx, 5.0)
+        assert len(result.results) == 2
+        assert all(not r.success for r in result.results)
+        assert logged == ["discord.com", "discord.com"]
+    finally:
+        bp.BridgeSession = original
 
 
 @pytest.mark.unit
-async def test_wssize_retry_skips_config_items() -> None:
-    """wssize retry does not fire for config strategies (path, not inline text)."""
-    classic_calls: list[tuple] = []
+async def test_wssize_retry_removed_from_campaign_batch() -> None:
+    import inspect
 
-    async def acquire() -> str:
-        return "bs-p-0"
+    from blockchecks.service.batch_service import ProbeBatchService
 
-    async def release(ns: str) -> None:
-        pass
-
-    def run_tcp_check(*args, **kwargs):
-        classic_calls.append((args, kwargs))
-        return {"success": False}
-
-    config_item = StrategyItem(label="cfg", strategy="/tmp/some_config.conf", is_config=True)
-    inline_item = StrategyItem(label="inline", strategy="fake:blob=stun:repeats=6")
-
-    deps = RunnerProbeDeps(
-        python="python3",
-        disable_ech=False,
-        repeats=1,
-        parallel_repeats=False,
-        repeats_mode="fast",
-        resolve_domain_ips=lambda domain: [],
-        quick_break=False,
-        try_wssize=True,
-        lua_extra=[],
-        timing_for=lambda item, t: (t, None),
-        resolve_domain_dns=AsyncMock(return_value=(None, "", "")),
-        tcp_result_from_data=lambda item, domain, data: MagicMock(success=data.get("success")),
-        log_tcp_result=AsyncMock(),
-        next_probe_gen=lambda: 1,
-        run_tcp_check=run_tcp_check,
-        acquire_ns=acquire,
-        release_ns=release,
-    )
-    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
-    ctx = BatchContext(
-        ns_name="",
-        items=[config_item, inline_item],
-        domain="discord.com",
-        batch_id=10,
-    )
-    await svc.run_batch(ctx, 5.0)
-
-    # config item: 1 call, no wssize retry; inline item: 1 original + 1 wssize retry
-    assert len(classic_calls) == 3
-    config_args = classic_calls[0][0]
-    assert "wssize" not in str(config_args)
-    wssize_calls = [a for a, k in classic_calls if "wssize" in str(a)]
-    assert len(wssize_calls) == 1
+    assert "_maybe_wssize_retry" not in inspect.getsource(ProbeBatchService)
 
 
 @pytest.mark.unit
@@ -700,7 +623,7 @@ async def test_run_batch_stop_event_skips_acquire() -> None:
         ),
         log_tcp_result=log_result,
     )
-    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
+    svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), deps)
     ctx = BatchContext(
         ns_name="",
         items=[_item("a"), _item("b")],
@@ -732,7 +655,7 @@ async def test_run_batch_acquire_timeout_returns_empty() -> None:
         return "bs-p-0"
 
     deps = _minimal_deps(acquire_ns=never_acquire, release_ns=AsyncMock())
-    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
+    svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), deps)
     ctx = BatchContext(
         ns_name="",
         items=[_item("a")],
@@ -853,30 +776,60 @@ async def test_run_batch_mid_stop_pads_skipped_tail() -> None:
     stop = asyncio.Event()
     calls = {"n": 0}
 
-    def run_tcp_check(*args, **kwargs):
+    class FakeSession:
+        ns_name = "bs-p-0"
+
+        def __init__(self, **_k) -> None:
+            self.bridge = MagicMock()
+            self.bridge.truncate_events = MagicMock()
+            self.bridge.heartbeat_age = MagicMock(return_value=0.0)
+            self.bridge.publish = MagicMock()
+            self.bridge.drain_events = MagicMock(return_value=[])
+
+        def boot(self) -> float:
+            return 0.1
+
+        def shutdown(self) -> None:
+            return None
+
+    def probe(*_a, **_k):
         calls["n"] += 1
         if calls["n"] == 1:
             stop.set()
-        return {"success": True, "http_code": 200}
+        return {
+            "success": True,
+            "http_code": 200,
+            "bridge_applied": True,
+            "bridge_events": ["APPLIED"],
+        }
 
-    deps = _minimal_deps(
-        run_tcp_check=run_tcp_check,
-        tcp_result_from_data=lambda item, domain, data: TcpTestResult(
-            item=item,
-            domain=domain,
-            success=bool(data.get("success")),
-            error=data.get("error") or "",
-        ),
-    )
-    svc = ProbeBatchService(BatchProbeConfig(backend="classic"), deps)
-    ctx = BatchContext(
-        ns_name="",
-        items=[_item("a"), _item("b"), _item("c")],
-        domain="discord.com",
-        batch_id=2,
-    )
-    result = await svc.run_batch(ctx, timeout=5.0, stop_event=stop)
-    assert len(result.results) == 3
-    assert result.results[0].success is True
-    assert result.results[1].error == STOPPED_BEFORE_PROBE
-    assert result.results[2].error == STOPPED_BEFORE_PROBE
+    import blockchecks.service.batch_service as bp
+
+    original = bp.BridgeSession
+    real_probe = bp.run_tcp_check_bridge
+    bp.BridgeSession = FakeSession
+    bp.run_tcp_check_bridge = probe
+    try:
+        deps = _minimal_deps(
+            tcp_result_from_data=lambda item, domain, data: TcpTestResult(
+                item=item,
+                domain=domain,
+                success=bool(data.get("success")),
+                error=data.get("error") or "",
+            ),
+        )
+        svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), deps)
+        ctx = BatchContext(
+            ns_name="",
+            items=[_item("a"), _item("b"), _item("c")],
+            domain="discord.com",
+            batch_id=2,
+        )
+        result = await svc.run_batch(ctx, timeout=5.0, stop_event=stop)
+        assert len(result.results) == 3
+        assert result.results[0].success is True
+        assert result.results[1].error == STOPPED_BEFORE_PROBE
+        assert result.results[2].error == STOPPED_BEFORE_PROBE
+    finally:
+        bp.run_tcp_check_bridge = real_probe
+        bp.BridgeSession = original

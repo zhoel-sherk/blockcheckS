@@ -55,11 +55,11 @@ async def test_run_adaptive_tcp_single():
     ]
     queue = AdaptiveJobQueue.build(items, ["discord.com"], epsilon=0.0)
     runner = _FakeRunner()
-    result = await run_adaptive_tcp(runner, queue, curl_parallel=1)
+    result = await run_adaptive_tcp(runner, queue, curl_parallel=1, workers=1)
     assert result.done == 2
     assert result.passed == 2
     assert len(runner.calls) == 2
-    assert runner.batch_backends == ["classic", "classic"]
+    assert runner.batch_backends == ["lua_bridge"]
 
 
 @pytest.mark.asyncio
@@ -71,9 +71,7 @@ async def test_run_adaptive_tcp_b2_batch():
     result = await run_adaptive_tcp(runner, queue, curl_parallel=4)
     assert result.done == 2
     assert result.passed == 2
-    # B2: one test_tcp_domains call for both discord domains
-    assert len(runner.calls) == 1
-    assert set(runner.calls[0][1]) == set(domains)
+    assert runner.batch_backends == ["lua_bridge"]
 
 
 @pytest.mark.asyncio
@@ -91,6 +89,45 @@ async def test_build_adaptive_queue_resume(temp_db):
         resume_check=resume,
     )
     assert skipped == 1
+    assert len(queue) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_adaptive_queue_skip_keys_not_allocated():
+    """PERF-3: skip_keys never enter _pending; counted as resume skip."""
+    items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
+    queue, skipped = await build_adaptive_queue(
+        items,
+        ["discord.com", "discord.gg"],
+        None,
+        load_weights=False,
+        skip_keys={("s1", "discord.com")},
+    )
+    assert skipped == 1
+    assert len(queue) == 1
+    assert ("s1", "discord.com") not in queue._pending
+    assert ("s1", "discord.com") in queue._done
+
+
+@pytest.mark.asyncio
+async def test_build_adaptive_queue_quarantine_skip_domains():
+    """PERF-3: quarantine snapshot is applied at build, not after packing."""
+
+    class _Q:
+        def exclude_domains(self) -> set[str]:
+            return {"dead.example"}
+
+    items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
+    queue, skipped = await build_adaptive_queue(
+        items,
+        ["discord.com", "dead.example"],
+        None,
+        load_weights=False,
+        quarantine=_Q(),
+    )
+    assert skipped == 0
+    assert all(job.domain != "dead.example" for job in queue._pending.values())
+    assert "dead.example" in queue.excluded_domains
     assert len(queue) == 1
 
 
@@ -128,7 +165,9 @@ async def test_run_adaptive_tcp_stops_on_stop_event():
         return [_FakeResult(success=True, item=item, domain=domain)]
 
     runner._run_probe_batch = _run_probe_batch
-    result = await run_adaptive_tcp(runner, queue, curl_parallel=1, stop_event=stop)
+    result = await run_adaptive_tcp(
+        runner, queue, workers=1, bridge_batch=1, stop_event=stop
+    )
     assert result.done == 1
     assert result.passed == 1
     assert len(queue) > 0
@@ -468,26 +507,26 @@ async def test_bridge_worker_progress_before_batch_flush():
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_classic_aq_logs_backend(caplog):
+async def test_aq_logs_lua_bridge_backend(caplog):
     items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
     queue = AdaptiveJobQueue.build(items, ["discord.com"], epsilon=0.0)
     runner = _FakeRunner()
     with caplog.at_level("INFO"):
-        await run_adaptive_tcp(runner, queue, curl_parallel=1)
-    assert "backend=classic" in caplog.text
+        await run_adaptive_tcp(runner, queue, curl_parallel=1, workers=1)
+    assert "backend=lua_bridge" in caplog.text
 
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_classic_aq_b2_logs_backend(caplog):
+async def test_aq_multi_domain_uses_bridge_batch(caplog):
     items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
     domains = ["discord.com", "discord.gg"]
     queue = AdaptiveJobQueue.build(items, domains, epsilon=0.0)
     runner = _FakeRunner()
     with caplog.at_level("INFO"):
-        await run_adaptive_tcp(runner, queue, curl_parallel=4)
-    assert "backend=classic" in caplog.text
-    assert runner.batch_backends == []
+        await run_adaptive_tcp(runner, queue, curl_parallel=4, workers=1)
+    assert "backend=lua_bridge" in caplog.text
+    assert runner.batch_backends == ["lua_bridge"]
 
 
 @pytest.mark.asyncio
@@ -512,33 +551,19 @@ async def test_apply_provider_weights_idempotent():
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_classic_quarantine_filtered_jobs_mark_done():
-    """Classic AQ: quarantine-filtered pop_batch jobs are not silently dropped (ENG-6.1)."""
+async def test_aq_quarantine_skip_domains_not_probed():
+    """Dead domains skipped at queue build are never probed (ENG-6.1)."""
     items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
     domains = ["discord.com", "youtube.com"]
-    queue = AdaptiveJobQueue.build(items, domains, epsilon=0.0)
-
-    class FakeQuarantine:
-        def __init__(self):
-            self._dead = {"youtube.com"}
-
-        def exclude_domains(self):
-            return set(self._dead)
-
-        def record(self, domain, ok):
-            return None
-
-    runner = _FakeRunner()
-    result = await run_adaptive_tcp(
-        runner,
-        queue,
-        curl_parallel=2,
-        quarantine=FakeQuarantine(),
+    queue = AdaptiveJobQueue.build(
+        items, domains, epsilon=0.0, skip_domains={"youtube.com"}
     )
-    assert result.done == 2
-    assert result.skipped == 1
+    runner = _FakeRunner()
+    result = await run_adaptive_tcp(runner, queue, workers=1)
+    assert result.done == 1
     assert result.passed == 1
     assert len(queue) == 0
+    assert all(c[1] != ["youtube.com"] for c in runner.calls)
 
 
 @pytest.mark.asyncio

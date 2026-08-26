@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from blockchecks.engine.generators.base import StrategyItem
 
-ProbeBackend = Literal["classic", "lua_bridge"]
+ProbeBackend = Literal["lua_bridge"]
 
 
 @dataclass(frozen=True)
@@ -33,10 +33,9 @@ class BatchContext:
 
 @dataclass(frozen=True)
 class BatchProbeConfig:
-    backend: ProbeBackend
+    backend: ProbeBackend = "lua_bridge"
     batch_size: int = 500
     lua_extra: tuple[str, ...] = ()
-    compare_classic: bool = False
 
 
 @dataclass
@@ -44,7 +43,7 @@ class BatchProbeResult:
     results: list
     settle_ms: float = 0.0
     batch_wall_ms: float = 0.0
-    backend: str = "classic"
+    backend: str = "lua_bridge"
     batch_fill_ratio: float = 1.0
 
 

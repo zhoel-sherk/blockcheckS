@@ -16,6 +16,11 @@ from tests.unit._quality_config import PROJECT_ROOT, tool_section
 pytestmark = [pytest.mark.unit, pytest.mark.quality]
 
 
+from blockchecks.cli.parser import _LEGACY_NO_FROM_POSITIVE, build_parser
+
+_POSITIVE_TO_LEGACY = dict(_LEGACY_NO_FROM_POSITIVE)
+
+
 def _dest_mentioned(src: str, dest: str) -> bool:
     if re.search(rf"\bargs\.{re.escape(dest)}\b", src):
         return True
@@ -77,7 +82,14 @@ def test_no_dead_cli_flags(command: str) -> None:
     dests = _subparser_dests(build_parser()).get(command, set())
     src = _read_bundle(readers)
     dead = sorted(
-        d for d in dests if d not in ignore and d not in allow and not _dest_mentioned(src, d)
+        d
+        for d in dests
+        if d not in ignore
+        and d not in allow
+        and not _dest_mentioned(src, d)
+        and not (
+            d in _POSITIVE_TO_LEGACY and _dest_mentioned(src, _POSITIVE_TO_LEGACY[d])
+        )
     )
     assert not dead, (
         f"dead CLI dests on `{command}` (declared but never read in readers):\n"
@@ -148,6 +160,15 @@ def test_parity_dests_full_vs_pair() -> None:
     assert "add_curl_repeats_args" in src
     assert "add_domain_filter_args" in src
     assert 'g.add_argument("--no-secure-dns"' not in src
+
+
+def test_no_settle_profile_alias_parses() -> None:
+    from blockchecks.cli.parser import parse_cli_argv
+
+    ns, cmd, _ = parse_cli_argv(["full", "--no-settle-profile", "--no-preflight"], cfg={})
+    assert cmd == "full"
+    assert ns.use_settle_profile is False
+    assert ns.no_settle_profile is True
 
 
 def test_scan_no_suppress_udp_aliases() -> None:

@@ -1,3 +1,9 @@
+## Unreleased — campaign lua_bridge-only, CLI slim
+
+- Campaign TCP no longer restarts nfqws2 per strategy (`_run_classic_batch` / classic AQ cut). `--classic` warns and maps to lua_bridge. `--lua-bridge-compare` removed from CLI.
+- `--no-settle-profile` alias (week_cov argv). GP `--http-off`/`--http3-off` share dests with `--no-http`/`--no-quic`. Backend flags stripped from `bs tcp`/`udp` help. Series D retired.
+- One-shot `bs tcp` / composite / fan-out still use `start_daemon`.
+
 ## 1.3.9 — harvest-batch, host hygiene, bridge integrity (2026-08-25)
 
 ### Host hygiene (P0–P2)
