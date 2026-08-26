@@ -12,6 +12,7 @@ from blockchecks.engine.generators.families._helpers import (
     _ttl_clause,
     _with_ack_drop,
     _with_send_md5,
+    cmd_label,
     emit_rows,
     expand_axes,
     required_foolings,
@@ -88,6 +89,21 @@ def test_emit_rows_stops_on_single():
     assert added == [("a", "s1", "tls12")]
     assert emit_rows(add, items, seen, "fast", [("c", "s3")]) is False
     assert added[-1] == ("c", "s3", "tls12")
+
+
+@pytest.mark.unit
+def test_cmd_label_same_truncated_prefix_differs():
+    """Two cmds that share a truncated prefix must still get distinct names."""
+    prefix = "std_fake_google_r6_tlsmod=rnd,dupsid,sni=www"  # [:20] of a long tls_mod
+    cmd_a = "fake:blob=google:repeats=6:tls_mod=rnd,dupsid,sni=www.google.com"
+    cmd_b = "fake:blob=google:repeats=6:tls_mod=rnd,dupsid,sni=www.youtube.com"
+    name_a, name_b = cmd_label(prefix, cmd_a), cmd_label(prefix, cmd_b)
+    assert name_a != name_b
+    assert name_a.startswith(f"{prefix}_")
+    assert name_b.startswith(f"{prefix}_")
+    assert name_a.rsplit("_", 1)[-1] != name_b.rsplit("_", 1)[-1]
+    assert len(name_a.rsplit("_", 1)[-1]) == 6
+    assert cmd_label(prefix, cmd_a) == name_a  # stable
 
 
 @pytest.mark.unit

@@ -272,7 +272,7 @@ def resolve_probe_backend(args) -> str:
             "campaign --classic / probe-backend=classic is deprecated; "
             "mapping to lua_bridge (per-strategy nfqws2 restart is gone)"
         )
-    return "lua_bridge"
+    return DEFAULT_PROBE_BACKEND
 
 
 def effective_default_pool_size(*, mem_soft_cap_kb: int = 1_500_000) -> int:

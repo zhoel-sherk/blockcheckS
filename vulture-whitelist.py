@@ -223,3 +223,11 @@ dirty
 is_attached
 DPI_TESTER_SETTINGS
 AdaptiveJobQueue._rebuild_heap_calls
+
+# ARC-8b: class alias for tests; generate() reads FamilySpec.axes via axes_for()
+StandardGenerator.STRATEGY_FAMILIES
+
+# Public AQ / batch API used from tests and fan-out callers
+AdaptiveJobQueue.pop_batch
+nfqws2_pid_in_ns
+RunnerProbeDeps.run_tcp_check

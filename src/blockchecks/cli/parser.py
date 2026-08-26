@@ -999,7 +999,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     gc = sub.add_parser(
         "gc",
-        help="Prune debug logs, run summaries, harvest dirs, zapret2-dl, voice caches (dry-run)",
+        help="Prune debug logs, run summaries, harvest dirs, zapret2-dl, voice caches, optional DB rows (dry-run)",
     )
     gc_mode = gc.add_mutually_exclusive_group()
     gc_mode.add_argument(
@@ -1023,6 +1023,23 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=50,
         help="Newest nfqws2_*.log files to keep (default 50)",
+    )
+    gc.add_argument(
+        "--db-days",
+        type=float,
+        default=None,
+        metavar="N",
+        help="Age-prune tcp_results/udp_results older than N days (opt-in; skipped if omitted)",
+    )
+    gc.add_argument(
+        "--orphan-strategies",
+        action="store_true",
+        help="With --db-days, also drop strategies with no remaining tcp/udp rows",
+    )
+    gc.add_argument(
+        "--db",
+        default=None,
+        help=f"State DB for --db-days (default: {DEFAULT_DB_PATH})",
     )
 
     db = sub.add_parser(

@@ -29,6 +29,7 @@ from blockchecks.main_phases import (
     export_and_summarize,
     generate_strategy_items,
     load_run_domains,
+    open_full_run_db,
     prepare_run_dns,
     print_full_run_banner,
     print_optional_phases_skip,
@@ -43,6 +44,22 @@ from blockchecks.main_phases import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def fail_store():
+    """Store whose init() fails (QA-5)."""
+    db = MagicMock()
+    db.init = AsyncMock(side_effect=OSError("store unavailable"))
+    return db
+
+
+@pytest.fixture
+def timeout_budget_args():
+    """Invalid wall-clock budget for arm_run_deadline (QA-5)."""
+    args = _args()
+    args.max_timem = 0
+    return args
 
 
 def _args(**over):
@@ -222,6 +239,33 @@ def test_load_run_domains_preset_missing():
         domains, fname, rc = load_run_domains(args)
     assert rc == 1 and domains == []
     assert fname == "nope"
+
+
+def test_load_run_domains_default_missing_when_no_dash_d():
+    """No -d / preset / file: missing default coverage list is a hard FAIL."""
+    args = _args(domain="", domains_file=None, preset=None)
+    with patch("blockchecks.main_phases.load_domains", side_effect=FileNotFoundError):
+        domains, fname, rc = load_run_domains(args)
+    assert rc == 1 and domains == []
+    assert fname
+
+
+def test_build_full_run_context_empty_domains_raises():
+    args = _args(domain="")
+    with pytest.raises(IndexError):
+        build_full_run_context(args, MagicMock(), [], "f", None, [])
+
+
+def test_open_full_run_db_store_error(fail_store):
+    with patch("blockchecks.main_phases.open_run_store", return_value=fail_store):
+        with pytest.raises(OSError, match="store unavailable"):
+            asyncio.run(open_full_run_db(_args()))
+
+
+def test_arm_run_deadline_nonpositive_budget(timeout_budget_args):
+    ctx = build_full_run_context(timeout_budget_args, MagicMock(), ["a.com"], "f", None, [])
+    with pytest.raises(SystemExit, match="positive"):
+        asyncio.run(arm_run_deadline(ctx))
 
 
 # ── prepare_run_dns ───────────────────────────────────────────────────
@@ -793,13 +837,42 @@ def test_tcp_adaptive():
             "blockchecks.main_phases.build_adaptive_queue",
             new=AsyncMock(return_value=([MagicMock()], 0)),
         ),
-        patch("blockchecks.main_phases.run_adaptive_tcp", new=AsyncMock(return_value=aq)) as run_tcp,
+        patch(
+            "blockchecks.main_phases.run_adaptive_tcp", new=AsyncMock(return_value=aq)
+        ) as run_tcp,
         patch("blockchecks.main_phases.resolve_probe_backend", return_value="lua_bridge"),
         patch("blockchecks.main_phases.persist_adaptive_weights", new=AsyncMock()),
     ):
         asyncio.run(_run_tcp_adaptive(ctx, progress))
     assert run_tcp.await_args.kwargs.get("quarantine") is not None
     ctx.aq_result = aq
+
+
+def test_tcp_adaptive_none_result_raises():
+    from blockchecks.main_phases import _run_tcp_adaptive
+
+    ctx = _mk_ctx()
+    ctx.tcp_items = [MagicMock()]
+    ctx.domains = ["a.com"]
+    ctx.db = MagicMock()
+    ctx.args.resume = False
+    ctx.args.adaptive_epsilon = 0.1
+    ctx.args.no_adaptive_weights = True
+    ctx.args.timeout = 5.0
+    ctx.args.protocol = "tls12"
+    ctx.args.parallel = 2
+    ctx.args.disable_ech = False
+    progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
+    with (
+        patch(
+            "blockchecks.main_phases.build_adaptive_queue",
+            new=AsyncMock(return_value=([MagicMock()], 0)),
+        ),
+        patch("blockchecks.main_phases.run_adaptive_tcp", new=AsyncMock(return_value=None)),
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="lua_bridge"),
+    ):
+        with pytest.raises(RuntimeError, match="without result"):
+            asyncio.run(_run_tcp_adaptive(ctx, progress))
 
 
 def test_tcp_family_gates():

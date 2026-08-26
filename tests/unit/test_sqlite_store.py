@@ -676,3 +676,82 @@ async def test_flush_strategy_cache_one_ensure_per_strategy(tmp_path, monkeypatc
         await store.log_tcp("same", f"d{i}.com", "PASS", 10.0, 200, config_path="fake:same")
     await store.flush()
     assert calls["n"] == 6
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_strategies_unique_name_proto_constraint(tmp_path):
+    import aiosqlite
+
+    store = open_run_store(tmp_path / "uniq.db")
+    await store.init()
+    async with aiosqlite.connect(store.db_path) as db:
+        cur = await db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='strategies'"
+        )
+        ddl = (await cur.fetchone())[0]
+        indexes = await db.execute("PRAGMA index_list(strategies)")
+        unique = [row[1] for row in await indexes.fetchall() if row[2]]
+    assert "UNIQUE(name,proto)" in "".join(ddl.split())
+    assert unique
+    await store.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ensure_strategy_upsert_updates_nonempty_path(tmp_path):
+    store = open_run_store(tmp_path / "up.db")
+    await store.init()
+    id1 = await store.ensure_strategy("fake_x", "tcp", "path_a")
+    id2 = await store.ensure_strategy("fake_x", "tcp", "path_b")
+    assert id1 == id2
+    assert await store.get_strategy_config("fake_x", "tcp") == "path_b"
+    id3 = await store.ensure_strategy("fake_x", "tcp", "")
+    assert id3 == id1
+    assert await store.get_strategy_config("fake_x", "tcp") == "path_b"
+    await store.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ensure_strategy_concurrent_two_connections(tmp_path):
+    path = tmp_path / "race.db"
+    a = open_run_store(path)
+    b = open_run_store(path)
+    await a.init()
+    await b.init()
+    ids = await asyncio.gather(
+        a.ensure_strategy("shared", "tcp", "p1"),
+        b.ensure_strategy("shared", "tcp", "p2"),
+    )
+    assert ids[0] == ids[1]
+    cfg = await a.get_strategy_config("shared", "tcp")
+    assert cfg in {"p1", "p2"}
+    await a.close()
+    await b.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reclaim_skipped_on_hot_write_paths(tmp_path, monkeypatch):
+    calls: list = []
+
+    def _track(path):
+        calls.append(str(path))
+
+    monkeypatch.setattr(
+        "blockchecks.engine.store.sqlite_store.reclaim_sudo_ownership", _track
+    )
+    store = open_run_store(tmp_path / "rc.db")
+    await store.init()
+    after_init = len(calls)
+    await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
+    await store.log_udp("u1", "voice", "PASS", 5.0, config_path="fake:u")
+    await store.quarantine_domain("dead.com", reason="zero")
+    await store.save_triage_snapshot("a.com", {"ok": True})
+    store.batch_size = 10
+    await store.log_tcp("s2", "b.com", "PASS", 10.0, 200, config_path="fake:2")
+    await store.flush()
+    assert len(calls) == after_init
+    await store.close()
+    assert len(calls) == after_init + 1

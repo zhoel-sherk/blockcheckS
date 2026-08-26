@@ -270,7 +270,7 @@ def _apply_debug_flags(sub: BaseModel | argparse.Namespace) -> None:
 def _print_validation_error(exc: pydantic_core.ValidationError) -> int:
     errs = exc.errors()
     if not errs:
-        print("ERROR: invalid arguments", file=sys.stderr)  # noqa: T201
+        print("ERROR: invalid arguments", file=sys.stderr)  # noqa: T201, print
         return 2
     e = errs[0]
     loc = ".".join(str(x) for x in e.get("loc", ()) if x != "__root__")
@@ -280,9 +280,9 @@ def _print_validation_error(exc: pydantic_core.ValidationError) -> int:
     if ctx.get("expected"):
         extra = f" (expected {ctx['expected']})"
     if loc:
-        print(f"ERROR: --{loc.replace('.', ' ')}: {msg}{extra}", file=sys.stderr)  # noqa: T201
+        print(f"ERROR: --{loc.replace('.', ' ')}: {msg}{extra}", file=sys.stderr)  # noqa: T201, print
     else:
-        print(f"ERROR: {msg}{extra}", file=sys.stderr)  # noqa: T201
+        print(f"ERROR: {msg}{extra}", file=sys.stderr)  # noqa: T201, print
     return 2
 
 
@@ -552,7 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         code = exc.code
         if isinstance(code, str):
-            print(code, file=sys.stderr)  # noqa: T201
+            print(code, file=sys.stderr)  # noqa: T201, print
             return 1
         return int(code or 0)
     except pydantic_core.ValidationError as exc:

@@ -119,6 +119,27 @@ async def test_custom_list_generator_labels_unique_for_long_strategies():
 
 
 @pytest.mark.asyncio
+async def test_custom_list_colon_vs_space_same_prefix_differs():
+    """Sanitizing ':' and ' ' to '_' used to collide across family-style cmds."""
+    from blockchecks.engine.generators.custom import CustomListGenerator
+
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "list_https_tls12.txt")
+        with open(p, "w") as f:
+            f.write("fake blob=stun:repeats=6\n")
+            f.write("fake:blob=stun:repeats=6\n")
+        items = await CustomListGenerator(base_dir=d).generate(
+            "tls12", scan_level="full", max_count=10
+        )
+
+    assert [i.strategy for i in items] == [
+        "fake blob=stun:repeats=6",
+        "fake:blob=stun:repeats=6",
+    ]
+    assert items[0].label != items[1].label
+
+
+@pytest.mark.asyncio
 async def test_generate_udp_voice_protocol_and_filter():
     gen = MatrixGenerator()
     fast = await gen.generate_udp(sources=["standard_udp"], scan_level="fast", max_count=400)

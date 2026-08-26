@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from blockchecks.engine.fail_phase import FailPhase
+from blockchecks.engine.family_spec import DEFAULT_FAMILIES, TRIAGE_TO_FAMILIES
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.generators.families._helpers import _static_numeric_split
 
@@ -15,16 +16,6 @@ if TYPE_CHECKING:
     from blockchecks.engine.triage import TriageProfile
 
 log = logging.getLogger(__name__)
-
-DEFAULT_FAMILIES: tuple[str, ...] = ("fake", "hostfake", "fakedsplit", "multisplit")
-
-TRIAGE_TO_FAMILIES: dict[str, tuple[str, ...]] = {
-    "stall": ("wssize",),
-    "silent_drop": ("fake", "hostfake", "fakedsplit", "multisplit", "multi_fake"),
-    "rst_at_sni": ("multisplit", "fakedsplit", "multidisorder"),
-    "quic_drop": ("quic_fake", "quic_ipfrag"),
-    "udp_blocked": ("udp_discord",),
-}
 
 # Grid cell ``tcp_seq=1000`` is the sequence-number probe; badsid is the same class.
 _FOOLING_EQUIV: dict[str, tuple[str, ...]] = {

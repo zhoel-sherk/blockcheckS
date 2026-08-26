@@ -13,7 +13,9 @@ from blockchecks.engine.adaptive_queue import (
     AdaptiveJobQueue,
     ScanWeights,
     cluster_domain,
+    extract_blob_hints,
     sibling_domains,
+    strategy_traits,
 )
 from blockchecks.engine.generators.base import StrategyItem
 
@@ -111,6 +113,22 @@ def test_cluster_domain_lru_cache():
     assert cluster_domain.cache_info().hits == before + 1
 
 
+def test_extract_blob_hints_lru_cache():
+    extract_blob_hints.cache_clear()
+    extract_blob_hints("fake:blob=stun:repeats=6")
+    before = extract_blob_hints.cache_info().hits
+    extract_blob_hints("fake:blob=stun:repeats=6")
+    assert extract_blob_hints.cache_info().hits == before + 1
+
+
+def test_strategy_traits_lru_cache():
+    strategy_traits.cache_clear()
+    strategy_traits("fake:blob=stun:repeats=6:tcp_ts=-1000")
+    before = strategy_traits.cache_info().hits
+    strategy_traits("fake:blob=stun:repeats=6:tcp_ts=-1000")
+    assert strategy_traits.cache_info().hits == before + 1
+
+
 @pytest.mark.asyncio
 async def test_scan_weights_db_roundtrip(temp_db):
 
@@ -124,8 +142,7 @@ async def test_scan_weights_db_roundtrip(temp_db):
 
 
 def test_strategy_traits_extracts_axes():
-    from blockchecks.engine.adaptive_queue import strategy_traits
-
+    strategy_traits.cache_clear()
     tr = strategy_traits("fake:blob=stun:repeats=6:tcp_ts=-1000:ip_ttl=127")
     assert "r6" in tr
     assert "fool:tcp_ts" in tr

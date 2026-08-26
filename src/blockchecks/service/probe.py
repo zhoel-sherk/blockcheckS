@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import select
 import signal
@@ -11,6 +12,8 @@ import threading
 import time
 
 from blockchecks.checkers.curl_probe import CurlProbeRequest
+
+log = logging.getLogger(__name__)
 
 _FAIL = {
     "success": False,
@@ -22,6 +25,7 @@ _FAIL = {
     "read_rate_bps": 0,
 }
 
+_STDERR_RING = 8192
 _WORKERS: dict[tuple[str, str], _PersistentCurlWorker] = {}
 _WORKERS_LOCK = threading.Lock()
 
@@ -76,29 +80,64 @@ def _worker_cmd(ns_name: str, py: str) -> list[str]:
     ]
 
 
-def _readline_timed(pipe: sp.TextIOWrapper | None, timeout: float) -> str | None:
-    """Read one stdout line with a wall-clock deadline; None on timeout/EOF."""
-    if pipe is None:
-        return None
-    fd = pipe.fileno()
+def _readline_timed(fd: int, timeout: float, remainder: bytearray) -> str | None:
+    """Read one stdout line via os.read; None on timeout/EOF.
+
+    Must not mix select() with buffered TextIOWrapper.read(): the wrapper
+    slurps the whole JSON line on the first byte, then select waits on an
+    empty kernel pipe until the wall timeout (composite/scan fake FAIL).
+    """
     deadline = time.monotonic() + timeout
-    chunks: list[str] = []
     while True:
+        if (nl := remainder.find(b"\n")) >= 0:
+            line = bytes(remainder[:nl])
+            del remainder[: nl + 1]
+            return line.decode("utf-8", errors="replace")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
         ready, _, _ = select.select([fd], [], [], remaining)
         if not ready:
             return None
-        ch = pipe.read(1)
-        if ch == "":
-            return "".join(chunks) if chunks else None
-        if ch == "\n":
-            return "".join(chunks)
-        chunks.append(ch)
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            return None
+        if not chunk:
+            if not remainder:
+                return None
+            line = bytes(remainder)
+            remainder.clear()
+            return line.decode("utf-8", errors="replace")
+        remainder.extend(chunk)
 
 
-def _kill_worker_tree(proc: sp.Popen[str] | None) -> None:
+def _drain_stderr_fd(fd: int, stop: threading.Event, buf: bytearray) -> None:
+    """Keep stderr PIPE from filling; retain a small tail for death diagnostics."""
+    try:
+        os.set_blocking(fd, False)
+    except OSError:
+        pass
+    while not stop.is_set():
+        ready, _, _ = select.select([fd], [], [], 0.1)
+        if not ready:
+            continue
+        try:
+            chunk = os.read(fd, 4096)
+        except BlockingIOError:
+            continue
+        except OSError:
+            break
+        if not chunk:
+            break
+        buf.extend(chunk)
+        overflow = len(buf) - _STDERR_RING
+        if overflow > 0:
+            del buf[:overflow]
+            log.debug("curl worker stderr ring overflow, dropped %d bytes", overflow)
+
+
+def _kill_worker_tree(proc: sp.Popen[bytes] | None) -> None:
     if proc is None:
         return
     try:
@@ -117,24 +156,59 @@ class _PersistentCurlWorker:
     def __init__(self, ns_name: str, py: str) -> None:
         self.ns_name = ns_name
         self.py = py
-        self._proc: sp.Popen[str] | None = None
+        self._proc: sp.Popen[bytes] | None = None
         self._io_lock = threading.Lock()
+        self._stdout_buf = bytearray()
+        self._stderr_buf = bytearray()
+        self._stderr_stop: threading.Event | None = None
+        self._stderr_thread: threading.Thread | None = None
+
+    def _stop_stderr_drain(self) -> None:
+        if self._stderr_stop is not None:
+            self._stderr_stop.set()
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=0.5)
+        self._stderr_stop = None
+        self._stderr_thread = None
+
+    def _start_stderr_drain(self, proc: sp.Popen[bytes]) -> None:
+        self._stop_stderr_drain()
+        self._stderr_buf = bytearray()
+        if proc.stderr is None:
+            return
+        try:
+            fd = int(proc.stderr.fileno())
+        except (AttributeError, OSError, TypeError, ValueError):
+            return
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=_drain_stderr_fd,
+            args=(fd, stop, self._stderr_buf),
+            daemon=True,
+            name="curl-worker-stderr",
+        )
+        self._stderr_stop = stop
+        self._stderr_thread = thread
+        thread.start()
 
     def _start(self) -> None:
         self._kill()
+        self._stdout_buf = bytearray()
         self._proc = sp.Popen(
             _worker_cmd(self.ns_name, self.py),
             stdin=sp.PIPE,
             stdout=sp.PIPE,
             stderr=sp.PIPE,
-            text=True,
-            bufsize=1,
+            bufsize=0,
             start_new_session=True,
         )
+        self._start_stderr_drain(self._proc)
 
     def _kill(self) -> None:
+        self._stop_stderr_drain()
         _kill_worker_tree(self._proc)
         self._proc = None
+        self._stdout_buf = bytearray()
 
     def invoke(self, payload: dict, timeout: float) -> dict:
         with self._io_lock:
@@ -144,23 +218,22 @@ class _PersistentCurlWorker:
             if proc is None or proc.stdin is None or proc.stdout is None:
                 return {**_FAIL, "error": "worker start failed"}
             try:
-                proc.stdin.write(json.dumps(payload) + "\n")
+                proc.stdin.write(json.dumps(payload).encode("utf-8") + b"\n")
                 proc.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
                 self._kill()
                 return {**_FAIL, "error": f"worker write: {exc}"[:120]}
-            line = _readline_timed(proc.stdout, timeout)
-            if line is None:
+            try:
+                fd = proc.stdout.fileno()
+            except (AttributeError, OSError, ValueError):
                 self._kill()
-                if proc.poll() is not None:
-                    err_tail = ""
-                    if proc.stderr is not None:
-                        try:
-                            err_tail = (proc.stderr.read() or "")[:120]
-                        except OSError:
-                            pass
-                    if err_tail:
-                        return {**_FAIL, "error": f"worker died: {err_tail}"}
+                return {**_FAIL, "error": "worker stdout has no fd"}
+            line = _readline_timed(fd, timeout, self._stdout_buf)
+            if line is None:
+                err_tail = self._stderr_buf.decode("utf-8", errors="replace")[-120:]
+                self._kill()
+                if proc.poll() is not None and err_tail:
+                    return {**_FAIL, "error": f"worker died: {err_tail}"}
                 return {**_FAIL, "error": f"timeout after {timeout:.0f}s"}
             return _loads_probe_json(line)
 
@@ -203,4 +276,5 @@ def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: floa
     try:
         return _get_worker(ns_name, py).invoke(payload, timeout)
     except Exception as e:
+        log.warning("invoke_curl_probe_worker(%s) failed: %s", ns_name, e)
         return {**_FAIL, "error": str(e)[:120]}

@@ -121,9 +121,7 @@ def test_find_nfqws2_pids_missing_ns_file(caplog):
     assert "netns 'bs-p0' missing or unreadable" in caplog.text
 
 
-def test_find_nfqws2_pids_eperm_readlink_logs_warning(caplog):
-    import logging
-
+def test_find_nfqws2_pids_eperm_uses_sudo_readlink():
     def _listdir(path):
         if path == "/proc":
             return ["1234"]
@@ -137,16 +135,41 @@ def test_find_nfqws2_pids_eperm_readlink_logs_warning(caplog):
             return _TextIO("nfqws2")
         raise FileNotFoundError
 
-    with caplog.at_level(logging.WARNING):
-        with (
-            patch("blockchecks.service.metrics.os.stat") as mock_stat,
-            patch("blockchecks.service.metrics.os.listdir", side_effect=_listdir),
-            patch("blockchecks.service.metrics.os.readlink", side_effect=_readlink),
-            patch("blockchecks.service.metrics.open", side_effect=_open),
-        ):
-            mock_stat.return_value.st_ino = 99
-            assert find_nfqws2_pids("bs-p0") == []
-    assert "EPERM reading /proc/1234/ns/net" in caplog.text
+    with (
+        patch("blockchecks.service.metrics.os.stat") as mock_stat,
+        patch("blockchecks.service.metrics.os.listdir", side_effect=_listdir),
+        patch("blockchecks.service.metrics.os.readlink", side_effect=_readlink),
+        patch("blockchecks.service.metrics.open", side_effect=_open),
+        patch("blockchecks.service.metrics._sudo_readlink", return_value="net:[99]") as sudo_rl,
+    ):
+        mock_stat.return_value.st_ino = 99
+        assert find_nfqws2_pids("bs-p0") == [1234]
+    sudo_rl.assert_called_once_with("/proc/1234/ns/net")
+
+
+def test_find_nfqws2_pids_eperm_sudo_fail_returns_empty():
+    def _listdir(path):
+        if path == "/proc":
+            return ["1234"]
+        raise OSError("unexpected listdir")
+
+    def _readlink(path):
+        raise PermissionError("Operation not permitted")
+
+    def _open(path, *args, **kwargs):
+        if path == "/proc/1234/comm":
+            return _TextIO("nfqws2")
+        raise FileNotFoundError
+
+    with (
+        patch("blockchecks.service.metrics.os.stat") as mock_stat,
+        patch("blockchecks.service.metrics.os.listdir", side_effect=_listdir),
+        patch("blockchecks.service.metrics.os.readlink", side_effect=_readlink),
+        patch("blockchecks.service.metrics.open", side_effect=_open),
+        patch("blockchecks.service.metrics._sudo_readlink", return_value=None),
+    ):
+        mock_stat.return_value.st_ino = 99
+        assert find_nfqws2_pids("bs-p0") == []
 
 
 def test_pkill_nfqws2_in_ns_eperm_retries_sudo(caplog):

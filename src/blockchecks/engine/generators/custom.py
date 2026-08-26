@@ -5,9 +5,18 @@ import os
 import sys
 
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
+from blockchecks.engine.generators.families._helpers import cmd_label
 from blockchecks.engine.store import RunStateStore
 
 log = logging.getLogger(__name__)
+
+_LABEL_PREFIX_LEN = 40
+
+
+def _cmd_human_label(cmd: str) -> str:
+    """Sanitize first line as a short prefix; hash the full cmd for uniqueness."""
+    prefix = cmd.split("\n", 1)[0].replace(" ", "_").replace(":", "_")[:_LABEL_PREFIX_LEN]
+    return cmd_label(prefix, cmd)
 
 
 class CustomListGenerator(StrategyGenerator):
@@ -49,7 +58,7 @@ class CustomListGenerator(StrategyGenerator):
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                label = line.replace(" ", "_").replace(":", "_")
+                label = _cmd_human_label(line)
                 proto = {
                     "http": "http",
                     "quic": "quic",
@@ -186,7 +195,7 @@ class UserMatrixGenerator(StrategyGenerator):
                 continue
             if protocol == "udp_voice" and any(tok in low for tok in _UDP_SKIP_TCP_CLI):
                 continue
-            label = strategy.split("\n", 1)[0].replace(" ", "_").replace(":", "_")
+            label = _cmd_human_label(strategy)
             items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
             if scan_level == "single" and items:
                 break

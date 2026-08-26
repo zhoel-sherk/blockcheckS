@@ -63,6 +63,20 @@ async def test_run_adaptive_tcp_single():
 
 
 @pytest.mark.asyncio
+async def test_run_adaptive_tcp_timeout_error_propagates():
+    items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
+    queue = AdaptiveJobQueue.build(items, ["discord.com"], epsilon=0.0)
+    runner = _FakeRunner()
+
+    async def boom(*_a, **_k):
+        raise TimeoutError("probe timed out")
+
+    runner._run_probe_batch = boom
+    with pytest.raises(TimeoutError, match="timed out"):
+        await run_adaptive_tcp(runner, queue, curl_parallel=1, workers=1, bridge_batch=1)
+
+
+@pytest.mark.asyncio
 async def test_run_adaptive_tcp_b2_batch():
     items = [StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")]
     domains = ["discord.com", "discord.gg"]

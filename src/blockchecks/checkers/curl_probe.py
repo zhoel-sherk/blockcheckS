@@ -647,37 +647,27 @@ def _classify_generic(
 
 def run_curl_probe(req: CurlProbeRequest, *, _gv_hop: int = 0) -> CurlProbeResult:
     """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
-    res = _run_curl_probe_inner(req, _gv_hop=_gv_hop)
+    return _run_curl_probe_inner(req, _gv_hop=_gv_hop)
+
+
+def _finish_probe(req: CurlProbeRequest, res: CurlProbeResult) -> CurlProbeResult:
     if not res.resolve_name and req.resolve_name:
         res.resolve_name = req.resolve_name
     return res
 
 
-def _run_curl_probe_inner(
-    req: CurlProbeRequest, *, _gv_hop: int = 0
-) -> CurlProbeResult:
-    """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
-    import time
-
-    start = time.perf_counter()
-    session = _open_curl_session(req)
-    if isinstance(session, CurlProbeResult):
-        session.latency_ms = (time.perf_counter() - start) * 1000
-        return session
+def _session_get(session: curl_cffi.Session, req: CurlProbeRequest):
+    """One GET on an already-configured Session. Never pass options= (broken ≥0.15)."""
     url_scheme = "http" if req.protocol == "http" else "https"
-    try:
-        with session:
-            url = req.curl_url if req.curl_url else f"{url_scheme}://{req.domain}"
-            curl_timeout = min(req.timeout, 8.0) if req.googlevideo else req.timeout
-            resp = session.get(url, timeout=curl_timeout, **_curl_proxy_kwargs(req))
-    except RequestsError as e:
-        msg = str(e)
-        return CurlProbeResult(
-            latency_ms=(time.perf_counter() - start) * 1000,
-            error="timeout" if "Timeout" in msg else msg[:120],
-        )
-    except Exception as e:
-        return CurlProbeResult(error=str(e)[:120])
+    url = req.curl_url if req.curl_url else f"{url_scheme}://{req.domain}"
+    curl_timeout = min(req.timeout, 8.0) if req.googlevideo else req.timeout
+    return session.get(url, timeout=curl_timeout, **_curl_proxy_kwargs(req))
+
+
+def _classify_response(
+    req: CurlProbeRequest, resp, start: float, *, _gv_hop: int
+) -> CurlProbeResult:
+    import time
 
     elapsed = max(time.perf_counter() - start, 0.001)
     clen = len(resp.content)
@@ -701,6 +691,43 @@ def _run_curl_probe_inner(
     if follow:
         return run_curl_probe(follow, _gv_hop=1)
     return _classify_generic(req, resp, elapsed, clen, loc, redirect_err)
+
+
+def _probe_with_session(
+    req: CurlProbeRequest,
+    session: curl_cffi.Session,
+    *,
+    _gv_hop: int = 0,
+) -> CurlProbeResult:
+    """One attempt on a live Session (caller owns open/close)."""
+    import time
+
+    start = time.perf_counter()
+    try:
+        resp = _session_get(session, req)
+    except RequestsError as e:
+        msg = str(e)
+        return _finish_probe(
+            req,
+            CurlProbeResult(
+                latency_ms=(time.perf_counter() - start) * 1000,
+                error="timeout" if "Timeout" in msg else msg[:120],
+            ),
+        )
+    except Exception as e:
+        return _finish_probe(req, CurlProbeResult(error=str(e)[:120]))
+    return _finish_probe(req, _classify_response(req, resp, start, _gv_hop=_gv_hop))
+
+
+def _run_curl_probe_inner(
+    req: CurlProbeRequest, *, _gv_hop: int = 0
+) -> CurlProbeResult:
+    """Execute one curl probe (hostfakesplit / generic TLS / googlevideo chunk)."""
+    opened = _open_curl_session(req)
+    if isinstance(opened, CurlProbeResult):
+        return _finish_probe(req, opened)
+    with opened:
+        return _probe_with_session(req, opened, _gv_hop=_gv_hop)
 
 
 MAX_CURL_REPEATS = 10  # Discovery cap
@@ -755,6 +782,7 @@ def run_curl_probe_with_repeats(
     stable = repeats_mode == "stable"
 
     if parallel_repeats and n > 1:
+        # curl_cffi Session is not thread-safe; each worker owns its Session.
         with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
             futs = [ex.submit(run_curl_probe, req) for _ in range(n)]
             first_pass: CurlProbeResult | None = None
@@ -773,20 +801,24 @@ def run_curl_probe_with_repeats(
                 return last.as_dict()
         return CurlProbeResult(error="all parallel repeats failed").as_dict()
 
-    first_pass: CurlProbeResult | None = None
-    last: CurlProbeResult | None = None
-    for _ in range(n):
-        last = run_curl_probe(req)
-        if last.success:
-            if first_pass is None:
-                first_pass = last
-            if not stable:
-                return last.as_dict()
-        elif quick_break:
-            break
-    if first_pass is not None:
-        return first_pass.as_dict()
-    return (last or CurlProbeResult()).as_dict()
+    opened = _open_curl_session(req)
+    if isinstance(opened, CurlProbeResult):
+        return opened.as_dict()
+    with opened as session:
+        first_pass: CurlProbeResult | None = None
+        last: CurlProbeResult | None = None
+        for _ in range(n):
+            last = _probe_with_session(req, session)
+            if last.success:
+                if first_pass is None:
+                    first_pass = last
+                if not stable:
+                    return last.as_dict()
+            elif quick_break:
+                break
+        if first_pass is not None:
+            return first_pass.as_dict()
+        return (last or CurlProbeResult()).as_dict()
 
 
 @dataclass

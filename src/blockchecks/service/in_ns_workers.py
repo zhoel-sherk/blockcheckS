@@ -108,8 +108,6 @@ def _load_conf_lines(path: str) -> list[str]:
 
 def _attach_udp_queue(ns_name: str, port: int, *, coexist: bool) -> None:
     """NFQUEUE UDP to q201 after nfqws2 is up. No --queue-bypass (would skip desync)."""
-    import sys as _s
-    print("ZDBG real attach called; module:", __name__, file=_s.stderr)
     from blockchecks.engine.config import NFQUEUE_UDP
     from blockchecks.service.ns_firewall import get_ns_firewall
 

@@ -57,6 +57,11 @@ def test_run_invalid_domain_records_fail(tmp_path):
         patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool),
         patch("blockchecks.engine.composite_runner._start_pool", new=AsyncMock()),
         patch("blockchecks.engine.composite_runner._stop_pool", new=AsyncMock()),
+        patch("blockchecks.engine.composite_runner.start_daemon", new=MagicMock()),
+        patch(
+            "blockchecks.engine.composite_runner.invoke_curl_probe_worker",
+            return_value={"success": False, "http_code": 0, "error": "fail"},
+        ),
         patch("blockchecks.engine.composite_runner.get_ns_firewall") as get_fw,
     ):
         get_fw.return_value = MagicMock()
@@ -164,6 +169,7 @@ def test_run_minimal_fixture_injects_lua_init_and_probes(tmp_path, monkeypatch):
     assert launched_text is not None
     assert "--lua-init=@/opt/zapret2/lua/zapret-lib.lua" in launched_text
     assert "--qnum=" in launched_text  # qnum preserved from fixture
+    assert "--bind-fix4" in launched_text
     assert fw.attach.call_count == 2
 
 

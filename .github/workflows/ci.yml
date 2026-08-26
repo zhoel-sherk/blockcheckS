@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master, alpha]
+    branches: [main, master, alpha, beta]
   pull_request:
-    branches: [main, master, alpha]
+    branches: [main, master, alpha, beta]
   workflow_dispatch:
 
 concurrency:
@@ -46,7 +46,7 @@ jobs:
               tests/unit/test_strategy_loader.py tests/unit/test_tcp_redirect.py
               tests/unit/test_tcp_fanout.py tests/unit/test_wave4_perf.py
               tests/unit/test_blob_aliases.py tests/unit/test_family_needs.py
-              tests/unit/test_family_registry.py tests/unit/test_fail_phase.py tests/unit/test_todo_debt_w2w3.py
+              tests/unit/test_family_registry.py tests/unit/test_family_spec.py tests/unit/test_fail_phase.py tests/unit/test_todo_debt_w2w3.py
               tests/unit/test_wave_c.py tests/unit/test_wave3_audit.py
               tests/unit/test_wave_a_regressions.py tests/unit/test_full_export.py
               tests/unit/test_wave1_followups.py tests/unit/test_architecture.py
@@ -77,6 +77,7 @@ jobs:
               tests/unit/test_nfqws2_settle.py tests/unit/test_firewall_unit.py
               tests/unit/test_metrics.py tests/unit/test_probe_backend.py
               tests/unit/test_probe_service.py tests/unit/test_probe_worker.py
+              tests/unit/test_probe_worker_ipc.py
               tests/unit/test_http_server.py tests/unit/test_mcp_server.py tests/unit/test_async_runner_methods.py
               tests/unit/test_async_runner_tcp.py
               tests/unit/test_batch_scheduler.py tests/unit/test_live_and_impersonate.py
@@ -116,6 +117,33 @@ jobs:
         run: pip install -e ".[mcp,dev]"
       - name: Run Test Shard — ${{ matrix.name }}
         run: pytest ${{ matrix.files }} -m "not integration and not quality and not mutation" -n auto --dist loadscope --timeout=15
+
+  # Safe subset of integration: SQLite concurrency + firewall rule shape.
+  # No nfqws2 PATH gate — ubuntu-latest GitHub runners do not ship nfqws2;
+  # tests that need the binary skip via the nfqws2_available fixture.
+  # Full suite (netns + real nfqws2) stays workflow_dispatch-only below.
+  # Optional: self-hosted runner label [probe] — see docs/ci-selfhosted.md.
+  integration-safe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+      - name: Install dependencies
+        run: pip install -e ".[mcp,dev]"
+      - name: Integration-safe (no nfqws2 required)
+        run: |
+          python -m pytest \
+            tests/integration/test_sqlite_concurrency.py \
+            tests/integration/test_nfqws2_firewall.py \
+            -o addopts= \
+            -m integration \
+            -k "not killpg and not nfqws2_bin" \
+            --timeout=30 -q
 
   mutation:
     if: github.event_name == 'workflow_dispatch'
@@ -163,10 +191,9 @@ jobs:
         run: pip install -e ".[mcp,dev]"
       - name: Integration (requires probe host with nfqws2 + sudo + netns)
         run: |
-          # QA-2: без nfqws2 джоба падает ГРОМКО (раньше — тихий exit 0,
-          # и регрессии netns/nfqws2 проходили CI незамеченными).
-          # Полноценный прогон — на self-hosted runner с меткой [probe]:
-          #   см. docs/ci-selfhosted.md (настройка раннера на Fiord-хосте).
+          # Loud nfqws2 check: missing binary is a hard fail (not skip/exit 0).
+          # Full suite is workflow_dispatch only — do not auto-run on this LAN
+          # Xeon during week_cov. Self-hosted [probe] runner: docs/ci-selfhosted.md.
           if ! command -v nfqws2 >/dev/null 2>&1; then
             echo "::error::nfqws2 not found on runner. Integration suite MUST run" \
                  "on a probe host (label [probe]) or via dev/release_smoke.sh manually."

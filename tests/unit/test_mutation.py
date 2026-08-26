@@ -16,6 +16,8 @@ def test_mutmut_config_present() -> None:
     cfg = tool_section("tool", "mutmut")
     paths = cfg.get("source_paths") or []
     assert paths, "[tool.mutmut].source_paths must be non-empty in pyproject.toml"
+    stale = [p for p in paths if not (PROJECT_ROOT / p).is_file()]
+    assert not stale, f"stale mutmut source_paths (files missing): {stale}"
     assert cfg.get("pytest_add_cli_args_test_selection"), (
         "[tool.mutmut].pytest_add_cli_args_test_selection required"
     )

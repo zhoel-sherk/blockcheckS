@@ -74,6 +74,34 @@ def _proc_status_value(pid: int, field: str) -> int:
     return 0
 
 
+def _sudo_readlink(path: str) -> str | None:
+    """Escalate ``readlink`` via ``sudo -n`` (overflow-uid ``/proc/.../ns/net``)."""
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", "readlink", path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        log.debug("sudo -n readlink %s failed to execute: %s", path, exc)
+        return None
+    if proc.returncode == 0:
+        link = (proc.stdout or "").strip()
+        if link:
+            log.debug("EPERM on %s; used sudo -n readlink", path)
+            return link
+        log.debug("sudo -n readlink %s returned empty stdout", path)
+        return None
+    log.debug(
+        "sudo -n readlink %s failed (rc=%d): %s",
+        path,
+        proc.returncode,
+        (proc.stderr or proc.stdout or "").strip(),
+    )
+    return None
+
+
 def _sudo_kill_pid(pid: int) -> bool:
     """Escalate SIGKILL via ``sudo -n kill -9`` (never netns exec / pkill -f)."""
     try:
@@ -152,9 +180,8 @@ def _find_nfqws2_pids(ns_name: str) -> tuple[list[int], int]:
     try:
         ns_inode = os.stat(ns_file).st_ino
     except OSError as exc:
-        scan_errors += 1
         log.warning("netns %r missing or unreadable (%s): cannot scan nfqws2", ns_name, exc)
-        return [], scan_errors
+        return [], 0
     pids: list[int] = []
     try:
         proc_dirs = os.listdir("/proc")
@@ -184,17 +211,20 @@ def _find_nfqws2_pids(ns_name: str) -> tuple[list[int], int]:
                 continue
             if comm != "nfqws2":
                 continue
+            ns_path = f"/proc/{pid}/ns/net"
             try:
-                link = os.readlink(f"/proc/{pid}/ns/net")
+                link = os.readlink(ns_path)
             except PermissionError as exc:
-                scan_errors += 1
-                log.warning(
-                    "EPERM reading /proc/%d/ns/net while scanning nfqws2 in %r: %s",
-                    pid,
+                log.debug(
+                    "EPERM reading %s while scanning nfqws2 in %r: %s; trying sudo",
+                    ns_path,
                     ns_name,
                     exc,
                 )
-                continue
+                link = _sudo_readlink(ns_path)
+                if not link:
+                    scan_errors += 1
+                    continue
             if link.endswith(f"[{ns_inode}]"):
                 pids.append(pid)
         except (FileNotFoundError, ProcessLookupError, OSError):

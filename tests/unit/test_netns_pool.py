@@ -259,6 +259,19 @@ def test_ip_forward_saved_and_restored_on_last_destroy():
     assert ("sysctl", "-w", "net.ipv4.ip_forward=0") in sysctl_cmds
 
 
+def test_destroy_one_releases_curl_worker():
+    pool = NetNsPool(size=1, base="bs-t")
+    with (
+        patch.object(pool, "_run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch("blockchecks.service.metrics.pkill_nfqws2_in_ns"),
+        patch("blockchecks.service.ns_firewall.drop_ns_firewall"),
+        patch("blockchecks.service.probe.release_curl_probe_worker") as release,
+    ):
+        pool._destroy_one("bs-t-0", track_lifecycle=False)
+    release.assert_called_once_with("bs-t-0")
+
+
 def test_destroy_one_drops_ns_firewall():
     pool = NetNsPool(size=1, base="bs-t")
 

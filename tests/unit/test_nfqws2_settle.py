@@ -109,8 +109,7 @@ def test_wait_nfqws2_gone_returns_true_when_never_there():
     """_wait_nfqws2_gone: nfqws2 absent → returns True immediately."""
     from blockchecks.service.nfqws2_settle import _wait_nfqws2_gone
 
-    running = MagicMock(return_value=False)
-    with patch("blockchecks.service.nfqws2_settle.nfqws2_running_in_ns", running):
+    with patch("blockchecks.service.nfqws2_settle._nfqws2_scan", return_value=(0, 0)):
         assert _wait_nfqws2_gone("bs-p0", max_wait=0.5) is True
 
 
@@ -118,19 +117,18 @@ def test_wait_nfqws2_gone_polls_until_gone():
     """pkill is async; _wait_nfqws2_gone polls until the daemon disappears."""
     from blockchecks.service.nfqws2_settle import _wait_nfqws2_gone
 
-    running = MagicMock(side_effect=[True, True, False])
+    scan = MagicMock(side_effect=[(1, 0), (1, 0), (0, 0)])
     sleep = MagicMock()
-    with patch("blockchecks.service.nfqws2_settle.nfqws2_running_in_ns", running):
+    with patch("blockchecks.service.nfqws2_settle._nfqws2_scan", scan):
         with patch("blockchecks.service.nfqws2_settle.time.sleep", sleep):
             assert _wait_nfqws2_gone("bs-p0", max_wait=1.0, poll_interval=0.05) is True
-    assert running.call_count == 3
+    assert scan.call_count == 3
 
 
 def test_wait_nfqws2_gone_timeout():
     """If nfqws2 never disappears within max_wait, return False (caller decides)."""
     from blockchecks.service.nfqws2_settle import _wait_nfqws2_gone
 
-    running = MagicMock(return_value=True)
     t = {"now": 0.0}
 
     def fake_perf():
@@ -139,7 +137,7 @@ def test_wait_nfqws2_gone_timeout():
     def fake_sleep(dt):
         t["now"] += dt
 
-    with patch("blockchecks.service.nfqws2_settle.nfqws2_running_in_ns", running):
+    with patch("blockchecks.service.nfqws2_settle._nfqws2_scan", return_value=(1, 0)):
         with patch("blockchecks.service.nfqws2_settle.time.sleep", side_effect=fake_sleep):
             with patch(
                 "blockchecks.service.nfqws2_settle.time.perf_counter",
@@ -148,12 +146,41 @@ def test_wait_nfqws2_gone_timeout():
                 assert _wait_nfqws2_gone("bs-p0", max_wait=0.3, poll_interval=0.1) is False
 
 
+def test_wait_nfqws2_gone_unknown_on_scan_errors():
+    """EPERM scan (0 pids, scan_errors>0) is unknown, not drain_ok."""
+    from blockchecks.service.nfqws2_settle import _wait_nfqws2_gone
+
+    t = {"now": 0.0}
+
+    def fake_perf():
+        return t["now"]
+
+    def fake_sleep(dt):
+        t["now"] += dt
+
+    with patch("blockchecks.service.nfqws2_settle._nfqws2_scan", return_value=(0, 2)):
+        with patch("blockchecks.service.nfqws2_settle.time.sleep", side_effect=fake_sleep):
+            with patch(
+                "blockchecks.service.nfqws2_settle.time.perf_counter",
+                side_effect=fake_perf,
+            ):
+                assert _wait_nfqws2_gone("bs-p0", max_wait=0.2, poll_interval=0.1) is False
+
+
 def test_nfqws2_pid_in_ns():
     from blockchecks.service.nfqws2_settle import nfqws2_pid_in_ns
 
-    with patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[42, 99]):
-        assert nfqws2_pid_in_ns(42, "bs-p0") is True
-        assert nfqws2_pid_in_ns(1, "bs-p0") is False
+    with patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[1001, 1002]):
+        assert nfqws2_pid_in_ns(1001, "bs-p0") is True
+        assert nfqws2_pid_in_ns(42, "bs-p0") is False  # sudo wrapper is not nfqws2
+
+
+def test_resolve_nfqws2_pids_coexist_difference():
+    from blockchecks.service.nfqws2_settle import resolve_nfqws2_pids
+
+    with patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[100, 200]):
+        assert resolve_nfqws2_pids("bs-p0", frozenset({100})) == [200]
+        assert resolve_nfqws2_pids("bs-p0") == [100, 200]
 
 
 def test_nfqws2_out_shows_bind(tmp_path):
@@ -180,15 +207,40 @@ def test_wait_nfqws2_bind_proof_pid(tmp_path):
 
     calls = {"n": 0}
 
-    def pid_ready(pid, ns):
+    def pids(ns):
         calls["n"] += 1
-        return calls["n"] >= 2
+        return [] if calls["n"] < 2 else [1001]
 
     with (
-        patch("blockchecks.service.nfqws2_settle.nfqws2_pid_in_ns", side_effect=pid_ready),
+        patch("blockchecks.service.metrics.find_nfqws2_pids", side_effect=pids),
         patch("blockchecks.service.nfqws2_settle.time.sleep"),
     ):
-        assert wait_nfqws2_bind_proof("bs-p0", launched_pid=123, within=0.5) is True
+        assert wait_nfqws2_bind_proof("bs-p0", within=0.5) is True
+
+
+def test_wait_nfqws2_bind_proof_ignores_sudo_pid():
+    from blockchecks.service.nfqws2_settle import wait_nfqws2_bind_proof
+
+    with (
+        patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[]),
+        patch("blockchecks.service.nfqws2_settle.time.sleep"),
+    ):
+        assert wait_nfqws2_bind_proof("bs-p0", within=0.0) is False
+
+
+def test_wait_nfqws2_bind_proof_coexist_baseline():
+    from blockchecks.service.nfqws2_settle import wait_nfqws2_bind_proof
+
+    with (
+        patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[100]),
+        patch("blockchecks.service.nfqws2_settle.time.sleep"),
+    ):
+        assert wait_nfqws2_bind_proof("bs-p0", baseline_pids={100}, within=0.0) is False
+    with (
+        patch("blockchecks.service.metrics.find_nfqws2_pids", return_value=[100, 200]),
+        patch("blockchecks.service.nfqws2_settle.time.sleep"),
+    ):
+        assert wait_nfqws2_bind_proof("bs-p0", baseline_pids={100}, within=0.0) is True
 
 
 @pytest.mark.parametrize(

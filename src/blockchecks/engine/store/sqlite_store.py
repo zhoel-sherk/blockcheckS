@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -31,6 +32,16 @@ _TCP_INSERT_SQL = """INSERT INTO tcp_results
 _UDP_INSERT_SQL = """INSERT INTO udp_results
    (run_id,strategy_id,target,status,latency_ms,error,timestamp,epoch_ms)
    VALUES(?,?,?,?,?,?,?,?)"""
+
+_ENSURE_STRATEGY_SQL = """INSERT INTO strategies(name, proto, config_path, first_seen)
+   VALUES(?,?,?,?)
+   ON CONFLICT(name, proto) DO UPDATE SET
+     config_path=CASE
+       WHEN excluded.config_path != '' THEN excluded.config_path
+       ELSE strategies.config_path
+     END"""
+
+_SELECT_STRATEGY_ID_SQL = "SELECT id FROM strategies WHERE name=? AND proto=?"
 
 
 def matrix_fingerprint(
@@ -95,12 +106,8 @@ def _probe_nfqws2_version() -> str:
 
 
 def _resolve_impersonate() -> str:
-    try:
-        from blockchecks.checkers.curl_probe import impersonate_target
-
-        return impersonate_target()
-    except ImportError:
-        return ""
+    """Same env pin as curl_probe.impersonate_target, without importing checkers (store_leaf)."""
+    return (os.environ.get("BLOCKCHECKS_IMPERSONATE") or "").strip() or "chrome124"
 
 
 _WORKING_STATUSES = "('PASS','THROTTLED')"
@@ -158,6 +165,9 @@ class SqliteRunStore:
             db = await self._writer()
             await apply_schema(db)
         reclaim_sudo_ownership(self._path)
+        log.debug(
+            "reclaim_sudo_ownership: init/close only (skipped per-write hot path)"
+        )
 
     async def _writer(self) -> aiosqlite.Connection:
         """Lazy-open the long-lived writer connection (ST-2)."""
@@ -246,7 +256,6 @@ class SqliteRunStore:
                 nfv=nfv,
             )
         log.info("started run_id=%s fingerprint=%s resume=%s", run_id, fp, use_resume)
-        reclaim_sudo_ownership(self._path)
         return run_id
 
     async def _begin_run_on_db(
@@ -298,11 +307,6 @@ class SqliteRunStore:
             imp=_resolve_impersonate(),
             nfv=_probe_nfqws2_version(),
         )
-
-    async def _ensure_run_id(self) -> int:
-        if self._run_id is not None:
-            return self._run_id
-        return await self.begin_run(resume=False, fingerprint="")
 
     def _tcp_row_values(self, run_id: int, sid: int, entry: dict) -> tuple:
         return (
@@ -404,33 +408,27 @@ class SqliteRunStore:
         await db.execute("PRAGMA temp_store = MEMORY")
 
     async def ensure_strategy(
-        self, name: str, proto: str, config_path: str, db: aiosqlite.Connection = None
+        self,
+        name: str,
+        proto: str,
+        config_path: str,
+        db: aiosqlite.Connection | None = None,
     ) -> int:
         """Insert or get strategy ID. Reuses open `db` when provided."""
 
-        async def _body(conn, commit: bool):
-            row = await conn.execute(
-                "SELECT id FROM strategies WHERE name=? AND proto=?",
-                (name, proto),
-            )
-            existing = await row.fetchone()
-            if existing:
-                if config_path:
-                    await conn.execute(
-                        "UPDATE strategies SET config_path=? WHERE id=?",
-                        (config_path, existing[0]),
-                    )
-                    if commit:
-                        await conn.commit()
-                return existing[0]
+        async def _body(conn, commit: bool) -> int:
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-            cur = await conn.execute(
-                "INSERT INTO strategies(name,proto,config_path,first_seen) VALUES(?,?,?,?)",
+            await conn.execute(
+                _ENSURE_STRATEGY_SQL,
                 (name, proto, config_path, ts),
             )
+            row = await conn.execute(_SELECT_STRATEGY_ID_SQL, (name, proto))
+            found = await row.fetchone()
+            if found is None:
+                raise RuntimeError(f"strategy upsert vanished: {name!r} {proto!r}")
             if commit:
                 await conn.commit()
-            return cur.lastrowid
+            return int(found[0])
 
         if db is not None:
             return await _body(db, commit=False)
@@ -524,7 +522,6 @@ class SqliteRunStore:
                 self._udp_pending[:0] = udp_batch
                 raise last_err
             self._clear_pending_clock()
-        reclaim_sudo_ownership(self._path)
 
     async def log_tcp(
         self,
@@ -618,7 +615,6 @@ class SqliteRunStore:
                 ),
             )
             await db.commit()
-        reclaim_sudo_ownership(self._path)
 
     async def log_udp(
         self,
@@ -659,7 +655,6 @@ class SqliteRunStore:
                 (run_id, sid, target, status, latency_ms, error, ts, epoch_ms),
             )
             await db.commit()
-        reclaim_sudo_ownership(self._path)
 
     async def quarantine_domain(
         self, domain: str, *, reason: str = "", failed: int = 0
@@ -680,7 +675,6 @@ class SqliteRunStore:
                 ),
             )
             await db.commit()
-        reclaim_sudo_ownership(self._path)
 
     async def get_quarantined(self) -> list[dict]:
         """All quarantined domains recorded for this campaign DB."""
@@ -903,9 +897,9 @@ class SqliteRunStore:
 
     async def has_tcp_result(self, strategy: str, domain: str, proto: str = "tcp") -> bool:
         """True if any tcp_results row exists for strategy×domain in the current run."""
-        run_id = await self._ensure_run_id()
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+        async with self._write_lock:
+            db = await self._writer()
+            run_id = await self._ensure_run_id_on_db(db)
             row = await db.execute(
                 """SELECT 1 FROM tcp_results t
                    JOIN strategies s ON t.strategy_id = s.id
@@ -924,8 +918,8 @@ class SqliteRunStore:
         if self._run_id is None:
             return set()
         run_id = self._run_id
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+        async with self._write_lock:
+            db = await self._writer()
             rows = await db.execute(
                 f"""SELECT s.name, t.domain
                    FROM tcp_results t
@@ -1273,4 +1267,3 @@ class SqliteRunStore:
                 (domain or "", json.dumps(payload, ensure_ascii=False), ts),
             )
             await db.commit()
-        reclaim_sudo_ownership(self._path)

@@ -7,8 +7,9 @@ import random
 import re
 import time
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from functools import cache, lru_cache
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from blockchecks.engine.family_needs import classify_strategy_family
@@ -62,7 +63,7 @@ def sibling_domains(
     return [d for d in all_domains if d != domain and cluster_domain(d) == cluster]
 
 
-@cache
+@lru_cache(maxsize=4096)
 def extract_blob_hints(strategy: str) -> tuple[str, ...]:
     """Blob aliases referenced in a strategy string (cached, immutable tuple)."""
     hints: list[str] = []
@@ -73,7 +74,7 @@ def extract_blob_hints(strategy: str) -> tuple[str, ...]:
     return tuple(hints)
 
 
-@cache
+@lru_cache(maxsize=4096)
 def strategy_traits(strategy: str) -> tuple[str, ...]:
     """Strategy-genetics traits: repeats / fooling / ttl / pos.
 
@@ -409,7 +410,7 @@ class AdaptiveJobQueue:
         self.metrics.total_enqueued += 1
         return True
 
-    def enqueue_many(self, jobs: list[AdaptiveJob]) -> int:
+    def enqueue_many(self, jobs: Iterable[AdaptiveJob]) -> int:
         return sum(1 for j in jobs if self.enqueue(j))
 
     def _epsilon_pick_key(self, exclude: set[str]) -> tuple[str, str] | None:
@@ -567,16 +568,18 @@ class AdaptiveJobQueue:
         q._cluster_index = _cluster_domain_index(domains)
         if skip_domains:
             q.excluded_domains |= skip_domains
-        for item in items:
-            label = item.label
-            for dom in domains:
-                if dom in skip_domains:
-                    continue
-                key = (label, dom)
-                if key in skip_keys:
-                    q._done.add(key)
-                    continue
-                q.enqueue(AdaptiveJob.from_item(item, dom))
+        q._done.update(
+            (item.label, dom)
+            for item in items
+            for dom in domains
+            if (item.label, dom) in skip_keys
+        )
+        q.enqueue_many(
+            AdaptiveJob.from_item(item, dom)
+            for item in items
+            for dom in domains
+            if dom not in skip_domains and (item.label, dom) not in skip_keys
+        )
         q.metrics.set_half_mark(q.metrics.total_enqueued)
         return q
 

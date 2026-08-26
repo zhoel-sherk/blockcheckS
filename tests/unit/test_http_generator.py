@@ -67,17 +67,15 @@ def test_family_expanders_all_have_methods():
     Jules/vulture flag these as "unused" (getattr dispatcher), but they are
     called dynamically in _expand_family. This guards against broken links.
     """
-    import inspect
     import re
     from pathlib import Path
 
     import blockchecks.engine.generators.standard as standard_mod
+    from blockchecks.engine.family_spec import FAMILY_EXPANDERS, REGISTRY
 
-    src = inspect.getsource(standard_mod)
-    m = re.search(r"_FAMILY_EXPANDERS = \{(.*?)\n    \}", src, re.S)
-    assert m, "could not find _FAMILY_EXPANDERS in standard.py"
-    mapped = set(re.findall(r': "(_fam_\w+)"', m.group(1)))
-    assert mapped, "no _fam_* entries in _FAMILY_EXPANDERS"
+    mapped = set(FAMILY_EXPANDERS.values())
+    assert mapped, "no _fam_* entries in expander registry"
+    assert mapped == {s.expander for s in REGISTRY}
 
     fam_dir = Path(standard_mod.__file__).parent / "families"
     defined = set()

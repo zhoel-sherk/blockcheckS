@@ -54,7 +54,7 @@ mcp = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "pytest-cov>=7.0.0",
+    # NOTE: pytest-cov omitted — unused in CI/gate (QA-9); do not add a cov job.
     "pytest-randomly>=3.15",
     "pytest-timeout>=2.0.0",
     "pytest-xdist>=3.5.0",
@@ -186,7 +186,7 @@ source_paths = [
     "src/blockchecks/checkers/voice_dns.py",
     "src/blockchecks/engine/results.py",
     "src/blockchecks/engine/nfqws_config.py",
-    "src/blockchecks/engine/in_ns_workers.py",
+    "src/blockchecks/service/in_ns_workers.py",
     "src/blockchecks/engine/tcp_fanout.py",
     "src/blockchecks/engine/conf_builder.py",
     "src/blockchecks/checkers/tcp_tls.py",
@@ -233,7 +233,7 @@ also_copy = [
 ]
 do_not_mutate_patterns = ["logger\\.", "raise "]
 [tool.blockchecks.architecture]
-# ARC-2 follow-up: move in_ns_workers/test_runner to service (engine→service still allowed).
+# ARC-2: in_ns_workers/test_runner live in service (engine→service still allowed).
 package = "blockchecks"
 
 [[tool.blockchecks.architecture.rules]]
@@ -266,10 +266,7 @@ name = "engine_no_cli"
 match = "blockchecks.engine*"
 should_not_import = ["blockchecks.cli*"]
 
-[[tool.blockchecks.architecture.rules]]
-name = "main_no_cli"
-match = "blockchecks.main*"
-should_not_import = ["blockchecks.cli*"]
+# main.py is the `bs full` orchestrator and owns the argparse tree; it may import cli.
 
 [[tool.blockchecks.architecture.rules]]
 name = "service_no_cli"

@@ -6,33 +6,10 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from blockchecks.engine.family_spec import LABEL_PREFIXES, TCP_FAMILIES
 from blockchecks.engine.generators.base import StrategyItem
-from blockchecks.engine.generators.standard import TCP_FAMILIES
 
 FAMILY_RANK = {name: idx for idx, name in enumerate(TCP_FAMILIES)}
-
-LABEL_PREFIXES: dict[str, tuple[str, ...]] = {
-    "fake": ("std_fake_", "fake_"),
-    "hostfake": ("std_hf_", "std_hostfake_", "hostfake_"),
-    "multisplit": ("std_split_", "std_multisplit_", "multisplit_"),
-    "syndata": ("std_syn_", "std_syndata_"),
-    "tcpseg": ("std_tcpseg_",),
-    "oob": ("std_oob_",),
-    "multi_fake": ("std_multi_fake_", "std_multi_", "fake_multi_"),
-    "fake_multisplit": ("std_fms_", "fake_multisplit_"),
-    "fake_multisplit_hostfake": ("std_fmsh_", "fake_multisplit_hostfake_"),
-    "fake_multidisorder": ("std_fmd_", "fake_multidisorder_"),
-    "multidisorder": ("std_mdis_", "multidisorder_"),
-    "fakedsplit": ("std_fds_", "fakedsplit_"),
-    "fakeddisorder": ("std_fdd_", "fakeddisorder_"),
-    "fake_fakedsplit": ("std_ffds_", "fake_fakedsplit_"),
-    "fake_hostfake": ("std_fake_hostfake_", "std_fh_", "fake_hostfake_"),
-    "tcp_ipfrag": ("std_tcp_fake_ipfrag_", "std_tcp_ipfrag_"),
-    "rst_fake": ("std_rst_",),
-    "synack": ("std_synack",),
-    "wssize": ("std_wssize",),
-    "geneva_fool": ("std_gva_",),
-}
 
 
 def map_triage_to_generators(profile) -> list[str]:

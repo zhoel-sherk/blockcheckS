@@ -26,7 +26,7 @@ from blockchecks.service.nfqws2_settle import (
     nfqws2_bind_retry_should_continue,
     nfqws2_count_in_ns,
     nfqws2_out_shows_bind,
-    nfqws2_pid_in_ns,
+    resolve_nfqws2_pids,
     wait_nfqws2_bind_proof,
     wait_nfqws2_ready,
 )
@@ -151,8 +151,9 @@ def start_daemon(
     """
     _fd, tmp_conf = tempfile.mkstemp(prefix="bs_nfq_", suffix=".conf")
     os.close(_fd)
-    launched_pid: int | None = None
+    launched: bool = False
     last_out_path: Path | None = None
+    baseline: frozenset[int] = frozenset()
     try:
         shutil.copy2(config_path, tmp_conf)
         dbg_path = inject_debug_and_daemon(tmp_conf, tag=ns_name)
@@ -173,6 +174,9 @@ def start_daemon(
                     f"  [nfqws2] {ns_name}: prior daemon still visible after "
                     f"pkill drain — bind retries likely",
                 )
+        else:
+            # Coexist: new daemon = set difference vs pre-launch nfqws2 PIDs.
+            baseline = frozenset(resolve_nfqws2_pids(ns_name))
         # @config must be the only argument; daemon/debug are inside the file
         cmd = [
             "sudo",
@@ -201,7 +205,7 @@ def start_daemon(
                     stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
                 )
                 if proc is not None:
-                    launched_pid = proc.pid
+                    launched = True
                     _daemon_popens.add(proc)
                     _reap_daemon_popens()
             finally:
@@ -212,8 +216,8 @@ def start_daemon(
                 ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
             )
             _reclaim_debug_log(dbg_path)
-            # Liveness: readiness is THIS session's PID or stdout bind marker —
-            # not any comm=nfqws2 left in the ns from a stale pkill.
+            # Liveness: bind marker (primary) or a real nfqws2 pid in ns —
+            # never the sudo wrapper PID (comm is sudo, not nfqws2).
             try:
                 out_txt = (
                     out_path.read_text(errors="replace")[:2000]
@@ -222,9 +226,7 @@ def start_daemon(
                 )
             except OSError:
                 out_txt = ""
-            alive = NFQWS2_BIND_MARKER in out_txt or (
-                launched_pid is not None and nfqws2_pid_in_ns(launched_pid, ns_name)
-            )
+            alive = NFQWS2_BIND_MARKER in out_txt or bool(resolve_nfqws2_pids(ns_name, baseline))
             should_retry, reason = nfqws2_bind_retry_should_continue(
                 out_txt,
                 attempt=attempt,
@@ -245,13 +247,12 @@ def start_daemon(
         return settle
     finally:
         # Hold @config until this session's daemon read it (bind marker or PID).
-        if launched_pid is not None and not (
-            nfqws2_out_shows_bind(last_out_path)
-            or nfqws2_pid_in_ns(launched_pid, ns_name)
+        if launched and not (
+            nfqws2_out_shows_bind(last_out_path) or resolve_nfqws2_pids(ns_name, baseline)
         ):
             wait_nfqws2_bind_proof(
                 ns_name,
-                launched_pid=launched_pid,
+                baseline_pids=baseline,
                 out_path=last_out_path,
             )
         try:
@@ -294,6 +295,9 @@ class Nfqws2Manager:
         # с nfq_create_queue(): Operation not permitted.
         max_bind_attempts = NFQWS2_BIND_ATTEMPTS
         last_err: RuntimeError | None = None
+        baseline: frozenset[int] = (
+            frozenset(resolve_nfqws2_pids(self.ns_name)) if self.ns_name else frozenset()
+        )
         for attempt in range(1, max_bind_attempts + 1):
             out_fh, out_path = open_out_capture(self.ns_name or "host")
             self.last_out_log = out_path
@@ -315,14 +319,22 @@ class Nfqws2Manager:
             if self.ns_name:
                 settle_max = NFQWS2_SETTLE_MAX
                 settle = wait_nfqws2_ready(self.ns_name, max_wait=settle_max)
-                if settle >= settle_max and nfqws2_count_in_ns(self.ns_name) == 0:
-                    raise RuntimeError(
-                        f"nfqws2 not visible in {self.ns_name} after settle "
-                        f"({settle:.2f}s >= {settle_max:.2f}s)"
+                count = nfqws2_count_in_ns(self.ns_name)
+                bound = nfqws2_out_shows_bind(self.last_out_log)
+                if settle >= settle_max and count == 0:
+                    if not bound:
+                        raise RuntimeError(
+                            f"nfqws2 not visible in {self.ns_name} after settle "
+                            f"({settle:.2f}s >= {settle_max:.2f}s)"
+                        )
+                    log.debug(
+                        "%s",
+                        f"  [nfqws2] {self.ns_name}: bind marker present with "
+                        "count=0 — treat as alive (overflow-uid /proc EPERM)",
                     )
                 if not wait_nfqws2_bind_proof(
                     self.ns_name,
-                    launched_pid=self._pid,
+                    baseline_pids=baseline,
                     out_path=self.last_out_log,
                 ):
                     log.warning(
@@ -330,6 +342,8 @@ class Nfqws2Manager:
                         f"  [nfqws2] {self.ns_name}: no bind proof after settle "
                         f"— process visible but NFQUEUE may not be ready",
                     )
+                if real := resolve_nfqws2_pids(self.ns_name, baseline):
+                    self._pid = real[0]
             else:
                 time.sleep(0.1)
             _reclaim_debug_log(self.last_debug_log)

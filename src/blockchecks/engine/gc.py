@@ -6,6 +6,7 @@ Default is collect-only (dry-run). Never deletes week_cov* campaign artifacts.
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,7 +14,9 @@ from pathlib import Path
 from blockchecks.engine.paths import (
     CACHE_DIR,
     DATA_DIR,
+    DEFAULT_DB_PATH,
     DEFAULT_OUT_DIR,
+    RUN_LOCK_FILE,
     RUNTIME_LOGS_DIR,
     STATE_DIR,
 )
@@ -48,6 +51,16 @@ class GcPlan:
     @property
     def total_bytes(self) -> int:
         return sum(i.bytes for i in self.deletes)
+
+
+@dataclass
+class DbGcStats:
+    tcp_rows: int = 0
+    udp_rows: int = 0
+    orphan_strategies: int = 0
+    skipped_lock: bool = False
+    dry_run: bool = True
+    db_path: Path | None = None
 
 
 def _sz(path: Path) -> int:
@@ -107,13 +120,8 @@ def prune_nfqws2_debug_logs(log_dir: Path | None = None, keep: int = NFQWS2_LOG_
 
 
 def _has_live_run_lock() -> bool:
-    try:
-        from blockchecks.service.run_control import read_active_run
-
-        return read_active_run() is not None
-    except Exception as exc:
-        log.warning("gc run.lock probe failed: %s", exc)
-        return False
+    """True when campaign run.lock exists. File-only — do not import service (archrule)."""
+    return RUN_LOCK_FILE.is_file()
 
 
 def _scan_tmp_nfqws2_artifacts(add, *, max_age_days: float) -> None:
@@ -244,6 +252,140 @@ def collect_gc(
     wal_roots = list(dict.fromkeys([STATE_DIR, DATA_DIR, *search]))
     _scan_sqlite_wal_shm(_add, wal_roots, max_age_days=max_age_days)
     return plan
+
+
+# Prefer epoch_ms; fall back to lexicographic ISO timestamp (store format %Y-%m-%dT%H:%M:%S).
+_RESULT_AGE_SQL = """(
+  (epoch_ms IS NOT NULL AND epoch_ms < :cutoff_ms)
+  OR (
+    epoch_ms IS NULL
+    AND timestamp IS NOT NULL
+    AND timestamp != ''
+    AND timestamp < :cutoff_iso
+  )
+)"""
+_TCP_COUNT_SQL = f"SELECT COUNT(*) FROM tcp_results WHERE {_RESULT_AGE_SQL}"
+_UDP_COUNT_SQL = f"SELECT COUNT(*) FROM udp_results WHERE {_RESULT_AGE_SQL}"
+_TCP_DELETE_SQL = f"DELETE FROM tcp_results WHERE {_RESULT_AGE_SQL}"
+_UDP_DELETE_SQL = f"DELETE FROM udp_results WHERE {_RESULT_AGE_SQL}"
+_KEEP_TCP_SQL = (
+    f"SELECT 1 FROM tcp_results t WHERE t.strategy_id = s.id AND NOT {_RESULT_AGE_SQL}"
+)
+_KEEP_UDP_SQL = (
+    f"SELECT 1 FROM udp_results u WHERE u.strategy_id = s.id AND NOT {_RESULT_AGE_SQL}"
+)
+_ORPHAN_DELETE_SQL = """
+DELETE FROM strategies WHERE id NOT IN (
+  SELECT strategy_id FROM tcp_results WHERE strategy_id IS NOT NULL
+  UNION
+  SELECT strategy_id FROM udp_results WHERE strategy_id IS NOT NULL
+)
+"""
+
+
+def _sqlite_tables(con: sqlite3.Connection) -> set[str]:
+    rows = con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'",
+    ).fetchall()
+    return {str(r[0]) for r in rows}
+
+
+def _age_cutoffs(max_age_days: float) -> dict[str, int | str]:
+    age_s = 0.0 if max_age_days <= 0 else float(max_age_days) * 86400.0
+    cutoff = time.time() - age_s
+    return {
+        "cutoff_ms": int(cutoff * 1000),
+        "cutoff_iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(cutoff)),
+    }
+
+
+def _count_sql(con: sqlite3.Connection, sql: str, params: dict[str, int | str]) -> int:
+    row = con.execute(sql, params).fetchone()
+    return int(row[0] if row else 0)
+
+
+def _count_orphan_strategies(
+    con: sqlite3.Connection,
+    tables: set[str],
+    params: dict[str, int | str],
+) -> int:
+    """Strategies that would have no tcp/udp rows after aged-result deletion."""
+    if "strategies" not in tables:
+        return 0
+    keep_tcp = _KEEP_TCP_SQL if "tcp_results" in tables else "SELECT 1 WHERE 0"
+    keep_udp = _KEEP_UDP_SQL if "udp_results" in tables else "SELECT 1 WHERE 0"
+    sql = (
+        "SELECT COUNT(*) FROM strategies s "
+        f"WHERE NOT EXISTS ({keep_tcp}) AND NOT EXISTS ({keep_udp})"
+    )
+    return _count_sql(con, sql, params)
+
+
+def prune_db_results(
+    db_path: Path | str | None = None,
+    *,
+    max_age_days: float,
+    dry_run: bool = True,
+    orphan_strategies: bool = False,
+    live_run: bool | None = None,
+) -> DbGcStats:
+    """Age-prune tcp_results/udp_results. Never DELETE while run.lock is held.
+
+    Default is count-only (dry_run). ``orphan_strategies`` also drops strategy
+    rows that would have no remaining tcp/udp results.
+    """
+    path = Path(db_path) if db_path is not None else Path(DEFAULT_DB_PATH)
+    stats = DbGcStats(dry_run=dry_run, db_path=path)
+    if not path.is_file():
+        log.warning("gc db: skip, no sqlite file (%s)", path)
+        return stats
+    locked = _has_live_run_lock() if live_run is None else bool(live_run)
+    params = _age_cutoffs(max_age_days)
+    try:
+        with sqlite3.connect(str(path)) as con:
+            tables = _sqlite_tables(con)
+            if "tcp_results" in tables:
+                stats.tcp_rows = _count_sql(con, _TCP_COUNT_SQL, params)
+            if "udp_results" in tables:
+                stats.udp_rows = _count_sql(con, _UDP_COUNT_SQL, params)
+            if orphan_strategies:
+                stats.orphan_strategies = _count_orphan_strategies(con, tables, params)
+            if locked and not dry_run:
+                stats.skipped_lock = True
+                log.warning(
+                    "gc db: run.lock held, skipping DELETE "
+                    "(tcp_results=%d udp_results=%d orphan_strategies=%d) path=%s",
+                    stats.tcp_rows,
+                    stats.udp_rows,
+                    stats.orphan_strategies,
+                    path,
+                )
+            elif dry_run:
+                log.info(
+                    "gc db dry-run: tcp_results=%d udp_results=%d orphan_strategies=%d "
+                    "(no deletes) path=%s",
+                    stats.tcp_rows,
+                    stats.udp_rows,
+                    stats.orphan_strategies,
+                    path,
+                )
+            else:
+                if "tcp_results" in tables and stats.tcp_rows:
+                    con.execute(_TCP_DELETE_SQL, params)
+                if "udp_results" in tables and stats.udp_rows:
+                    con.execute(_UDP_DELETE_SQL, params)
+                if orphan_strategies and stats.orphan_strategies and "strategies" in tables:
+                    con.execute(_ORPHAN_DELETE_SQL)
+                log.info(
+                    "gc db deleted: tcp_results=%d udp_results=%d orphan_strategies=%d path=%s",
+                    stats.tcp_rows,
+                    stats.udp_rows,
+                    stats.orphan_strategies,
+                    path,
+                )
+    except sqlite3.Error as exc:
+        log.warning("gc db prune failed (%s): %s", path, exc)
+    return stats
 
 
 def apply_gc(plan: GcPlan, *, dry_run: bool = True) -> int:

@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from itertools import product
 
 AddFn = Callable[..., None]
+
+# 3-byte blake2s → 6 hex; stable across processes, collision-safe for truncated prefixes.
+_CMD_LABEL_DIGEST = 3
+
+
+def cmd_label(prefix: str, cmd: str) -> str:
+    """Keep a short human prefix; suffix 6-hex blake2s of the full strategy cmd."""
+    digest = hashlib.blake2s(cmd.encode(), digest_size=_CMD_LABEL_DIGEST).hexdigest()
+    return f"{prefix}_{digest}"
 
 
 def _ttl_clause(ttl_val: str | int | None) -> str:

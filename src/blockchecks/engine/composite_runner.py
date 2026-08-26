@@ -140,6 +140,8 @@ async def run(
             inject += [f"--lua-init=@{p}" for p in get_lua_init_scripts()]
         if "--qnum=" not in conf_text:
             inject.append(f"--qnum={NFQUEUE_TCP}")
+        if "--bind-fix4" not in conf_text:
+            inject.append("--bind-fix4")
         if inject:
             mod_conf = f"{config_abs}.composite.{os.getpid()}.conf"
             Path(mod_conf).write_text(

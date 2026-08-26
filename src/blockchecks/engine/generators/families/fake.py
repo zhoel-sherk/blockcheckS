@@ -9,6 +9,7 @@ from blockchecks.engine.generators.families._helpers import (
     _fooling_clause,
     _with_ack_drop,
     _with_send_md5,
+    cmd_label,
     emit_rows,
     expand_axes,
     required_foolings,
@@ -86,16 +87,18 @@ class FakeFamiliesMixin:
             if not (scan_level == "fast" and lab in known_working)
             for row in ttl_companion_rows(lab, st, p.ttl_static, p.ttl_auto)
         ]
+        def _tls_row(a: dict) -> tuple[str, str]:
+            cmd = f"fake:blob={a['blob']}:repeats={a['r']}:tls_mod={a['tmod']}"
+            prefix = f"std_fake_{a['blob']}_r{a['r']}_tlsmod={a['tmod'][:20]}"
+            return cmd_label(prefix, cmd), cmd
+
         tls = expand_axes(
             {
                 "blob": tuple(b for b in p.blobs if b in ("google", "0x00000000")),
                 "r": (6, 8),
                 "tmod": tuple(t for t in p.tls_mods if t),
             },
-            lambda a: (
-                f"std_fake_{a['blob']}_r{a['r']}_tlsmod={a['tmod'][:20]}",
-                f"fake:blob={a['blob']}:repeats={a['r']}:tls_mod={a['tmod']}",
-            ),
+            _tls_row,
         )
         # tls_mod companions only when the core has no fooling (matches prior nest)
         empty_fool = not any(p.foolings) or "" in p.foolings
@@ -243,19 +246,18 @@ class FakeFamiliesMixin:
             ),
         ):
             return items
+        def _rst_fake_row(a: dict) -> tuple[str, str]:
+            cmd = f"--payload=empty --out-range=s1<d1\n{a['fake']}"
+            slug = a["fake"].replace(":", "_").replace("=", "_")[:40]
+            prefix = f"std_rst_{a['fake'].split(':')[0]}_{slug}"
+            return cmd_label(prefix, cmd), cmd
+
         emit_rows(
             self._add,
             items,
             seen,
             scan_level,
-            expand_axes(
-                {"fake": fakes},
-                lambda a: (
-                    f"std_rst_{a['fake'].split(':')[0]}_"
-                    f"{a['fake'].replace(':', '_').replace('=', '_')[:40]}",
-                    f"--payload=empty --out-range=s1<d1\n{a['fake']}",
-                ),
-            ),
+            expand_axes({"fake": fakes}, _rst_fake_row),
         )
         return items
 

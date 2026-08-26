@@ -40,12 +40,24 @@ def nfqws2_running_in_ns(ns_name: str) -> bool:
 
 def nfqws2_pid_in_ns(pid: int, ns_name: str) -> bool:
     """True when *pid* is an nfqws2 process inside *ns_name*."""
+    return pid in resolve_nfqws2_pids(ns_name)
+
+
+def resolve_nfqws2_pids(
+    ns_name: str, baseline: set[int] | frozenset[int] | None = None
+) -> list[int]:
+    """Real nfqws2 PIDs in *ns_name* (``comm==nfqws2``), minus *baseline*.
+
+    The sudo / ``ip netns exec`` wrapper PID is never in this list. For
+    coexist launches (``kill_existing=False``) pass the pre-launch snapshot.
+    """
     from blockchecks.service.metrics import find_nfqws2_pids
 
     try:
-        return pid in find_nfqws2_pids(ns_name)
+        found = find_nfqws2_pids(ns_name)
     except OSError:
-        return False
+        return []
+    return found if baseline is None else [p for p in found if p not in baseline]
 
 
 def nfqws2_out_shows_bind(out_path: Path | str | None) -> bool:
@@ -96,26 +108,27 @@ def nfqws2_bind_retry_should_continue(
 def wait_nfqws2_bind_proof(
     ns_name: str,
     *,
-    launched_pid: int | None = None,
+    baseline_pids: set[int] | frozenset[int] | None = None,
     out_path: Path | str | None = None,
     within: float = NFQWS2_BIND_PROOF_WAIT,
 ) -> bool:
-    """Block until launched PID is visible in ns or out-log shows bind marker.
+    """Block until bind marker or a real nfqws2 pid appears in the ns.
 
-    Classic-mode counterpart of batch_service._wait_heartbeat: process visibility
-    alone is not enough — NFQUEUE bind can lag behind /proc.
+    Bind marker (``setting copy_packet mode``) is primary. PID proof uses
+    ``find_nfqws2_pids`` (comm==nfqws2), never the sudo wrapper PID.
+    *baseline_pids* is the pre-launch snapshot for coexist.
     """
+
+    def _proved() -> bool:
+        return nfqws2_out_shows_bind(out_path) or bool(resolve_nfqws2_pids(ns_name, baseline_pids))
+
     deadline = time.monotonic() + within
     while time.monotonic() < deadline:
-        if nfqws2_out_shows_bind(out_path):
-            return True
-        if launched_pid is not None and nfqws2_pid_in_ns(launched_pid, ns_name):
+        if _proved():
             return True
         if within > 0:
             time.sleep(0.05)
-    return nfqws2_out_shows_bind(out_path) or (
-        launched_pid is not None and nfqws2_pid_in_ns(launched_pid, ns_name)
-    )
+    return _proved()
 
 
 def wait_nfqws2_ready(
@@ -148,19 +161,33 @@ def wait_nfqws2_ready(
     return time.perf_counter() - start
 
 
+def _nfqws2_scan(ns_name: str) -> tuple[int, int]:
+    """Return ``(pid_count, scan_errors)``; ``(0, 0)`` on unexpected OSError."""
+    from blockchecks.service.metrics import _find_nfqws2_pids
+
+    try:
+        pids, scan_errors = _find_nfqws2_pids(ns_name)
+    except OSError:
+        return 0, 0
+    return len(pids), scan_errors
+
+
 def _wait_nfqws2_gone(ns_name: str, *, max_wait: float = 2.0, poll_interval: float = 0.05) -> bool:
     """Poll until nfqws2 is gone from the netns (post-pkill drain).
 
     pkill(9) is asynchronous — the dying daemon can hold the NFQUEUE socket for
     a few ms. If we bind a replacement too early it dies with a queue conflict
     (settle spikes + "PASS without APPLIED"). Returns True when gone/never was
-    there, False on timeout.
+    there, False on timeout **or** when the /proc scan is EPERM-unknown
+    (empty PID list with scan_errors — do not treat as drain_ok).
     """
     start = time.perf_counter()
     deadline = start + max(0.0, max_wait)
     while time.perf_counter() < deadline:
-        if not nfqws2_running_in_ns(ns_name):
+        count, scan_errors = _nfqws2_scan(ns_name)
+        if count == 0 and scan_errors == 0:
             return True
         if poll_interval > 0:
             time.sleep(poll_interval)
-    return not nfqws2_running_in_ns(ns_name)
+    count, scan_errors = _nfqws2_scan(ns_name)
+    return count == 0 and scan_errors == 0

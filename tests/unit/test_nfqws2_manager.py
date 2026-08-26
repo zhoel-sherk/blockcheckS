@@ -31,6 +31,8 @@ def test_launch_raises_when_process_exits_immediately(tmp_path: Path):
         patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/opt/zapret2/nfq2/nfqws2"),
         patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=dead),
         patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.01),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_bind_proof", return_value=True),
+        patch("blockchecks.service.nfqws2.resolve_nfqws2_pids", return_value=[]),
     ):
         with pytest.raises(RuntimeError, match="failed to start"):
             mgr.start_config(str(conf))
@@ -51,10 +53,15 @@ def test_launch_success_sets_pid(tmp_path: Path):
         patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
         patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=alive) as popen,
         patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.02),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_bind_proof", return_value=True),
+        patch(
+            "blockchecks.service.nfqws2.resolve_nfqws2_pids",
+            side_effect=[[], [1001]],
+        ),
     ):
         mgr.start_config(str(conf))
 
-    assert mgr._pid == 7777
+    assert mgr._pid == 1001  # real nfqws2, not sudo Popen 7777
     assert mgr._proc is alive
     cmd = popen.call_args.args[0]
     assert "netns" in cmd
@@ -74,6 +81,8 @@ def test_start_full_cli_strategy_no_double_payload(tmp_path: Path):
         patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
         patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=alive) as popen,
         patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.02),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_bind_proof", return_value=True),
+        patch("blockchecks.service.nfqws2.resolve_nfqws2_pids", return_value=[1001]),
     ):
         mgr.start("--payload=http_req --lua-desync=http_hostcase")
 
@@ -96,6 +105,8 @@ def test_start_simple_strategy_still_wrapped(tmp_path: Path):
         patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
         patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=alive) as popen,
         patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.02),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_bind_proof", return_value=True),
+        patch("blockchecks.service.nfqws2.resolve_nfqws2_pids", return_value=[1001]),
     ):
         mgr.start("fake:blob=stun:repeats=6:tcp_ts=-1000")
 
@@ -254,7 +265,7 @@ def test_start_daemon_warns_when_drain_times_out(tmp_path, caplog):
         patch("blockchecks.service.metrics.pkill_nfqws2_in_ns"),
         patch.object(nfq, "_reclaim_debug_log"),
         patch.object(nfq, "open_out_capture", return_value=(None, None)),
-        patch.object(nfq, "nfqws2_pid_in_ns", return_value=True),
+        patch.object(nfq, "resolve_nfqws2_pids", return_value=[9001]),
         caplog.at_level(logging.WARNING),
     ):
         nfq.start_daemon("bs-p-0", str(conf), kill_existing=True)
@@ -276,10 +287,36 @@ def test_launch_settle_timeout_raises_when_no_procs(tmp_path):
         patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.6),
         patch("blockchecks.service.nfqws2.NFQWS2_SETTLE_MAX", 0.5),
         patch("blockchecks.service.nfqws2.nfqws2_count_in_ns", return_value=0),
+        patch("blockchecks.service.nfqws2.nfqws2_out_shows_bind", return_value=False),
         patch("blockchecks.service.nfqws2.wait_nfqws2_bind_proof", return_value=True),
     ):
         with pytest.raises(RuntimeError, match="not visible"):
             mgr.start_config(str(conf))
+
+
+def test_launch_settle_skips_visibility_raise_when_bind_marker(tmp_path):
+    conf = tmp_path / "ok.conf"
+    conf.write_text("--qnum=200\n", encoding="utf-8")
+
+    alive = MagicMock()
+    alive.pid = 7777
+    alive.poll.return_value = None
+
+    mgr = Nfqws2Manager(ns_name="bs-p0")
+    with (
+        patch("blockchecks.service.nfqws2.get_nfqws2_bin", return_value="/bin/nfqws2"),
+        patch("blockchecks.service.nfqws2.subprocess.Popen", return_value=alive),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_ready", return_value=0.6),
+        patch("blockchecks.service.nfqws2.NFQWS2_SETTLE_MAX", 0.5),
+        patch("blockchecks.service.nfqws2.nfqws2_count_in_ns", return_value=0),
+        patch("blockchecks.service.nfqws2.nfqws2_out_shows_bind", return_value=True),
+        patch("blockchecks.service.nfqws2.wait_nfqws2_bind_proof", return_value=True),
+        patch("blockchecks.service.nfqws2.resolve_nfqws2_pids", return_value=[]),
+        patch("blockchecks.service.nfqws2._reclaim_debug_log"),
+        patch("blockchecks.service.nfqws2.open_out_capture", return_value=(None, None)),
+    ):
+        mgr.start_config(str(conf))
+    assert mgr._pid == 7777  # EPERM: no comm=nfqws2 visible; keep wrapper for killpg
 
 
 def test_launch_sudo_no_netns(tmp_path):
