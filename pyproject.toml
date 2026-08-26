@@ -289,7 +289,7 @@ parity_dests = [
     "timeout",
     "parallel",
     "scan_level",
-    "no_secure_dns",
+    "secure_dns",
     "doh_server",
     "resume",
     "export_limit",

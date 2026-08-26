@@ -51,9 +51,10 @@ def add_time_limit_args(parser: argparse.ArgumentParser, *, include_export: bool
     )
     if include_export:
         g.add_argument(
-            "--no-export-on-stop",
-            action="store_true",
-            help="Skip nfconf export when stopped early (SIGINT or time limit)",
+            "--export-on-stop",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Export nfconf when stopped early (default: ON)",
         )
 
 

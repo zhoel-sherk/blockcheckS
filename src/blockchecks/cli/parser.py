@@ -26,6 +26,45 @@ from blockchecks.engine.config import (
 from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR
 from blockchecks.engine.settle_profile import DEFAULT_PROFILE_PATH
 
+_BOOL = argparse.BooleanOptionalAction
+
+# Positive BooleanOptionalAction dest → legacy ``no_*`` handler field (inverted).
+_LEGACY_NO_FROM_POSITIVE: tuple[tuple[str, str], ...] = (
+    ("adaptive", "no_adaptive"),
+    ("preflight", "no_preflight"),
+    ("wssize", "no_wssize"),
+    ("http", "no_http"),
+    ("quic", "no_quic"),
+    ("voice", "no_voice"),
+    ("secure_dns", "no_secure_dns"),
+    ("auto_pin", "no_auto_pin"),
+    ("family_gates", "no_family_gates"),
+    ("adaptive_weights", "no_adaptive_weights"),
+    ("fetch_deps", "no_fetch_deps"),
+    ("common_only", "no_common_only"),
+    ("quarantine", "no_quarantine"),
+    ("export_on_stop", "no_export_on_stop"),
+    ("hostlist", "no_hostlist"),
+    ("use_settle_profile", "no_settle_profile"),
+)
+
+
+def namespace_compat(ns: argparse.Namespace) -> None:
+    """Map positive BooleanOptionalAction fields to legacy ``no_*`` dest names."""
+    for positive, legacy in _LEGACY_NO_FROM_POSITIVE:
+        if hasattr(ns, positive):
+            setattr(ns, legacy, not bool(getattr(ns, positive)))
+
+
+def iter_subparsers(root: argparse.ArgumentParser | None = None) -> dict[str, argparse.ArgumentParser]:
+    """Return subcommand name → subparser (public ``command`` dest, no private classes)."""
+    root = root or build_parser()
+    for action in root._actions:
+        if action.dest != "command" or not getattr(action, "choices", None):
+            continue
+        return dict(action.choices)
+    return {}
+
 
 def _default_isp_interface() -> str:
     """Router WAN iface for exported conf; empty = omit unless user sets env."""
@@ -51,15 +90,10 @@ def add_adaptive_args(parser: argparse.ArgumentParser) -> None:
     """AQ flags (full + scan/pair)."""
     g = parser.add_argument_group("adaptive queue (AQ)")
     g.add_argument(
-        "--no-adaptive",
-        action="store_true",
-        help="Disable adaptive priority queue (run purely sequential matrix; default: adaptive ON)",
-    )
-    g.add_argument(
         "--adaptive",
-        action="store_false",
-        dest="no_adaptive",
-        help="Enable adaptive priority queue (default: ON)",
+        action=_BOOL,
+        default=True,
+        help="Adaptive priority queue (default: ON; --no-adaptive for sequential matrix)",
     )
     g.add_argument(
         "--fan-out",
@@ -74,9 +108,10 @@ def add_adaptive_args(parser: argparse.ArgumentParser) -> None:
         help="epsilon-greedy exploration rate (default 0.1)",
     )
     g.add_argument(
-        "--no-adaptive-weights",
-        action="store_true",
-        help="Do not load/save scan_weights in state.db",
+        "--adaptive-weights",
+        action=_BOOL,
+        default=True,
+        help="Load/save scan_weights in state.db (default: ON)",
     )
 
 
@@ -231,9 +266,10 @@ def add_family_gate_args(parser: argparse.ArgumentParser) -> None:
     """need_* family gating between standard strategy families."""
     g = parser.add_argument_group("family gates")
     g.add_argument(
-        "--no-family-gates",
-        action="store_true",
-        help="Disable need_* gating between standard families (default: on for single/fast)",
+        "--family-gates",
+        action=_BOOL,
+        default=True,
+        help="need_* gating between standard families (default: ON for single/fast)",
     )
 
 
@@ -250,9 +286,10 @@ def add_ip_pin_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     g.add_argument(
-        "--no-auto-pin",
-        action="store_true",
-        help="Disable auto-probing of pinned/DoH IPs at startup (use pins as-is)",
+        "--auto-pin",
+        action=_BOOL,
+        default=True,
+        help="Auto-probe pinned/DoH IPs at startup (default: ON)",
     )
 
 
@@ -262,9 +299,10 @@ def add_secure_dns_args(
     """DoH / UDP DNS flags; optional preflight group."""
     g = parser.add_argument_group("secure DNS")
     g.add_argument(
-        "--no-secure-dns",
-        action="store_true",
-        help="Disable DoH pre-resolve (default: on)",
+        "--secure-dns",
+        action=_BOOL,
+        default=True,
+        help="DoH pre-resolve (default: ON)",
     )
     g.add_argument("--doh-server", default=None, help="Fixed DoH server URL")
     g.add_argument("--skip-dns-audit", action="store_true", help="Skip UDP vs DoH audit table")
@@ -282,9 +320,10 @@ def add_secure_dns_args(
         return
     g = parser.add_argument_group("preflight")
     g.add_argument(
-        "--no-preflight",
-        action="store_true",
-        help="Skip all preflight checks (prolog, IP-block, port-block, baseline)",
+        "--preflight",
+        action=_BOOL,
+        default=True,
+        help="Run preflight checks (prolog, IP-block, port-block, baseline; default: ON)",
     )
     g.add_argument(
         "--quick",
@@ -327,9 +366,10 @@ def add_system_deps_args(parser: argparse.ArgumentParser) -> None:
     """Host tool / zapret2 vendor fetch flags (1.0.1)."""
     g = parser.add_argument_group("system dependencies")
     g.add_argument(
-        "--no-fetch-deps",
-        action="store_true",
-        help="Do not auto-download zapret2/nfqws2 when missing (BLOCKCHECKS_FETCH_DEPS=0)",
+        "--fetch-deps",
+        action=_BOOL,
+        default=True,
+        help="Auto-download zapret2/nfqws2 when missing (default: ON)",
     )
     g.add_argument(
         "--offline",
@@ -385,9 +425,24 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     if mode == "full":
         parser.add_argument("--quic-sources", default="standard_quic")
         parser.add_argument("--http-sources", default="custom,standard_http")
-        parser.add_argument("--no-http", action="store_true", help="Skip HTTP :80 strategy phase")
-        parser.add_argument("--no-quic", action="store_true", help="Skip QUIC strategy phase")
-        parser.add_argument("--no-voice", action="store_true", help="Skip UDP voice phase")
+        parser.add_argument(
+            "--http",
+            action=_BOOL,
+            default=True,
+            help="HTTP :80 strategy phase (default: ON)",
+        )
+        parser.add_argument(
+            "--quic",
+            action=_BOOL,
+            default=True,
+            help="QUIC strategy phase (default: ON)",
+        )
+        parser.add_argument(
+            "--voice",
+            action=_BOOL,
+            default=True,
+            help="UDP voice phase (default: ON)",
+        )
         parser.add_argument(
             "--tcp-only", action="store_true", help="Skip UDP, QUIC, and HTTP phases"
         )
@@ -400,10 +455,10 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
         help="Disable Encrypted Client Hello (force plaintext SNI)",
     )
     parser.add_argument(
-        "--no-wssize",
-        action="store_true",
-        default=False,
-        help="Skip wssize fallback on TLS 1.2 FAIL (faster, lower coverage)",
+        "--wssize",
+        action=_BOOL,
+        default=True,
+        help="wssize fallback on TLS 1.2 FAIL (default: ON; --no-wssize to skip)",
     )
     if mode in ("scan", "pair"):
         parser.add_argument(
@@ -442,10 +497,10 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     )
     g = parser.add_argument_group("domain quarantine")
     g.add_argument(
-        "--no-quarantine",
-        action="store_true",
-        default=False,
-        help="Keep probing domains that never PASS (quarantine ON by default)",
+        "--quarantine",
+        action=_BOOL,
+        default=True,
+        help="Quarantine domains that never PASS (default: ON)",
     )
     g.add_argument(
         "--quarantine-min",
@@ -500,9 +555,10 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
         "--export-limit", type=int, default=3, help="Max strategies to export per category"
     )
     parser.add_argument(
-        "--no-common-only",
-        action="store_true",
-        help="Export best per-domain instead of COMMON intersection",
+        "--common-only",
+        action=_BOOL,
+        default=True,
+        help="Export COMMON intersection (default: ON; --no-common-only for per-domain)",
     )
 
     if mode in ("pair", "full"):
@@ -579,9 +635,10 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
             help="Load settle/curl timings from bench-settle JSON",
         )
         g.add_argument(
-            "--no-settle-profile",
-            action="store_true",
-            help="Ignore settle profile even if logs/settle_profile.json exists",
+            "--use-settle-profile",
+            action=_BOOL,
+            default=True,
+            help="Use settle profile when logs/settle_profile.json exists (default: ON)",
         )
 
     parser.add_argument(
@@ -697,7 +754,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--protocol", default="tls12", choices=["http", "tls12", "tls13", "quic", "udp_voice"]
     )
     tcp.add_argument("--timeout", type=float, default=3.0)
-    tcp.add_argument("--no-hostlist", action="store_true")
+    tcp.add_argument(
+        "--hostlist",
+        action=_BOOL,
+        default=True,
+        help="nfqws2 hostlist filter (default: ON)",
+    )
     tcp.add_argument("--qnum", type=int, default=200)
     tcp.add_argument("--ns")
     add_secure_dns_args(tcp)
@@ -855,7 +917,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated curl timeouts (default: 0.5,1,1.5,2)",
     )
     bench.add_argument("--max-strategies", type=int, default=3)
-    bench.add_argument("--no-secure-dns", action="store_true")
+    bench.add_argument(
+        "--secure-dns",
+        action=_BOOL,
+        default=True,
+        help="DoH pre-resolve (default: ON)",
+    )
     bench.add_argument(
         "--write-profile",
         nargs="?",
@@ -1066,6 +1133,16 @@ def dispatch(args: argparse.Namespace) -> int:  # noqa: C901
 
         return cmd_gc(a)
 
+    def _serve(a: argparse.Namespace) -> int:
+        from blockchecks.cli.commands.serve import cmd_serve
+
+        return cmd_serve(a)
+
+    def _mcp(a: argparse.Namespace) -> int:
+        from blockchecks.cli.commands.mcp import cmd_mcp
+
+        return cmd_mcp(a)
+
     handlers: dict[str, Callable[[argparse.Namespace], int]] = {
         "tcp": cmd_tcp,
         "udp": cmd_udp,
@@ -1078,6 +1155,8 @@ def dispatch(args: argparse.Namespace) -> int:  # noqa: C901
         "data-block": _data_block,
         "harvest-batch": _harvest_batch,
         "gc": _gc,
+        "serve": _serve,
+        "mcp": _mcp,
     }
     handler = handlers.get(args.command)
     if handler is not None:
@@ -1087,14 +1166,40 @@ def dispatch(args: argparse.Namespace) -> int:  # noqa: C901
     return 1
 
 
+def parse_cli_argv(
+    argv: list[str],
+    cfg: dict,
+    *,
+    apply_defaults: bool = True,
+) -> tuple[argparse.Namespace, str | None, argparse.ArgumentParser]:
+    """Parse argv with build_parser (or full sub-parser); apply namespace_compat."""
+    from blockchecks.cli.profiles import flags_present_in_argv
+    from blockchecks.cli.user_config import apply_parser_defaults, finalize_store_args
+
+    if argv and argv[0] == "full":
+        from blockchecks.main import build_arg_parser
+
+        parser = build_arg_parser(cfg if apply_defaults else None)
+        ns = parser.parse_args(argv[1:])
+        ns.command = "full"
+    else:
+        parser = build_parser()
+        if apply_defaults and cfg:
+            for sub in iter_subparsers(parser).values():
+                apply_parser_defaults(sub, cfg)
+            apply_parser_defaults(parser, cfg)
+        ns = parser.parse_args(argv)
+
+    namespace_compat(ns)
+    ns._explicit_cli = flags_present_in_argv(argv)
+    if cfg:
+        finalize_store_args(ns, cfg)
+    cmd = getattr(ns, "command", None)
+    return ns, cmd, parser
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Entry point — pydantic CliApp (flag defs still from build_parser helpers)."""
-    import os
-
-    # Skip the system-deps check
-    if os.environ.get("BLOCKCHECKS_ARGPARSE", "").strip() in ("1", "true", "yes"):
-        return _main_argparse(argv)
-
+    """Entry point — argparse parse, pydantic projection, handler dispatch."""
     from blockchecks.cli.cliapp import main as cliapp_main
 
     return cliapp_main(argv)
@@ -1133,6 +1238,7 @@ def _main_argparse(argv: list[str] | None = None) -> int:
     finally:
         sys.argv = old_argv
 
+    namespace_compat(args)
     from blockchecks.cli.profiles import flags_present_in_argv
 
     args._explicit_cli = flags_present_in_argv(argv)

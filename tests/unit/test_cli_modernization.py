@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from types import SimpleNamespace
 
-from blockchecks.cli.parser import add_adaptive_args, add_profile_args
+from blockchecks.cli.parser import add_adaptive_args, add_profile_args, namespace_compat
 from blockchecks.cli.profiles import PROFILES, apply_profile
 from blockchecks.engine.preflight import PreflightOptions
 
@@ -40,12 +40,16 @@ def test_adaptive_args_parser():
     p = argparse.ArgumentParser()
     add_adaptive_args(p)
     parsed_default = p.parse_args([])
-    assert parsed_default.no_adaptive is False
+    assert parsed_default.adaptive is True
 
     parsed_no_adaptive = p.parse_args(["--no-adaptive"])
+    namespace_compat(parsed_no_adaptive)
+    assert parsed_no_adaptive.adaptive is False
     assert parsed_no_adaptive.no_adaptive is True
 
     parsed_adaptive = p.parse_args(["--adaptive"])
+    namespace_compat(parsed_adaptive)
+    assert parsed_adaptive.adaptive is True
     assert parsed_adaptive.no_adaptive is False
 
 

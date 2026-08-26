@@ -7,14 +7,29 @@ from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic_settings import CliApp, get_subcommand
 
 from blockchecks.cli.cliapp import (
     _GENERATE_DEFAULT,
-    build_cli_root,
+    _apply_debug_flags,
+    _apply_nfqws2_debug_env,
+    build_command_registry,
     collect_cli_shortcuts,
+    dispatch_parsed,
     expand_bare_generate,
+    parse_cli_subcommand,
 )
+from blockchecks.cli.parser import build_parser, iter_subparsers, namespace_compat
+from blockchecks.engine.log import debug_status, set_debug_mode
+
+
+@pytest.fixture(autouse=True)
+def _cli_registry():
+    build_command_registry({})
+    yield
+
+
+def _parse(argv: list[str]):
+    return parse_cli_subcommand(expand_bare_generate(argv))
 
 
 @pytest.mark.unit
@@ -44,17 +59,9 @@ def test_expand_bare_generate_keeps_explicit_value():
 
 @pytest.mark.unit
 def test_collect_cli_shortcuts_includes_domain_and_strategy_preset():
-    import argparse
-
-    from blockchecks.cli.parser import build_parser
     from blockchecks.main import build_arg_parser
 
-    root = build_parser()
-    subs = {}
-    for action in root._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            subs = dict(action.choices)
-            break
+    subs = iter_subparsers(build_parser())
     shortcuts = collect_cli_shortcuts(*subs.values(), build_arg_parser())
     assert shortcuts.get("domain") == "d"
     assert shortcuts.get("strategy-preset") == "M"
@@ -63,13 +70,7 @@ def test_collect_cli_shortcuts_includes_domain_and_strategy_preset():
 
 @pytest.mark.unit
 def test_scan_short_flags_parse_domain_and_preset():
-    Root = build_cli_root()
-    model = Root(
-        _cli_parse_args=expand_bare_generate(
-            ["scan", "-d", "discord.com", "-M", "gp-verified", "--max", "1"]
-        )
-    )
-    sub = get_subcommand(model, is_required=True)
+    sub = _parse(["scan", "-d", "discord.com", "-M", "gp-verified", "--max", "1"])
     assert sub.domain == "discord.com"
     assert sub.strategy_preset == "gp-verified"
     assert sub.max == 1
@@ -77,26 +78,21 @@ def test_scan_short_flags_parse_domain_and_preset():
 
 @pytest.mark.unit
 def test_scan_bare_generate_preprocessed():
-    Root = build_cli_root()
-    model = Root(_cli_parse_args=expand_bare_generate(["scan", "--generate", "--max", "1"]))
-    sub = get_subcommand(model, is_required=True)
+    sub = _parse(["scan", "--generate", "--max", "1"])
     assert sub.generate == _GENERATE_DEFAULT
 
 
 @pytest.mark.unit
 def test_composite_short_config_flag():
-    Root = build_cli_root()
-    model = Root(_cli_parse_args=["composite", "-c", "/tmp/x.conf"])
-    sub = get_subcommand(model, is_required=True)
+    sub = _parse(["composite", "-c", "/tmp/x.conf"])
     assert sub.config == "/tmp/x.conf"
 
 
 @pytest.mark.unit
 def test_root_help_includes_subcommand_blurbs():
-    Root = build_cli_root()
     buf = StringIO()
     with patch("sys.stdout", buf), pytest.raises(SystemExit) as exc:
-        CliApp.run(Root, cli_args=["--help"])
+        build_parser().parse_args(["--help"])
     assert exc.value.code in (0, None)
     help_text = buf.getvalue()
     assert "Async TCP strategy batch scan" in help_text
@@ -109,28 +105,23 @@ def test_root_help_includes_subcommand_blurbs():
 
 @pytest.mark.unit
 def test_data_block_export_parses():
-    Root = build_cli_root()
-    model = Root(_cli_parse_args=["data-block", "--git", "--out", "/tmp/db"])
-    sub = get_subcommand(model, is_required=True)
+    sub = _parse(["data-block", "--git", "--out", "/tmp/db"])
     assert sub.git is True
     assert sub.out == "/tmp/db"
 
 
 @pytest.mark.unit
 def test_gc_parses_dry_run():
-    Root = build_cli_root()
-    model = Root(_cli_parse_args=["gc", "--max-age-days", "7"])
-    sub = get_subcommand(model, is_required=True)
+    sub = _parse(["gc", "--max-age-days", "7"])
     assert sub.max_age_days == 7.0
     assert sub.apply is False
 
 
 @pytest.mark.unit
 def test_scan_help_shows_short_flags():
-    Root = build_cli_root()
     buf = StringIO()
     with patch("sys.stdout", buf), pytest.raises(SystemExit) as exc:
-        CliApp.run(Root, cli_args=["scan", "--help"])
+        build_parser().parse_args(["scan", "--help"])
     assert exc.value.code in (0, None)
     help_text = buf.getvalue()
     assert "-d" in help_text
@@ -140,23 +131,32 @@ def test_scan_help_shows_short_flags():
 @pytest.mark.unit
 def test_subcommand_models_have_no_cli_cmd():
     """VPS-2: subcommand parse models must not expose cli_cmd (single root dispatch)."""
-    Root = build_cli_root()
-    model = Root(_cli_parse_args=["scan", "--max", "1"])
-    sub = get_subcommand(model, is_required=True)
+    sub = _parse(["scan", "--max", "1"])
     assert not callable(getattr(type(sub), "cli_cmd", None))
 
 
 @pytest.mark.unit
 def test_scan_cliapp_adaptive_on_by_default():
-    Root = build_cli_root()
-    model = Root(_cli_parse_args=["scan", "--max", "1"])
-    sub = get_subcommand(model, is_required=True)
-    assert sub.no_adaptive is False
+    sub = _parse(["scan", "--max", "1"])
+    assert sub.adaptive is True
+
+
+@pytest.mark.unit
+def test_scan_adaptive_and_no_adaptive_argparse_cliapp_parity():
+    """--adaptive / --no-adaptive match between argparse Namespace and CliApp projection."""
+    scan_parser = iter_subparsers(build_parser())["scan"]
+    for flag, expect_adaptive in (("--no-adaptive", False), ("--adaptive", True)):
+        ns = scan_parser.parse_args([flag, "-d", "discord.com", "--max", "1"])
+        namespace_compat(ns)
+        assert ns.adaptive is expect_adaptive
+        assert ns.no_adaptive is (not expect_adaptive)
+        sub = _parse(["scan", flag, "-d", "discord.com", "--max", "1"])
+        assert sub.adaptive is expect_adaptive
 
 
 @pytest.mark.unit
 def test_cli_dispatches_scan_handler_once():
-    """VPS-2: CliApp.run must invoke scan handler exactly once."""
+    """VPS-2: main() must invoke scan handler exactly once."""
     from blockchecks.cli import cliapp as ca
 
     calls: list[int] = []
@@ -165,10 +165,9 @@ def test_cli_dispatches_scan_handler_once():
         calls.append(1)
         return 0
 
-    Root = build_cli_root()
-    ca._CMD_HANDLERS["ScanCmd"] = trace_scan
-    with patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0):
-        CliApp.run(Root, cli_args=["scan", "--max", "1", "--skip-deps-check"])
+    with patch("blockchecks.cli.cliapp._run_scan", side_effect=trace_scan):
+        with patch("blockchecks.cli.parser.ensure_system_deps_or_exit", lambda _a: 0):
+            ca.main(["scan", "-d", "discord.com", "--max", "1", "--skip-deps-check"])
     assert len(calls) == 1
 
 
@@ -191,25 +190,27 @@ def test_cli_main_string_system_exit_prints_and_returns_1():
     def _boom(*_a, **_k):
         raise SystemExit("ERROR: active run already registered (pid 1, scan)")
 
-    with patch("blockchecks.cli.cliapp.CliApp.run", side_effect=_boom):
-        with patch("sys.stderr", stderr):
-            code = ca.main(["scan", "-d", "discord.com"])
+    with patch("blockchecks.cli.cliapp.dispatch_parsed", side_effect=_boom):
+        with patch("blockchecks.cli.parser.parse_cli_argv") as parse_mock:
+            parse_mock.return_value = (
+                argparse.Namespace(command="scan"),
+                "scan",
+                build_parser(),
+            )
+            with patch("sys.stderr", stderr):
+                code = ca.main(["scan", "-d", "discord.com"])
     assert code == 1
     assert "active run already registered" in stderr.getvalue()
 
 
 @pytest.mark.unit
 def test_nfqws2_debug_parsed_by_cliapp_but_env_not_set_yet():
-    """The CliApp path parses --nfqws2-debug into the model but does NOT
-    propagate it to BLOCKCHECKS_NFQWS2_DEBUG (only parser.dispatch does, and it
-    is not reached from cliapp.main). This documents the pre-fix behavior."""
+    """Parsing --nfqws2-debug does not set env until _apply_debug_flags runs."""
     import os
 
     os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
     try:
-        Root = build_cli_root()
-        model = Root(_cli_parse_args=["scan", "--nfqws2-debug", "1", "--max", "1"])
-        sub = get_subcommand(model, is_required=True)
+        sub = _parse(["scan", "--nfqws2-debug", "1", "--max", "1"])
         assert sub.nfqws2_debug == "1"
         assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") is None
     finally:
@@ -235,19 +236,16 @@ def test_nfqws2_debug_env_set_by_dispatch_legacy_path():
 
 @pytest.mark.unit
 def test_nfqws2_debug_bare_requires_value_under_cliapp():
-    """Bare --nfqws2-debug is rejected: the flag requires a value."""
+    """Bare --nfqws2-debug expands to const ``1`` (argparse nargs='?' parity)."""
     import os
 
     from blockchecks.cli import cliapp as ca
 
     os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
     try:
-        Root = build_cli_root()
-        # Preprocessing expands bare --nfqws2-debug → "1" (const).
         expanded = ca.expand_bare_nfqws2_debug(["scan", "--nfqws2-debug", "--max", "1"])
         assert expanded == ["scan", "--nfqws2-debug", "1", "--max", "1"]
-        model = Root(_cli_parse_args=expanded)
-        sub = get_subcommand(model, is_required=True)
+        sub = _parse(expanded)
         assert sub.nfqws2_debug == "1"
     finally:
         os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
@@ -255,17 +253,13 @@ def test_nfqws2_debug_bare_requires_value_under_cliapp():
 
 @pytest.mark.unit
 def test_nfqws2_debug_env_propagated_by_dispatch_subcommand():
-    """F1: _dispatch_subcommand sets BLOCKCHECKS_NFQWS2_DEBUG from the model."""
+    """dispatch_parsed / _apply_debug_flags sets BLOCKCHECKS_NFQWS2_DEBUG."""
     import os
-
-    from blockchecks.cli import cliapp as ca
 
     os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
     try:
-        Root = build_cli_root()
-        model = Root(_cli_parse_args=["scan", "--nfqws2-debug", "syslog", "--max", "1"])
-        sub = get_subcommand(model, is_required=True)
-        ca._apply_nfqws2_debug_env(sub)
+        sub = _parse(["scan", "--nfqws2-debug", "syslog", "--max", "1"])
+        _apply_nfqws2_debug_env(sub)
         assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") == "syslog"
     finally:
         os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
@@ -276,17 +270,12 @@ def test_debug_flag_calls_set_debug_mode():
     """``--debug`` is the unified toggle (Python DEBUG + nfqws2)."""
     import os
 
-    from blockchecks.cli import cliapp as ca
-    from blockchecks.engine.log import debug_status, set_debug_mode
-
     os.environ.pop("BLOCKCHECKS_NFQWS2_DEBUG", None)
     os.environ.pop("BLOCKCHECKS_LOG_LEVEL", None)
     try:
-        Root = build_cli_root()
-        model = Root(_cli_parse_args=["scan", "--debug", "--max", "1"])
-        sub = get_subcommand(model, is_required=True)
+        sub = _parse(["scan", "--debug", "--max", "1"])
         assert sub.debug is True
-        ca._apply_debug_flags(sub)
+        _apply_debug_flags(sub)
         st = debug_status()
         assert st["enabled"] is True
         assert os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG") == "1"
@@ -298,29 +287,30 @@ def test_debug_flag_calls_set_debug_mode():
 
 
 @pytest.mark.unit
-def test_no_prefix_flags_set_true_by_dispatch():
-    """pydantic parses --no-<field> as negation; _dispatch_subcommand must
-    re-apply the captured field as True (no_http/no_quic/no_voice/...)."""
+def test_no_prefix_flags_set_true_by_namespace_compat():
+    """BooleanOptionalAction + namespace_compat sets legacy no_http/no_quic."""
+    from blockchecks.main import build_arg_parser
+
+    ns = build_arg_parser().parse_args(["-d", "discord.com", "--no-http", "--no-quic"])
+    namespace_compat(ns)
+    assert ns.no_http is True
+    assert ns.no_quic is True
+    captured: dict[str, bool] = {}
+
+    def handler(model):
+        from blockchecks.cli.cliapp import _to_namespace
+
+        n = _to_namespace(model)
+        captured["no_http"] = bool(n.no_http)
+        captured["no_quic"] = bool(n.no_quic)
+        return 0
+
     from blockchecks.cli import cliapp as ca
 
-    old = ca._NO_FLAGS_CAPTURED
-    try:
-        Root = build_cli_root()
-        model = Root(_cli_parse_args=["full", "-d", "discord.com"])
-        ca._NO_FLAGS_CAPTURED = {"no_quic", "no_http"}
-        captured: dict[str, bool] = {}
-
-        def handler(sub):
-            for field in ("no_quic", "no_http"):
-                captured[field] = bool(getattr(sub, field))
-            return 0
-
-        ca._CMD_HANDLERS["FullCmd"] = handler
-        assert ca._dispatch_subcommand(model) == 0
-        assert captured == {"no_quic": True, "no_http": True}
-    finally:
-        ca._NO_FLAGS_CAPTURED = old
-        ca._CMD_HANDLERS.pop("FullCmd", None)
+    ca._CMD_HANDLERS["full"] = handler
+    ns.command = "full"
+    assert dispatch_parsed(ns, "full") == 0
+    assert captured == {"no_http": True, "no_quic": True}
 
 
 # ── _run_* dispatcher coverage (release: all CLI commands tested) ─────
@@ -455,17 +445,11 @@ def test_print_validation_error_returns_2():
 
 @pytest.mark.unit
 def test_invalid_scan_level_rejected():
-    from pydantic import ValidationError
-
-    Root = build_cli_root()
-    with pytest.raises((SystemExit, ValidationError)):
-        Root(_cli_parse_args=["scan", "--scan-level", "nope", "-d", "x.com"])
+    with pytest.raises(SystemExit):
+        _parse(["scan", "--scan-level", "nope", "-d", "x.com"])
 
 
 @pytest.mark.unit
 def test_invalid_profile_rejected():
-    from pydantic import ValidationError
-
-    Root = build_cli_root()
-    with pytest.raises((SystemExit, ValidationError)):
-        Root(_cli_parse_args=["scan", "--profile", "nope", "-d", "x.com"])
+    with pytest.raises(SystemExit):
+        _parse(["scan", "--profile", "nope", "-d", "x.com"])
