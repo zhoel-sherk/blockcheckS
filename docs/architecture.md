@@ -89,6 +89,8 @@ flowchart TB
 | `bs mcp` / `bs-mcp` | FastMCP stdio → unix-сокет демона | extra `[mcp]` |
 | `bs stop` | `run_control` | снимает `run.lock` |
 | `bs bench-settle` | калибровка settle/curl | отдельная команда |
+| `bs harvest-batch` | `harvest_batch` | кандидаты из state.db → batch.txt + manifest v1 |
+| `bs gc` | prune артефактов | dry-run по умолчанию |
 
 `bs scan` **намеренно** обнуляет `auto_discover` и UDP-источники: это TCP-only обёртка над тем же `cmd_pair`. Голос и `--auto-discover` — у `pair` / `full`. Это не баг CLI, а контракт команды (см. [guide.md](guide.md) «известные ограничения»).
 
@@ -319,6 +321,9 @@ UDP-стратегии тегируются `udp_voice`; `--udp-sources game` я
 
 Критерий успеха — не `https://googlevideo.com`, а **signed `videoplayback`** (yt-dlp, кэш `bs_gv_url_cache.json`) + Range-chunk, HTTP 206, `content_ok`.
 
+SNI для проб выбирается из пула `engine/ggc_pool.py` (`BLOCKCHECKS_GGC_MODE=synthetic|real|fixed`);
+выбранный хост пишется в `tcp_results.probe_host`.
+
 ```mermaid
 flowchart LR
   gv[domain contains googlevideo]
@@ -415,6 +420,11 @@ flowchart LR
 | Блобы | `engine/blob_aliases.py`, `blob_filter.py` |
 | Preflight / triage / fail_phase | `preflight.py`, `triage.py`, `fail_phase.py` |
 | AQ | `adaptive_queue.py`, `adaptive_runner.py` |
+| Domain quarantine | `domain_quarantine.py` |
+| GGC SNI pool | `ggc_pool.py` |
+| Probe executors | `probe_executors.py` |
+| Pair matrix | `pair_matrix_runner.py` |
+| Bridge worker pool | `bridge_worker_pool.py` |
 | Family gates | `family_needs.py`, `family_registry.py` |
 | Fan-out | `tcp_fanout.py` |
 | Async / sync раннер | `async_runner.py`, `test_runner.py` |
@@ -427,8 +437,10 @@ flowchart LR
 
 | Задача | Модуль |
 |---|---|
-| Пул ns | `netns_pool.py`, `firewall.py` |
+| Пул ns | `netns_pool.py`, `firewall.py`, `ns_firewall.py` |
 | nfqws2 | `nfqws2.py` |
+| RSS / pkill helpers | `metrics.py` |
+| Live probe journal | `live_events.py` |
 | Батч classic/bridge | `batch_service.py`, `batch_bridge_probe.py`, `lua_session.py` |
 | Lua IPC | `lua_bridge_ipc.py`, `lua_conf.py`, `lua_netns.py` |
 | Тёплый probe | `probe_service.py`, `probe.py` |
@@ -441,7 +453,8 @@ flowchart LR
 
 ### Persist / export
 
-`engine/store/` · `nfconf.py` · `data_block/` · `shortlist_export.py` / `shortlist_import.py` · `provider_import.py`.
+`engine/store/` · `nfconf.py` · `data_block/` · `harvest_batch.py` (manifest v1) ·
+`shortlist_export.py` / `shortlist_import.py` · `provider_import.py`.
 
 Альтернативный движок стратегий (не дефолт): `byedpi_translator.py` — [byedpi_engine.md](byedpi_engine.md).
 

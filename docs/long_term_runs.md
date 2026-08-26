@@ -50,12 +50,13 @@ Monitors (in tmux):
 ```bash
 # top strategies by domain coverage
 .venv/bin/python3 - <<'EOF'
-from blockchecks.engine.store import RunStateStore
+from blockchecks.engine.store import open_run_store
 import asyncio
 async def main():
-    db = RunStateStore(path="logs/run_A_base.db")
+    db = open_run_store("logs/run_A_base.db")
     for s in await db.get_best_by_coverage(limit=20):
         print(s)
+    await db.close()
 asyncio.run(main())
 EOF
 ```

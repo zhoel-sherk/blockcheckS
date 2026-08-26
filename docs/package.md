@@ -17,10 +17,16 @@ blockcheckS/
 │   │   └── commands/          # tcp, udp, pair, ...
 │   ├── main.py                # bs full orchestrator
 │   ├── nfconf.py
+│   ├── harvest_batch.py       # harvest-batch manifest v1 + batch.txt export
 │   ├── engine/
 │   │   ├── run_spec.py        # RunSpec + CampaignContext (typed CLI config)
 │   │   ├── paths.py           # XDG dirs (config/data/cache)
 │   │   ├── store/             # RunStateStore DAO (sqlite)
+│   │   ├── ggc_pool.py        # googlevideo SNI pool (synthetic/real/fixed)
+│   │   ├── domain_quarantine.py # mid-run dead-domain exclusion
+│   │   ├── probe_executors.py # curl/udp probe dispatch backends
+│   │   ├── pair_matrix_runner.py # TCP×UDP pair matrix phase
+│   │   ├── bridge_worker_pool.py # lua_bridge worker scheduling
 │   │   ├── config.py
 │   │   ├── fail_phase.py      # FailPhase enum (32 tokens) + classifier
 │   │   ├── triage.py          # TriageProfile (preflight interference profile)
@@ -43,6 +49,9 @@ blockcheckS/
 │   ├── probe.py               # invoke_curl_probe_worker (netns subprocess API)
 │   ├── probe_service.py       # resident on-the-fly probe service
 │   ├── server.py              # Unix-socket core + HTTP bridge
+│   ├── live_events.py         # events_live.jsonl + current_probe.json
+│   ├── metrics.py             # nfqws2 RSS monitor, PID-scoped pkill
+│   ├── ns_firewall.py         # per-netns iptables OUTPUT rules
 │   ├── lua_bridge_ipc.py      # nfqws2 Lua bridge IPC (+ TTL-RST events)
 │   ├── nfqws2.py              # start_daemon / Nfqws2Manager
 │   └── nfqws2_settle.py       # wait_nfqws2_ready / _wait_nfqws2_gone
@@ -129,7 +138,7 @@ Unit suite: **1528 passed**, quality **139**, integration **22** (sudo E2E).
 ```
 src/blockchecks/                      (≈25 700 строк, 108+ py-файлов)
 ├── bs.py 17 | terminal.py 97 | main.py 234 | main_phases.py 1102 | nfconf.py 229
-├── provider_import.py 230 | shortlist_export.py 188 | shortlist_import.py 206
+├── harvest_batch.py 310 | provider_import.py 230 | shortlist_export.py 188 | shortlist_import.py 206
 ├── cli/  cliapp.py 602 | parser.py 916 | profiles.py 46 | presets.py 65 | user_config.py 104
 │   └── commands/  bench_settle 161 | pair 208 | pair_phases 802 | serve 62 |
 │                  stop 14 | tcp 117 | udp 123
@@ -139,10 +148,11 @@ src/blockchecks/                      (≈25 700 строк, 108+ py-файло�
 │   voice_dns 562 | youtube_url 195
 ├── data_block/  provider 167 | store 362
 ├── engine/  adaptive_queue 468 | adaptive_runner 353 | async_runner 1007 |
-│   blob_aliases 169 | byedpi_matrix_generator 144 |
+│   bridge_worker_pool 273 | blob_aliases 169 | byedpi_matrix_generator 144 |
 │   byedpi_translator 323 | conf_builder 361 | config 433 | db_logger 22 |
-│   domain_loader 175 | fail_phase 128 | family_needs 192 | in_ns_workers 784 |
-│   matrix_generator 287 | nfqws_config 94 | paths 322 | preflight 487 |
+│   domain_loader 175 | domain_quarantine 168 | fail_phase 128 | family_needs 192 |
+│   ggc_pool 317 | in_ns_workers 784 | matrix_generator 287 | nfqws_config 94 |
+│   pair_matrix_runner 271 | paths 322 | preflight 487 | probe_executors 531 |
 │   preset_paths 101 | results 82 | run_deadline 144 | run_finalize 154 |
 │   run_spec 185 | secure_io 24 | settings 107 | settle_profile 178 | strategy_loader 64 |
 │   system_deps 489 | tcp_fanout 100 | test_runner 353 | triage 130
@@ -150,8 +160,9 @@ src/blockchecks/                      (≈25 700 строк, 108+ py-файло�
 │   │   └── families/  fake 213 | split 253 | tamper 244 | _helpers 112
 │   └── store/  models 16 | schema 201 | sqlite_store 743
 ├── service/  batch_bridge_probe 186 | batch_models 67 | batch_scheduler 110 |
-│   batch_service 385 | firewall 120 | lua_bridge_ipc 133 | lua_conf 112 |
-│   lua_netns 82 | lua_session 141 | metrics 216 | netns_pool 228 | nfqws2 316 |
+│   batch_service 385 | firewall 120 | live_events 211 | lua_bridge_ipc 133 |
+│   lua_conf 112 | lua_netns 82 | lua_session 141 | metrics 334 |
+│   netns_pool 228 | ns_firewall 211 | nfqws2 316 |
 │   nfqws2_settle 71 | probe 107 | probe_service 219 | run_control 178 | server 181
 tests/unit/                        (≈18 600 строк, 122 файла)   — 1528 passed
 tests/integration/                 (≈670 строк, 5 файлов)       — 22 passed (sudo)

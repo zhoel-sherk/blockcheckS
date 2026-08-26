@@ -211,6 +211,24 @@ SELECT overall, COUNT(*) FROM pair_results GROUP BY overall;
 SELECT * FROM checkpoints ORDER BY id DESC LIMIT 1;
 ```
 
+## Harvest batch manifest (`blockchecks.harvest/v1`)
+
+`bs harvest-batch` writes `manifest.json` alongside `batch.txt` for external
+validators (dpi-tester). Schema constant: `SCHEMA = "blockchecks.harvest/v1"` in
+[`harvest_batch.py`](../src/blockchecks/harvest_batch.py).
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `schema` | string | Always `blockchecks.harvest/v1` |
+| `generated_at` | string | UTC ISO timestamp (`%Y-%m-%dT%H:%M:%SZ`) |
+| `source_db` | string | Basename of the input state DB |
+| `proto` | string | `tcp` or `udp` |
+| `params` | object | `top`, `min_domains` CLI filters |
+| `candidates` | array | `{strategy, domains[], coverage, avg_latency_ms, attempts, pass_rate, conf_path?}` |
+| `domains_meta` | array | Per-domain saturation stats (`saturated` when pass_share ≥ 0.85) |
+| `quarantined_excluded` | array | Domains skipped from harvest (quarantine table) |
+| `skipped_unresolved` | int | Strategies dropped (unresolved `.conf` / export filter) |
+
 ## CLI export
 
 ```bash
