@@ -1,6 +1,7 @@
 """Tests for settle/curl timeout profiles."""
 
 import json
+import logging
 from pathlib import Path
 
 from blockchecks.engine.settle_profile import (
@@ -95,3 +96,30 @@ def test_auto_load_accepts_safe_profile(tmp_path, monkeypatch):
 def test_auto_load_disabled_by_env(monkeypatch):
     monkeypatch.setenv("BLOCKCHECKS_SETTLE_PROFILE", "0")
     assert auto_load_profile() is None
+
+
+def test_load_profile_missing_file(caplog):
+    with caplog.at_level(logging.WARNING):
+        assert load_profile("/nonexistent/settle_profile.json") is None
+    assert "not found" in caplog.text
+
+
+def test_load_profile_invalid_json(tmp_path: Path, caplog):
+    path = tmp_path / "bad.json"
+    path.write_text("{not json", encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        assert load_profile(str(path)) is None
+    assert "invalid JSON" in caplog.text
+
+
+def test_load_profile_read_error(tmp_path: Path, caplog, monkeypatch):
+    path = tmp_path / "x.json"
+    path.write_text("{}", encoding="utf-8")
+
+    def boom(*args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("builtins.open", boom)
+    with caplog.at_level(logging.WARNING):
+        assert load_profile(str(path)) is None
+    assert "read failed" in caplog.text

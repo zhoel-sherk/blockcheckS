@@ -39,14 +39,20 @@ class SettleProfile:
     strategies: dict[str, TimingOverride] = field(default_factory=dict)
     source_path: str = ""
 
-    def lookup(self, strategy: str) -> TimingOverride | None:
+    def match_key(self, strategy: str) -> str | None:
+        """Return profile dict key when strategy matches explicitly, else None."""
         key = strategy.strip()
         if key in self.strategies:
-            return self.strategies[key]
-        # Multi-line strategy configs: match first line
+            return key
         first = key.split("\n", 1)[0].strip()
         if first in self.strategies:
-            return self.strategies[first]
+            return first
+        return None
+
+    def lookup(self, strategy: str) -> TimingOverride | None:
+        explicit = self.match_key(strategy)
+        if explicit is not None:
+            return self.strategies[explicit]
         return self.defaults
 
     def settle_max_for(self, strategy: str) -> float | None:
@@ -129,11 +135,16 @@ def load_profile(path: str | None = None) -> SettleProfile | None:
     if not os.path.isabs(p):
         p = os.path.join(PROJECT_DIR, p) if not os.path.exists(p) else p
     if not os.path.exists(p):
+        log.warning("settle profile not found: %s", p)
         return None
     try:
         with open(p, encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except json.JSONDecodeError as exc:
+        log.warning("settle profile invalid JSON: %s (%s)", p, exc)
+        return None
+    except OSError as exc:
+        log.warning("settle profile read failed: %s (%s)", p, exc)
         return None
 
     defaults = None

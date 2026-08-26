@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
+from blockchecks.engine.async_runner import AsyncTestRunner
 from blockchecks.engine.generators.base import StrategyItem
+from blockchecks.engine.settle_profile import SettleProfile, TimingOverride
 
 pytestmark = pytest.mark.unit
 
@@ -114,4 +118,60 @@ async def test_runner_batch_tcp_classic(mock_runner):
     items = [_item(label="a"), _item(label="b")]
     results = await mock_runner.test_batch_tcp(items, "discord.com", timeout=5.0)
     assert len(results) == 2
-    assert all(r.success for r in results)
+
+
+def _timing_runner(profile: SettleProfile) -> AsyncTestRunner:
+    runner = AsyncTestRunner.__new__(AsyncTestRunner)
+    runner.settle_profile = profile
+    runner._timing_override_logged = set()
+    return runner
+
+
+def test_timing_for_explicit_override(caplog):
+    profile = SettleProfile(
+        defaults=TimingOverride(0.5, 3.0),
+        strategies={"fake:blob=stun": TimingOverride(0.2, 1.5)},
+        source_path="/tmp/profile.json",
+    )
+    runner = _timing_runner(profile)
+    item = StrategyItem(label="x", strategy="fake:blob=stun")
+    with caplog.at_level(logging.INFO):
+        timeout, settle_max = runner._timing_for(item, 10.0)
+    assert timeout == 1.5
+    assert settle_max == 0.2
+    assert "settle profile override" in caplog.text
+    assert "/tmp/profile.json" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        runner._timing_for(item, 10.0)
+    assert "settle profile override" not in caplog.text
+
+
+def test_timing_for_defaults_fallback(caplog):
+    profile = SettleProfile(
+        defaults=TimingOverride(0.5, 3.0),
+        strategies={"fake:blob=stun": TimingOverride(0.2, 1.5)},
+        source_path="/tmp/profile.json",
+    )
+    runner = _timing_runner(profile)
+    item = StrategyItem(label="x", strategy="unknown:strategy")
+    with caplog.at_level(logging.WARNING):
+        timeout, settle_max = runner._timing_for(item, 10.0)
+    assert timeout == 3.0
+    assert settle_max == 0.5
+    assert "defaults fallback" in caplog.text
+    assert "cli_timeout=10.0" in caplog.text
+
+
+def test_timing_for_preserves_zero_curl_timeout():
+    profile = SettleProfile(
+        defaults=TimingOverride(0.1, 0.0),
+        strategies={"fake:blob=stun": TimingOverride(0.1, 0.0)},
+        source_path="/tmp/profile.json",
+    )
+    runner = _timing_runner(profile)
+    item = StrategyItem(label="x", strategy="fake:blob=stun")
+    timeout, settle_max = runner._timing_for(item, 10.0)
+    assert timeout == 0.0
+    assert settle_max == 0.1

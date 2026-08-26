@@ -116,6 +116,7 @@ class AsyncTestRunner:
         self.quick_break = quick_break
         self.try_wssize = try_wssize
         self.settle_profile = settle_profile
+        self._timing_override_logged: set[str] = set()
         self.lua_bridge = lua_bridge
         self.bridge_batch = max(1, bridge_batch)
         self.lua_bridge_compare = lua_bridge_compare
@@ -216,12 +217,45 @@ class AsyncTestRunner:
 
     def _timing_for(self, item: StrategyItem, timeout: float) -> tuple[float, float | None]:
         """Return (curl_timeout, settle_max override) from B11 profile if set."""
+        cli_timeout = timeout
         settle_max: float | None = None
-        if self.settle_profile:
-            override = self.settle_profile.lookup(item.strategy)
-            if override:
-                settle_max = override.settle_max
-                timeout = override.curl_timeout
+        profile = self.settle_profile
+        if profile is None:
+            return timeout, settle_max
+
+        override = profile.lookup(item.strategy)
+        if override is None:
+            return timeout, settle_max
+
+        settle_max = override.settle_max
+        if override.curl_timeout is not None:
+            timeout = override.curl_timeout
+
+        source_path = profile.source_path or "?"
+        explicit_key = profile.match_key(item.strategy)
+        snippet = (explicit_key or item.strategy.strip())[:80]
+
+        if explicit_key is not None:
+            if explicit_key not in self._timing_override_logged:
+                self._timing_override_logged.add(explicit_key)
+                log.info(
+                    "settle profile override: strategy=%r settle_max=%s curl_timeout=%s source=%s",
+                    snippet,
+                    settle_max,
+                    timeout,
+                    source_path,
+                )
+        elif item.strategy.strip() not in self._timing_override_logged:
+            self._timing_override_logged.add(item.strategy.strip())
+            log.warning(
+                "settle profile defaults fallback: strategy=%r settle_max=%s "
+                "curl_timeout=%s cli_timeout=%s source=%s",
+                snippet,
+                settle_max,
+                timeout,
+                cli_timeout,
+                source_path,
+            )
         return timeout, settle_max
 
     async def start(self):
