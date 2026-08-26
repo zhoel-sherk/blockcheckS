@@ -67,6 +67,34 @@ async def _stop_pool(pool: NetNsPool) -> None:
     await asyncio.to_thread(pool.destroy_all)
 
 
+def _wait_queue_bind(ns_name: str, deadline_sec: float) -> bool:
+    """Wait until the composite daemon actually bound its NFQUEUE socket
+    (stdout marker ``setting copy_packet mode``). Returns False on timeout
+    (caller may still probe — but logs the degradation)."""
+    from blockchecks.engine.paths import RUNTIME_LOGS_DIR
+
+    deadline = time.perf_counter() + deadline_sec
+    while time.perf_counter() < deadline:
+        candidates = sorted(
+            RUNTIME_LOGS_DIR.glob(f"nfqws2_out_{ns_name}_*.log"),
+            key=lambda q: q.stat().st_mtime,
+        )
+        if candidates:
+            try:
+                txt = candidates[-1].read_text(errors="replace")[-800:]
+            except OSError:
+                txt = ""
+            if "setting copy_packet mode" in txt:
+                return True
+        time.sleep(0.15)
+    log.warning(
+        "composite: queue-bind marker not seen within %.1fs (%s) — probing anyway",
+        deadline_sec,
+        ns_name,
+    )
+    return False
+
+
 async def run(
     config_path: str, domains: list[str] = None, _parallel: int = 2, timeout: float = 5.0
 ):
@@ -99,34 +127,6 @@ async def run(
     except OSError as exc:
         log.warning("composite: shm dir %s prepare failed: %s", _shm_dir, exc)
 
-    # Ждём ФАКТИЧЕСКОГО бинда очереди: маркер 'setting copy_packet mode'
-    # в stdout-захвате демона (надёжен при любом пользователе запуска,
-    # в отличие от /proc-скана root-owned процессов).
-    hb_path = Path(SHM_BASE) / ns_name / "heartbeat"  # noqa: F841 (IPC будущ.)
-    _bind_deadline = time.perf_counter() + 12.0
-    _bound = False
-    while time.perf_counter() < _bind_deadline:
-        # путь захвата берём из RUNTIME_LOGS_DIR напрямую
-        from blockchecks.engine.paths import RUNTIME_LOGS_DIR
-        candidates = sorted(
-            RUNTIME_LOGS_DIR.glob(f"nfqws2_out_{ns_name}_*.log"),
-            key=lambda q: q.stat().st_mtime,
-        )
-        if candidates:
-            try:
-                txt = candidates[-1].read_text(errors="replace")[-800:]
-            except OSError:
-                txt = ""
-            if "setting copy_packet mode" in txt:
-                _bound = True
-                break
-        time.sleep(0.15)
-    if not _bound:
-        log.warning(
-            "composite: queue-bind marker not seen within 12s (%s) — probing anyway",
-            ns_name,
-        )
-
     # Автоинъекция окружения для `-c` конфигов: их часто пишут минимально,
     # без --lua-init/--qnum, что раньше давало мгновенную смерть демона
     # ("desync function does not exist" / "Need queue number").
@@ -157,7 +157,13 @@ async def run(
     try:
         # Start the single nfqws2 instance
         await asyncio.to_thread(start_daemon, ns_name, config_abs)
-        await asyncio.sleep(0.5)
+
+        # Ждём ФАКТИЧЕСКОГО бинда очереди: маркер 'setting copy_packet mode'
+        # в stdout-захвате демона (надёжен при любом пользователе запуска,
+        # в отличие от /proc-скана root-owned процессов). Должен идти ПОСЛЕ
+        # start_daemon — до него лог-файла демона ещё нет и цикл всегда
+        # вырождался в 12-секундный сон (ложный "probing anyway").
+        _wait_queue_bind(ns_name, deadline_sec=12.0)
 
         fw = get_ns_firewall(ns_name)
         fw.attach(proto="tcp", port="443", queue=NFQUEUE_TCP)
