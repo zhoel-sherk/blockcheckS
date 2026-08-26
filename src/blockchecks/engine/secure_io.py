@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
+from pathlib import Path
+
+from blockchecks.engine.paths import reclaim_sudo_ownership
+
+log = logging.getLogger(__name__)
 
 
 def write_secure_text(path: str, content: str, *, mode: int = 0o600) -> None:
@@ -16,9 +22,11 @@ def write_secure_text(path: str, content: str, *, mode: int = 0o600) -> None:
             f.write(content)
         os.replace(tmp, path)
         os.chmod(path, mode)
-    except Exception:
+    except (OSError, UnicodeError) as exc:
+        log.warning("secure write failed for %s: %s", path, exc)
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
+    reclaim_sudo_ownership(Path(path))

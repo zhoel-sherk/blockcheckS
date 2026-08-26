@@ -1,6 +1,13 @@
 """Load strategies from an inline string, a file, or a config directory."""
 
+from __future__ import annotations
+
+import logging
 from pathlib import Path
+
+from blockchecks.engine.static_validator import validate_strategy
+
+log = logging.getLogger(__name__)
 
 
 class StrategyLoader:
@@ -21,7 +28,7 @@ class StrategyLoader:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                strategies.append(line)
+                strategies.append(line.replace("\\n", "\n"))
         return strategies
 
     @staticmethod
@@ -36,6 +43,38 @@ class StrategyLoader:
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(f"Config not found: {p}")
+
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError as exc:
+            log.warning("config file unreadable %s: %s", p, exc)
+            return [str(p)]
+
+        if not text.strip():
+            log.warning("config file is empty: %s", p)
+            return [str(p)]
+
+        has_lua_desync = False
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("--lua-desync="):
+                has_lua_desync = True
+                desync = line.split("=", 1)[1].strip()
+                if desync:
+                    for issue in validate_strategy(desync).issues:
+                        if issue.severity == "error":
+                            log.warning(
+                                "config %s lua-desync validation (%s): %s",
+                                p,
+                                issue.code,
+                                issue.message,
+                            )
+
+        if not has_lua_desync:
+            log.warning("config has no --lua-desync lines: %s", p)
+
         return [str(p)]
 
     @staticmethod

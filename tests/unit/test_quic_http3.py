@@ -48,12 +48,13 @@ def test_build_quic_nfqws_config_inline():
 
 def test_build_quic_nfqws_config_cli():
     strat = (
-        "--filter-udp=443 --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6"
+        "--filter-udp=443 --payload=quic_initial --lua-desync=fake:blob=quic_initial:repeats=6"
     )
     lines = _build_quic_nfqws_lines(strat)
     text = "\n".join(lines)
     assert "--filter-udp=443" in text
-    assert "fake_default_quic" in text
+    assert "quic_initial" in text
+    assert any(line.startswith("--blob=quic_initial:") for line in lines)
 
 
 def test_supports_http3_true_on_connection_error():

@@ -91,3 +91,9 @@ def test_wrong_version_is_handshake_not_rst_at_sni():
     assert (
         classify_fail_phase("curl: (35) Recv failure: Connection reset").value == "tls_rst_at_sni"
     )
+
+
+@pytest.mark.unit
+def test_data_stall_7k_not_70():
+    assert classify_fail_phase("stalled at 7kb").value == "data_stall_7k"
+    assert classify_fail_phase("stalled at 70kb").value != "data_stall_7k"

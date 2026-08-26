@@ -29,6 +29,17 @@ def test_from_file_skips_comments_and_blanks(tmp_path: Path):
     ]
 
 
+def test_from_file_expands_literal_backslash_n(tmp_path: Path):
+    p = tmp_path / "matrix.txt"
+    p.write_text(
+        "fake:blob=stun:repeats=6\\nfake:blob=max_ru:repeats=6\n",
+        encoding="utf-8",
+    )
+    assert StrategyLoader.from_file(str(p)) == [
+        "fake:blob=stun:repeats=6\nfake:blob=max_ru:repeats=6",
+    ]
+
+
 def test_from_file_empty(tmp_path: Path):
     p = tmp_path / "empty.txt"
     p.write_text("# only comments\n\n", encoding="utf-8")
@@ -54,6 +65,20 @@ def test_from_config_and_dir(tmp_path: Path):
     assert len(configs) == 2
     assert configs == sorted(configs)
     assert all(c.endswith(".conf") for c in configs)
+
+
+def test_from_config_warns_empty_or_no_lua_desync(tmp_path: Path, caplog):
+    empty = tmp_path / "empty.conf"
+    empty.write_text("  \n# only comments\n", encoding="utf-8")
+    bare = tmp_path / "bare.conf"
+    bare.write_text("--qnum=200\n--filter-tcp=443\n", encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        assert StrategyLoader.from_config(str(empty)) == [str(empty)]
+        assert StrategyLoader.from_config(str(bare)) == [str(bare)]
+
+    assert any("empty" in r.message for r in caplog.records)
+    assert any("no --lua-desync" in r.message for r in caplog.records)
 
 
 def test_from_custom_dir_unknown_protocol(tmp_path: Path):

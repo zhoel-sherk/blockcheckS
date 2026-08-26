@@ -56,6 +56,7 @@ def _build_quic_nfqws_lines(strategy: str) -> list[str]:
         for lua in get_lua_init_scripts():
             if os.path.exists(lua):
                 config_lines.append(f"--lua-init=@{lua}")
+        strategy = add_blobs_from_strategy(config_lines, strategy)
         for raw_line in strategy.split("\n"):
             raw_line = raw_line.strip()
             if not raw_line:

@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from blockchecks.engine.config import PROJECT_DIR
-from blockchecks.engine.paths import USER_PRESETS_DIR
+from blockchecks.engine.paths import USER_PRESETS_DIR, expand_path
 
 # Not selectable as a domain preset (filter list only).
 RESERVED_DOMAIN_FILES = frozenset({"denylist.txt"})
@@ -42,9 +42,10 @@ def _bundled_ipset_dir() -> Path:
 
 def _user_ipset_dir() -> Path:
     env = os.environ.get("BLOCKCHECKS_IPSET_DIR", "").strip()
+    default = Path(USER_PRESETS_DIR) / "ipset"
     if env:
-        return Path(os.path.expanduser(os.path.expandvars(env)))
-    return Path(USER_PRESETS_DIR) / "ipset"
+        return expand_path(env, default=default)
+    return default
 
 
 def normalize_preset_name(name: str, *, strip_suffixes: tuple[str, ...] = ()) -> str:

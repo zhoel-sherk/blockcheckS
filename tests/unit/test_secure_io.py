@@ -34,3 +34,28 @@ def test_write_secure_text_cleanup_on_failure(tmp_path):
     assert not path.exists()
     leftovers = list(tmp_path.glob("*.tmp.*"))
     assert leftovers == []
+
+
+def test_write_secure_text_reclaims_sudo_ownership(tmp_path, monkeypatch):
+    called: list[str] = []
+
+    def fake_reclaim(path):
+        called.append(str(path))
+
+    monkeypatch.setattr("blockchecks.engine.secure_io.reclaim_sudo_ownership", fake_reclaim)
+    path = tmp_path / "token.txt"
+    write_secure_text(str(path), "secret")
+    assert called == [str(path)]
+
+
+def test_write_secure_text_logs_oserror(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "f.txt"
+
+    def boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("blockchecks.engine.secure_io.os.replace", boom)
+    with caplog.at_level("WARNING"):
+        with pytest.raises(OSError, match="disk full"):
+            write_secure_text(str(path), "x")
+    assert any("secure write failed" in r.message for r in caplog.records)

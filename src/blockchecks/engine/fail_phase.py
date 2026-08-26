@@ -88,7 +88,10 @@ _PHASE_PATTERNS: tuple[tuple[FailPhase, re.Pattern], ...] = (
     (FailPhase.DATA_STALL_64K_PLUS, re.compile(r"stall.*64|stalled at 64|reassembly", re.I)),
     (FailPhase.DATA_STALL_42K, re.compile(r"stall.*42|stalled at 42", re.I)),
     (FailPhase.DATA_STALL_16K, re.compile(r"stall.*16|stalled at 16", re.I)),
-    (FailPhase.DATA_STALL_7K, re.compile(r"stall.*7|stalled at 7", re.I)),
+    (
+        FailPhase.DATA_STALL_7K,
+        re.compile(r"stall.*\b7k\b|\b7kb\b|stalled at 7(?!\d)|stall.*[^0-9]7(?!\d)k?", re.I),
+    ),
     (FailPhase.DATA_STALL_FIRST_REQ, re.compile(r"stall.*first|stalled at first|first req", re.I)),
     (FailPhase.DATA_STALL_TLS_CERT, re.compile(r"stall.*cert|cert.*stall|stalled at 2", re.I)),
     (FailPhase.DELAYED_RST, re.compile(r"reset after|rst after", re.I)),
