@@ -435,3 +435,16 @@ def test_manager_non_bind_error_raises_immediately(tmp_path, monkeypatch):
     with _pytest.raises(RuntimeError, match="failed to start"):
         mgr._launch(f"@{tmp_path / 'x.conf'}")
     assert calls["n"] == 1
+
+
+def test_default_isp_interface_from_env(monkeypatch):
+    from blockchecks.nfconf import _default_isp_interface
+
+    monkeypatch.delenv("BLOCKCHECKS_ISP_IFACE", raising=False)
+    monkeypatch.delenv("ISP_INTERFACE", raising=False)
+    assert _default_isp_interface() == ""
+    monkeypatch.setenv("BLOCKCHECKS_ISP_IFACE", "wlp4s0")
+    assert _default_isp_interface() == "wlp4s0"
+    monkeypatch.delenv("BLOCKCHECKS_ISP_IFACE", raising=False)
+    monkeypatch.setenv("ISP_INTERFACE", "eth0")
+    assert _default_isp_interface() == "eth0"

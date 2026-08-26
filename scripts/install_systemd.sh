@@ -31,6 +31,10 @@ install_unit "$ROOT/systemd/blockcheck-serve.service" \
   /etc/systemd/system/blockcheck-serve.service
 
 systemctl daemon-reload
-systemctl enable blockcheck-series.service 2>&1 | tail -1
 systemctl enable blockcheck-serve.service 2>&1 | tail -1
+if [ "${INSTALL_SERIES_BOOT_RESUME:-0}" = 1 ]; then
+  systemctl enable blockcheck-series.service 2>&1 | tail -1
+else
+  echo "blockcheck-series.service installed but not enabled (set INSTALL_SERIES_BOOT_RESUME=1 to opt in)"
+fi
 echo "done"

@@ -34,6 +34,10 @@ fi
 
 mkdir -p logs
 SERIES_LOG="logs/long_term_series_$(date +%Y%m%d_%H%M%S).log"
+SERIES_RESUME="logs/series.resume"
+SERIES_COMPLETE="logs/series.COMPLETE"
+rm -f "$SERIES_COMPLETE"
+touch "$SERIES_RESUME"
 echo "series log: $SERIES_LOG"
 
 tmux new-session -d -s "$SERIES_SESSION" -c "$ROOT" bash -lc "
@@ -47,6 +51,8 @@ for VAR in $LIST; do
   done
   echo \"===== SERIES: variant \$VAR done (\$(date -Is)) =====\" | tee -a '$SERIES_LOG'
 done
+touch '$SERIES_COMPLETE'
+rm -f '$SERIES_RESUME'
 echo \"===== SERIES: ALL VARIANTS COMPLETE (\$(date -Is)) =====\" | tee -a '$SERIES_LOG'
 "
 

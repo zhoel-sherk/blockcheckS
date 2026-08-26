@@ -7,7 +7,7 @@
 #   D  classic       base + --classic (no lua-bridge backend)
 #   E  flowseal      coverage.txt, --tcp-sources flowseal
 #   F  stable        base + --repeats 3 --repeats-mode stable
-#   G  udp_voice     bs pair Discord-UDP, 35.217, full generate_udp, loop to 20h
+#   G  udp_voice     bs pair Discord-UDP, --discover-dns, full generate_udp, loop to 20h
 #
 # Usage: scripts/run_variant.sh {A|B|C|D|E|F|G} [hours]
 set -euo pipefail
@@ -79,6 +79,7 @@ export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
 export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
 export PYTHONUNBUFFERED=1
 export PATH="$ROOT/.venv/bin:$PATH"
+export ISP_IFACE="${BLOCKCHECKS_ISP_IFACE:-${ISP_INTERFACE:-}}"
 
 mkdir -p "$OUT"
 TS="$(date +%Y%m%d_%H%M%S)"
@@ -131,7 +132,7 @@ while true; do
     --tcp-sources fake \\
     --udp-sources custom,standard_udp,configs,flowseal \\
     --scan-level full --max 200 --udp-bypass \\
-    --ip 35.217.48.152 --port 50004 --discover-dns 5 \\
+    --discover-dns 5 \\
     --parallel 2 --timeout 3 --udp-timeout 3 \\
     --allow-dns-hijack --resume --data-block-sync --no-preflight \\
     --skip-prolog --skip-ip-block --skip-port-block --skip-baseline --skip-dns-audit \\
@@ -164,6 +165,7 @@ export BLOCKCHECKS_SETTINGS="$BLOCKCHECKS_SETTINGS"
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
 export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
 export PYTHONUNBUFFERED=1
+export ISP_IFACE="${ISP_IFACE}"
 exec bs full \\
   --max-timeh $HOURS \\
   --domains-file $DOMAINS \\
@@ -177,7 +179,7 @@ exec bs full \\
   --skip-prolog \\
   --skip-ip-block \\
   --skip-port-block \\
-  --isp-interface eth3
+  \${ISP_IFACE:+--isp-interface "\$ISP_IFACE"}
 EOF
 fi
 chmod 700 "$RUNNER"
@@ -201,5 +203,5 @@ echo "attach: tmux attach -t $SESSION"
 if [ -n "$DOMAINS" ] && [ -f "$DOMAINS" ]; then
   echo "domains: $DOMAINS ($(grep -c . "$DOMAINS" 2>/dev/null || echo 0) lines)"
 else
-  echo "target: Discord-voice UDP 35.217.48.152:50004 (pair loop)"
+  echo "target: Discord-voice UDP (--discover-dns pair loop)"
 fi

@@ -27,6 +27,11 @@ from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR
 from blockchecks.engine.settle_profile import DEFAULT_PROFILE_PATH
 
 
+def _default_isp_interface() -> str:
+    """Router WAN iface for exported conf; empty = omit unless user sets env."""
+    return os.environ.get("BLOCKCHECKS_ISP_IFACE") or os.environ.get("ISP_INTERFACE") or ""
+
+
 def add_store_args(parser: argparse.ArgumentParser, *, include_out_dir: bool = True) -> None:
     """Shared --db / --out-dir (XDG defaults applied post-parse)."""
     parser.add_argument(
@@ -559,7 +564,9 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
             "--pair-max", type=int, default=200, help="Cap TCP×UDP pair combinations"
         )
         parser.add_argument(
-            "--isp-interface", default="eth3", help="Router WAN interface for exported conf"
+            "--isp-interface",
+            default=_default_isp_interface(),
+            help="Router WAN interface for exported conf (env: BLOCKCHECKS_ISP_IFACE / ISP_INTERFACE)",
         )
         parser.add_argument("--prefix", default="/opt/etc/nfqws2", help="Router nfqws2 prefix path")
         parser.add_argument("--mode", default="auto", choices=["auto", "list", "all"])

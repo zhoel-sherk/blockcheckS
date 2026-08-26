@@ -28,6 +28,10 @@ _IP2NET_CANDIDATES = (
     os.path.join(ZAPRET2_ROOT, "binaries", "linux-x86_64", "ip2net"),
     os.path.join(ZAPRET2_ROOT, "ip2net", "ip2net"),
 )
+
+
+def _default_isp_interface() -> str:
+    return os.environ.get("BLOCKCHECKS_ISP_IFACE") or os.environ.get("ISP_INTERFACE") or ""
 _IPSET_INLINE_LIMIT = 64  # > this many IPs → write a file instead of inline
 
 log = logging.getLogger(__name__)
@@ -230,7 +234,7 @@ async def export_configs(
     domain: str = "discord.com",
     limit: int = 3,
     out_dir: str | None = None,
-    isp_interface: str = "eth3",
+    isp_interface: str = "",
     prefix: str = DEFAULT_KEENETIC_PREFIX,
     mode: str = "auto",
     domains_file: str | None = None,
@@ -357,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--limit", type=int, default=3)
     p.add_argument("--out-dir", default=None, help=f"Export directory (default: {DEFAULT_OUT_DIR})")
-    p.add_argument("--isp-interface", default="eth3")
+    p.add_argument("--isp-interface", default=_default_isp_interface())
     p.add_argument(
         "--prefix",
         default=DEFAULT_KEENETIC_PREFIX,

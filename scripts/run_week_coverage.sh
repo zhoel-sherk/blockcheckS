@@ -37,6 +37,8 @@ export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
 export PYTHONUNBUFFERED=1
 export PATH="$ROOT/.venv/bin:$PATH"
 export HOME="${HOME:-/home/zhoel}"
+# Keenetic WAN iface for nfconf export only (e.g. wlp4s0 on Xeon). Unset = omit flag.
+export ISP_IFACE="${BLOCKCHECKS_ISP_IFACE:-${ISP_INTERFACE:-}}"
 
 dump_provider_pass() {
   "$ROOT/.venv/bin/python3" - "$DB" <<'PY'
@@ -100,7 +102,11 @@ do_export() {
     dump_provider_pass
     return 0
   fi
-  bc-nfconf --db "$DB" --out-dir "$OUT" --isp-interface eth3 \
+  NFCONF_ISP=()
+  if [ -n "$ISP_IFACE" ]; then
+    NFCONF_ISP=(--isp-interface "$ISP_IFACE")
+  fi
+  bc-nfconf --db "$DB" --out-dir "$OUT" "${NFCONF_ISP[@]}" \
     --domains-file presets/domains/coverage-tcp.txt || true
   dump_provider_pass
 }
@@ -148,6 +154,7 @@ export BLOCKCHECKS_SETTINGS="$BLOCKCHECKS_SETTINGS"
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
 export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
 export PYTHONUNBUFFERED=1
+export ISP_IFACE="${ISP_IFACE}"
 exec bs full \\
   --preset $preset \\
   --tcp-only \\
@@ -163,7 +170,7 @@ exec bs full \\
   --allow-dns-hijack --skip-dns-audit \\
   --resume --data-block-sync \\
   --skip-prolog --skip-ip-block --skip-port-block \\
-  --isp-interface eth3
+  \${ISP_IFACE:+--isp-interface "\$ISP_IFACE"}
 EOF
   chmod 700 "$runner"
   echo "===== STAGE $id preset=$preset ${hours}h $(date -Is) ====="
@@ -182,7 +189,12 @@ EOF
   if [ "$rc" -eq 4 ]; then
     echo "fingerprint mismatch on $id — not retrying, next stage"
   elif [ "$rc" -ne 0 ]; then
-    echo "stage $id failed rc=$rc — continuing"
+    if [ "${WEEK_CONTINUE_ON_FAIL:-0}" = 1 ]; then
+      echo "stage $id failed rc=$rc — continuing (WEEK_CONTINUE_ON_FAIL=1)"
+    else
+      echo "stage $id failed rc=$rc — aborting week (set WEEK_CONTINUE_ON_FAIL=1 to continue)" >&2
+      exit "$rc"
+    fi
   fi
 }
 
@@ -222,7 +234,7 @@ while true; do
     --tcp-sources fake \\
     --udp-sources custom,standard_udp,configs,flowseal \\
     --scan-level full --max 200 --udp-bypass \\
-    --ip 35.217.48.152 --port 50004 --discover-dns 5 \\
+    --discover-dns 5 \\
     --parallel 2 --timeout 3 --udp-timeout 3 \\
     --allow-dns-hijack --resume --data-block-sync --no-preflight \\
     --skip-prolog --skip-ip-block --skip-port-block --skip-baseline --skip-dns-audit \\

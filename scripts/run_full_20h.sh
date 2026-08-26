@@ -14,6 +14,7 @@ export BLOCKCHECKS_SETTINGS="${BLOCKCHECKS_SETTINGS:-$ROOT/../dpi-tester/setting
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
 export PYTHONUNBUFFERED=1
 export PATH="$ROOT/.venv/bin:$PATH"
+export ISP_IFACE="${BLOCKCHECKS_ISP_IFACE:-${ISP_INTERFACE:-}}"
 
 mkdir -p logs/full_20h_export
 TS="$(date +%Y%m%d_%H%M%S)"
@@ -45,6 +46,7 @@ export BLOCKCHECKS_BLOBS="$BLOCKCHECKS_BLOBS"
 export BLOCKCHECKS_SETTINGS="$BLOCKCHECKS_SETTINGS"
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
 export PYTHONUNBUFFERED=1
+export ISP_IFACE="${ISP_IFACE}"
 exec bs full \\
   --max-timeh $HOURS \\
   --db logs/full_20h.db \\
@@ -56,7 +58,7 @@ exec bs full \\
   --skip-prolog \\
   --skip-ip-block \\
   --skip-port-block \\
-  --isp-interface eth3
+  \${ISP_IFACE:+--isp-interface "\$ISP_IFACE"}
 # Graceful stop from another terminal: bs stop  (or: bs --stop; sudo if run via sudo)
 EOF
 chmod 700 "$RUNNER"
