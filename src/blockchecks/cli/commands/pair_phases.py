@@ -655,9 +655,12 @@ async def _run_pair_matrix_multi_ep(
     return all_pairs
 
 
-async def _seed_quarantine_from_db(db, quarantine, queue, qcfg) -> None:
-    """Pre-seed quarantine from campaign DB; re-sync AQ if *queue* is set."""
-    if qcfg is None or db is None or quarantine is None:
+async def _seed_quarantine_from_db(db, quarantine, queue, qcfg, *, resume: bool) -> None:
+    """Pre-seed quarantine from campaign DB; re-sync AQ if *queue* is set.
+
+    Historical 0-PASS rows only apply on ``--resume``.
+    """
+    if not resume or qcfg is None or db is None or quarantine is None:
         return
     try:
         rows = await db.domain_pass_rows()
@@ -726,7 +729,9 @@ async def run_adaptive_pair_phase(
     qcfg = quarantine_from_args(args)
     if qcfg is not None:
         quarantine = DomainQuarantine(qcfg)
-        await _seed_quarantine_from_db(db, quarantine, None, qcfg)
+        await _seed_quarantine_from_db(
+            db, quarantine, None, qcfg, resume=bool(getattr(args, "resume", False))
+        )
 
     queue, skipped = await build_adaptive_queue(
         tcp_items,

@@ -132,21 +132,20 @@ INFRA_FAIL_PHASES = frozenset(
 
 _INFRA_ERROR_MARKERS = (
     "dev/shm",
+    "Permission denied",
     "ns pool exhausted",
     "stopped before probe",
+    "batch probe loop failed",
 )
 
 
 def is_infra_fail_phase(fail_phase: str, *, error: str = "") -> bool:
     """True when a probe failure is infrastructure-related, not DPI-shaped."""
-    phase = (fail_phase or "").strip().lower()
-    if phase in {p.value for p in INFRA_FAIL_PHASES}:
+    err = error or ""
+    if any(marker in err for marker in _INFRA_ERROR_MARKERS):
         return True
-    if phase in (FailPhase.UNKNOWN.value, FailPhase.OTHER.value):
-        err = error or ""
-        if any(marker in err for marker in _INFRA_ERROR_MARKERS):
-            return True
-    return False
+    phase = (fail_phase or "").strip().lower()
+    return phase in {p.value for p in INFRA_FAIL_PHASES}
 
 
 def classify_fail_phase(error: str, http_code: int = 0) -> FailPhase:

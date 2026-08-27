@@ -18,6 +18,12 @@ log = logging.getLogger(__name__)
 _world_warned: set[str] = set()
 _setfacl_available: bool | None = None
 
+#: Lua ``bs_heartbeat`` timer period (``init.lua``). Ready/stale thresholds must
+#: exceed 2× this value to survive scheduling jitter.
+HEARTBEAT_LUA_PERIOD_S = 0.2
+HEARTBEAT_FRESH_MAX_AGE_S = HEARTBEAT_LUA_PERIOD_S * 5  # 1.0s
+HEARTBEAT_STALE_MIN_AGE_S = HEARTBEAT_LUA_PERIOD_S * 15  # 3.0s
+
 
 class IpcPermissionError(OSError):
     """IPC path could not be made accessible to nfqws2 overflow-uid."""
@@ -51,6 +57,34 @@ def _setfacl_usable() -> bool:
         return False
     _setfacl_available = proc.returncode == 0
     return _setfacl_available
+
+
+def _mkdir_or_sudo(path: Path) -> None:
+    """Create *path* (and parents). On EPERM (overflow-uid leftover shm) use sudo.
+
+    ``LuaBridge.setup`` used to call ``Path.mkdir`` only: leftover
+    ``/dev/shm/blockchecks`` owned by nfqws2 overflow-uid made every batch
+    abort with PermissionError before curl ran.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return
+    except OSError as exc:
+        log.warning("IPC mkdir %s failed (%s) — retrying via sudo", path, exc)
+    proc = sp.run(
+        ["sudo", "-n", "mkdir", "-p", "--", str(path)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if proc.returncode != 0:
+        raise IpcPermissionError(
+            errno.EACCES,
+            f"IPC mkdir {path} failed ({proc.stderr.strip()[:200] or proc.returncode})",
+        ) from None
+    if not path.is_dir():
+        raise IpcPermissionError(errno.EACCES, f"IPC mkdir {path}: sudo succeeded but path missing")
+    _chmod_or_sudo(path, 0o770, is_dir=True)
 
 
 def _chmod_or_sudo(path: Path, mode: int, *, is_dir: bool) -> bool:
@@ -238,13 +272,28 @@ class LuaBridge:
         self.paths = BridgePaths(base / ns_name)
 
     def setup(self) -> None:
-        self.paths.base.mkdir(parents=True, exist_ok=True)
+        _mkdir_or_sudo(self.paths.base)
         # nfqws2 drops privileges to nobody/overflow (uid 65534) and must be
         # able to chdir + create staging files here. 0o755 (root:root) lets it
         # chdir but NOT create .staging / strategy.* files → the daemon dies or
         # the bridge never sees APPLIED. World-writable dir fixes both.
         _ipc_relax_for_nobody(self.paths.base, is_dir=True)
+        self._init_strategy_ipc()
         self._init_events()
+        self._init_heartbeat()
+
+    def _init_strategy_ipc(self) -> None:
+        # Empty sentinels (S0a heartbeat pattern): a reused ns must not expose
+        # stale id/gen/ready/cmd from a prior session. Lua's ready==gen fence
+        # treats empty ready as unreadable until the next publish.
+        for path in (
+            self.paths.strategy_id,
+            self.paths.strategy_gen,
+            self.paths.strategy_ready,
+            self.paths.strategy_cmd,
+        ):
+            path.write_text("", encoding="utf-8")
+            _ipc_relax_for_nobody(path, is_dir=False)
 
     def _init_events(self) -> None:
         # nfqws2 drops privileges (setuid nobody/overflow) after init and must
@@ -253,6 +302,12 @@ class LuaBridge:
         # returns nil and the strategy-selection events are silently lost.
         self.paths.events.write_text("", encoding="utf-8")
         _ipc_relax_for_nobody(self.paths.events, is_dir=False)
+
+    def _init_heartbeat(self) -> None:
+        # Empty sentinel: Lua's 200ms timer rewrites content + mtime. Until then
+        # heartbeat_age() returns None (daemon not ready / dead).
+        self.paths.heartbeat.write_text("", encoding="utf-8")
+        _ipc_relax_for_nobody(self.paths.heartbeat, is_dir=False)
 
     def teardown(self) -> None:
         _rmtree_logged(self.paths.base, context="teardown")
@@ -310,6 +365,7 @@ class LuaBridge:
         staged_files["strategy.gen"].write_text(f"{gen}\n", encoding="utf-8")
         if cmd:
             staged_files["strategy.cmd"] = staging / "strategy.cmd"
+            # WONTFIX: Lua bs_read_strategy_ipc does not parse strategy.cmd yet.
             staged_files["strategy.cmd"].write_text(cmd.rstrip() + "\n", encoding="utf-8")
         staged_files["strategy.ready"].write_text(f"{gen}\n", encoding="utf-8")
 
@@ -357,16 +413,46 @@ class LuaBridge:
         self._init_events()
 
     def heartbeat_age(self, *, now: float | None = None) -> float | None:
-        """Seconds since the daemon's last heartbeat, or None if unknown.
+        """Seconds since the daemon's last heartbeat rewrite, or None if unknown.
 
-        The Lua timer (init.lua) rewrites ``heartbeat`` (epoch seconds) every
-        ~200ms while nfqws2 is alive. A stale value means the daemon is dead
-        or wedged — check BEFORE burning a probe on queue-bypassed traffic.
+        Python pre-creates an empty ``heartbeat`` file; Lua's timer
+        (``HEARTBEAT_LUA_PERIOD_S``, 200ms) rewrites it and updates mtime.
+        Empty or missing file means no live tick yet — not fresh.
+
+        Ready/stale thresholds should be >= 2× ``HEARTBEAT_LUA_PERIOD_S``.
         """
+        path = self.paths.heartbeat
+        if not path.is_file():
+            return None
         try:
-            raw = self.paths.heartbeat.read_text(encoding="utf-8").strip()
-            ts = int(raw)
-        except (OSError, ValueError):
+            st = path.stat()
+            if st.st_size == 0:
+                return None
+            mtime = st.st_mtime
+        except OSError:
             return None
         ref = time.time() if now is None else now
-        return max(0.0, float(ref - ts))
+        return max(0.0, ref - mtime)
+
+
+def wait_heartbeat_fresh(
+    bridge: LuaBridge,
+    *,
+    within: float = 1.2,
+    ns_name: str = "",
+) -> bool:
+    """Block until Lua heartbeat mtime is fresh (age not None and <= T).
+
+    Shared by campaign ``ProbeBatchService`` and ``composite_runner``.
+    """
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        try:
+            age = bridge.heartbeat_age()
+        except OSError as exc:
+            log.debug("wait_heartbeat age failed for %s: %s", ns_name or "?", exc)
+            age = None
+        if age is not None and age <= HEARTBEAT_FRESH_MAX_AGE_S:
+            return True
+        time.sleep(0.05)
+    return False

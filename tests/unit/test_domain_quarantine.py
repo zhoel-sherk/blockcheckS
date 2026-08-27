@@ -84,6 +84,26 @@ def test_quarantine_from_args() -> None:
 
 
 @pytest.mark.unit
+def test_record_skips_infra_shm_fail() -> None:
+    q = DomainQuarantine(QuarantineConfig(min_attempts=2))
+    err = "[Errno 13] Permission denied: '/dev/shm/blockchecks/bs-p-0'"
+    assert q.record("youtube.com", False, fail_phase="other", error=err) is None
+    assert q.record("youtube.com", False, fail_phase="other", error=err) is None
+    assert "youtube.com" not in q.quarantined
+    assert "youtube.com" not in q.stats
+
+
+@pytest.mark.unit
+def test_record_dpi_fail_still_quarantines() -> None:
+    q = DomainQuarantine(QuarantineConfig(min_attempts=2))
+    q.record("dead.example", False, fail_phase="tls_silent_drop_after_sni", error="timeout")
+    assert (
+        q.record("dead.example", False, fail_phase="tls_silent_drop_after_sni", error="timeout")
+        == "dead.example"
+    )
+
+
+@pytest.mark.unit
 def test_record_throttled_status_counts_as_pass() -> None:
     q = DomainQuarantine(QuarantineConfig(min_attempts=3))
     assert q.record("slow.example", False, status="THROTTLED") is None

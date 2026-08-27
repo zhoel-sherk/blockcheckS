@@ -846,6 +846,46 @@ def test_tcp_adaptive():
         asyncio.run(_run_tcp_adaptive(ctx, progress))
     assert run_tcp.await_args.kwargs.get("quarantine") is not None
     ctx.aq_result = aq
+    ctx.db.domain_pass_rows.assert_not_called()
+
+
+def test_tcp_adaptive_seeds_quarantine_on_resume():
+    from blockchecks.main_phases import _run_tcp_adaptive
+
+    ctx = _mk_ctx()
+    ctx.tcp_items = [MagicMock()]
+    ctx.domains = ["a.com"]
+    ctx.db = MagicMock()
+    ctx.db.domain_pass_rows = AsyncMock(return_value=[("dead.example", 400, 0)])
+    ctx.db.quarantine_domain = AsyncMock()
+    ctx.db.get_resume_skip_tcp_keys = AsyncMock(return_value=set())
+    ctx.args.resume = True
+    ctx.args.adaptive_epsilon = 0.1
+    ctx.args.no_adaptive_weights = True
+    ctx.args.timeout = 5.0
+    ctx.args.protocol = "tls12"
+    ctx.args.parallel = 2
+    ctx.args.disable_ech = False
+    aq = MagicMock()
+    aq.done = 0
+    aq.passed = 0
+    aq.weights = {}
+    aq.metrics = MagicMock()
+    aq.metrics.time_to_first_pass = None
+    aq.metrics.fanout_enqueued = 0
+    aq.metrics.half_mark_jobs = False
+    progress = SimpleNamespace(done=0, skipped=0, passed=0, report=lambda: None)
+    with (
+        patch(
+            "blockchecks.main_phases.build_adaptive_queue",
+            new=AsyncMock(return_value=([MagicMock()], 0)),
+        ),
+        patch("blockchecks.main_phases.run_adaptive_tcp", new=AsyncMock(return_value=aq)),
+        patch("blockchecks.main_phases.resolve_probe_backend", return_value="lua_bridge"),
+        patch("blockchecks.main_phases.persist_adaptive_weights", new=AsyncMock()),
+    ):
+        asyncio.run(_run_tcp_adaptive(ctx, progress))
+    ctx.db.domain_pass_rows.assert_awaited()
 
 
 def test_tcp_adaptive_none_result_raises():

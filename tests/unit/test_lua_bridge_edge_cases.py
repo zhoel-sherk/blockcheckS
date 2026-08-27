@@ -230,6 +230,50 @@ def test_world_writable_warning_includes_path_and_uid(tmp_path, caplog, monkeypa
     assert "world-writable" in msg
 
 
+@pytest.mark.unit
+def test_mkdir_or_sudo_falls_back_to_sudo_on_eperm(tmp_path, monkeypatch):
+    from blockchecks.service import lua_bridge_ipc as ipc
+
+    target = tmp_path / "blockchecks" / "bs-p-0"
+
+    def boom(self, *a, **k):
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+
+    def fake_run(cmd, **_kw):
+        argv = list(cmd)
+        if argv[:3] == ["sudo", "-n", "mkdir"]:
+            import os
+
+            os.makedirs(argv[-1], exist_ok=True)
+            return SimpleNamespace(returncode=0, stderr="")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(ipc.sp, "run", fake_run)
+    ipc._mkdir_or_sudo(target)
+    assert target.is_dir()
+
+
+@pytest.mark.unit
+def test_mkdir_or_sudo_raises_when_sudo_fails(tmp_path, monkeypatch):
+    from blockchecks.service import lua_bridge_ipc as ipc
+
+    target = tmp_path / "ns"
+
+    def boom(self, *a, **k):
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    monkeypatch.setattr(
+        ipc.sp,
+        "run",
+        lambda *_a, **_k: SimpleNamespace(returncode=1, stderr="mkdir: Permission denied"),
+    )
+    with pytest.raises(ipc.IpcPermissionError, match="IPC mkdir"):
+        ipc._mkdir_or_sudo(target)
+
+
 def test_ipc_relax_raises_when_all_chmod_paths_fail(tmp_path, monkeypatch):
     from blockchecks.service import lua_bridge_ipc as ipc
 

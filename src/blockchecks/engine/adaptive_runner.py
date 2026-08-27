@@ -17,6 +17,7 @@ from blockchecks.engine.adaptive_queue import (
 from blockchecks.engine.bridge_worker_pool import (
     BridgeJob,
     BridgeWorkerPool,
+    result_campaign_pass,
 )
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.store import RunStateStore
@@ -216,7 +217,7 @@ async def _bridge_worker(  # noqa: C901
     stop_event = pool.stop_event
     quarantine = pool.quarantine
 
-    async def _account(job: AdaptiveJob, ok: bool) -> None:
+    async def _account(job: AdaptiveJob, ok: bool, result: object | None = None) -> None:
         queue.mark_done(job, passed=ok)
         stats.done += 1
         if ok:
@@ -224,6 +225,7 @@ async def _bridge_worker(  # noqa: C901
         await pool.account_with_quarantine(
             BridgeJob(item=job.item, domain=job.domain, fanout=job.fanout),
             ok,
+            result,
         )
 
     async def _account_skipped(job: AdaptiveJob) -> None:
@@ -243,8 +245,8 @@ async def _bridge_worker(  # noqa: C901
         batch = [BridgeJob(item=j.item, domain=j.domain, fanout=j.fanout) for j in aq_jobs]
         job_by_key = {(j.item.label, j.domain): j for j in aq_jobs}
 
-        async def account_ok(bj: BridgeJob, ok: bool) -> None:
-            await _account(job_by_key[(bj.item.label, bj.domain)], ok)
+        async def account_ok(bj: BridgeJob, ok: bool, result: object | None = None) -> None:
+            await _account(job_by_key[(bj.item.label, bj.domain)], ok, result)
 
         async def account_skipped_bj(bj: BridgeJob) -> None:
             await _account_skipped(job_by_key[(bj.item.label, bj.domain)])
@@ -268,7 +270,7 @@ async def _bridge_worker(  # noqa: C901
     async def run_single(job: AdaptiveJob) -> None:
         try:
             result = await pool.runner.test_tcp(job.item, job.domain, timeout=pool.timeout)
-            await _account(job, bool(result.success))
+            await _account(job, result_campaign_pass(result), result)
             _report_progress()
         finally:
             await pool.isolation.release_domains([job.domain])

@@ -1,8 +1,11 @@
 """Mid-run domain quarantine: stop probing domains that never PASS.
 
 A domain is quarantined once it accumulated ``min_attempts`` failed probes
-(0 PASS) within the current campaign — plus, on ``--resume``, whatever the
-campaign DB already holds. Quarantined domains stop being scheduled (AQ
+(0 PASS) within the current campaign — plus, on ``--resume`` only, whatever
+the campaign DB already holds. Without ``--resume``, historical FAIL rows
+must not pre-exclude domains (append-only re-runs need a fresh clock).
+Infrastructure FAILs (shm EPERM, batch-loop abort, ns pool) do not count.
+Quarantined domains stop being scheduled (AQ
 ``pop(exclude_domains=...)``, fan-out/sequential domain filters), are logged
 loudly, persisted to the campaign DB (``quarantined`` table) so MCP
 ``get_series_status`` can surface them, and — with
@@ -67,22 +70,43 @@ class DomainQuarantine:
                 newly.append(domain)
         return newly
 
-    def record(self, domain: str, passed: bool, *, status: str | None = None) -> str | None:
+    def record(
+        self,
+        domain: str,
+        passed: bool,
+        *,
+        status: str | None = None,
+        fail_phase: str = "",
+        error: str = "",
+    ) -> str | None:
         """Account one probe result; return domain name if just quarantined.
 
         When ``status`` is provided, PASS and THROTTLED count as success (working
         probes). Otherwise ``passed`` is used as-is for backward compatibility.
+        Infra/synthetic FAILs do not increment ``attempts``.
         """
         if not self.config.enabled or domain in self.quarantined:
             return None
-        st = self.stats.setdefault(domain, _DomainStats())
-        st.attempts += 1
         counts_pass = (
             status in _WORKING_PROBE_STATUSES if status is not None else passed
         )
         if counts_pass:
+            st = self.stats.setdefault(domain, _DomainStats())
+            st.attempts += 1
             st.passed += 1
             return None
+        from blockchecks.engine.fail_phase import is_infra_fail_phase
+
+        if is_infra_fail_phase(fail_phase, error=error):
+            log.debug(
+                "quarantine skip infra FAIL %s fail_phase=%r error=%r",
+                domain,
+                fail_phase,
+                (error or "")[:160],
+            )
+            return None
+        st = self.stats.setdefault(domain, _DomainStats())
+        st.attempts += 1
         if st.attempts < self.config.min_attempts or st.passed:
             return None
         self._mark(domain, st)

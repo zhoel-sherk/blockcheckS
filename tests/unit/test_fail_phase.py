@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from blockchecks.engine.fail_phase import FailPhase, classify_fail_phase, http_phase
+from blockchecks.engine.fail_phase import (
+    FailPhase,
+    classify_fail_phase,
+    http_phase,
+    is_infra_fail_phase,
+)
 
 
 @pytest.mark.unit
@@ -91,6 +96,15 @@ def test_wrong_version_is_handshake_not_rst_at_sni():
     assert (
         classify_fail_phase("curl: (35) Recv failure: Connection reset").value == "tls_rst_at_sni"
     )
+
+
+@pytest.mark.unit
+def test_is_infra_fail_shm_permission_denied():
+    err = "[Errno 13] Permission denied: '/dev/shm/blockchecks/bs-p-1309-3'"
+    assert is_infra_fail_phase("other", error=err)
+    assert is_infra_fail_phase("tls_silent_drop_after_sni", error=err)
+    assert not is_infra_fail_phase("tls_silent_drop_after_sni", error="timeout")
+    assert is_infra_fail_phase("connect_timeout", error="")
 
 
 @pytest.mark.unit

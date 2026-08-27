@@ -9,10 +9,21 @@ from dataclasses import dataclass
 from typing import Any
 
 from blockchecks.engine.generators.base import StrategyItem
-from blockchecks.engine.results import TcpTestResult
+from blockchecks.engine.results import TcpTestResult, campaign_pass
 from blockchecks.service.batch_service import STOPPED_BEFORE_PROBE
 
 log = logging.getLogger(__name__)
+
+
+def result_campaign_pass(result: Any) -> bool:
+    """TcpTestResult.campaign_pass(); tests may yield SimpleNamespace(success=...)."""
+    fn = getattr(result, "campaign_pass", None)
+    if callable(fn):
+        return bool(fn())
+    return campaign_pass(
+        http_ok=bool(getattr(result, "success", False)),
+        bridge_applied=getattr(result, "bridge_applied", None),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +36,7 @@ class BridgeJob:
 
 
 ProgressHook = Callable[[], Awaitable[None] | None]
-AccountOkCb = Callable[[BridgeJob, bool], Awaitable[None]]
+AccountOkCb = Callable[..., Awaitable[None]]
 AccountSkippedCb = Callable[[BridgeJob], Awaitable[None]]
 
 
@@ -119,8 +130,8 @@ async def run_bridge_batch(
             if getattr(result, "error", "") == STOPPED_BEFORE_PROBE:
                 await account_skipped(job)
             else:
-                await account_ok(job, bool(result.success))
-            await _invoke_progress(on_progress)
+                await account_ok(job, result_campaign_pass(result), result)
+        await _invoke_progress(on_progress)
     finally:
         if isolation is not None:
             await isolation.release_domains(domains)
@@ -152,9 +163,13 @@ async def record_quarantine_hit(
     ok: bool,
     *,
     excluded_domains: set[str] | None,
+    fail_phase: str = "",
+    error: str = "",
 ) -> None:
     """Record probe outcome; hard-exclude newly quarantined domains immediately."""
-    newly = quarantine.record(domain, ok)
+    newly = quarantine.record(
+        domain, ok, fail_phase=fail_phase, error=error
+    )
     if not newly:
         return
     if excluded_domains is not None:
@@ -209,7 +224,9 @@ class BridgeWorkerPool:
             on_progress=on_progress,
         )
 
-    async def account_with_quarantine(self, job: BridgeJob, ok: bool) -> None:
+    async def account_with_quarantine(
+        self, job: BridgeJob, ok: bool, result: Any = None
+    ) -> None:
         if self.quarantine is None:
             return
         await record_quarantine_hit(
@@ -218,6 +235,8 @@ class BridgeWorkerPool:
             job.domain,
             ok,
             excluded_domains=self.excluded_domains,
+            fail_phase=getattr(result, "fail_phase", "") or "",
+            error=getattr(result, "error", "") or "",
         )
 
 

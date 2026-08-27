@@ -641,8 +641,14 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
     if qcfg is not None:
         quarantine = DomainQuarantine(qcfg)
 
-    # Seed from DB *before* packing so dead domains never become AdaptiveJob.
-    if qcfg is not None and ctx.db is not None and quarantine is not None:
+    # Seed from DB only on --resume (docstring of DomainQuarantine). Without
+    # resume, append-only re-runs must not inherit a dead-domain clock.
+    if (
+        args.resume
+        and qcfg is not None
+        and ctx.db is not None
+        and quarantine is not None
+    ):
         try:
             rows = await ctx.db.domain_pass_rows()
             seeded = quarantine.seed_from_rows(rows)
@@ -890,12 +896,12 @@ async def _run_tcp_sequential_bridge(ctx: FullRunContext, progress: TcpProgress)
             progress.skipped = stats["skipped"]
         progress.report()
 
-    async def account_ok(bj, ok: bool) -> None:
+    async def account_ok(bj, ok: bool, result=None) -> None:
         async with stats_lock:
             stats["done"] += 1
             if ok:
                 stats["passed"] += 1
-        await pool.account_with_quarantine(bj, ok)
+        await pool.account_with_quarantine(bj, ok, result)
 
     async def account_skipped(_bj) -> None:
         async with stats_lock:
