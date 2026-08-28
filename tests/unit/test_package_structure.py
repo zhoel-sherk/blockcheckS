@@ -38,7 +38,7 @@ class TestSubmoduleImports:
         "blockchecks.engine.config",
         "blockchecks.service.nfqws2",
         "blockchecks.service.nfqws2_settle",
-        "blockchecks.service.firewall",
+        "blockchecks.service.ns_firewall",
         "blockchecks.service.netns_pool",
         "blockchecks.service.probe",
         "blockchecks.service.run_control",

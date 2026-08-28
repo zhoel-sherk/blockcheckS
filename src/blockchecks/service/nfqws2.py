@@ -1,268 +1,46 @@
-"""Start and stop nfqws2: daemon @config, or foreground Popen plus killpg."""
+"""Start and stop nfqws2: daemon @config, or foreground Popen plus PID-scope kill."""
 
 from __future__ import annotations
 
 import logging
 import os
-import shutil
-import signal
 import subprocess
 import tempfile
-import time
-import weakref
 from pathlib import Path
 
 from blockchecks.engine.config import (
     BLOB_DIR,
-    NFQWS2_SETTLE_MAX,
     get_lua_init_scripts,
-    get_nfqws2_bin,
     nfqws2_debug_conf_line,
 )
-from blockchecks.service.nfqws2_settle import (
-    NFQWS2_BIND_MARKER,
-    _wait_nfqws2_gone,
-    nfqws2_bind_retry_backoff,
-    nfqws2_bind_retry_should_continue,
-    nfqws2_count_in_ns,
-    nfqws2_out_shows_bind,
-    resolve_nfqws2_pids,
-    wait_nfqws2_bind_proof,
-    wait_nfqws2_ready,
+from blockchecks.service.nfqws2_launcher import (
+    NFQWS2_BIND_ATTEMPTS,
+    Nfqws2Launcher,
+    _daemon_popens,
+    _reap_daemon_popens,
+    _reclaim_debug_log,
+    inject_debug_and_daemon,
+    open_out_capture,
+    start_daemon,
 )
 
 log = logging.getLogger(__name__)
 
-#: Попытки бинда NFQUEUE при "queue busy" (сокет освобождается ядром с задержкой)
-NFQWS2_BIND_ATTEMPTS = 5
-
-#: Fire-and-forget daemon Popens from start_daemon — poll() to reap zombies (RT-7).
-_daemon_popens: weakref.WeakSet[subprocess.Popen] = weakref.WeakSet()
-
-
-def _reap_daemon_popens() -> None:
-    """Poll tracked daemon Popens so exited children do not accumulate as zombies."""
-    for proc in list(_daemon_popens):
-        try:
-            proc.poll()
-        except Exception as exc:
-            log.debug("daemon Popen poll failed: %s", exc)
-
-
-def inject_debug_and_daemon(config_path: str, tag: str = "") -> str | None:
-    """Ensure conf contains --daemon and optional --debug=@log. Returns log path."""
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            text = f.read()
-    except OSError:
-        return None
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    changed = False
-    if not any(ln.startswith("--daemon") for ln in lines):
-        lines.insert(0, "--daemon")
-        changed = True
-    dbg, dbg_path = nfqws2_debug_conf_line(tag=tag or "async")
-    if dbg and not any(ln.startswith("--debug=") for ln in lines):
-        lines.insert(1 if lines and lines[0].startswith("--daemon") else 0, dbg)
-        changed = True
-        if dbg_path:
-            log.info("%s", f"  [nfqws2 debug] {dbg_path}")
-    if changed:
-        try:
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
-        except OSError:
-            return None
-    return dbg_path if dbg else None
-
-
-def _reclaim_debug_log(dbg_path: str | None) -> None:
-    """Chown a just-created nfqws2 --debug log back to SUDO_UID/GID.
-
-    nfqws2 drops privileges (setuid overflow-uid) and creates the log itself,
-    so it stays root/overflow-owned unless repaired after launch.
-    """
-    if not dbg_path:
-        return
-    try:
-        from blockchecks.engine.paths import reclaim_sudo_ownership
-
-        reclaim_sudo_ownership(Path(dbg_path))
-    except Exception as exc:
-        log.warning("nfqws2 debug log reclaim failed (%s): %s", dbg_path, exc)
-
-
-def open_out_capture(tag: str):
-    """Open stdout/stderr capture file for an nfqws2 launch.
-
-    Bind failures (`nfq_create_queue(): ...`) are printed by nfqws2 to
-    **stdout** — NOT to ``--debug=@file``. With --daemon and DEVNULL pipes
-    that message was lost, making daemon deaths look silent (zapret2#300).
-    Files match the ``nfqws2_*.log`` gc glob, so retention applies.
-
-    Returns ``(fh, path)``; fh=None on failure. Caller must close fh after
-    Popen (the child keeps its inherited fd).
-    """
-    from blockchecks.engine.paths import RUNTIME_LOGS_DIR
-
-    try:
-        RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        path = RUNTIME_LOGS_DIR / f"nfqws2_out_{tag}_{ts}.log"
-        # noqa: SIM115 — файл намеренно живёт дольше функции: его наследует
-        # дочерний процесс (stdout демона), закрывает вызывающий после Popen.
-        fh = open(path, "ab", buffering=0)  # noqa: SIM115
-        fh.write(f"=== nfqws2 launch tag={tag} {ts}\n".encode())
-        return fh, path
-    except OSError as exc:
-        log.warning("%s", f"  WARNING: out-capture disabled for {tag}: {exc}")
-        return None, None
-
-
-def _prune_out_logs() -> None:
-    """Apply keep-N retention to out/debug captures after each launch."""
-    try:
-        from blockchecks.engine.gc import prune_nfqws2_debug_logs
-
-        prune_nfqws2_debug_logs()
-    except Exception as exc:
-        log.warning("nfqws2 out-log prune failed: %s", exc)
-
-
-def start_daemon(
-    ns_name: str,
-    config_path: str,
-    kill_existing: bool = True,
-    *,
-    settle_max: float | None = None,
-    settle_poll: float | None = None,
-    min_procs: int = 1,
-) -> float:
-    """Launch nfqws2 in daemon mode inside ns. Non-blocking.
-
-    kill_existing=True (default) clears prior nfqws2 in the ns — for solo
-    TCP/UDP checks. Pair matrix must pass kill_existing=False when starting
-    the UDP instance so the TCP desync (qnum 200) stays alive.
-
-    Note: with ``@config`` nfqws2 ignores trailing CLI flags — put ``--debug``
-    and ``--daemon`` inside a *temporary* copy of the config.
-
-    Returns settle elapsed seconds (B1 readiness poll).
-    """
-    _fd, tmp_conf = tempfile.mkstemp(prefix="bs_nfq_", suffix=".conf")
-    os.close(_fd)
-    launched: bool = False
-    last_out_path: Path | None = None
-    baseline: frozenset[int] = frozenset()
-    try:
-        shutil.copy2(config_path, tmp_conf)
-        dbg_path = inject_debug_and_daemon(tmp_conf, tag=ns_name)
-        drain_ok = True
-        if kill_existing:
-            # Scoped kill: netns exec pkill would hit nfqws2 host-wide (no PID ns).
-            from blockchecks.service.metrics import pkill_nfqws2_in_ns
-
-            pkill_nfqws2_in_ns(ns_name)
-            # pkill is async: the old daemon may still hold the NFQUEUE socket
-            # when the new one binds, causing the new daemon to die (settle
-            # spikes, "PASS without APPLIED" warnings). Wait for it to actually
-            # disappear before starting the replacement.
-            drain_ok = _wait_nfqws2_gone(ns_name, max_wait=2.0)
-            if not drain_ok:
-                log.warning(
-                    "%s",
-                    f"  [nfqws2] {ns_name}: prior daemon still visible after "
-                    f"pkill drain — bind retries likely",
-                )
-        else:
-            # Coexist: new daemon = set difference vs pre-launch nfqws2 PIDs.
-            baseline = frozenset(resolve_nfqws2_pids(ns_name))
-        # @config must be the only argument; daemon/debug are inside the file
-        cmd = [
-            "sudo",
-            "ip",
-            "netns",
-            "exec",
-            ns_name,
-            get_nfqws2_bin(),
-            f"@{tmp_conf}",
-        ]
-        # Ядро освобождает NFQUEUE-сокет после pkill с задержкой; при раннем
-        # ребуте новый демон умирает с nfq_create_queue(): Operation not
-        # permitted (zapret2#300). Ретраим бинд с backoff — stdout-захват
-        # даёт надёжный маркер именно этой причины.
-        max_bind_attempts = NFQWS2_BIND_ATTEMPTS
-        settle = 0.0
-        _reap_daemon_popens()
-        for attempt in range(1, max_bind_attempts + 1):
-            out_fh, out_path = open_out_capture(ns_name)
-            last_out_path = out_path
-            proc: subprocess.Popen | None = None
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
-                    stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
-                )
-                if proc is not None:
-                    launched = True
-                    _daemon_popens.add(proc)
-                    _reap_daemon_popens()
-            finally:
-                if out_fh is not None:
-                    out_fh.close()
-                _prune_out_logs()
-            settle = wait_nfqws2_ready(
-                ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
-            )
-            _reclaim_debug_log(dbg_path)
-            # Liveness: bind marker (primary) or a real nfqws2 pid in ns —
-            # never the sudo wrapper PID (comm is sudo, not nfqws2).
-            try:
-                out_txt = (
-                    out_path.read_text(errors="replace")[:2000]
-                    if out_path is not None and out_path.exists()
-                    else ""
-                )
-            except OSError:
-                out_txt = ""
-            alive = NFQWS2_BIND_MARKER in out_txt or bool(resolve_nfqws2_pids(ns_name, baseline))
-            should_retry, reason = nfqws2_bind_retry_should_continue(
-                out_txt,
-                attempt=attempt,
-                max_attempts=max_bind_attempts,
-                drain_ok=drain_ok,
-                succeeded=alive,
-            )
-            if not should_retry:
-                break
-            backoff = nfqws2_bind_retry_backoff(attempt)
-            log.warning(
-                "%s",
-                f"  [nfqws2] {ns_name}: {reason} after pkill "
-                f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
-            )
-            time.sleep(backoff)
-        _prune_out_logs()
-        return settle
-    finally:
-        # Hold @config until this session's daemon read it (bind marker or PID).
-        if launched and not (
-            nfqws2_out_shows_bind(last_out_path) or resolve_nfqws2_pids(ns_name, baseline)
-        ):
-            wait_nfqws2_bind_proof(
-                ns_name,
-                baseline_pids=baseline,
-                out_path=last_out_path,
-            )
-        try:
-            os.unlink(tmp_conf)
-        except OSError:
-            pass
+__all__ = [
+    "NFQWS2_BIND_ATTEMPTS",
+    "Nfqws2Manager",
+    "Nfqws2Launcher",
+    "_daemon_popens",
+    "_reap_daemon_popens",
+    "_reclaim_debug_log",
+    "inject_debug_and_daemon",
+    "open_out_capture",
+    "start_daemon",
+]
 
 
 class Nfqws2Manager:
-    """Manages a single nfqws2 process via foreground Popen + killpg."""
+    """Manages a single nfqws2 process via foreground Popen + PID-scope kill."""
 
     def __init__(self, ns_name: str | None = None, qnum: int = 200):
         self.ns_name = ns_name
@@ -270,11 +48,12 @@ class Nfqws2Manager:
         self._proc: subprocess.Popen | None = None
         self._pid: int | None = None
         self._temp_files: list[str] = []
+        self._launcher = Nfqws2Launcher(ns_name)
         self.last_debug_log: str | None = None
         self.last_out_log: Path | None = None
 
     def _launch(self, config_arg: str, *, stop_first: bool = True) -> None:
-        """Start nfqws2 in foreground, verify it's alive.
+        """Start nfqws2 in foreground via Nfqws2Launcher.
 
         stop_first=True clears any prior process/temps. Callers that just
         created a temp config and appended it to ``_temp_files`` must pass
@@ -284,106 +63,11 @@ class Nfqws2Manager:
         if stop_first:
             self.stop()
 
-        args = [get_nfqws2_bin(), config_arg]
-        if self.ns_name:
-            args = ["sudo", "-n", "ip", "netns", "exec", self.ns_name] + args
-        else:
-            args = ["sudo", "-n"] + args
-
-        # Bind-retry (тот же маркер, что в start_daemon): ядро освобождает
-        # NFQUEUE-сокет после pkill с задержкой → первый запуск может упасть
-        # с nfq_create_queue(): Operation not permitted.
-        max_bind_attempts = NFQWS2_BIND_ATTEMPTS
-        last_err: RuntimeError | None = None
-        baseline: frozenset[int] = (
-            frozenset(resolve_nfqws2_pids(self.ns_name)) if self.ns_name else frozenset()
-        )
-        for attempt in range(1, max_bind_attempts + 1):
-            out_fh, out_path = open_out_capture(self.ns_name or "host")
-            self.last_out_log = out_path
-            try:
-                self._proc = subprocess.Popen(
-                    args,
-                    stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
-                    # Never PIPE: unread buffer blocks a chatty/debug nfqws2.
-                    # Init/errors go to --debug=@file when enabled; bind errors
-                    # (nfq_create_queue) go to stdout — captured in out-file.
-                    stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-            finally:
-                if out_fh is not None:
-                    out_fh.close()
-                    _prune_out_logs()
-            self._pid = self._proc.pid
-            if self.ns_name:
-                settle_max = NFQWS2_SETTLE_MAX
-                settle = wait_nfqws2_ready(self.ns_name, max_wait=settle_max)
-                count = nfqws2_count_in_ns(self.ns_name)
-                bound = nfqws2_out_shows_bind(self.last_out_log)
-                if settle >= settle_max and count == 0:
-                    if not bound:
-                        raise RuntimeError(
-                            f"nfqws2 not visible in {self.ns_name} after settle "
-                            f"({settle:.2f}s >= {settle_max:.2f}s)"
-                        )
-                    log.debug(
-                        "%s",
-                        f"  [nfqws2] {self.ns_name}: bind marker present with "
-                        "count=0 — treat as alive (overflow-uid /proc EPERM)",
-                    )
-                if not wait_nfqws2_bind_proof(
-                    self.ns_name,
-                    baseline_pids=baseline,
-                    out_path=self.last_out_log,
-                ):
-                    log.warning(
-                        "%s",
-                        f"  [nfqws2] {self.ns_name}: no bind proof after settle "
-                        f"— process visible but NFQUEUE may not be ready",
-                    )
-                if real := resolve_nfqws2_pids(self.ns_name, baseline):
-                    self._pid = real[0]
-            else:
-                time.sleep(0.1)
-            _reclaim_debug_log(self.last_debug_log)
-
-            if self._proc.poll() is None:
-                last_err = None
-                break
-            tail_txt = ""
-            for log_path in (
-                self.last_out_log,
-                Path(self.last_debug_log) if self.last_debug_log else None,
-            ):
-                if log_path and os.path.exists(log_path):
-                    try:
-                        tail_txt += Path(log_path).read_text(errors="replace")[-300:]
-                    except OSError:
-                        pass
-            should_retry, reason = nfqws2_bind_retry_should_continue(
-                tail_txt,
-                attempt=attempt,
-                max_attempts=max_bind_attempts,
-                succeeded=False,
-            )
-            self._proc = None
-            self._pid = None
-            if not should_retry:
-                last_err = RuntimeError(
-                    "nfqws2 failed to start (exited immediately)"
-                    + (f"; out_tail={tail_txt!r}" if tail_txt else "")
-                )
-                break
-            backoff = nfqws2_bind_retry_backoff(attempt)
-            log.warning(
-                "%s",
-                f"  [nfqws2] {self.ns_name or 'host'}: {reason} after stop "
-                f"(attempt {attempt}/{max_bind_attempts}) — retry in {backoff:.1f}s",
-            )
-            time.sleep(backoff)
-        if last_err is not None:
-            raise last_err
+        self._launcher.last_debug_log = self.last_debug_log
+        result = self._launcher.foreground(config_arg)
+        self._proc = result.proc
+        self._pid = result.pid
+        self.last_out_log = result.out_log
 
     def start_config(self, config_path: str) -> None:
         """Start nfqws2 using a pre-built .conf file."""
@@ -422,14 +106,11 @@ class Nfqws2Manager:
             if os.path.exists(lua):
                 lines.append(f"--lua-init=@{lua}")
 
-        # Explicit blobs= plus auto-discover blob=/seqovl_pattern= from strategy
-        from blockchecks.engine.blob_aliases import append_blob_cli_lines, extract_blob_names
+        from blockchecks.engine.blob_aliases import sanitize_strategy_for_nfqws2
 
-        blob_names: list[str] = list(blobs or [])
-        for name in extract_blob_names(strategy):
-            if name not in blob_names:
-                blob_names.append(name)
-        append_blob_cli_lines(lines, blob_names, BLOB_DIR)
+        strategy = sanitize_strategy_for_nfqws2(
+            strategy, lines, BLOB_DIR, extra_names=blobs
+        )
 
         if hostlist:
             fd, hostlist_path = tempfile.mkstemp(prefix="bs_hostlist_", suffix=".txt")
@@ -437,7 +118,6 @@ class Nfqws2Manager:
                 with os.fdopen(fd, "w") as f:
                     for d in hostlist:
                         f.write(f"{d}\n")
-                # nfqws2 drops UID after init and re-opens hostlist — must be world-readable
                 os.chmod(hostlist_path, 0o644)
                 lines.append(f"--hostlist={hostlist_path}")
                 self._temp_files.append(hostlist_path)
@@ -448,10 +128,6 @@ class Nfqws2Manager:
                     pass
                 raise
 
-        # Full CLI strategy lines (e.g. custom list_http.txt entries like
-        # "--payload=http_req --lua-desync=http_hostcase") carry their own
-        # payload + desync and must not be wrapped again — otherwise nfqws2
-        # gets a duplicate --payload / a garbage --lua-desync and exits.
         if strategy.strip().startswith("--"):
             from blockchecks.engine.conf_builder import split_cli_args
 
@@ -479,29 +155,35 @@ class Nfqws2Manager:
                 self._temp_files.remove(config_path)
             raise
 
+    def _kill_owned_nfqws2(self) -> None:
+        """Stop nfqws2 without killpg (EPERM on overflow-uid daemons)."""
+        if self.ns_name:
+            from blockchecks.service.metrics import pkill_nfqws2_in_ns
+
+            pkill_nfqws2_in_ns(self.ns_name)
+            return
+        if self._pid is None:
+            return
+        from blockchecks.service.metrics import _kill_pid_sigkill
+
+        _kill_pid_sigkill(self._pid)
+
     def stop(self) -> None:
-        """Kill the owned nfqws2 process group via killpg; unlink temp files."""
-        if self._pid is not None:
-            try:
-                os.killpg(os.getpgid(self._pid), signal.SIGTERM)
-                time.sleep(0.1)
-                try:
-                    os.killpg(os.getpgid(self._pid), signal.SIGKILL)
-                except (ProcessLookupError, OSError):
-                    pass
-            except (ProcessLookupError, OSError):
-                pass
-            self._pid = None
+        """Kill owned nfqws2 via PID-scoped kill; unlink temp files."""
+        self._kill_owned_nfqws2()
+        self._pid = None
 
         if self._proc is not None:
             try:
                 self._proc.wait(timeout=1)
-            except Exception:
+            except subprocess.TimeoutExpired:
                 try:
                     self._proc.kill()
                     self._proc.wait(timeout=1)
-                except Exception:
-                    pass
+                except (ProcessLookupError, OSError) as exc:
+                    log.debug("nfqws2 Popen kill/wait failed: %s", exc)
+            except (ProcessLookupError, OSError) as exc:
+                log.debug("nfqws2 Popen wait failed: %s", exc)
             self._proc = None
 
         for path in self._temp_files:

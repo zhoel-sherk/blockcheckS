@@ -1,4 +1,4 @@
-"""Namespace-scoped NFQUEUE iptables with tracked -D cleanup.
+"""Namespace-scoped and host NFQUEUE iptables with tracked -D cleanup.
 
 Never ``iptables -F OUTPUT``. Rules are attached once per namespace (idempotent
 ``attach``) and removed with matching ``-D`` on teardown.
@@ -28,18 +28,18 @@ class _RuleSpec:
     queue: int
     multiport: bool = False
     bypass: bool = True
+    dst_ip: str | None = None
 
 
-class NsFirewall:
-    """Track OUTPUT NFQUEUE rules inside one network namespace."""
+class _IptablesTracker:
+    """Track OUTPUT NFQUEUE rules via matching ``iptables -D`` on teardown."""
 
-    def __init__(self, ns_name: str) -> None:
-        self.ns_name = ns_name
+    def __init__(self) -> None:
         self._rules: dict[_RuleSpec, list[str]] = {}
         self._dirty = False
 
     def _cmd_prefix(self) -> list[str]:
-        return ["sudo", "-n", "ip", "netns", "exec", self.ns_name, "iptables"]
+        raise NotImplementedError
 
     def _run(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
         cmd = self._cmd_prefix() + list(args)
@@ -47,12 +47,12 @@ class NsFirewall:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
-                f"iptables timeout in {self.ns_name!r}: {' '.join(args)}"
+                f"iptables timeout: {' '.join(args)}"
             ) from exc
         if check and result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
             raise IptablesError(
-                f"{self.ns_name}: iptables {' '.join(args)} failed rc={result.returncode}"
+                f"iptables {' '.join(args)} failed rc={result.returncode}"
                 + (f" ({detail[:200]})" if detail else "")
             )
         return result
@@ -60,6 +60,8 @@ class NsFirewall:
     @staticmethod
     def _rule_body(spec: _RuleSpec) -> list[str]:
         body = ["OUTPUT", "-p", spec.proto]
+        if spec.dst_ip:
+            body.extend(["-d", spec.dst_ip])
         if spec.multiport:
             body.extend(["-m", "multiport", "--dports", spec.dport])
         else:
@@ -85,8 +87,9 @@ class NsFirewall:
         queue: int,
         multiport: bool = False,
         bypass: bool = True,
+        dst_ip: str | None = None,
     ) -> bool:
-        return _RuleSpec(proto, port, queue, multiport, bypass) in self._rules
+        return _RuleSpec(proto, port, queue, multiport, bypass, dst_ip) in self._rules
 
     def attach(
         self,
@@ -96,14 +99,15 @@ class NsFirewall:
         queue: int,
         multiport: bool = False,
         bypass: bool = True,
+        dst_ip: str | None = None,
     ) -> None:
         """Add one OUTPUT NFQUEUE rule; no-op when already tracked."""
         if self._dirty:
-            log.debug("ns_firewall %s: dirty — detaching before attach", self.ns_name)
+            log.debug("iptables tracker: dirty — detaching before attach")
             self.detach()
             self._dirty = False
 
-        spec = _RuleSpec(proto, port, queue, multiport, bypass)
+        spec = _RuleSpec(proto, port, queue, multiport, bypass, dst_ip)
         if spec in self._rules:
             return
 
@@ -114,14 +118,12 @@ class NsFirewall:
         verify = self._run("-C", *body)
         if verify.returncode != 0:
             log.warning(
-                "  [iptables] %s: rule MISSING right after -A "
-                "(rc=%s) — table may have been reset",
-                self.ns_name,
+                "  [iptables] rule MISSING right after -A (rc=%s) — table may have been reset",
                 verify.returncode,
             )
             self._rules.pop(spec, None)
             raise IptablesError(
-                f"{self.ns_name}: iptables -C NFQUEUE/{queue} failed after -A"
+                f"iptables -C NFQUEUE/{queue} failed after -A"
             )
 
     def detach_one(
@@ -132,18 +134,18 @@ class NsFirewall:
         queue: int,
         multiport: bool = False,
         bypass: bool = True,
+        dst_ip: str | None = None,
     ) -> None:
         """Remove one tracked rule via ``iptables -D``."""
-        spec = _RuleSpec(proto, port, queue, multiport, bypass)
+        spec = _RuleSpec(proto, port, queue, multiport, bypass, dst_ip)
         delete_args = self._rules.pop(spec, None)
         if delete_args is None:
             return
         try:
             self._run(*delete_args, check=False)
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             log.warning(
-                "ns_firewall %s: detach_one %s failed: %s",
-                self.ns_name,
+                "iptables detach_one %s failed: %s",
                 " ".join(delete_args),
                 exc,
             )
@@ -153,20 +155,64 @@ class NsFirewall:
         for delete_args in reversed(list(self._rules.values())):
             try:
                 self._run(*delete_args, check=False)
-            except Exception as exc:
+            except (OSError, subprocess.SubprocessError) as exc:
                 log.warning(
-                    "ns_firewall %s: detach %s failed: %s",
-                    self.ns_name,
+                    "iptables detach %s failed: %s",
                     " ".join(delete_args),
                     exc,
                 )
         self._rules.clear()
 
-    def __enter__(self) -> NsFirewall:
+    def cleanup(self) -> None:
+        """Alias for ``detach`` (host oneshot / legacy callers)."""
+        self.detach()
+
+    def __enter__(self) -> _IptablesTracker:
         return self
 
     def __exit__(self, *_args: object) -> None:
         self.detach()
+
+
+class NsFirewall(_IptablesTracker):
+    """Track OUTPUT NFQUEUE rules inside one network namespace."""
+
+    def __init__(self, ns_name: str) -> None:
+        super().__init__()
+        self.ns_name = ns_name
+
+    def _cmd_prefix(self) -> list[str]:
+        return ["sudo", "-n", "ip", "netns", "exec", self.ns_name, "iptables"]
+
+    def __enter__(self) -> NsFirewall:
+        return self
+
+
+class HostFirewall(_IptablesTracker):
+    """Host-scoped NFQUEUE rules (``bs tcp`` without ``--ns``)."""
+
+    def _cmd_prefix(self) -> list[str]:
+        return ["sudo", "-n", "iptables"]
+
+    def prepare_tcp(self, port: int = 443, qnum: int = 200, dst_ip: str | None = None) -> None:
+        """Add OUTPUT NFQUEUE rule for TCP with queue-bypass."""
+        self.attach(
+            proto="tcp",
+            port=str(port),
+            queue=qnum,
+            bypass=True,
+            dst_ip=dst_ip,
+        )
+
+    def prepare_udp(
+        self, ports: str = "50000:50100", qnum: int = 200, voice_port: int | None = None
+    ) -> None:
+        """Add OUTPUT NFQUEUE rule for UDP with queue-bypass."""
+        dport = str(voice_port) if voice_port is not None else ports
+        self.attach(proto="udp", port=dport, queue=qnum, bypass=True)
+
+    def __enter__(self) -> HostFirewall:
+        return self
 
 
 def get_ns_firewall(ns_name: str) -> NsFirewall:
@@ -202,6 +248,7 @@ def reset_registry_for_tests() -> None:
 
 
 __all__ = [
+    "HostFirewall",
     "IptablesError",
     "NsFirewall",
     "drop_ns_firewall",

@@ -60,6 +60,7 @@ def test_tcp_check_detaches_in_finally():
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
         patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
+        patch("blockchecks.service.in_ns_workers._pkill_nfqws2"),
         patch(
             "blockchecks.service.probe.invoke_curl_probe_worker",
             return_value={"success": True, "http_code": 200},
@@ -102,6 +103,7 @@ def test_quic_check_no_flush_uses_ns_firewall():
     with (
         patch("blockchecks.service.nfqws2.start_daemon", return_value=0.05),
         patch("blockchecks.service.ns_firewall.get_ns_firewall", return_value=fw),
+        patch("blockchecks.service.in_ns_workers._pkill_nfqws2"),
         patch(
             "blockchecks.checkers.http3.quic_subprocess_result",
             return_value={"success": True},

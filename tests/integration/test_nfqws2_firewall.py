@@ -7,8 +7,8 @@ import os
 import pytest
 
 from blockchecks.engine.config import NFQWS2_BIN, PYTHON_BIN
-from blockchecks.service.firewall import Firewall
 from blockchecks.service.nfqws2 import Nfqws2Manager
+from blockchecks.service.ns_firewall import HostFirewall
 
 pytestmark = pytest.mark.integration
 
@@ -32,10 +32,11 @@ def test_nfqws2_killpg_process_gone(nfqws2_available):
 
 
 def test_firewall_cleanup_no_flush_output():
-    fw = Firewall()
-    # Tracked cleanup uses -D only; never -F
-    fw._rules.append(
-        [
+    fw = HostFirewall()
+    from blockchecks.service.ns_firewall import _RuleSpec
+
+    fw._rules = {
+        _RuleSpec("tcp", "443", 219, False, True, None): [
             "-D",
             "OUTPUT",
             "-p",
@@ -47,17 +48,16 @@ def test_firewall_cleanup_no_flush_output():
             "--queue-num",
             "219",
             "--queue-bypass",
-        ]
-    )
+        ],
+    }
     # Don't actually run iptables if no sudo — just assert rule shape
-    assert all(r[0] == "-D" for r in fw._rules)
-    assert not any("-F" in r for r in fw._rules)
+    assert all(r[0] == "-D" for r in fw._rules.values())
+    assert not any("-F" in r for r in fw._rules.values())
     fw._rules.clear()
 
 
 def test_firewall_queue_bypass_tracked():
-    fw = Firewall()
-    # prepare without applying: inspect _add_rule tracking via monkeypatch
+    fw = HostFirewall()
     recorded = []
 
     def fake_run(*args, check=False):
@@ -72,10 +72,11 @@ def test_firewall_queue_bypass_tracked():
     fw.prepare_tcp(port=443, qnum=219)
     fw.prepare_udp(voice_port=50006, qnum=219)
     assert len(fw._rules) == 2
-    assert "--queue-bypass" in fw._rules[0]
-    assert "50006" in fw._rules[1]
+    specs = list(fw._rules)
+    assert all(s.bypass for s in specs)
+    assert any(s.dport == "50006" for s in specs)
     fw.cleanup()
-    assert fw._rules == []
+    assert fw._rules == {}
 
 
 def test_python_bin_exists():

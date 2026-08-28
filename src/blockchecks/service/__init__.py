@@ -12,7 +12,6 @@ from blockchecks.service.batch_models import (
 )
 from blockchecks.service.batch_scheduler import BatchJobAccumulator, BatchScheduler
 from blockchecks.service.batch_service import ProbeBatchService, warn_fanout_bridge_once
-from blockchecks.service.firewall import Firewall
 from blockchecks.service.lua_bridge_ipc import BridgeEvent, BridgePaths, LuaBridge
 from blockchecks.service.lua_conf import (
     blockchecks_lua_init_lines,
@@ -42,6 +41,7 @@ from blockchecks.service.nfqws2_settle import (
     nfqws2_running_in_ns,
     wait_nfqws2_ready,
 )
+from blockchecks.service.ns_firewall import HostFirewall
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
 from blockchecks.service.run_control import (
     ActiveRunInfo,
@@ -63,7 +63,7 @@ __all__ = [
     "BridgeEvent",
     "BridgePaths",
     "BridgeSession",
-    "Firewall",
+    "HostFirewall",
     "LuaBridge",
     "MemoryMonitor",
     "MemorySample",
