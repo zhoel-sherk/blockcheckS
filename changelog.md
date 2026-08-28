@@ -1,17 +1,12 @@
-## Unreleased
-
-- MCP `stop_campaign` calls `bs stop` (`run.lock`) first; daemon socket stop only if no campaign.
-- TCP ranking (`get_best_*`, `v_coverage`, MCP `query_strategies` / `generate_router_config`)
-  keeps `bridge_applied IS NULL OR = 1`.
-- `dbg_validate_strategy_syntax` warns on digit blob ids and rewrites `4pda`→`b4pda`.
-
 ## 1.4.0 — campaign lua_bridge-only, CLI slim, run-scoped resume (2026-08-28)
 
 Campaign TCP is **lua_bridge only**. Classic per-strategy nfqws2 restart is gone
 from `scan`/`pair`/`full`. One-shot `bs tcp` / `composite` / fan-out still use
 `start_daemon`. Harvest/smoke/`campaign_pass` require HTTP OK **and**
-`bridge_applied`; `bc-nfconf` and MCP SQL still rank raw `status='PASS'`
-(use `harvest-batch` for validation-grade export, especially on pre-fix week_cov DBs).
+`bridge_applied=1`. Ranking (`get_best_*`, `v_coverage`, MCP
+`query_strategies` / `generate_router_config`, `bc-nfconf`) keeps
+`bridge_applied IS NULL OR = 1` (oneshot NULL stays; lua PASS without APPLIED
+is dropped). Harvest is still the strict `=1` export.
 
 ### Campaign / CLI
 
@@ -36,6 +31,13 @@ from `scan`/`pair`/`full`. One-shot `bs tcp` / `composite` / fan-out still use
 - Quarantine **seed_from_rows only with `--resume`**. Infra FAIL (`dev/shm`,
   `Permission denied`, …) does not count toward `quarantine_min`. Re-sync
   `queue.excluded_domains` after seed.
+
+### MCP / export
+
+- `stop_campaign` calls `bs stop` (`run.lock`) first; daemon socket stop only
+  if no campaign.
+- `dbg_validate_strategy_syntax` warns on digit blob ids and rewrites
+  `4pda`→`b4pda` in escaped conf lines (`is_valid` follows errors, not warnings).
 
 ### Architecture
 
