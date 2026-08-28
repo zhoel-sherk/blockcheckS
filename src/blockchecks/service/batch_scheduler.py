@@ -11,6 +11,17 @@ if TYPE_CHECKING:
     from blockchecks.engine.generators.base import StrategyItem
 
 
+def batch_job_key(job: AdaptiveJob) -> tuple[str, str, str]:
+    """Accumulator dedup key: (label, domain, protocol).
+
+    Protocol comes from ``job.item.protocol`` (tls12, tls13, http, quic,
+    udp_voice, …). Jobs with different protocols must not share one bridge
+    batch — nfqws2 filters and probe transport differ per protocol.
+    """
+    proto = getattr(job.item, "protocol", None) or "tls12"
+    return (job.item.label, job.domain, proto)
+
+
 class BatchScheduler:
     """Chunk strategies/jobs into bridge-sized batches."""
 
@@ -63,17 +74,18 @@ class BatchScheduler:
 
 
 class BatchJobAccumulator:
-    """AQ bridge mode: accumulate jobs until batch_size unique (label, domain) keys.
+    """AQ bridge mode: accumulate jobs until batch_size unique batch keys.
 
-    The bridge is domain-agnostic (netns iptables redirects all :443 traffic to
-    nfqws2; strategy selected by published id), so jobs from *different* domains
-    can share one batch. Only fan-out waves are excluded (classic per-strategy).
+    Key is ``(label, domain, protocol)`` — see :func:`batch_job_key`. The bridge
+    is domain-agnostic (netns iptables redirects traffic to nfqws2; strategy
+    selected by published id), so jobs from *different* domains can share one
+    batch when protocol matches. Fan-out waves are excluded (classic per-strategy).
     """
 
     def __init__(self, batch_size: int) -> None:
         self.batch_size = max(1, batch_size)
         self._jobs: list[AdaptiveJob] = []
-        self._keys: set[tuple[str, str]] = set()
+        self._keys: set[tuple[str, str, str]] = set()
 
     def __len__(self) -> int:
         return len(self._jobs)
@@ -95,7 +107,10 @@ class BatchJobAccumulator:
     def can_accept(self, job: AdaptiveJob) -> bool:
         if job.fanout:
             return False
-        if job.key in self._keys:
+        key = batch_job_key(job)
+        if key in self._keys:
+            return False
+        if self._jobs and batch_job_key(self._jobs[0])[-1] != key[-1]:
             return False
         return len(self._jobs) < self.batch_size
 
@@ -103,7 +118,7 @@ class BatchJobAccumulator:
         if not self.can_accept(job):
             return False
         self._jobs.append(job)
-        self._keys.add(job.key)
+        self._keys.add(batch_job_key(job))
         return True
 
     def is_full(self) -> bool:

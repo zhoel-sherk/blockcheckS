@@ -225,3 +225,32 @@ def test_harvest_cli_exclude_quarantined_flag() -> None:
     ns = build_parser().parse_args(["harvest-batch"])
     assert ns.exclude_quarantined is False
 
+
+def test_assert_smoke_db_rejects_pass_without_applied(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    from tests.unit._quality_config import PROJECT_ROOT
+
+    db = tmp_path / "s.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(SCHEMA_SQL)
+    conn.execute(
+        "INSERT INTO strategies(name, proto, config_path) VALUES ('x','tcp','x')"
+    )
+    conn.execute(
+        "INSERT INTO tcp_results(strategy_id,domain,status,latency_ms,timestamp,"
+        "bridge_applied) VALUES (1,'a.com','PASS',1.0,'t',0)"
+    )
+    conn.commit()
+    conn.close()
+    script = PROJECT_ROOT / "dev" / "assert_smoke_db.py"
+    r = subprocess.run(
+        [sys.executable, str(script), "--db", str(db)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert r.returncode == 1
+    assert "PASS rows without bridge_applied=1" in r.stderr
+

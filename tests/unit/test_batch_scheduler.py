@@ -9,6 +9,7 @@ import pytest
 from blockchecks.service.batch_scheduler import (
     BatchJobAccumulator,
     BatchScheduler,
+    batch_job_key,
 )
 
 pytestmark = pytest.mark.unit
@@ -20,9 +21,10 @@ def _item(label="s1"):
     return it
 
 
-def _job(label="s1", domain="d.com", fanout=False, key=None):
+def _job(label="s1", domain="d.com", fanout=False, key=None, protocol="tls12"):
     j = MagicMock()
     j.item = _item(label)
+    j.item.protocol = protocol
     j.domain = domain
     j.fanout = fanout
     j.key = key or (label, domain)
@@ -115,3 +117,27 @@ def test_accumulator_is_full():
     acc.push(_job("s2", "a.com"))
     assert acc.is_full() is True
     assert acc.push(_job("s3", "a.com")) is False
+
+
+def test_batch_job_key_includes_protocol():
+    job = _job("s1", "a.com", protocol="udp_voice")
+    assert batch_job_key(job) == ("s1", "a.com", "udp_voice")
+
+
+def test_accumulator_rejects_protocol_mismatch():
+    acc = BatchJobAccumulator(10)
+    assert acc.push(_job("s1", "a.com", protocol="tls12"))
+    assert not acc.can_accept(_job("s2", "b.com", protocol="udp_voice"))
+    assert not acc.push(_job("s2", "b.com", protocol="udp_voice"))
+
+
+def test_accumulator_same_label_domain_different_protocol_after_flush():
+    acc = BatchJobAccumulator(10)
+    j_tcp = _job("s1", "a.com", protocol="tls12")
+    j_udp = _job("s1", "a.com", protocol="udp_voice")
+    assert acc.push(j_tcp)
+    assert not acc.push(j_udp)
+    flushed = acc.flush()
+    assert len(flushed) == 1
+    assert acc.push(j_udp)
+    assert len(acc) == 1

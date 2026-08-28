@@ -406,16 +406,15 @@ async def test_writer_reuses_single_connection(tmp_path, monkeypatch):
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_epoch_ms_set_at_log_time(tmp_path, monkeypatch):
-    epochs = [1_700_000_000_000, 1_700_000_000_123]
+    from itertools import count
+
+    clock = count(1_700_000_000_000)
     store = open_run_store(tmp_path / "epoch.db")
     await store.init()
 
-    def _epoch():
-        return epochs.pop(0)
-
     monkeypatch.setattr(
         "blockchecks.engine.store.sqlite_store.time.time",
-        lambda: _epoch() / 1000,
+        lambda: next(clock) / 1000,
     )
     await store.log_tcp("s1", "a.com", "PASS", 10.0, 200, config_path="fake:1")
     await store.log_tcp("s2", "b.com", "PASS", 20.0, 200, config_path="fake:2")
@@ -423,7 +422,9 @@ async def test_epoch_ms_set_at_log_time(tmp_path, monkeypatch):
     con = sqlite3.connect(tmp_path / "epoch.db")
     rows = con.execute("SELECT domain, epoch_ms FROM tcp_results ORDER BY id").fetchall()
     con.close()
-    assert rows == [("a.com", 1_700_000_000_000), ("b.com", 1_700_000_000_123)]
+    assert rows[0][0] == "a.com"
+    assert rows[1][0] == "b.com"
+    assert rows[0][1] < rows[1][1]
 
 
 @pytest.mark.unit

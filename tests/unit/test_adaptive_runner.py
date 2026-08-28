@@ -11,6 +11,7 @@ import pytest
 from blockchecks.engine.adaptive_queue import AdaptiveJob, AdaptiveJobQueue
 from blockchecks.engine.adaptive_runner import build_adaptive_queue, run_adaptive_tcp
 from blockchecks.engine.generators.base import StrategyItem
+from blockchecks.engine.results import TcpTestResult, campaign_pass
 
 pytestmark = pytest.mark.unit
 
@@ -20,6 +21,9 @@ class _FakeResult:
     success: bool
     item: StrategyItem
     domain: str
+
+    def campaign_pass(self) -> bool:
+        return campaign_pass(http_ok=self.success, bridge_applied=None)
 
 
 class _FakeRunner:
@@ -43,7 +47,9 @@ class _FakeRunner:
         for i, item in enumerate(items):
             d = domains[i] if domains and i < len(domains) else domain
             self.calls.append((item.label, [d]))
-            results.append(_FakeResult(success=True, item=item, domain=d))
+            results.append(
+                TcpTestResult(item=item, domain=d, success=True, bridge_applied=True)
+            )
         return results
 
 
@@ -407,7 +413,12 @@ async def test_bridge_worker_accounts_partial_batch_as_skipped():
     runner = MagicMock()
     runner._run_probe_batch = AsyncMock(
         return_value=[
-            TcpTestResult(item=jobs[0].item, domain=jobs[0].domain, success=True),
+            TcpTestResult(
+                item=jobs[0].item,
+                domain=jobs[0].domain,
+                success=True,
+                bridge_applied=True,
+            ),
             TcpTestResult(item=jobs[1].item, domain=jobs[1].domain, success=False),
         ]
     )
@@ -429,11 +440,14 @@ async def test_bridge_worker_flushes_full_batch():
     from blockchecks.engine.adaptive_runner import _RunStats
 
     queue = MagicMock()
-    results = [MagicMock(success=True), MagicMock(success=False)]
+    jobs = [await _make_job(domain=f"d{i}") for i in range(2)]
+    results = [
+        TcpTestResult(item=jobs[0].item, domain=jobs[0].domain, success=True, bridge_applied=True),
+        TcpTestResult(item=jobs[1].item, domain=jobs[1].domain, success=False),
+    ]
     runner = MagicMock()
     runner._run_probe_batch = AsyncMock(side_effect=[[r] for r in results])
 
-    jobs = [await _make_job(domain=f"d{i}") for i in range(2)]
     pops = iter([jobs[0], jobs[1], None])
     queue.pop = MagicMock(side_effect=lambda **kw: next(pops))
 
@@ -461,7 +475,9 @@ async def test_bridge_worker_fanout_run_single():
     queue.pop = MagicMock(side_effect=lambda **kw: next(pops))
 
     runner = MagicMock()
-    runner.test_tcp = AsyncMock(return_value=MagicMock(success=True))
+    runner.test_tcp = AsyncMock(
+        return_value=TcpTestResult(item=job.item, domain=job.domain, success=True)
+    )
 
     stats = _RunStats()
     await _run_bridge_worker(runner, queue, stats, bridge_batch=50)
@@ -494,7 +510,8 @@ async def test_bridge_worker_progress_before_batch_flush():
     runner = MagicMock()
     runner._run_probe_batch = AsyncMock(
         side_effect=lambda items, domain, timeout, backend, domains=None, stop_event=None: [
-            MagicMock(success=True) for _ in items
+            TcpTestResult(item=it, domain=dom, success=True, bridge_applied=True)
+            for it, dom in zip(items, domains or [domain] * len(items), strict=False)
         ]
     )
 
@@ -632,3 +649,48 @@ async def test_bridge_worker_pool_parallel_claims():
     assert results == [True, True, False]
     await pool.release_domains(["a.com", "b.com"])
     assert await pool.claim_domain("a.com")
+
+
+@pytest.mark.unit
+def test_campaign_pass_contract() -> None:
+    assert campaign_pass(http_ok=True, bridge_applied=True) is True
+    assert campaign_pass(http_ok=False, bridge_applied=True) is False
+    assert campaign_pass(http_ok=True, bridge_applied=False) is False
+    assert campaign_pass(http_ok=True, bridge_applied=None) is True
+
+    item = StrategyItem(label="s", strategy="fake:s")
+    applied = TcpTestResult(item=item, domain="d.com", success=True, bridge_applied=True)
+    assert applied.campaign_pass() is True
+    suspicious = TcpTestResult(item=item, domain="d.com", success=True, bridge_applied=False)
+    assert suspicious.campaign_pass() is False
+    oneshot = TcpTestResult(item=item, domain="d.com", success=True)
+    assert oneshot.campaign_pass() is True
+
+
+@pytest.mark.unit
+async def test_bridge_worker_http_ok_without_applied_not_passed() -> None:
+    """Bridge batch: HTTP 200 without APPLIED must not boost AQ or passed stats."""
+    from blockchecks.engine.adaptive_runner import _RunStats
+
+    queue = MagicMock()
+    job = await _make_job()
+    queue.pop = MagicMock(side_effect=[job, None])
+    queue.mark_done = MagicMock(return_value=0)
+
+    runner = MagicMock()
+    runner._run_probe_batch = AsyncMock(
+        return_value=[
+            TcpTestResult(
+                item=job.item,
+                domain=job.domain,
+                success=True,
+                bridge_applied=False,
+            )
+        ]
+    )
+
+    stats = _RunStats()
+    await _run_bridge_worker(runner, queue, stats, bridge_batch=1)
+    assert stats.passed == 0
+    queue.mark_done.assert_called_once()
+    assert queue.mark_done.call_args.kwargs["passed"] is False

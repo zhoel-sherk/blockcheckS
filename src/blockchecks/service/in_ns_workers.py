@@ -27,6 +27,12 @@ from blockchecks.engine.config import RETRY_IP_TIMEOUT
 log = logging.getLogger(__name__)
 
 
+def _pkill_nfqws2(ns_name: str) -> None:
+    from blockchecks.service.metrics import pkill_nfqws2_in_ns
+
+    pkill_nfqws2_in_ns(ns_name)
+
+
 
 def _sudo(*args, timeout: float | None = None):
     """Патчируемый шов sudo-исполнения внутри ns (тесты подменяют)."""
@@ -198,6 +204,7 @@ def _run_quic_check(
         return quic_subprocess_result(ns_name, py, domain, timeout, resolved_ip)
     finally:
         fw.detach_one(proto="udp", port="443", queue=NFQUEUE_UDP, bypass=True)
+        _pkill_nfqws2(ns_name)
         if tmp_conf:
             try:
                 os.unlink(tmp_conf)
@@ -372,6 +379,7 @@ def _run_tcp_check(
         return data
     finally:
         fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
+        _pkill_nfqws2(ns_name)
         if tmp_conf:
             try:
                 os.unlink(tmp_conf)
@@ -576,6 +584,7 @@ def _run_tcp_check_multi(
         return out
     finally:
         fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
+        _pkill_nfqws2(ns_name)
         if tmp_conf:
             try:
                 os.unlink(tmp_conf)
@@ -651,6 +660,7 @@ print(json.dumps({{"success": ok, "latency_ms": lat,
             }
     finally:
         fw.detach_one(proto="udp", port=str(port), queue=NFQUEUE_UDP, bypass=False)
+        _pkill_nfqws2(ns_name)
         try:
             os.unlink(tmp_conf)
         except OSError:

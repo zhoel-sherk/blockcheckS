@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import signal
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -82,6 +83,36 @@ def test_e2e_tcp():
     assert r.returncode in (0, 1), r.stdout[-1000:]
 
 
+@pytest.mark.asyncio
+async def test_e2e_tcp_ns():
+    from blockchecks.service.netns_pool import NetNsPool
+
+    pool = NetNsPool(size=1, base="bs-e2e")
+    pool.create_all()
+    await pool.seed()
+    ns = await pool.acquire()
+    try:
+        r = _run(
+            [
+                BS,
+                "tcp",
+                "--domain",
+                DOMAIN,
+                "--strategy",
+                STRATEGY,
+                "--ns",
+                ns,
+                "--timeout",
+                "8",
+                "--skip-deps-check",
+            ]
+        )
+        assert r.returncode in (0, 1), r.stdout[-1000:]
+    finally:
+        await pool.release(ns)
+        pool.destroy_all()
+
+
 def test_e2e_scan_smoke():
     matrix = "\n".join(
         [
@@ -114,6 +145,14 @@ def test_e2e_scan_smoke():
         input=matrix,
     )
     assert r.returncode in (0, 1), r.stdout[-1000:]
+    db = Path("/tmp/e2e_scan.db")
+    if db.is_file():
+        n = sqlite3.connect(db).execute(
+            "SELECT COUNT(*) FROM tcp_results "
+            "WHERE status='PASS' AND coalesce(bridge_applied,0)!=1"
+        ).fetchone()[0]
+        assert n == 0, f"harvest PASS without APPLIED: {n}"
+
 
 
 def test_e2e_pair_smoke():

@@ -686,6 +686,69 @@ async def test_item_domains_length_mismatch_raises() -> None:
 
 
 @pytest.mark.unit
+def test_daemon_heartbeat_stale_when_age_none() -> None:
+    """Missing heartbeat (age None) must fail closed — daemon treated as dead."""
+    session = MagicMock()
+    session.ns_name = "bs-p-stale"
+    session.bridge.heartbeat_age.return_value = None
+    svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), MagicMock())
+    assert svc._daemon_heartbeat_stale(session) is True
+
+
+@pytest.mark.unit
+def test_daemon_heartbeat_stale_on_oserror() -> None:
+    """heartbeat_age OSError must fail closed, not proceed to probe."""
+    session = MagicMock()
+    session.ns_name = "bs-p-err"
+    session.bridge.heartbeat_age.side_effect = OSError("stat failed")
+    svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), MagicMock())
+    assert svc._daemon_heartbeat_stale(session) is True
+
+
+@pytest.mark.unit
+def test_daemon_heartbeat_stale_when_fresh() -> None:
+    session = MagicMock()
+    session.ns_name = "bs-p-fresh"
+    session.bridge.heartbeat_age.return_value = 0.1
+    svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), MagicMock())
+    assert svc._daemon_heartbeat_stale(session) is False
+
+
+@pytest.mark.unit
+def test_daemon_heartbeat_stale_when_old() -> None:
+    session = MagicMock()
+    session.ns_name = "bs-p-old"
+    session.bridge.heartbeat_age.return_value = 5.0
+    svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), MagicMock())
+    assert svc._daemon_heartbeat_stale(session) is True
+
+
+@pytest.mark.unit
+def test_wait_heartbeat_rejects_none_age() -> None:
+    """Ready fence: None age is never healthy."""
+    session = MagicMock()
+    session.ns_name = "bs-p-wait"
+    session.bridge.heartbeat_age.return_value = None
+    svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), MagicMock())
+    with patch(
+        "blockchecks.service.lua_bridge_ipc.time.monotonic",
+        side_effect=[0.0, 0.0, 1.0],
+    ):
+        with patch("blockchecks.service.lua_bridge_ipc.time.sleep"):
+            assert svc._wait_heartbeat(session, within=0.5) is False
+
+
+@pytest.mark.unit
+def test_wait_heartbeat_accepts_fresh_age() -> None:
+    session = MagicMock()
+    session.ns_name = "bs-p-wait-ok"
+    session.bridge.heartbeat_age.return_value = 0.05
+    svc = ProbeBatchService(BatchProbeConfig(backend="lua_bridge"), MagicMock())
+    with patch("blockchecks.service.lua_bridge_ipc.time.sleep"):
+        assert svc._wait_heartbeat(session, within=1.0) is True
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio(loop_scope="package")
 async def test_reboot_daemon_waits_heartbeat_after_recycle() -> None:
     """Memory recycle must boot then wait for heartbeat before probing."""

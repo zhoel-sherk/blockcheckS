@@ -221,6 +221,33 @@ def apply_blob_renames(text: str, renames: dict[str, str]) -> str:
     return text
 
 
+def sanitize_strategy_for_nfqws2(
+    strategy: str,
+    lines: list[str],
+    blobs_dir: str | None = None,
+    *,
+    extra_names: Iterable[str] | None = None,
+) -> str:
+    """Append ``--blob`` CLI lines and rewrite strategy text for nfqws2 safety.
+
+    Digit-leading identifiers (``4pda`` → ``b4pda``) are renamed in both the
+    ``--blob`` lines and the returned strategy so nfqws2 does not fatal-exit
+    on startup ("bad identifier '4pda'").
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for name in extra_names or ():
+        if name and name not in seen:
+            names.append(name)
+            seen.add(name)
+    for name in extract_blob_names(strategy):
+        if name not in seen:
+            names.append(name)
+            seen.add(name)
+    renames = append_blob_cli_lines(lines, names, blobs_dir or BLOB_DIR)
+    return apply_blob_renames(strategy, renames)
+
+
 def blob_cli_lines(names: Iterable[str], blobs_dir: str | None = None) -> list[str]:
     """Return ``--blob=NAME:@path`` lines for resolvable names."""
     out: list[str] = []

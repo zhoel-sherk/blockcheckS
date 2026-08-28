@@ -190,6 +190,9 @@ def test_udp_check_parses_cli_prefix(monkeypatch, tmp_path):
 
     monkeypatch.setattr(insw, "_nfqws2_daemon", fake_daemon)
     monkeypatch.setattr(
+        "blockchecks.service.nfqws2.start_daemon", fake_daemon
+    )
+    monkeypatch.setattr(
         "blockchecks.service.ns_firewall.NsFirewall.attach",
         lambda self, *a, **k: None,
     )
@@ -263,9 +266,10 @@ def test_udp_coexist_skips_pkill(monkeypatch):
 
 def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
     import blockchecks.service.nfqws2 as nfq
+    import blockchecks.service.nfqws2_launcher as launcher
     from blockchecks.service import in_ns_workers as insw
 
-    src = Path(nfq.__file__).read_text(encoding="utf-8")
+    src = Path(launcher.__file__).read_text(encoding="utf-8")
     # zapret2#300: bind-ошибки печатаются в stdout nfqws2 — захват обязателен,
     # DEVNULL допустим только как fallback при недоступном файле лога.
     assert "open_out_capture(" in src
@@ -284,7 +288,7 @@ def test_nfqws2_daemon_stderr_devnull_and_kill_flag():
 
 def test_nfqws2_daemon_unlinks_temp_conf(tmp_path, monkeypatch):
     """C1: daemon mkstemp copy must not leak in /tmp after settle."""
-    import blockchecks.service.nfqws2 as nfq
+    import blockchecks.service.nfqws2_launcher as launcher
 
     src = tmp_path / "src.conf"
     src.write_text("--filter-tcp=443\n", encoding="utf-8")
@@ -295,12 +299,12 @@ def test_nfqws2_daemon_unlinks_temp_conf(tmp_path, monkeypatch):
             if isinstance(part, str) and part.startswith("@") and "bs_nfq_" in part:
                 seen.append(part[1:])
 
-    monkeypatch.setattr(nfq.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(nfq.subprocess, "run", lambda *a, **k: None)
-    monkeypatch.setattr(nfq, "wait_nfqws2_ready", lambda *a, **k: 0.01)
-    monkeypatch.setattr(nfq, "inject_debug_and_daemon", lambda *a, **k: None)
+    monkeypatch.setattr(launcher.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(launcher, "wait_nfqws2_ready", lambda *a, **k: 0.01)
+    monkeypatch.setattr(launcher, "inject_debug_and_daemon", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "resolve_nfqws2_pids", lambda *a, **k: [1])
 
-    nfq.start_daemon("mock-ns", str(src), kill_existing=False)
+    launcher.start_daemon("mock-ns", str(src), kill_existing=False)
     assert seen, "expected @bs_nfq_* path in Popen cmd"
     assert not Path(seen[0]).exists(), f"leaked temp conf: {seen[0]}"
 

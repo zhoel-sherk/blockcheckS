@@ -319,6 +319,19 @@ class NetNsPool:
         self._run("ip", "netns", "exec", name, "ip", "link", "set", veth_n, "up")
         self._run("ip", "netns", "exec", name, "ip", "link", "set", "lo", "up")
 
+        # IPv6 off — pool has no ip6tables/NAT; avoid probe leak to v6 path (S2c).
+        for sysctl_iface in ("all", "default", veth_n):
+            self._run(
+                "ip",
+                "netns",
+                "exec",
+                name,
+                "sysctl",
+                "-w",
+                f"net.ipv6.conf.{sysctl_iface}.disable_ipv6=1",
+                check=False,
+            )
+
         # Routing
         self._run("ip", "netns", "exec", name, "ip", "route", "add", "default", "via", host_ip)
 
@@ -362,6 +375,9 @@ class NetNsPool:
         if r.returncode != 0:
             raise RuntimeError(f"tee resolv.conf failed: {r.stderr[:200]}")
 
+        from blockchecks.service.probe import bump_ns_epoch
+
+        bump_ns_epoch(name)
         self._names.append(name)
         _track_ns_created(self._run)
         return name

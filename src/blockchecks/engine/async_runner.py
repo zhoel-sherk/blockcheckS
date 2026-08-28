@@ -16,7 +16,11 @@ from blockchecks.engine.probe_executors import (
     TcpProbeExecutor,
     UdpProbeExecutor,
 )
-from blockchecks.engine.probe_result_logger import ProbeResultLogger, tcp_row_status
+from blockchecks.engine.probe_result_logger import (
+    ProbeResultLogger,
+    resolved_ip_for_log,
+    tcp_row_status,
+)
 from blockchecks.engine.settle_profile import SettleProfile
 from blockchecks.engine.store import RunStateStore
 from blockchecks.service.batch_models import BatchContext, BatchProbeConfig, RunnerProbeDeps
@@ -56,11 +60,13 @@ from blockchecks.service.in_ns_workers import (
 
 __all__ = [
     "AsyncTestRunner",
+    "CampaignProbeResultLogger",
     "PairResult",
     "ScanReport",
     "StrategyItem",
     "TcpTestResult",
     "UdpTestResult",
+    "campaign_harvest_status",
     "tcp_results_from_details",
 ]
 
@@ -69,6 +75,138 @@ _tcp_row_status = tcp_row_status
 # Backward-compat module aliases (not in __all__).
 _add_blobs_from_strategy = add_blobs_from_strategy
 _split_cli_args = split_cli_args
+
+_PROBE_BACKEND_LUA = "lua_bridge"
+_PROBE_BACKEND_ONESHOT = "oneshot"
+
+
+def campaign_harvest_status(result: TcpTestResult, backend: str) -> str:
+    """SQLite status for campaign rows; harvest counts only lua_bridge APPLIED PASS."""
+    base = tcp_row_status(result)
+    if base != "PASS":
+        return base
+    if backend == _PROBE_BACKEND_LUA:
+        return "PASS" if result.success and result.bridge_applied is True else "FAIL"
+    if backend == _PROBE_BACKEND_ONESHOT:
+        return "FAIL"
+    log.warning("campaign harvest: unknown probe backend %r — demoting PASS", backend)
+    return "FAIL"
+
+
+def _campaign_fail_phase(result: TcpTestResult, backend: str, status: str) -> str:
+    phase = result.fail_phase or ""
+    if status == "PASS":
+        return phase
+    if backend == _PROBE_BACKEND_ONESHOT and result.success:
+        return phase or _PROBE_BACKEND_ONESHOT
+    if backend == _PROBE_BACKEND_LUA and result.success and result.bridge_applied is not True:
+        return phase or "no_bridge_applied"
+    return phase
+
+
+class CampaignProbeResultLogger(ProbeResultLogger):
+    """Gates DB PASS: lua_bridge needs APPLIED; oneshot never writes harvest PASS."""
+
+    def __init__(self, db: RunStateStore | None) -> None:
+        super().__init__(db)
+        self._probe_backend = _PROBE_BACKEND_LUA
+
+    def set_probe_backend(self, backend: str) -> None:
+        self._probe_backend = backend
+
+    async def log_tcp_result(
+        self,
+        item: StrategyItem,
+        domain: str,
+        result: TcpTestResult,
+        *,
+        resolved_ip: str | None,
+        dns_verdict: str,
+        doh_server: str,
+    ) -> None:
+        await self._log_tcp_campaign(
+            item,
+            domain,
+            result,
+            backend=self._probe_backend,
+            resolved_ip=resolved_ip,
+            dns_verdict=dns_verdict,
+            doh_server=doh_server,
+            save_data_block=True,
+        )
+
+    async def log_tcp_probe(
+        self,
+        item: StrategyItem,
+        domain: str,
+        result: TcpTestResult,
+        *,
+        resolved_ip: str | None,
+        dns_verdict: str,
+        doh_server: str,
+        save_data_block: bool = False,
+    ) -> None:
+        await self._log_tcp_campaign(
+            item,
+            domain,
+            result,
+            backend=_PROBE_BACKEND_ONESHOT,
+            resolved_ip=resolved_ip,
+            dns_verdict=dns_verdict,
+            doh_server=doh_server,
+            save_data_block=save_data_block,
+        )
+
+    async def _log_tcp_campaign(
+        self,
+        item: StrategyItem,
+        domain: str,
+        result: TcpTestResult,
+        *,
+        backend: str,
+        resolved_ip: str | None,
+        dns_verdict: str,
+        doh_server: str,
+        save_data_block: bool,
+    ) -> None:
+        if not self.db:
+            return
+        protocol = getattr(item, "protocol", "tls12") or "tls12"
+        proto_db = "http" if protocol == "http" else "tcp"
+        status = campaign_harvest_status(result, backend)
+        fail_phase = _campaign_fail_phase(result, backend, status)
+        await self.db.log_tcp(
+            item.label,
+            domain,
+            status,
+            result.latency_ms,
+            result.http_code,
+            content_valid=result.content_valid,
+            error=result.error,
+            read_rate_bps=result.read_rate_bps,
+            config_path=item.strategy,
+            resolved_ip=resolved_ip_for_log(result.used_ip, resolved_ip),
+            dns_verdict=dns_verdict,
+            doh_server=doh_server,
+            proto=proto_db,
+            fail_phase=fail_phase,
+            bridge_applied=result.bridge_applied,
+            bridge_batch_id=result.bridge_batch_id,
+            bridge_gen=result.bridge_gen,
+            probe_host=getattr(result, "probe_host", "") or "",
+            settle_ms=getattr(result, "settle_ms", None),
+            content_len=result.content_length,
+        )
+        if save_data_block and status == "PASS":
+            from blockchecks.engine.probe_result_logger import _save_pass_data_block
+
+            await _save_pass_data_block(
+                item.strategy,
+                domain,
+                protocol=proto_db,
+                latency_ms=result.latency_ms,
+                http_code=result.http_code,
+            )
 
 
 class AsyncTestRunner:
@@ -127,7 +265,7 @@ class AsyncTestRunner:
         self._probe_gen = 0
         self._batch_id = 0
         self.memory_monitor = None
-        self._result_logger = ProbeResultLogger(db)
+        self._result_logger = CampaignProbeResultLogger(db)
         self._dns_pin = (
             DnsPinService(
                 dns_cache=dns_cache,
@@ -263,8 +401,12 @@ class AsyncTestRunner:
     async def test_tcp(
         self, item: StrategyItem, domain: str, timeout: float = 5.0
     ) -> TcpTestResult:
-        """Test one TCP strategy in an isolated netns."""
-        return await self._tcp_executor.test_tcp(item, domain, timeout=timeout)
+        """Test one TCP strategy in an isolated netns (oneshot backend)."""
+        self._result_logger.set_probe_backend(_PROBE_BACKEND_ONESHOT)
+        try:
+            return await self._tcp_executor.test_tcp(item, domain, timeout=timeout)
+        finally:
+            self._result_logger.set_probe_backend(_PROBE_BACKEND_LUA)
 
     async def test_quic(
         self, item: StrategyItem, domain: str, timeout: float = 8.0
@@ -308,10 +450,14 @@ class AsyncTestRunner:
         *,
         curl_parallel: int = 4,
     ) -> list[TcpTestResult]:
-        """B2: one nfqws2 session, parallel curl for multiple domains."""
-        return await self._tcp_executor.test_tcp_domains(
-            item, domains, timeout=timeout, curl_parallel=curl_parallel
-        )
+        """Fan-out: one nfqws2 session, parallel curl (oneshot — not harvest PASS)."""
+        self._result_logger.set_probe_backend(_PROBE_BACKEND_ONESHOT)
+        try:
+            return await self._tcp_executor.test_tcp_domains(
+                item, domains, timeout=timeout, curl_parallel=curl_parallel
+            )
+        finally:
+            self._result_logger.set_probe_backend(_PROBE_BACKEND_LUA)
 
     async def test_udp(
         self, item: StrategyItem, ip: str, port: int, timeout: float = 3.0

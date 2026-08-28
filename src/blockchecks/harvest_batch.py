@@ -133,7 +133,7 @@ def collect_harvest_candidates(
     """Latest row per strategy×domain → сгруппированные кандидаты.
 
     Ранжирование: покрытие (число доменов) ↓, avg latency ↑ — как в
-    generate_router_config. Только PASS с bridge_applied≠0 (NULL = не applied).
+    generate_router_config. Только PASS с bridge_applied=1 (APPLIED seen).
     Карантин исключается только при ``exclude_quarantined=True``.
     """
     status_list = [s.upper() for s in statuses] or ["PASS"]
@@ -169,7 +169,7 @@ def collect_harvest_candidates(
             FROM latest l
             JOIN strategies s ON s.id = l.strategy_id
             WHERE l.rn = 1 AND l.status IN ({placeholders})
-              AND l.bridge_applied IS NOT 0{quarantine_clause}
+              AND l.bridge_applied = 1{quarantine_clause}
             """,
             (proto, *status_list),
         ).fetchall()

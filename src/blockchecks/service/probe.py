@@ -26,8 +26,30 @@ _FAIL = {
 }
 
 _STDERR_RING = 8192
-_WORKERS: dict[tuple[str, str], _PersistentCurlWorker] = {}
+WorkerCacheKey = tuple[str, str, int]
+_WORKERS: dict[WorkerCacheKey, _PersistentCurlWorker] = {}
 _WORKERS_LOCK = threading.Lock()
+_NS_EPOCHS: dict[str, int] = {}
+_NS_EPOCHS_LOCK = threading.Lock()
+
+
+def bump_ns_epoch(ns_name: str) -> int:
+    """Increment pool epoch for *ns_name* (call on netns create/recreate)."""
+    with _NS_EPOCHS_LOCK:
+        epoch = _NS_EPOCHS.get(ns_name, 0) + 1
+        _NS_EPOCHS[ns_name] = epoch
+        return epoch
+
+
+def get_ns_epoch(ns_name: str) -> int:
+    """Current pool epoch for *ns_name* (0 when never bumped)."""
+    with _NS_EPOCHS_LOCK:
+        return _NS_EPOCHS.get(ns_name, 0)
+
+
+def worker_cache_key(ns_name: str, py: str) -> WorkerCacheKey:
+    """Persistent curl worker dict key: (ns_name, python, pool_epoch)."""
+    return (ns_name, py, get_ns_epoch(ns_name))
 
 
 def probe_request_dict(req: CurlProbeRequest) -> dict:
@@ -243,12 +265,12 @@ class _PersistentCurlWorker:
 
 
 def release_curl_probe_worker(ns_name: str, py: str | None = None) -> None:
-    """Stop the persistent curl worker for *ns_name* (best-effort)."""
+    """Stop the persistent curl worker for *ns_name* (best-effort, all epochs)."""
     with _WORKERS_LOCK:
         if py is None:
             keys = [k for k in _WORKERS if k[0] == ns_name]
         else:
-            keys = [(ns_name, py)]
+            keys = [k for k in _WORKERS if k[0] == ns_name and k[1] == py]
         for key in keys:
             worker = _WORKERS.pop(key, None)
             if worker is not None:
@@ -256,7 +278,7 @@ def release_curl_probe_worker(ns_name: str, py: str | None = None) -> None:
 
 
 def _get_worker(ns_name: str, py: str) -> _PersistentCurlWorker:
-    key = (ns_name, py)
+    key = worker_cache_key(ns_name, py)
     with _WORKERS_LOCK:
         worker = _WORKERS.get(key)
         if worker is None:

@@ -106,8 +106,10 @@ def test_test_single_success():
     fw = MagicMock()
     nfq = MagicMock()
     with (
-        patch("blockchecks.service.test_runner.Firewall", return_value=fw),
+        patch("blockchecks.service.test_runner.HostFirewall", return_value=fw),
+        patch("blockchecks.service.test_runner.get_ns_firewall", return_value=fw),
         patch("blockchecks.service.test_runner.Nfqws2Manager", return_value=nfq),
+        patch("blockchecks.service.test_runner.pkill_nfqws2_in_ns"),
         patch.object(
             runner,
             "_run_check",
@@ -126,8 +128,10 @@ def test_test_single_exception():
     nfq = MagicMock()
     nfq.start.side_effect = RuntimeError("no netns")
     with (
-        patch("blockchecks.service.test_runner.Firewall", return_value=fw),
+        patch("blockchecks.service.test_runner.HostFirewall", return_value=fw),
+        patch("blockchecks.service.test_runner.get_ns_firewall", return_value=fw),
         patch("blockchecks.service.test_runner.Nfqws2Manager", return_value=nfq),
+        patch("blockchecks.service.test_runner.pkill_nfqws2_in_ns"),
     ):
         result = runner.test_single("fake:a", "d.com", timeout=3.0)
     assert "no netns" in result.error
@@ -138,8 +142,10 @@ def test_test_config():
     fw = MagicMock()
     nfq = MagicMock()
     with (
-        patch("blockchecks.service.test_runner.Firewall", return_value=fw),
+        patch("blockchecks.service.test_runner.HostFirewall", return_value=fw),
+        patch("blockchecks.service.test_runner.get_ns_firewall", return_value=fw),
         patch("blockchecks.service.test_runner.Nfqws2Manager", return_value=nfq),
+        patch("blockchecks.service.test_runner.pkill_nfqws2_in_ns"),
         patch.object(
             runner,
             "_run_check",
@@ -170,8 +176,10 @@ def test_test_udp_config():
     fw = MagicMock()
     nfq = MagicMock()
     with (
-        patch("blockchecks.service.test_runner.Firewall", return_value=fw),
+        patch("blockchecks.service.test_runner.HostFirewall", return_value=fw),
+        patch("blockchecks.service.test_runner.get_ns_firewall", return_value=fw),
         patch("blockchecks.service.test_runner.Nfqws2Manager", return_value=nfq),
+        patch("blockchecks.service.test_runner.pkill_nfqws2_in_ns"),
         patch.object(
             runner, "_run_stun_check", return_value={"success": True, "latency_ms": 5, "detail": ""}
         ),

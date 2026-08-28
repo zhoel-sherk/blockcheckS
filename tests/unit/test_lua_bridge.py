@@ -12,6 +12,40 @@ from blockchecks.service.lua_session import chunk_strategies
 
 
 @pytest.mark.unit
+def test_setup_clears_stale_strategy_ipc_files(tmp_path: Path) -> None:
+    """Reused ns must not expose prior session strategy.id/gen/ready/cmd."""
+    bridge = LuaBridge("bs-p-stale", shm_base=tmp_path)
+    bridge.paths.base.mkdir(parents=True)
+    bridge.paths.strategy_id.write_text("99\n", encoding="utf-8")
+    bridge.paths.strategy_gen.write_text("42\n", encoding="utf-8")
+    bridge.paths.strategy_ready.write_text("42\n", encoding="utf-8")
+    bridge.paths.strategy_cmd.write_text("fake:blob=stun:repeats=6\n", encoding="utf-8")
+
+    bridge.setup()
+
+    for path in (
+        bridge.paths.strategy_id,
+        bridge.paths.strategy_gen,
+        bridge.paths.strategy_ready,
+        bridge.paths.strategy_cmd,
+    ):
+        assert path.is_file()
+        assert path.read_text() == ""
+        assert (path.stat().st_mode & 0o777) in {0o666, 0o660}
+    bridge.teardown()
+
+
+@pytest.mark.unit
+def test_setup_strategy_cmd_sentinel_without_publish(tmp_path: Path) -> None:
+    """strategy.cmd exists as empty sentinel even before any publish."""
+    bridge = LuaBridge("bs-p-cmd-sentinel", shm_base=tmp_path)
+    bridge.setup()
+    assert bridge.paths.strategy_cmd.is_file()
+    assert bridge.paths.strategy_cmd.read_text() == ""
+    bridge.teardown()
+
+
+@pytest.mark.unit
 def test_publish_atomic_and_drain_events(tmp_path: Path) -> None:
     bridge = LuaBridge("bs-p-test", shm_base=tmp_path)
     bridge.setup()
@@ -127,6 +161,18 @@ def test_events_file_world_writable_for_dropped_uid(tmp_path: Path) -> None:
     assert (bridge.paths.events.stat().st_mode & 0o777) in {0o666, 0o660}
     bridge.truncate_events()
     assert (bridge.paths.events.stat().st_mode & 0o777) in {0o666, 0o660}
+    bridge.teardown()
+
+
+@pytest.mark.unit
+def test_heartbeat_file_pre_created_and_world_writable(tmp_path: Path) -> None:
+    """Python must pre-create heartbeat (empty sentinel) with same ACL as events."""
+    bridge = LuaBridge("bs-p-hbfile", shm_base=tmp_path)
+    bridge.setup()
+    assert bridge.paths.heartbeat.is_file()
+    assert bridge.paths.heartbeat.read_text() == ""
+    assert (bridge.paths.heartbeat.stat().st_mode & 0o777) in {0o666, 0o660}
+    assert bridge.heartbeat_age() is None
     bridge.teardown()
 
 

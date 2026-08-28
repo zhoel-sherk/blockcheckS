@@ -361,6 +361,7 @@ def test_export_configs_passes_ipset_to_builders(tmp_path, monkeypatch):
 def test_manager_bind_retry_on_eperm(tmp_path, monkeypatch):
     """Nfqws2Manager._launch: EPERM-бут → ретрай; живой бут со 2-й попытки."""
     import blockchecks.service.nfqws2 as nfq
+    import blockchecks.service.nfqws2_launcher as launcher_mod
 
     attempts = {"n": 0}
     logs = []
@@ -386,11 +387,11 @@ def test_manager_bind_retry_on_eperm(tmp_path, monkeypatch):
         fh = open(path, "rb")  # noqa: SIM115
         return fh, path
 
-    monkeypatch.setattr(nfq.subprocess, "Popen", lambda *a, **k: FakeProc())
-    monkeypatch.setattr(nfq, "wait_nfqws2_ready", lambda *a, **k: 0.0)
-    monkeypatch.setattr(nfq.time, "sleep", lambda s: None)
-    monkeypatch.setattr(nfq, "open_out_capture", fake_capture)
-    monkeypatch.setattr(nfq, "_reclaim_debug_log", lambda p: None)
+    monkeypatch.setattr(launcher_mod.subprocess, "Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(launcher_mod, "wait_nfqws2_ready", lambda *a, **k: 0.0)
+    monkeypatch.setattr(launcher_mod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(launcher_mod, "open_out_capture", fake_capture)
+    monkeypatch.setattr(launcher_mod, "_reclaim_debug_log", lambda p: None)
 
     mgr = nfq.Nfqws2Manager(ns_name="ns-r")
     conf = tmp_path / "m.conf"
@@ -406,6 +407,7 @@ def test_manager_non_bind_error_raises_immediately(tmp_path, monkeypatch):
     import pytest as _pytest
 
     import blockchecks.service.nfqws2 as nfq
+    import blockchecks.service.nfqws2_launcher as launcher_mod
 
     calls = {"n": 0}
 
@@ -416,11 +418,11 @@ def test_manager_non_bind_error_raises_immediately(tmp_path, monkeypatch):
             calls["n"] += 1
             return 1
 
-    monkeypatch.setattr(nfq.subprocess, "Popen", lambda *a, **k: FakeProc())
-    monkeypatch.setattr(nfq, "wait_nfqws2_ready", lambda *a, **k: 0.0)
+    monkeypatch.setattr(launcher_mod.subprocess, "Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(launcher_mod, "wait_nfqws2_ready", lambda *a, **k: 0.0)
     # out-файл без маркера nfq_create_queue
     monkeypatch.setattr(
-        nfq,
+        launcher_mod,
         "open_out_capture",
         lambda tag: _open_empty(tmp_path),
     )

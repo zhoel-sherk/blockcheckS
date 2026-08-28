@@ -18,14 +18,21 @@ from blockchecks.cli.presets import (
 )
 from blockchecks.engine.secure_io import write_secure_text
 from blockchecks.service import probe as probe_mod
-from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
+from blockchecks.service.probe import (
+    bump_ns_epoch,
+    invoke_curl_probe_worker,
+    probe_request_dict,
+    worker_cache_key,
+)
 
 
 @pytest.fixture(autouse=True)
 def _clear_persistent_workers():
     probe_mod._WORKERS.clear()
+    probe_mod._NS_EPOCHS.clear()
     yield
     probe_mod._WORKERS.clear()
+    probe_mod._NS_EPOCHS.clear()
 
 
 def _fake_worker(stdout_line: str) -> MagicMock:
@@ -75,6 +82,7 @@ def test_invoke_curl_probe_worker_reuses_one_process():
     payload = {"mode": "single", "request": {"domain": "x"}}
     fake = _fake_worker("")
     line = json.dumps({"success": True, "http_code": 200, "latency_ms": 12})
+    bump_ns_epoch("bs-p-0")
     with (
         patch("blockchecks.service.probe.sp.Popen", return_value=fake) as popen,
         patch("blockchecks.service.probe._readline_timed", return_value=line),
@@ -83,6 +91,31 @@ def test_invoke_curl_probe_worker_reuses_one_process():
         invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", payload, 10.0)
         invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", payload, 10.0)
     assert popen.call_count == 1
+
+
+@pytest.mark.unit
+def test_worker_cache_key_includes_pool_epoch():
+    assert worker_cache_key("bs-p-0", "/usr/bin/python3") == ("bs-p-0", "/usr/bin/python3", 0)
+    assert bump_ns_epoch("bs-p-0") == 1
+    assert worker_cache_key("bs-p-0", "/usr/bin/python3") == ("bs-p-0", "/usr/bin/python3", 1)
+    assert bump_ns_epoch("bs-p-0") == 2
+    assert worker_cache_key("bs-p-1", "/usr/bin/python3") == ("bs-p-1", "/usr/bin/python3", 0)
+
+
+@pytest.mark.unit
+def test_epoch_bump_spawns_new_worker():
+    payload = {"mode": "single", "request": {"domain": "x"}}
+    fake = _fake_worker("")
+    line = json.dumps({"success": True, "http_code": 200, "latency_ms": 12})
+    bump_ns_epoch("bs-p-0")
+    with (
+        patch("blockchecks.service.probe.sp.Popen", return_value=fake) as popen,
+        patch("blockchecks.service.probe._readline_timed", return_value=line),
+    ):
+        invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", payload, 10.0)
+        bump_ns_epoch("bs-p-0")
+        invoke_curl_probe_worker("bs-p-0", "/usr/bin/python3", payload, 10.0)
+    assert popen.call_count == 2
 
 
 @pytest.mark.unit

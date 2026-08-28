@@ -327,6 +327,19 @@ def test_tcp_result_from_data_used_ip():
     r = _tcp_executor_for_data().tcp_result_from_data(item, "discord.com", data)
     assert r.used_ip == "1.2.3.4"
     assert r.success is True
+    assert r.campaign_pass() is True
+
+
+def test_tcp_result_from_data_bridge_applied_false_still_http_success():
+    from blockchecks.engine.results import campaign_pass
+
+    item = StrategyItem(label="fake", strategy="fake:blob=stun:repeats=6")
+    data = {"success": True, "http_code": 200, "bridge_applied": False}
+    r = _tcp_executor_for_data().tcp_result_from_data(item, "discord.com", data)
+    assert r.success is True
+    assert r.bridge_applied is False
+    assert r.campaign_pass() is False
+    assert campaign_pass(http_ok=True, bridge_applied=False) is False
 
 
 def test_tcp_results_from_details_throttled():

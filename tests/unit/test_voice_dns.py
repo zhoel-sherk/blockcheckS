@@ -285,7 +285,7 @@ def test_udp_discover_bootstrap_cleanup_logs_failures(caplog):
     mock_mgr.stop.side_effect = OSError("kill fail")
 
     with patch("blockchecks.checkers.voice_dns.sys.platform", "linux"):
-        with patch("blockchecks.service.firewall.Firewall", return_value=mock_fw):
+        with patch("blockchecks.service.ns_firewall.HostFirewall", return_value=mock_fw):
             with patch("blockchecks.service.nfqws2.Nfqws2Manager", return_value=mock_mgr):
                 with patch.object(mock_mgr, "start_config", side_effect=RuntimeError("boot fail")):
                     with caplog.at_level(logging.WARNING, logger="blockchecks.checkers.voice_dns"):

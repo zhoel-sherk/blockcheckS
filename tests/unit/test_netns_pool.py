@@ -272,6 +272,47 @@ def test_destroy_one_releases_curl_worker():
     release.assert_called_once_with("bs-t-0")
 
 
+def test_create_one_disables_ipv6_in_netns():
+    pool = NetNsPool(size=1, base="bs-t")
+    sysctl_cmds: list[tuple[str, ...]] = []
+
+    def fake_run(*args, check=True):
+        if args[:4] == ("ip", "netns", "exec", "bs-t-0") and args[4:6] == ("sysctl", "-w"):
+            sysctl_cmds.append(tuple(args))
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(pool, "_run", side_effect=fake_run),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch("blockchecks.service.netns_pool.subprocess.run") as sprun,
+        patch("blockchecks.service.netns_pool.time.sleep"),
+        patch("blockchecks.service.probe.bump_ns_epoch", return_value=1),
+    ):
+        sprun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        pool._create_one(0)
+    ipv6_disables = [
+        c for c in sysctl_cmds if c[-1].startswith("net.ipv6.conf.") and c[-1].endswith(".disable_ipv6=1")
+    ]
+    assert len(ipv6_disables) == 3
+    assert any(c[-1] == "net.ipv6.conf.all.disable_ipv6=1" for c in ipv6_disables)
+    assert any(c[-1] == "net.ipv6.conf.default.disable_ipv6=1" for c in ipv6_disables)
+
+
+def test_create_one_bumps_ns_epoch():
+    pool = NetNsPool(size=1, base="bs-t")
+
+    with (
+        patch.object(pool, "_run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch("blockchecks.service.netns_pool.subprocess.run") as sprun,
+        patch("blockchecks.service.netns_pool.time.sleep"),
+        patch("blockchecks.service.probe.bump_ns_epoch", return_value=1) as bump,
+    ):
+        sprun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        pool._create_one(0)
+    bump.assert_called_once_with("bs-t-0")
+
+
 def test_destroy_one_drops_ns_firewall():
     pool = NetNsPool(size=1, base="bs-t")
 

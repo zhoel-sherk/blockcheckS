@@ -8,8 +8,9 @@ import sys
 import time
 from dataclasses import dataclass, field
 
-from blockchecks.service.firewall import Firewall
+from blockchecks.service.metrics import pkill_nfqws2_in_ns
 from blockchecks.service.nfqws2 import Nfqws2Manager
+from blockchecks.service.ns_firewall import HostFirewall, get_ns_firewall
 
 log = logging.getLogger(__name__)
 
@@ -167,6 +168,29 @@ class TestRunner:
 
         return result
 
+    def _host_firewall(self) -> HostFirewall:
+        return HostFirewall()
+
+    def _ns_firewall(self) -> tuple[str, object]:
+        assert self.ns_name is not None
+        return self.ns_name, get_ns_firewall(self.ns_name)
+
+    def _teardown_tcp_firewall(self, fw: object, qnum: int) -> None:
+        if self.ns_name:
+            fw.detach_one(proto="tcp", port="443", queue=qnum, bypass=True)
+        else:
+            fw.cleanup()
+
+    def _teardown_udp_firewall(self, fw: object, port: int, qnum: int) -> None:
+        if self.ns_name:
+            fw.detach_one(proto="udp", port=str(port), queue=qnum, bypass=True)
+        else:
+            fw.cleanup()
+
+    def _teardown_nfqws2(self) -> None:
+        if self.ns_name:
+            pkill_nfqws2_in_ns(self.ns_name)
+
     def test_single(
         self,
         strategy: str,
@@ -179,11 +203,14 @@ class TestRunner:
         result = StrategyResult(strategy=strategy, domain=domain)
         t0 = time.perf_counter()
 
-        fw = Firewall(ns_name=self.ns_name)
         nfqws2 = Nfqws2Manager(ns_name=self.ns_name)
+        fw = self._host_firewall() if self.ns_name is None else self._ns_firewall()[1]
 
         try:
-            fw.prepare_tcp(qnum=qnum)
+            if self.ns_name:
+                fw.attach(proto="tcp", port="443", queue=qnum, bypass=True)
+            else:
+                fw.prepare_tcp(qnum=qnum)
             nfqws2.start(strategy, hostlist=hostlist, qnum=qnum)
 
             check = self._run_check(domain, timeout)
@@ -195,7 +222,8 @@ class TestRunner:
             result.error = str(e)[:200]
         finally:
             nfqws2.stop()
-            fw.cleanup()
+            self._teardown_nfqws2()
+            self._teardown_tcp_firewall(fw, qnum)
 
         result.time_total_ms = (time.perf_counter() - t0) * 1000
         return result
@@ -210,11 +238,14 @@ class TestRunner:
         result = StrategyResult(strategy=basename, domain=domain)
         t0 = time.perf_counter()
 
-        fw = Firewall(ns_name=self.ns_name)
         nfqws2 = Nfqws2Manager(ns_name=self.ns_name)
+        fw = self._host_firewall() if self.ns_name is None else self._ns_firewall()[1]
 
         try:
-            fw.prepare_tcp(qnum=qnum)
+            if self.ns_name:
+                fw.attach(proto="tcp", port="443", queue=qnum, bypass=True)
+            else:
+                fw.prepare_tcp(qnum=qnum)
             nfqws2.start_config(config_path)
 
             check = self._run_check(domain, timeout)
@@ -226,7 +257,8 @@ class TestRunner:
             result.error = str(e)[:200]
         finally:
             nfqws2.stop()
-            fw.cleanup()
+            self._teardown_nfqws2()
+            self._teardown_tcp_firewall(fw, qnum)
 
         result.time_total_ms = (time.perf_counter() - t0) * 1000
         return result
@@ -321,11 +353,14 @@ class TestRunner:
         result = StrategyResult(strategy=basename, domain=f"{ip}:{port}")
         t0 = time.perf_counter()
 
-        fw = Firewall(ns_name=self.ns_name)
         nfqws2 = Nfqws2Manager(ns_name=self.ns_name)
+        fw = self._host_firewall() if self.ns_name is None else self._ns_firewall()[1]
 
         try:
-            fw.prepare_udp(ports=str(port), qnum=qnum)
+            if self.ns_name:
+                fw.attach(proto="udp", port=str(port), queue=qnum, bypass=True)
+            else:
+                fw.prepare_udp(ports=str(port), qnum=qnum)
             nfqws2.start_config(config_path)
 
             data = self._run_stun_check(ip, port, timeout)
@@ -336,7 +371,8 @@ class TestRunner:
             result.error = str(e)[:200]
         finally:
             nfqws2.stop()
-            fw.cleanup()
+            self._teardown_nfqws2()
+            self._teardown_udp_firewall(fw, port, qnum)
 
         result.time_total_ms = (time.perf_counter() - t0) * 1000
         if result.success:

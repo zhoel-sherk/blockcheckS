@@ -20,7 +20,11 @@ from blockchecks.service.batch_models import (
     RunnerProbeDeps,
 )
 from blockchecks.service.batch_scheduler import BatchScheduler
-from blockchecks.service.lua_bridge_ipc import LuaBridge
+from blockchecks.service.lua_bridge_ipc import (
+    HEARTBEAT_STALE_MIN_AGE_S,
+    LuaBridge,
+    wait_heartbeat_fresh,
+)
 from blockchecks.service.lua_session import BridgeSession, strategy_text_from_item
 from blockchecks.terminal import CYAN, RESET, YELLOW
 
@@ -36,6 +40,17 @@ NS_POOL_EXHAUSTED = "ns pool exhausted"
 PROBE_SKIP_ERRORS = frozenset({STOPPED_BEFORE_PROBE, NS_POOL_EXHAUSTED})
 
 _pool_exhausted_total = 0
+
+
+def _batch_strategy_summary(ctx: BatchContext, limit: int = 3) -> str:
+    """Compact strategy labels for exception log context."""
+    labels: list[str] = []
+    for item in ctx.items[:limit]:
+        labels.append(str(getattr(item, "label", None) or getattr(item, "strategy", "?")))
+    extra = len(ctx.items) - limit
+    if extra > 0:
+        labels.append(f"+{extra}")
+    return ",".join(labels)
 
 
 def pool_exhausted_total() -> int:
@@ -117,12 +132,28 @@ class ProbeBatchService:
                 if sync_task is not None and not sync_task.done():
                     try:
                         await sync_task
+                    except asyncio.CancelledError:
+                        raise
                     except Exception:
-                        pass
+                        log.exception(
+                            "sync batch task failed during cancel drain "
+                            "(batch_id=%s, ns=%s, n=%d, strategies=%s)",
+                            ctx.batch_id,
+                            ns,
+                            len(ctx.items),
+                            _batch_strategy_summary(ctx),
+                        )
                 raise
             except Exception as e:
                 # Never lose the batch: any error in the sync probe loop must
                 # still produce per-item failure results + DB logging.
+                log.exception(
+                    "batch probe loop failed (batch_id=%s, ns=%s, n=%d, strategies=%s)",
+                    ctx.batch_id,
+                    ns,
+                    len(ctx.items),
+                    _batch_strategy_summary(ctx),
+                )
                 failed = self._batch_fail_results(ctx, str(e))
                 result = BatchProbeResult(
                     results=failed,
@@ -382,39 +413,33 @@ class ProbeBatchService:
             backend="lua_bridge",
         )
 
-    def _daemon_heartbeat_stale(self, session: BridgeSession, max_age: float = 3.0) -> bool:
+    def _daemon_heartbeat_stale(
+        self,
+        session: BridgeSession,
+        max_age: float = HEARTBEAT_STALE_MIN_AGE_S,
+    ) -> bool:
         """True when the Lua heartbeat is missing/stale — daemon dead or wedged.
 
+        Missing heartbeat (``age is None``) is treated as dead (fail closed).
         The heartbeat timer rewrites the file every ~200ms, so anything above
-        ~3s means no live event loop in nfqws2. Probing then would only burn
-        curl timeout on queue-bypassed clean traffic.
+        ``max_age`` means no live event loop in nfqws2.
         """
         try:
             age = session.bridge.heartbeat_age()
-        except Exception as exc:
-            log.warning("daemon heartbeat_age failed: %s", exc)
-            return False
-        if not isinstance(age, (int, float)):
-            return False
+        except OSError as exc:
+            log.warning(
+                "daemon heartbeat_age failed for %s: %s",
+                session.ns_name,
+                exc,
+            )
+            return True
+        if age is None:
+            return True
         return age > max_age
 
     def _wait_heartbeat(self, session: BridgeSession, within: float = 1.2) -> bool:
-        """Block until the daemon's Lua heartbeat is fresh (age <= 1.0s).
-
-        Proof that the Lua event loop is running and the desync plan is built;
-        probing before that risks queue-bypassed clean traffic.
-        """
-        deadline = time.monotonic() + within
-        while time.monotonic() < deadline:
-            try:
-                age = session.bridge.heartbeat_age()
-            except Exception as exc:
-                log.debug("wait_heartbeat age failed: %s", exc)
-                age = None
-            if isinstance(age, (int, float)) and age <= 1.0:
-                return True
-            time.sleep(0.05)
-        return False
+        """Block until the daemon's Lua heartbeat is fresh (see wait_heartbeat_fresh)."""
+        return wait_heartbeat_fresh(session.bridge, within=within, ns_name=session.ns_name)
 
     def _bridge_ready_fence(
         self,

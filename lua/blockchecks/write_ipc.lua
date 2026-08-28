@@ -65,12 +65,25 @@ function bs_read_strategy_ipc()
 	return id, gen
 end
 
--- Daemon liveness heartbeat (epoch seconds). Python treats a stale file
--- (> ~2-3s with a 200ms period) as "daemon dead" BEFORE burning a probe
--- on queue-bypassed clean traffic.
+-- Daemon liveness heartbeat. Python pre-creates an empty file; this timer
+-- rewrites content + mtime every 200ms. Stale/missing => daemon dead.
+_G.bs_heartbeat_open_fail = _G.bs_heartbeat_open_fail or 0
+
 function bs_write_heartbeat()
-	local f = io.open(writable_file_name("heartbeat"), "w")
-	if not f then return end
+	local path = writable_file_name("heartbeat")
+	local f = io.open(path, "w")
+	if not f then
+		_G.bs_heartbeat_open_fail = _G.bs_heartbeat_open_fail + 1
+		io.stderr:write(
+			"blockcheckS: bs_write_heartbeat open failed: "
+				.. tostring(path)
+				.. " (count="
+				.. tostring(_G.bs_heartbeat_open_fail)
+				.. ")\n"
+		)
+		io.stderr:flush()
+		return
+	end
 	f:write(tostring(os.time()))
 	f:write("\n")
 	f:close()

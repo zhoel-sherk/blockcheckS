@@ -196,6 +196,7 @@ class TcpProbeExecutor:
                 f"{item.label[:24]} (strategy may not have been picked up by nfqws2)"
                 f"{(' raw=[' + tail + ']') if tail else ''}{RESET}",
             )
+        # result.success stays HTTP for diagnostics; AQ/harvest use campaign_pass().
         return result
 
     async def log_tcp_result(

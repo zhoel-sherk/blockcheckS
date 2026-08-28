@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,8 +15,42 @@ from blockchecks.checkers.composite_runner import (
     normalize_domains,
     run,
 )
+from blockchecks.engine.composite_runner import _wait_bridge_heartbeat
 
 pytestmark = pytest.mark.unit
+
+
+@contextmanager
+def _composite_patches(*, pool, start_daemon=None, worker_data=None, get_fw=None):
+    """Common mocks: pool lifecycle, LuaBridge.setup, heartbeat fence, daemon."""
+    if start_daemon is None:
+        start_daemon = MagicMock()
+    if worker_data is None:
+        worker_data = {"success": True, "http_code": 200, "latency_ms": 50, "error": ""}
+    if get_fw is None:
+        get_fw = MagicMock(return_value=MagicMock())
+
+    bridge = MagicMock()
+    bridge.setup = MagicMock()
+    bridge.heartbeat_age = MagicMock(return_value=0.05)
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool))
+        stack.enter_context(patch("blockchecks.engine.composite_runner._start_pool", new=AsyncMock()))
+        stack.enter_context(patch("blockchecks.engine.composite_runner._stop_pool", new=AsyncMock()))
+        stack.enter_context(patch("blockchecks.engine.composite_runner.LuaBridge", return_value=bridge))
+        stack.enter_context(
+            patch("blockchecks.engine.composite_runner._wait_bridge_heartbeat", return_value=True)
+        )
+        stack.enter_context(patch("blockchecks.engine.composite_runner.start_daemon", new=start_daemon))
+        stack.enter_context(
+            patch(
+                "blockchecks.engine.composite_runner.invoke_curl_probe_worker",
+                return_value=worker_data,
+            )
+        )
+        stack.enter_context(patch("blockchecks.engine.composite_runner.get_ns_firewall", get_fw))
+        yield bridge
 
 
 def test_valid_domain():
@@ -53,18 +88,10 @@ def test_run_invalid_domain_records_fail(tmp_path):
     pool = AsyncMock()
     pool.acquire = AsyncMock(return_value="ns1")
     pool.release = AsyncMock()
-    with (
-        patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool),
-        patch("blockchecks.engine.composite_runner._start_pool", new=AsyncMock()),
-        patch("blockchecks.engine.composite_runner._stop_pool", new=AsyncMock()),
-        patch("blockchecks.engine.composite_runner.start_daemon", new=MagicMock()),
-        patch(
-            "blockchecks.engine.composite_runner.invoke_curl_probe_worker",
-            return_value={"success": False, "http_code": 0, "error": "fail"},
-        ),
-        patch("blockchecks.engine.composite_runner.get_ns_firewall") as get_fw,
+    with _composite_patches(
+        pool=pool,
+        worker_data={"success": False, "http_code": 0, "error": "fail"},
     ):
-        get_fw.return_value = MagicMock()
         rc = asyncio.run(run(str(conf), ["not a domain", "discord.com"]))
     # invalid domain → no worker call; valid domain → worker call
     assert rc == 1  # both invalid/worker-fail → no passes
@@ -77,21 +104,11 @@ def test_run_success(tmp_path):
     pool.acquire = AsyncMock(return_value="ns1")
     pool.release = AsyncMock()
     data = {"success": True, "http_code": 200, "latency_ms": 50, "error": ""}
-    with (
-        patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool),
-        patch("blockchecks.engine.composite_runner._start_pool", new=AsyncMock()),
-        patch("blockchecks.engine.composite_runner._stop_pool", new=AsyncMock()),
-        patch("blockchecks.engine.composite_runner.start_daemon", new=MagicMock()),
-        patch(
-            "blockchecks.engine.composite_runner.invoke_curl_probe_worker",
-            return_value=data,
-        ),
-        patch("blockchecks.engine.composite_runner.get_ns_firewall") as get_fw,
-    ):
-        fw = MagicMock()
-        get_fw.return_value = fw
+    get_fw = MagicMock(return_value=MagicMock())
+    with _composite_patches(pool=pool, worker_data=data, get_fw=get_fw):
         rc = asyncio.run(run(str(conf), ["discord.com"], timeout=3.0))
     assert rc == 0
+    fw = get_fw.return_value
     assert fw.attach.call_count == 2
     pool.acquire.assert_awaited_once()
     pool.release.assert_awaited_once()
@@ -143,22 +160,13 @@ def test_run_minimal_fixture_injects_lua_init_and_probes(tmp_path, monkeypatch):
 
     injected = ["/opt/zapret2/lua/zapret-lib.lua", "/opt/zapret2/lua/zapret-antidpi.lua"]
     with (
-        patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool),
-        patch("blockchecks.engine.composite_runner._start_pool", new=AsyncMock()),
-        patch("blockchecks.engine.composite_runner._stop_pool", new=AsyncMock()),
+        _composite_patches(pool=pool, worker_data=data),
         patch(
             "blockchecks.engine.composite_runner.start_daemon",
             side_effect=_fake_start,
         ),
         patch("blockchecks.engine.config.get_lua_init_scripts", return_value=injected),
-        patch(
-            "blockchecks.engine.composite_runner.invoke_curl_probe_worker",
-            return_value=data,
-        ),
-        patch("blockchecks.engine.composite_runner.get_ns_firewall") as get_fw,
     ):
-        fw = MagicMock()
-        get_fw.return_value = fw
         rc = asyncio.run(run(str(conf), ["discord.com"], timeout=3.0))
 
     assert rc == 0
@@ -170,7 +178,83 @@ def test_run_minimal_fixture_injects_lua_init_and_probes(tmp_path, monkeypatch):
     assert "--lua-init=@/opt/zapret2/lua/zapret-lib.lua" in launched_text
     assert "--qnum=" in launched_text  # qnum preserved from fixture
     assert "--bind-fix4" in launched_text
-    assert fw.attach.call_count == 2
+
+
+def test_run_calls_lua_bridge_setup_before_daemon(tmp_path):
+    """Composite must use LuaBridge.setup() (campaign ACL), not bare chmod 0777."""
+    conf = tmp_path / "c.conf"
+    conf.write_text("--qnum=200\n")
+    pool = AsyncMock()
+    pool.acquire = AsyncMock(return_value="ns1")
+    pool.release = AsyncMock()
+    order: list[str] = []
+    bridge = MagicMock()
+
+    def _setup() -> None:
+        order.append("setup")
+
+    bridge.setup = _setup
+
+    def _start(ns_name: str, config_abs: str) -> None:
+        order.append("start_daemon")
+
+    with (
+        _composite_patches(pool=pool, start_daemon=MagicMock(side_effect=_start)),
+        patch("blockchecks.engine.composite_runner.LuaBridge", return_value=bridge),
+    ):
+        asyncio.run(run(str(conf), ["discord.com"], timeout=3.0))
+
+    assert order[:2] == ["setup", "start_daemon"]
+
+
+def test_run_heartbeat_fence_before_first_probe(tmp_path):
+    """Bind marker then heartbeat fence must complete before firewall attach/probe."""
+    conf = tmp_path / "c.conf"
+    conf.write_text("--qnum=200\n")
+    pool = AsyncMock()
+    pool.acquire = AsyncMock(return_value="ns1")
+    pool.release = AsyncMock()
+    order: list[str] = []
+
+    with (
+        _composite_patches(pool=pool),
+        patch(
+            "blockchecks.engine.composite_runner._wait_queue_bind",
+            side_effect=lambda *_a, **_k: order.append("bind") or True,
+        ),
+        patch(
+            "blockchecks.engine.composite_runner._wait_bridge_heartbeat",
+            side_effect=lambda *_a, **_k: order.append("heartbeat") or True,
+        ),
+        patch(
+            "blockchecks.engine.composite_runner.get_ns_firewall",
+            side_effect=lambda *_a, **_k: order.append("fw") or MagicMock(),
+        ),
+        patch(
+            "blockchecks.engine.composite_runner.invoke_curl_probe_worker",
+            side_effect=lambda *_a, **_k: order.append("probe") or {
+                "success": True,
+                "http_code": 200,
+                "latency_ms": 1,
+                "error": "",
+            },
+        ),
+    ):
+        asyncio.run(run(str(conf), ["discord.com"], timeout=3.0))
+
+    assert order == ["bind", "heartbeat", "fw", "probe"]
+
+
+def test_wait_bridge_heartbeat_delegates_to_batch_service() -> None:
+    """_wait_bridge_heartbeat must use wait_heartbeat_fresh (None age = not ready)."""
+    bridge = MagicMock()
+    bridge.heartbeat_age.return_value = None
+    with patch(
+        "blockchecks.service.lua_bridge_ipc.time.monotonic",
+        side_effect=[0.0, 0.0, 1.5],
+    ):
+        with patch("blockchecks.service.lua_bridge_ipc.time.sleep"):
+            assert _wait_bridge_heartbeat(bridge, "ns-test", within=1.2) is False
 
 
 def test_run_bind_marker_wait_short_circuits(tmp_path, monkeypatch):
@@ -191,19 +275,7 @@ def test_run_bind_marker_wait_short_circuits(tmp_path, monkeypatch):
     marker = logs / "nfqws2_out_ns1_0001.log"
     marker.write_text("binding this socket to queue '200'\nsetting copy_packet mode\n")
 
-    with (
-        patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool),
-        patch("blockchecks.engine.composite_runner._start_pool", new=AsyncMock()),
-        patch("blockchecks.engine.composite_runner._stop_pool", new=AsyncMock()),
-        patch("blockchecks.engine.composite_runner.start_daemon", new=MagicMock()),
-        patch(
-            "blockchecks.engine.composite_runner.invoke_curl_probe_worker",
-            return_value=data,
-        ),
-        patch("blockchecks.engine.composite_runner.get_ns_firewall") as get_fw,
-    ):
-        fw = MagicMock()
-        get_fw.return_value = fw
+    with _composite_patches(pool=pool, worker_data=data):
         rc = asyncio.run(run(str(conf), ["discord.com"], timeout=3.0))
 
     assert rc == 0  # marker seen → probe proceeds

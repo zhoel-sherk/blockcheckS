@@ -27,10 +27,12 @@ _STUB = (
 @pytest.fixture(autouse=True)
 def _clear_workers():
     probe_mod._WORKERS.clear()
+    probe_mod._NS_EPOCHS.clear()
     yield
-    for ns, py in list(probe_mod._WORKERS):
-        release_curl_probe_worker(ns, py)
+    for key in list(probe_mod._WORKERS):
+        release_curl_probe_worker(key[0], key[1])
     probe_mod._WORKERS.clear()
+    probe_mod._NS_EPOCHS.clear()
 
 
 @pytest.mark.unit

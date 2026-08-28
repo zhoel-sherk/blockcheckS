@@ -46,3 +46,17 @@ def test_resolve_quic_gv_from_fake_files(tmp_path):
     (blobs / "quic_gv_kyber_1.bin").symlink_to(src)
     path = resolve_blob_path("quic_gv_kyber_1", str(blobs))
     assert path and "kyber" in path
+
+
+def test_sanitize_strategy_renames_4pda(tmp_path):
+    from blockchecks.engine.blob_aliases import sanitize_strategy_for_nfqws2
+
+    blobs = tmp_path / "blobs"
+    blobs.mkdir()
+    (blobs / "tls_clienthello_4pda_to.bin").write_bytes(b"x" * 8)
+    lines: list[str] = []
+    result = sanitize_strategy_for_nfqws2(
+        "fake:blob=4pda:repeats=6", lines, str(blobs)
+    )
+    assert result == "fake:blob=b4pda:repeats=6"
+    assert any(line.startswith("--blob=b4pda:@") for line in lines)

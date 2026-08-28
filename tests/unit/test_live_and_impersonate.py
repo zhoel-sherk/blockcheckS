@@ -24,17 +24,24 @@ def test_impersonate_target_default_and_env(monkeypatch) -> None:
 
 @pytest.mark.unit
 def test_heartbeat_age_missing_and_stale(tmp_path) -> None:
+    import os
+
     bridge = LuaBridge("bs-p-hb", shm_base=tmp_path)
     bridge.setup()
-    # no heartbeat yet -> unknown (None), NOT stale-by-value
+    # Pre-created empty sentinel -> unknown (not fresh)
+    assert bridge.paths.heartbeat.is_file()
     assert bridge.heartbeat_age() is None
 
     now = time.time()
-    bridge.paths.heartbeat.write_text(f"{int(now - 10)}\n", encoding="utf-8")
+    bridge.paths.heartbeat.write_text("alive\n", encoding="utf-8")
+    os.utime(bridge.paths.heartbeat, (now - 10, now - 10))
     age = bridge.heartbeat_age(now=now)
     assert age is not None and 9.0 <= age <= 11.0
 
-    bridge.paths.heartbeat.write_text("garbage\n", encoding="utf-8")
+    bridge.paths.heartbeat.write_text("", encoding="utf-8")
+    assert bridge.heartbeat_age() is None
+
+    bridge.paths.heartbeat.unlink()
     assert bridge.heartbeat_age() is None
     bridge.teardown()
 

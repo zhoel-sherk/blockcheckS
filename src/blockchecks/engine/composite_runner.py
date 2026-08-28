@@ -12,10 +12,11 @@ import time
 from pathlib import Path
 
 from blockchecks.checkers.curl_probe import CurlProbeRequest, worker_wall_timeout
-from blockchecks.engine.config import NETNS_BASE, NFQUEUE_UDP, SHM_BASE
+from blockchecks.engine.config import NETNS_BASE, NFQUEUE_UDP
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.results import TcpTestResult
+from blockchecks.service.lua_bridge_ipc import LuaBridge
 from blockchecks.service.netns_pool import NetNsPool
 from blockchecks.service.nfqws2 import start_daemon
 from blockchecks.service.ns_firewall import get_ns_firewall
@@ -95,6 +96,13 @@ def _wait_queue_bind(ns_name: str, deadline_sec: float) -> bool:
     return False
 
 
+def _wait_bridge_heartbeat(bridge: LuaBridge, ns_name: str, *, within: float = 1.2) -> bool:
+    """Campaign-parity Lua heartbeat ready-fence (wait_heartbeat_fresh)."""
+    from blockchecks.service.lua_bridge_ipc import wait_heartbeat_fresh
+
+    return wait_heartbeat_fresh(bridge, within=within, ns_name=ns_name)
+
+
 async def run(
     config_path: str, domains: list[str] = None, _parallel: int = 2, timeout: float = 5.0
 ):
@@ -115,17 +123,10 @@ async def run(
     await _start_pool(pool)
     ns_name = await pool.acquire()
 
-    # RT-композит: ждём первый heartbeat демона (Lua-таймер ~200мс) до первой
-    # пробы — иначе проба уходит в окно Lua-init при queue-bypass и ТСПУ
-    # дропает её (ложный таймаут).
-    # Каталог IPC обязан существовать ДО старта демона и быть доступным
-    # overflow-uid (иначе Lua не пишет heartbeat/стратегию — мост мёртв).
-    _shm_dir = Path(SHM_BASE) / ns_name
-    try:
-        _shm_dir.mkdir(parents=True, exist_ok=True)
-        os.chmod(_shm_dir, 0o777)
-    except OSError as exc:
-        log.warning("composite: shm dir %s prepare failed: %s", _shm_dir, exc)
+    # IPC: same ACL path as campaign (0770/0660 + setfacl overflow-uid; 0777 only
+    # with warning). Pre-creates events.ndjson + heartbeat sentinel before daemon.
+    bridge = LuaBridge(ns_name)
+    bridge.setup()
 
     # Автоинъекция окружения для `-c` конфигов: их часто пишут минимально,
     # без --lua-init/--qnum, что раньше давало мгновенную смерть демона
@@ -166,6 +167,13 @@ async def run(
         # start_daemon — до него лог-файла демона ещё нет и цикл всегда
         # вырождался в 12-секундный сон (ложный "probing anyway").
         _wait_queue_bind(ns_name, deadline_sec=12.0)
+
+        if not _wait_bridge_heartbeat(bridge, ns_name):
+            log.warning(
+                "composite: no heartbeat from %s within 1.2s — probing anyway "
+                "(queue-bypass risk)",
+                ns_name,
+            )
 
         fw = get_ns_firewall(ns_name)
         fw.attach(proto="tcp", port="443", queue=NFQUEUE_TCP)
