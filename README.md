@@ -117,8 +117,8 @@ pytest -m "not integration"
 Для `bs scan` нужен Linux-хост с root.
 
 ```bash
-podman run --rm -v "$PWD":/src:ro -w /src python:3.12-slim \
-  bash -c 'pip install . && bs --help'
+podman run --rm -v "$PWD":/src:ro -w /tmp python:3.12-slim \
+  bash -c 'cp -r /src /tmp/blockcheckS && pip install /tmp/blockcheckS && bs --help'
 
 podman run --rm python:3.12-slim \
   bash -c 'pip install blockchecks && bs --help'

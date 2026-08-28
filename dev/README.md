@@ -42,9 +42,9 @@ bash dev/mutmut_gate.sh
 
 | Скрипт | Что делает | Время | Примечания |
 |---|---|---|---|
-| `smoke_scan.sh` | Короткий `bs scan` на 3 fake × discord.com. Аргумент: `default\|bridge\|classic-maps` (последний — deprecated `--classic` → lua_bridge, не второй бэкенд) | ~1 мин | + `assert_smoke_db.py` |
+| `smoke_scan.sh` | Короткий `bs scan` на 3 fake × discord.com. Default lua_bridge; `--classic`/`--probe-backend classic` warn+map к lua_bridge, `--lua-bridge-compare` удалён. | ~1 мин | + `assert_smoke_db.py` |
 | `smoke_full_quick.sh <домен> <N>` | Time-boxed `bs full` + APPLIED gate в БД | 1–3 мин | EXIT-trap = полный reset хоста |
-| `smoke_backend_matrix.sh` | Депрекейт `--classic` / env classic **мапится** на lua_bridge | 3–6 мин | не «два бэкенда» |
+| `smoke_backend_matrix.sh` | Функциональный тест выбора backend: default→lua_bridge, `--classic`/`--probe-backend classic` warn+map, env override; `--lua-bridge-compare` удалён. | 3–6 мин | не «два бэкенда» |
 | `smoke_flags.sh` | CLI `-h` + reject + live флаги + gc/harvest-batch + serve HTTP | 15–30 мин | `bs stop --force` между шагами |
 | `smoke_all.sh` | gate_all → flags pytest → smoke_full_quick → functional_smoke → smoke_flags → backend_matrix → … | до 90 мин | отказ при `run.lock` |
 | `functional_smoke.sh` | Все подкоманды + `tcp --ns` + harvest APPLIED + gc/harvest/карантин | 6–15 мин | отказ при `run.lock` |
@@ -60,7 +60,7 @@ bash dev/smoke_full_quick.sh discord.com 3
 bash dev/smoke_backend_matrix.sh
 
 # Точечные:
-bash dev/smoke_scan.sh                    # default lua_bridge; classic-maps = deprecated map
+bash dev/smoke_scan.sh                    # default lua_bridge; --classic warn+map, compare removed
 sudo bash dev/voice_smoke.sh
 SMOKE_ALL_BUDGET_SEC=7200 bash dev/smoke_all.sh
 ```

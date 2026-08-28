@@ -1,398 +1,639 @@
-# Architecture — blockcheckS
+# Architecture — blockcheckS 1.4.0
 
-Канонический разбор **как устроен прогон** (1.3.7+). Не дублирует:
+Канон **как устроен прогон** и **почему так**, а не только список модулей. Операторские флаги и DDL вынесены:
 
 | Документ | Что там, а не здесь |
 |---|---|
-| [guide.md](guide.md) | флаги CLI, примеры команд |
+| [guide.md](guide.md) | флаги CLI, примеры, troubleshooting |
 | [package.md](package.md) | дерево файлов, LOC, XDG-пути |
-| [database.md](database.md) | схема SQLite, resume SQL |
-| [custom_lua.md](custom_lua.md) | Lua IPC, `scan_pick`, Mode A/B |
+| [database.md](database.md) | схема SQLite, resume SQL, harvest manifest |
+| [custom_lua.md](custom_lua.md) | shm layout, `scan_pick`, Mode A/B backlog |
 | [api.md](api.md) | контракт socket / HTTP / MCP |
-| [mcp.md](mcp.md) | установка MCP-клиентов |
-| [ci-selfhosted.md](ci-selfhosted.md) | self-hosted `[probe]` runner, week_cov / run.lock |
+| [mcp.md](mcp.md) / [mcp-skill.md](mcp-skill.md) | установка клиентов, 22 tools |
+| [ci-selfhosted.md](ci-selfhosted.md) | self-hosted `[probe]` runner |
+
+**1.4.0 в одном абзаце.** Campaign TCP (`scan` / `pair` / `full`) всегда **lua_bridge**: один nfqws2 на батч стратегий, стратегия передаётся через `/dev/shm`. `--classic` / `--probe-backend classic` / `BLOCKCHECKS_PROBE_BACKEND=classic` → warning + map в lua_bridge. One-shot (`bs tcp`, `composite`, fan-out) по-прежнему запускают `start_daemon` на каждую стратегию. Campaign PASS считается как HTTP OK **и** APPLIED (`campaign_pass`); lua_bridge записывает HTTP-200 без APPLIED как FAIL. Resume работает по `run_id` + fingerprint; skip-ключи scoped к этому `run_id`. Карантин доменов сидируется **только** при `--resume`. MCP `stop_campaign` сначала делает `bs stop` (SIGTERM по `run.lock`); если кампании нет — останавливает `bs serve`.
 
 ---
 
-## Слои
+## 1. Обзор data-flow
 
 ```mermaid
 flowchart TB
-  subgraph entry [Entry]
-    CliApp[cli.cliapp pydantic]
-    Argparse[cli.parser BLOCKCHECKS_ARGPARSE]
+  subgraph cliEntry ["CLI entry"]
+    bs["bs / bc-nfconf / bs-mcp"]
+    parser["cli.parser + cli.cliapp.py"]
+    spec["RunSpec + CampaignContext"]
   end
-  subgraph campaign [Campaign]
-    Scan[cmd_pair tcp_only]
-    Pair[cmd_pair]
-    Full[main.run_full]
-    TcpUdp[test_runner sync]
+  subgraph campaignEngine ["Campaign engine"]
+    full["main_phases.run_full"]
+    pair["pair_phases.scan_or_pair"]
+    tcpCmd["commands.tcp (host TestRunner)"]
+    mg["MatrixGenerator"]
+    triage["TriageProfile"]
+    aq["AdaptiveJobQueue"]
   end
-  subgraph engine [Engine]
-    Pre[preflight TriageProfile]
-    Gen[matrix_generator]
-    Sched[AQ or fanout or family_gates]
-    AR[async_runner]
+  subgraph runtime ["Runtime in netns"]
+    ar["AsyncTestRunner"]
+    pool["NetNsPool bs-p-PID-i"]
+    batch["ProbeBatchService (lua_bridge)"]
+    oneShot["Nfqws2Launcher.start_daemon (one-shot)"]
+    worker["in_ns_workers (persistent curl)"]
   end
-  subgraph service [Service]
-    Pool[netns_pool]
-    Batch[batch_service]
-    Nfq[nfqws2]
-    Lock[run_control]
+  subgraph checkers ["Checkers"]
+    curl["curl_cffi (JA4)"]
+    udp["udp_voice / STUN"]
+    quic["quic_raw / HTTP3"]
   end
-  subgraph check [Checkers]
-    Curl[curl_probe]
-    Dns[dns_secure]
-    Voice[voice_dns]
+  subgraph persist ["Persistence"]
+    store["SqliteRunStore WAL"]
+    state["run.lock + events_live.jsonl"]
   end
-  subgraph persist [Persist]
-    Store[store.SqliteRunStore]
-    Export[nfconf plus data_block]
+  subgraph export ["Export artifacts"]
+    nfconf["nfconf.py -> .conf"]
+    harvest["harvest-batch (APPLIED=1)"]
+    dataBlock["data_block/providers/SLUG"]
   end
-  CliApp --> Scan
-  CliApp --> Pair
-  CliApp --> Full
-  Argparse --> Scan
-  Scan --> Pre --> Gen --> Sched --> AR
-  Pair --> Pre
-  Full --> Pre
-  AR --> Pool
-  AR --> Batch
-  Batch --> Nfq
-  AR --> Curl
-  Pre --> Dns
-  Pair --> Voice
-  AR --> Store
-  Full --> Export
-  Lock -.-> Full
-  Lock -.-> AR
+
+  bs --> parser --> spec
+  spec --> full
+  spec --> pair
+  spec --> tcpCmd
+  full --> triage --> mg
+  pair --> triage
+  mg --> aq
+  aq --> ar
+  ar --> pool
+  ar --> batch
+  ar --> oneShot
+  batch --> worker --> curl
+  oneShot --> worker --> curl
+  worker --> udp
+  worker --> quic
+  batch --> store
+  oneShot --> store
+  store --> state
+  store --> nfconf
+  store --> harvest
+  store --> dataBlock
 ```
 
-**Правило изоляции:** Python-оркестратор живёт на хосте; nfqws2 и curl — **внутри netns**. Очереди NFQUEUE 200/201 локальны для namespace, поэтому `--parallel N` не требует разных qnum на хосте.
+**Изоляция.** Оркестратор Python работает на хосте. nfqws2 и curl-субпроцессы исполняются **внутри network namespace** (`ip netns exec`). NFQUEUE 200 (TCP) и 201 (UDP) локальны внутри каждого namespace, поэтому `--parallel N` не требует разных queue number на хосте. Для каждого воркера NetNsPool создаёт veth-пару, настраивает NAT и правила OUTPUT → NFQUEUE; veth/NAT сам по себе не блокирует bypass (oneshot в том же namespace даёт HTTP 200).
 
 ---
 
-## Вход CLI
+## 2. Слои кода
 
-Дефолт — **pydantic CliApp** (`cli/cliapp.py`). Флаги по-прежнему описываются в `cli/parser.py` (`add_campaign_args`, `add_lua_bridge_args`, …). Старый argparse: `BLOCKCHECKS_ARGPARSE=1`.
+```mermaid
+flowchart TB
+  subgraph entry ["Entry"]
+    bsPy["bs.py"]
+    cliApp["cli.cliapp (pydantic)"]
+    legacyArgparse["cli.parser (BLOCKCHECKS_ARGPARSE=1)"]
+  end
+  subgraph commands ["CLI commands"]
+    cmdTcp["commands.tcp"]
+    cmdUdp["commands.udp"]
+    cmdPair["commands.pair"]
+    cmdPreflight["commands.preflight"]
+    cmdServe["commands.serve"]
+    cmdMcp["commands.mcp"]
+    cmdStop["commands.stop"]
+    cmdDataBlock["commands.data_block"]
+    cmdHarvest["commands.harvest_batch"]
+    cmdGc["commands.gc"]
+  end
+  subgraph engine ["Engine"]
+    runSpec["run_spec.py"]
+    matrixGen["matrix_generator.py"]
+    generators["generators/ (standard, flowseal, custom)"]
+    preflight["preflight.py"]
+    triageMod["triage.py"]
+    failPhase["fail_phase.py"]
+    adaptiveQ["adaptive_queue.py"]
+    adaptiveR["adaptive_runner.py"]
+    bridgePool["bridge_worker_pool.py"]
+    fanout["tcp_fanout.py"]
+    familyNeeds["family_needs.py"]
+    familyReg["family_registry.py"]
+    results["results.py"]
+    confBuilder["conf_builder.py"]
+    domainQ["domain_quarantine.py"]
+    ggcPool["ggc_pool.py"]
+    runDeadline["run_deadline.py"]
+    runFinalize["run_finalize.py"]
+    storeEngine["engine/store/"]
+  end
+  subgraph service ["Service runtime"]
+    netnsPool["netns_pool.py"]
+    nsFirewall["ns_firewall.py (NsFirewall + HostFirewall)"]
+    firewallShim["firewall.py (HostFirewall shim)"]
+    nfqws2Mod["nfqws2.py"]
+    nfqws2Launcher["nfqws2_launcher.py"]
+    nfqws2Settle["nfqws2_settle.py"]
+    luaBridgeIpc["lua_bridge_ipc.py"]
+    luaSession["lua_session.py"]
+    batchService["batch_service.py"]
+    batchBridgeProbe["batch_bridge_probe.py"]
+    inNsWorkers["in_ns_workers.py"]
+    testRunner["test_runner.py"]
+    probeWorker["probe.py (persistent curl worker)"]
+    server["server.py (ProbeServer)"]
+    runControl["run_control.py"]
+    liveEvents["live_events.py"]
+    metrics["metrics.py"]
+  end
+  subgraph checkersLayer ["Checkers"]
+    curlProbe["curl_probe.py"]
+    tcpTls["tcp_tls.py"]
+    dnsSecure["dns_secure.py"]
+    udpVoice["udp_voice.py"]
+    voiceDns["voice_dns.py"]
+    voiceDiscovery["voice_discovery.py"]
+    quicRaw["quic_raw.py"]
+    http3Mod["http3.py"]
+    l3Probe["l3_probe.py"]
+    ipBlock["ip_block.py"]
+    portBlock["port_block.py"]
+    youtubeUrl["youtube_url.py"]
+    compositeRunner["composite_runner.py"]
+  end
+  subgraph dataBlock ["data_block + export"]
+    provider["data_block/provider.py"]
+    providerStore["data_block/store.py"]
+    exportMod["data_block/export.py"]
+    nfconfEntry["nfconf.py"]
+    harvestMod["harvest_batch.py"]
+  end
+  subgraph mcpLayer ["MCP"]
+    mcpServer["mcp/server.py"]
+  end
 
-`bs.py` — тонкий entry → `cli.parser.main` (или CliApp). Console scripts: `bs`, `bs-mcp`, `bc-nfconf`, `bc-main`.
+  bsPy --> cliApp
+  bsPy --> legacyArgparse
+  cliApp --> commands
+  commands --> engine
+  commands --> service
+  engine --> service
+  service --> checkersLayer
+  checkersLayer --> engine
+  engine --> dataBlock
+  service --> server
+  server --> mcpLayer
+  server --> service
+```
 
-| Команда | Куда идёт | Раннер |
-|---|---|---|
-| `bs scan` | `cmd_pair` с `tcp_only=True`, **без** UDP/voice | async `AsyncTestRunner` |
-| `bs pair` | `cmd_pair` + UDP/pair matrix | async |
-| `bs full` | `main.run_full` → `main_phases` | async, все фазы |
-| `bs tcp` / `bs udp` | `cmd_tcp` / `cmd_udp` | **sync** `TestRunner` (один netns) |
-| `bs composite` | `composite_runner` | один netns + один nfqws2 на конфиг |
-| `bs preflight` | `engine.preflight` без матрицы | без полного пула стратегий |
-| `bs serve` | `service.server` + `ProbeService` | тёплый пул |
-| `bs mcp` / `bs-mcp` | FastMCP stdio → unix-сокет демона | extra `[mcp]` |
-| `bs stop` | `run_control` | снимает `run.lock` |
-| `bs bench-settle` | калибровка settle/curl | отдельная команда |
-| `bs harvest-batch` | `harvest_batch` | кандидаты из state.db → batch.txt + manifest v1 |
-| `bs gc` | prune артефактов | dry-run по умолчанию |
-
-`bs scan` **намеренно** обнуляет `auto_discover` и UDP-источники: это TCP-only обёртка над тем же `cmd_pair`. Голос и `--auto-discover` — у `pair` / `full`. Это не баг CLI, а контракт команды (см. [guide.md](guide.md) «известные ограничения»).
-
-Перед кампанией: `apply_profile` (`--profile smoke|fast|20h`) → `RunSpec.from_args` → `run_session` (ставит `run.lock`).
+Правило archon (`[tool.blockchecks.architecture]`): `checkers` / `engine` / `service` / `data_block` **не** импортируют `cli` и entry (`bs.py`, `main.py`). Это позволяет переиспользовать движок из `bs serve`, `bc-nfconf` и тестов без таскания argparse.
 
 ---
 
-## Поток кампании (`scan` / `pair` / `full`)
+## 3. Вход CLI
+
+Дефолтный парсер — **pydantic CliApp** (`cli/cliapp.py`). Флаги описываются в `cli/parser.py` и валидируются через `RunSpec`. Старый argparse включается переменной `BLOCKCHECKS_ARGPARSE=1`.
+
+`bs.py` — тонкий entry → `cli.parser.main`. Console scripts: `bs`, `bs-mcp`, `bc-nfconf`, `bc-main`.
+
+| Команда | Куда | Раннер | Примечание |
+|---|---|---|---|
+| `bs scan` | `cmd_pair` (`tcp_only=True`) | `AsyncTestRunner` + lua_bridge | UDP/авто-дискавер сброшены |
+| `bs pair` | `cmd_pair` + UDP / pair matrix | async | использует `eps[0]` из voice discover |
+| `bs full` | `main.run_full` → `main_phases` | async, все фазы | adaptive queue по умолчанию |
+| `bs tcp` / `bs udp` | `cmd_tcp` / `cmd_udp` | sync `TestRunner` | host или один netns |
+| `bs composite` | `checkers.composite_runner` | один ns + один nfqws2 | one-shot `start_daemon` |
+| `bs preflight` | `engine.preflight` | без матрицы | `TriageProfile` в stdout |
+| `bs serve` | `service.server` + `ProbeService` | тёплый пул | unix-socket + HTTP |
+| `bs mcp` / `bs-mcp` | FastMCP stdio → unix-сокет | extra `[mcp]` | ленивый импорт |
+| `bs stop` | `run_control.request_graceful_stop` | SIGTERM | по pid из `run.lock` |
+| `bs harvest-batch` | `harvest_batch` | PASS **и** `bridge_applied=1` | validation-grade rows |
+| `bs gc` | prune логов / `--db-days` | dry-run default | skipped при `run.lock` |
+| `bs data-block` | XDG → git checkout | не пишет submodule во время скана | `--data-block-sync` |
+| `bs bench-settle` | калибровка settle/curl | отдельная команда | |
+
+Перед кампанией: `apply_profile` (`--profile smoke|fast|20h`) → `RunSpec.from_args` → `run_session` (создаёт `run.lock`).
+
+---
+
+## 4. Поток кампании
 
 ```mermaid
 sequenceDiagram
   participant CLI as CLI
   participant Lock as run_control
+  participant DB as SqliteRunStore
   participant DNS as dns_secure
   participant PF as preflight
+  participant Q as DomainQuarantine
   participant MG as MatrixGenerator
-  participant Sched as AQ_or_gates
+  participant Sched as configure_tcp_execution
   participant AR as AsyncTestRunner
   participant Pool as NetNsPool
-  participant Batch as batch_service
-  participant NFQ as nfqws2
+  participant Batch as ProbeBatchService
+  participant NFQ as nfqws2 daemon
+  participant Shm as dev_shm IPC
   participant W as in_ns_workers
-  participant DB as SqliteRunStore
+  participant Live as live_events
+  participant Nfconf as nfconf
 
-  CLI->>Lock: run_session command
+  CLI->>Lock: register_active_run run.lock
+  CLI->>DB: open_run_store(resume=...)
+  DB-->>CLI: begin_run fingerprint to run_id
   CLI->>DNS: prepare_dns_for_run DoH
+  DNS-->>CLI: dns_cache + dns_audit_results
   CLI->>PF: run_preflight_async
-  PF-->>CLI: TriageProfile skip_domains
-  CLI->>MG: generate_tcp udp quic http
-  CLI->>Sched: configure_tcp_execution
-  CLI->>AR: start pool
-  AR->>Pool: acquire ns
-  alt lua_bridge campaign TCP
-    AR->>Batch: one nfqws2 per batch
-    Batch->>NFQ: scan_pick plus shm IPC
-  else one-shot tcp composite fan-out
-    AR->>NFQ: start_daemon per conf
+  PF-->>CLI: TriageProfile + skip_domains
+  alt resume == true
+    CLI->>Q: seed_from_rows(domain_pass_rows)
+    CLI->>Q: record dead domains
+    CLI->>Sched: excluded_domains |= quarantine
+  else resume == false
+    Note over Q: no seed, new run_id, fresh quarantine
   end
-  AR->>W: curl or udp subprocess
-  W-->>AR: status latency fail_phase
-  AR->>DB: log_tcp log_udp batch flush
-  AR->>Pool: release pkill flush
-  CLI->>DB: finalize export nfconf
+  CLI->>MG: generate_tcp / generate_udp / generate_quic / generate_http
+  MG-->>CLI: tcp_items, udp_items, quic_items, http_items
+  CLI->>Sched: choose AQ / family_gates / fanout / sequential
+  CLI->>AR: start pool (size=parallel)
+  loop until queue empty or stop
+    AR->>Pool: acquire ns
+    Pool-->>AR: bs-p-PID-i
+    AR->>Batch: run_batch(ctx, timeout)
+    Batch->>NFQ: boot bridge.conf (batch <= 500 strategies)
+    Batch->>Shm: write strategy.id + strategy.gen (atomic)
+    NFQ->>Shm: scan_pick reads active id/gen
+    NFQ->>Shm: append APPLIED / STRATEGY_FAIL
+    Batch->>Shm: drain_events(since_gen)
+    Batch->>W: invoke_curl_probe_worker (JSON-lines)
+    W->>Live: write_probe status
+    W-->>Batch: status + latency + http_code
+    Batch->>DB: log_tcp_result
+    Batch->>NFQ: shutdown or recycle on heartbeat stale
+    AR->>Pool: release ns (PID-scoped pkill, iptables -D)
+  end
+  CLI->>DB: finalize_db_and_weights
+  CLI->>Nfconf: maybe_export_configs
+  CLI->>Lock: clear run.lock + teardown shm
 ```
 
-Фазы `bs full` (`main_phases.py`), порядок:
+Фазы `bs full` (`main_phases.py`):
 
-1. DNS + preflight (можно урезать `--no-preflight` / `--quick` / `--skip-*`)
-2. Генерация TCP (и UDP/QUIC/HTTP, если не сняты флагами)
-3. TCP × coverage (AQ **по умолчанию**)
-4. HTTP :80 — если не `--no-http`
-5. Voice discover — если не `--no-voice` / `--tcp-only`
-6. QUIC — если не `--no-quic`
-7. Pair matrix TCP×UDP — тоже подчиняется `--no-voice`
-8. Export + summary
+```mermaid
+flowchart LR
+  P1["1 DNS + preflight"] --> P2["2 generate TCP/UDP/QUIC/HTTP"]
+  P2 --> P3["3 TCP coverage (AQ default)"]
+  P3 --> P4["4 HTTP :80"]
+  P4 --> P5["5 voice discover"]
+  P5 --> P6["6 QUIC HTTP/3"]
+  P6 --> P7["7 pair matrix"]
+  P7 --> P8["8 export + summary"]
+```
 
-`--no-voice` с 1.3.7 **не генерирует** UDP и **не запускает** pairs (раньше скипался только DNS-discover, а матрица на 50 UDP × `--pair-max` всё равно крутилась).
+1. DNS + preflight (`--no-preflight`, `--quick`, `--skip-*`).
+2. Генерация стратегий по домену `primary`.
+3. TCP × coverage. По умолчанию — **adaptive queue**; альтернативы — `family_gates`, `fan-out`, последовательный item×domain.
+4. HTTP :80 — если не `--no-http` / `--http-off`.
+5. Voice discover — если не `--no-voice` / `--tcp-only`.
+6. QUIC/HTTP3 — если не `--no-quic` / `--http3-off`.
+7. Pair matrix — TCP+UDP, только если voice не отключён.
+8. Export + summary (`--export-on-stop` при дедлайне).
 
-`RunSpec` / `CampaignContext` (`engine/run_spec.py`) — типизированный снимок флагов. Ключевые производные:
-
-- `use_adaptive` ← `not no_adaptive` (AQ ON)
-- `try_wssize` ← `not no_wssize`
-- `disable_ech` ← `--no-ech`
-- `no_voice` / `tcp_only` / `no_http` / `no_quic`
-
-Сырой `argparse.Namespace` ещё живёт в фазах; `RunSpec` — канон для новых полей.
+`RunSpec` / `CampaignContext`: `use_adaptive ← not no_adaptive`, `try_wssize ← not no_wssize`, `disable_ech ← --no-ech`. Сырой `Namespace` всё ещё живёт внутри фаз для совместимости; новые поля добавляются в `RunSpec`.
 
 ---
 
-## Campaign TCP: lua_bridge
+## 5. Campaign TCP: lua_bridge
 
-Campaign `scan`/`pair`/`full` крутит nfqws2 только через **lua_bridge** (один демон на батч, Lua `scan_pick` + `/dev/shm`). `--classic` больше не переключает рестарт-на-стратегию.
+Campaign TCP (`scan` / `pair` / `full`) всегда идёт через **lua_bridge**: один nfqws2-демон на батч стратегий, переключение стратегии без restart. Это критично, потому что restart nfqws2 на каждую стратегию стоит 0.2–0.4s (pkill + fork + три `--lua-init` + NFQUEUE bind), что на 300k+ стратегий превращает короткий скан в дни.
 
-| | **lua_bridge** (campaign TCP) | **one-shot** (`bs tcp`, composite, fan-out) |
+| | lua_bridge campaign | one-shot |
 |---|---|---|
-| nfqws2 | один демон на **батч** стратегий | `start_daemon` на conf / стратегию |
-| выбор стратегии | Lua `scan_pick` читает id из `/dev/shm` | аргументы `--lua-desync` в процессе |
-| код | `batch_service` + `lua_bridge_ipc` | `nfqws2.start_daemon` / `TestRunner` |
-
-`--classic` / `--probe-backend classic` / `BLOCKCHECKS_PROBE_BACKEND=classic` → warning + map на lua_bridge. Fan-out (`--fan-out` / `--curl-parallel N`) — one-shot на волне доменов, не scan_pick.
-
-Подробности shm-файлов и `smart_fallback`: [custom_lua.md](custom_lua.md).
-
-Проба HTTPS: не host-curl, а **субпроцесс** `python -m blockchecks.service.in_ns_workers --mode curl` внутри netns (`service/probe.py` → `invoke_curl_probe_worker`). UDP voice — тот же модуль `--mode udp`. Прокси `engine/_probe_worker.py` / `_curl_probe_worker.py` — только back-compat импорты.
-
----
-
-## NetNsPool и параллелизм
-
-Изоляция **на namespace**, не на уникальный qnum хоста.
+| Кто | `scan` / `pair` / `full` | `bs tcp`, `composite`, fan-out |
+| nfqws2 | один процесс на батч | `start_daemon` на каждую стратегию / конфиг |
+| Стратегия | `strategy.id` + `strategy.gen` в `/dev/shm` | `--lua-desync` в argv |
+| Код | `batch_service` + `lua_bridge_ipc` + `BridgeSession` | `nfqws2_launcher` + `TestRunner` |
+| PASS для AQ/harvest | `campaign_pass`: HTTP OK ∧ APPLIED | HTTP OK (`bridge_applied=None`) |
 
 ```mermaid
 flowchart TB
-  subgraph host [Host]
-    Sem[AsyncTestRunner Semaphore]
-    Pool[NetNsPool bs-p-0 to N]
-    Nat[FORWARD MASQUERADE]
-    Sem --> Pool
+  subgraph hostLayer ["Host Python"]
+    publish["LuaBridge.publish id/gen/cmd"]
+    drain["drain_events APPLIED/rst_in"]
+    fence["wait_heartbeat_fresh 200ms"]
+    reboot["_reboot_daemon on stale heartbeat"]
   end
-  subgraph ns0 [netns bs-p-0]
-    Ipt0[iptables OUTPUT q200 q201]
-    N0[nfqws2]
-    C0[curl subprocess]
-    C0 --> Ipt0 --> N0
+  subgraph shmLayer ["dev_shm / blockchecks / ns"]
+    strategyId["strategy.id"]
+    strategyGen["strategy.gen"]
+    strategyCmd["strategy.cmd"]
+    strategyReady["strategy.ready"]
+    events["events.ndjson"]
+    heartbeat["heartbeat"]
   end
-  subgraph ns1 [netns bs-p-1]
-    Ipt1[own iptables]
-    N1[own nfqws2]
+  subgraph nsLayer ["netns"]
+    nfqws2["nfqws2 overflow-uid 2147483647"]
+    scanPick["scan_pick.lua"]
+    initLua["init.lua (timer 200ms)"]
+    curlWorker["persistent curl worker"]
   end
-  Pool --> ns0
-  Pool --> ns1
-  ns0 --> Nat
+
+  publish --> strategyId
+  publish --> strategyGen
+  publish --> strategyCmd
+  publish --> strategyReady
+  nfqws2 --> scanPick
+  scanPick --> strategyId
+  scanPick --> strategyGen
+  nfqws2 --> events
+  drain --> events
+  initLua --> heartbeat
+  fence --> heartbeat
+  reboot --> nfqws2
+  curlWorker --> nfqws2
 ```
 
-- q200 = TCP 443 (и HTTP :80 в http-фазе), q201 = UDP voice.
-- `--parallel N` = размер пула + semaphore. На Xeon сначала поднимать parallel; на Pi2 — `1` (макс. 2).
-- nftables vmap / SO_MARK (host-mode) — **не** нужны для `parallel > 4` в текущей модели; это отдельный бэклог ([todo.md](todo.md)).
-- Cleanup: `pkill` nfqws2 в ns, снять iptables `-D` (никогда `-F OUTPUT`), вернуть veth. Хостовый сброс: `scripts/cleanup_env.sh` (полный — только между кампаниями; `--orphans-only` во время прогона). `NetNsPool._destroy_one` уже `rm -rf /etc/netns/<ns>`.
+**IPC `/dev/shm`.** `LuaBridge.publish` атомарно пишет `strategy.id`, `strategy.gen`, `strategy.cmd` и `strategy.ready` через staging + `os.replace`. Lua-сторона (`scan_pick`) читает id/gen только когда `strategy.ready == strategy.gen`. Это защищает от рассогласования: gen коммитится первым, ready последним.
 
-`Firewall` трекает правила, чтобы teardown был точечный.
+**Heartbeat fence.** `init.lua` запускает таймер 200ms, который перезаписывает файл `heartbeat`. Python ждёт `wait_heartbeat_fresh` ≤1.0s (`HEARTBEAT_FRESH_MAX_AGE_S`, 5× период таймера) перед первой пробой. Если heartbeat stale (>3s) — демон мёртв или NFQUEUE bind не случился; `batch_service` перезагружает демон. Это закрывает тихую смерть bind без лога (bol-van/zapret2#300).
+
+**Overflow-uid.** nfqws2 после `setuid` работает под UID **2147483647** (overflow-uid), который **не** совпадает с системным `nobody`. Поэтому `chmod`/`setfacl` на `nobody` бесполезен. `lua_bridge_ipc._ipc_relax_for_nobody` целит ACL на `2147483647`; fallback — `0777/0666` с warning. Если `/dev/shm/blockchecks/<ns>` создан демоном раньше Python ( leftover ), `Path.mkdir` падает с EPERM; используется `sudo -n mkdir -p` + `sudo -n chmod`.
+
+**Никогда не делай `ip netns exec <ns> pkill nfqws2`.** `ip netns exec` не создаёт PID-namespace; pkill сканирует хостовый `/proc` и убивает **все** nfqws2 на машине. Освобождение namespace использует `metrics.pkill_nfqws2_in_ns(ns)` — PID-scope по netns inode.
+
+**Проба HTTPS.** Постоянный curl worker (`in_ns_workers --mode curl`) запускается один раз на namespace; JSON-lines запрос/ответ. Чтение stdout идёт через `os.read` + remainder buffer, а не `TextIOWrapper.read(1)`: последний съедает JSON-строку целиком и даёт ложный timeout ~6–11s при живом HTTP 200. При уничтожении namespace обязательно вызывается `release_curl_probe_worker(ns)`, иначе кэш `_WORKERS` переживёт `ip netns delete` и ударит в мёртвый namespace.
+
+Fan-out (`--curl-parallel`) на волне — **one-shot** `start_daemon`, не `scan_pick` (warning once). `bs tcp` без `--ns` — **host** + `TestRunner`, не netns-контроль.
 
 ---
 
-## Планировщик TCP: четыре режима
-
-`configure_tcp_execution` выбирает **один** путь:
+## 6. Целостность PASS и экспорт
 
 ```mermaid
 flowchart TD
-  start[TCP items times domains]
-  aq{no_adaptive?}
-  aq -->|no AQ default| Adaptive[adaptive_queue epsilon greedy]
-  aq -->|yes sequential| fg{family_gates?}
-  fg -->|scan_level not full and standard-ish sources| Gates[need_star chain skip families]
-  fg -->|no| fo{fanout_allowed and curl_parallel gt 1?}
-  fo -->|yes| Fan[tcp_fanout compatible curl batches]
-  fo -->|no| Seq[one strategy times domain]
-  Adaptive --> jobs[AsyncTestRunner]
-  Gates --> jobs
-  Fan --> jobs
-  Seq --> jobs
+  Probe["probe HTTP + Lua events"] --> Http{"http_ok?"}
+  Http -->|no| Fail["status FAIL"]
+  Http -->|yes| App{"bridge_applied?"}
+  App -->|"False lua_bridge"| FailNoApplied["FAIL fail_phase=no_bridge_applied"]
+  App -->|"True lua_bridge"| Pass["status PASS"]
+  App -->|"None one-shot"| Pass
+  Pass --> AQ["AQ boost_pass / weights"]
+  Pass --> Harvest["harvest-batch (applied=1)"]
+  Pass --> NfconfAPI["bc-nfconf / MCP query raw PASS"]
+  Fail --> Quarantine["quarantine counter (if not infra FAIL)"]
+  FailNoApplied --> Quarantine
 ```
 
-1. **Adaptive queue (дефолт).** ε-greedy (по умолчанию 0.1): приоритет семей/блобов/кластеров доменов (discord/google/youtube/general), sibling expansion. Веса в `scan_weights` SQLite, если не `--no-adaptive-weights`.
-2. **Family gates.** Только если AQ выключен, `scan_level != full`, источники standard/fake/… `family_needs` / `family_registry`: по `TriageProfile` не гонять заведомо бесполезные expander’ы.
-3. **Fan-out (B2).** Несколько доменов в одном curl-батче, если профили совместимы. googlevideo — **всегда solo** (`tcp_fanout.CurlProfile.special`): свой `Range` и без ECH.
-4. **Последовательный** item×domain.
+`campaign_pass` (реализация в `engine/results.py`):
 
-`--fan-out` — шорткат «AQ + curl_parallel≥4». AQ и fan-out одновременно как два планировщика не живут: при AQ curl-parallel только ускоряет воркеры очереди.
+```python
+def campaign_pass(*, http_ok: bool, bridge_applied: bool | None) -> bool:
+    match bridge_applied:
+        case True:
+            return http_ok
+        case False:
+            return False
+        case None:
+            return http_ok
+```
+
+- **Campaign / AQ** пишет HTTP-200 без APPLIED как FAIL (`fail_phase=no_bridge_applied`). Это убирает «PASS without APPLIED», вызванный nfqws2, который не увидел трафик (queue-bypass, пустой conf, ошибка бинда).
+- **`harvest-batch`** и smoke `assert_smoke_db` требуют `bridge_applied=1` — это validation-grade выборка.
+- **`bc-nfconf`**, MCP SQL (`query_strategies`, `generate_router_config`) и `SqliteRunStore.get_best_*` / `v_coverage` берут working-строки с `bridge_applied IS NULL OR = 1` (oneshot без колонки/NULL сохраняются; lua PASS без APPLIED отбрасывается). Старые DB без колонки MCP ретраит SQL без фильтра (warning в лог).
+- **Infra FAIL** (`STOPPED_BEFORE_PROBE`, `NS_POOL_EXHAUSTED`, ошибки IPC) не засчитываются в `quarantine_min` — только реальные пробы DPI.
+
+Карантин: 0 PASS за `--quarantine-min` (default 300) → таблица `quarantined`, AQ `excluded_domains`. Seed из истории — **только `--resume`**. После `seed_from_rows` обязателен ре-синк `queue.excluded_domains |= quarantine.exclude_domains()`, иначе мёртвые домены из БД продолжают пробоваться.
 
 ---
 
-## Preflight и triage
+## 7. NetNsPool и параллелизм
 
-`run_preflight_async` → `TriageProfile` **до** матрицы. Дефолт ON.
+```mermaid
+flowchart TB
+  subgraph hostLayer2 ["Host"]
+    sem["AsyncTestRunner Semaphore"]
+    pool["NetNsPool bs-p-PID-i"]
+    hostFw["HostFirewall FORWARD MASQUERADE"]
+    pkill["metrics.pkill_nfqws2_in_ns (PID-scope)"]
+  end
+  subgraph ns0 ["netns worker 0"]
+    nsFw0["NsFirewall iptables OUTPUT"]
+    q200_0["q200 TCP 443"]
+    q201_0["q201 UDP"]
+    nfq0["nfqws2 daemon"]
+    curl0["persistent curl worker"]
+    curl0 --> nsFw0 --> q200_0 --> nfq0
+    nsFw0 --> q201_0 --> nfq0
+  end
+  subgraph ns1 ["netns worker 1"]
+    nsFw1["NsFirewall iptables OUTPUT"]
+    q200_1["q200 TCP 443"]
+    q201_1["q201 UDP"]
+    nfq1["nfqws2 daemon"]
+    curl1["persistent curl worker"]
+    curl1 --> nsFw1 --> q200_1 --> nfq1
+    nsFw1 --> q201_1 --> nfq1
+  end
+  sem --> pool
+  pool --> ns0
+  pool --> ns1
+  ns0 --> hostFw
+  ns1 --> hostFw
+  pkill -.-> nfq0
+  pkill -.-> nfq1
+```
+
+- q200 = TCP 443 (и :80 в http-фазе), q201 = UDP voice.
+- `--parallel N` = размер пула namespace + semaphore.
+- **NsFirewall** (`ns_firewall.py`) — правила **OUTPUT → NFQUEUE** внутри namespace; правила добавляются один раз при acquire, удаляются через `iptables -D` (не `-F OUTPUT`) при release.
+- **HostFirewall** (`ns_firewall.py`) — правила **FORWARD + MASQUERADE** на хосте для veth/NAT; `service/firewall.py` — deprecated shim `Firewall = HostFirewall`.
+- Teardown: PID-scoped `pkill_nfqws2_in_ns`, `iptables -D` для каждого tracked rule, `release_curl_probe_worker(ns)`, `rm -rf /etc/netns/<ns>`.
+- `cleanup_env.sh` полный — только между кампаниями. Во время `week_cov` использовать `--orphans-only --exclude-prefix=bs-p-<pid>-`.
+- veth/NAT **не** является блокером bypass: oneshot в том же namespace даёт HTTP 200 ~70ms. Ложные timeout в campaign historically были из-за IPC worker read loop и EPERM `/proc` у overflow-uid, а не из-за NAT.
+
+---
+
+## 8. TCP scheduler: AQ, family_gates, fan-out
+
+`configure_tcp_execution` (`main_phases.py`) выбирает **ровно один** путь:
+
+```mermaid
+flowchart TD
+  start["TCP items × domains"] --> adaptiveFlag{"no_adaptive?"}
+  adaptiveFlag -->|"no, AQ default"| Adaptive["AdaptiveJobQueue epsilon-greedy"]
+  adaptiveFlag -->|yes| familyFlag{"family_gates?"}
+  familyFlag -->|"scan_level not full, standard-ish"| Gates["family_needs need_star chain"]
+  familyFlag -->|no| fanoutFlag{"fanout_allowed and curl_parallel gt 1?"}
+  fanoutFlag -->|yes| Fan["tcp_fanout compatible batches"]
+  fanoutFlag -->|no| Seq["sequential item × domain"]
+  Adaptive --> Runner["AsyncTestRunner + BridgeWorkerPool"]
+  Gates --> Runner
+  Fan --> Runner
+  Seq --> Runner
+```
+
+1. **Adaptive queue (default).** ε-greedy (~0.1): семьи / блобы / кластеры доменов, sibling expansion. Веса `scan_weights` подгружаются из БД и сохраняются в конце, если не `--no-adaptive-weights`. AQ доменная изоляция (`AQ_DOMAIN_ISOLATE`) не даёт нескольким воркерам одновременно пробовать один и тот же домен, чтобы избежать ложных PASS от параллельных коннектов.
+2. **Family gates.** AQ выключен, `scan_level != full`, источники standard/fake/… `family_needs` по `TriageProfile` фильтрует семьи, которые точно не нужны (например, `quic_drop` → не генерировать TCP).
+3. **Fan-out (B2).** Несколько доменов в одном curl-батче. `googlevideo` — **всегда solo**, не смешивается с обычными доменами, потому что probe_host и URL требуют yt-dlp и особой обработки.
+4. **Последовательный.** item × domain один за другим.
+
+`--fan-out` = шорткат «AQ + curl_parallel ≥ 4». При AQ `curl_parallel` ускоряет воркеры, но не добавляет второй планировщик.
+
+`--reprobe-failed N`: на resume повторяет инфраструктурные FAIL, не DPI FAIL.
+
+---
+
+## 9. Preflight и triage
+
+`run_preflight_async` → `TriageProfile` **до** генерации матрицы. Дефолт ON.
 
 | Флаг | Эффект |
 |---|---|
-| (нет) | полный prolog + baseline + IP/port-block + DNS audit |
-| `--quick` | только prolog, без глубокого baseline/IP/port |
+| (нет) | prolog + baseline + IP/port-block + DNS audit |
+| `--quick` | только prolog |
 | `--no-preflight` | всё выкл, включая persist L3 |
-| `--skip-prolog` и др. | точечно (`PreflightOptions.from_args`) |
-| `--dpi-diag` | доп. оверлей (SNI WL, FAT, l4-25, …); **не** выставляет `dns_sinkhole` |
+| `--skip-prolog` и др. | `PreflightOptions.from_args` |
+| `--dpi-diag` | SNI WL, FAT, l4-25; не ставит `dns_sinkhole` |
 
-Пробы:
+Пробы: DNS UDP vs DoH; L3/L4 (`unbypassable_l3` → генераторы `[]`); stream stall → `wssize`; TLS/PQ режет `pos=N` сплиты; raw QUIC Initial → `quic_drop`.
 
-- DNS UDP vs DoH → `dns_hijacked` / `dns_sinkhole`
-- L3/L4 (`l3_probe`) → `unbypassable_l3` (desync бесполезен → генераторы `[]`)
-- stream stall / QoS (`curl_probe`) → `requires_window_clamp` (wssize)
-- TLS fingerprint / PQ ClientHello → режутся числовые `pos=N` сплиты
-- raw QUIC Initial (`quic_raw`) → `quic_drop` / `udp_blocked`
-
-Профиль уходит в `generate(..., triage=)` и в `map_triage_to_generators` (MCP `triage` + prune семей). `to_context()` — компактный вектор для AQ.
-
-`fail_phase` на результате: `classify_fail_phase` (32 токена). Lua `rst_in` (TTL RST DPI) → `TLS_RST_AT_SNI`.
-
-Отдельная команда `bs preflight` — тот же движок, без генерации стратегий.
+Профиль передаётся в `generate(..., triage=)` и `map_triage_to_generators` (MCP). `fail_phase`: 32 токена; Lua `rst_in` → `TLS_RST_AT_SNI`.
 
 ---
 
-## Голос Discord
+## 10. Discord voice
 
-Два **взаимоисключающих** пути (`check_discover_mutex` в `voice_dns.py`):
+Два **взаимоисключающих** пути (`check_discover_mutex`):
 
 ```mermaid
 flowchart TD
-  need[pair or full needs voice EP]
-  mutex{discover_dns XOR auto_discover}
-  dnsPath["--discover-dns N"]
-  autoPath["--auto-discover N"]
-  resolve[finland range plus Maks IPs]
-  boot{bootstrap default ON}
-  bootNfq["nfqws2 q201 discord_udp fake"]
-  dual[STUN plus IP Discovery 74B]
-  alive[alive endpoints]
-  proxy[sing-box SOCKS5]
-  gw[Gateway WS then Voice WS OP2]
-  ready[OP2 Ready ip port]
-  use["pair matrix uses eps0 only"]
-
-  need --> mutex
-  mutex --> dnsPath
-  mutex --> autoPath
-  dnsPath --> resolve --> boot
-  boot -->|yes| bootNfq --> dual
-  boot -->|no --discover-dns-no-bootstrap| dual
-  dual --> alive --> use
-  autoPath --> proxy --> gw --> ready --> use
+  need["pair/full needs voice endpoint"] --> mutex{"discover_dns XOR auto_discover"}
+  mutex --> dnsPath["discover-dns"]
+  mutex --> autoPath["auto-discover"]
+  dnsPath --> resolve["resolve finland range + Maks IPs"]
+  resolve --> boot{"bootstrap default ON"}
+  boot -->|yes| bootNfq["nfqws2 q201 discord_udp fake"]
+  bootNfq --> dual["STUN + IP Discovery 70B"]
+  boot -->|no bootstrap| dual
+  dual --> alive["alive endpoints"]
+  alive --> use["pair matrix uses eps0 only"]
+  autoPath --> proxy["SOCKS5 proxy"]
+  proxy --> gw["Gateway WS"]
+  gw --> ready["OP2 Ready ip:port"]
+  ready --> use
 ```
 
 | | `--discover-dns` | `--auto-discover` |
 |---|---|---|
 | VPN | не нужен | SOCKS5 `BLOCKCHECKS_PROXY` |
-| UDP bootstrap | **вкл** (host q201, blob `discord_udp`) | нет |
-| токен Discord | нет | `BLOCKCHECKS_SETTINGS` (файл не world-writable) |
-| код | `voice_dns.discover_dns_alive` | `voice_discovery` |
+| UDP bootstrap | host q201, blob `discord_udp` | нет |
+| Токен | не нужен | `BLOCKCHECKS_SETTINGS` |
+| Код | `voice_dns.discover_dns_alive` | `voice_discovery` |
 
-Bootstrap при ошибке **не валит** прогон — дальше без nfqws2. Pair сейчас берёт **`eps[0]`** (мульти-EP — WIP). `bs scan` сюда не входит.
-
-UDP-стратегии тегируются `udp_voice`; `--udp-sources game` явно, не по умолчанию.
+Pair берёт **`eps[0]`**. `bs scan` голос не делает. UDP-теги `udp_voice`; `--udp-sources game` явно выбирает игровой preset.
 
 ---
 
-## googlevideo (GV)
+## 11. googlevideo / GGC
 
-Критерий успеха — не `https://googlevideo.com`, а **signed `videoplayback`** (yt-dlp, кэш `bs_gv_url_cache.json`) + Range-chunk, HTTP 206, `content_ok`.
+Успех googlevideo — signed `videoplayback` (yt-dlp, кэш) + Range, HTTP 206, `content_ok`. SNI берётся из `ggc_pool.py` (`BLOCKCHECKS_GGC_MODE=synthetic|real|fixed`) и пишется в `tcp_results.probe_host`.
 
-SNI для проб выбирается из пула `engine/ggc_pool.py` (`BLOCKCHECKS_GGC_MODE=synthetic|real|fixed`);
-выбранный хост пишется в `tcp_results.probe_host`.
+Цепочка IP: `dns.db(host)` → `[google].fallback_ips` / env → `CACHE/ggc_ips.json` → legacy. Синтетические хосты — NXDOMAIN by design; их живость проверяется только DoH, не curl из main-ns.
 
 ```mermaid
 flowchart LR
-  gv[domain contains googlevideo]
-  ytdlp[get_fresh_url yt-dlp]
-  cache[GV_URL_CACHE TTL]
-  url[signed videoplayback]
-  nfq[nfqws2 TCP in netns]
-  curl[curl_cffi Range]
-  ok[206 content_ok]
-  gv --> ytdlp --> cache --> url --> nfq --> curl --> ok
+  gvDomain["domain googlevideo"] --> pool["ggc_pool SNI"]
+  pool --> ytdlp["get_fresh_url (yt-dlp)"]
+  ytdlp --> cache["GV_URL_CACHE"]
+  cache --> url["signed videoplayback URL"]
+  url --> nfq["nfqws2 in netns"]
+  nfq --> curl["curl_cffi Range"]
+  curl --> ok["HTTP 206 content_ok"]
 ```
 
-В fan-out googlevideo не смешивается с обычными доменами.
+В fan-out `googlevideo` всегда solo и не смешивается с обычными доменами.
 
 ---
 
-## DNS
+## 12. DNS
 
-Дефолт: DoH (`dns_secure.prepare_dns_for_run`) + auto-pin (`CURLOPT_RESOLVE`). Аудит UDP vs DoH — таблица; UDP≠DoH не останавливает прогон (пробы не ходят на UDP:53). Abort только на sinkhole/bogon (`--allow-dns-hijack`). `--no-secure-dns` выключает DoH. В netns `nameserver` — первый UDP из `[secure_dns].udp` (baked: `8.8.8.8`). CIDR sinkhole/CDN — `presets/ipset/` (user overlay `~/.config/blockcheckS/presets/ipset/`).
-
----
-
-## Персистентность и экспорт
-
-`engine/store/SqliteRunStore`: стратегии, `tcp_results` / `udp_results` / `pair_results` / `quic_results`, checkpoint fingerprint матрицы, `scan_weights`, triage snapshot. Батч-flush (`DEFAULT_DB_BATCH`, lock на drain). Схема: [database.md](database.md).
-
-По окончании `full`: `run_finalize` → `bc-nfconf` (`nfconf.py` + `conf_builder` — единственная санитизация аргументов nfqws2).
-
-- Keenetic: `--filter-l7` = протокол потока; `--payload` липкий до следующего `--payload=`. Circular: inbound `--in-range=-s5556`.
-- Raw conf — для хоста (`BLOB_DIR`, `/opt/zapret2/lua`), **не** копировать на роутер как есть.
-- `--ipset`: IP из DNS-кэша, CIDR через ip2net.
-
-Runtime-провайдер пишется только в XDG `~/.local/share/blockcheckS/data_block/providers/<slug>/` (hosts, dns.db, strategies.db, triage.toml). Репозиторный submodule `data_block/` не трогается во время скана. Снимок для git: `bs data-block [--out DIR] [--git]`. `--data-block-sync` = тот же export+commit, если найден `data_block/.git`.
-
-`data_block/` (submodule): провайдер-агностичные снимки (сейчас `default` + `llc_trc_fiord`). Синк в кампании — опциональный.
-
-Ранжирование PASS: `latency_ms=0` — валидный лучший результат, не «нет замера».
+DoH (`prepare_dns_for_run`) + auto-pin `CURLOPT_RESOLVE`. Аудит UDP vs DoH пишется в таблицу `dns_audit_results`; расхождение не abort (пробы не ходят на UDP:53). Abort — sinkhole/bogon, если нет `--allow-dns-hijack`. `--no-secure-dns` выключает DoH. В netns `nameserver` — первый UDP из `[secure_dns].udp`. CIDR: `presets/ipset/` + user overlay.
 
 ---
 
-## `bs serve`, HTTP, MCP
+## 13. Персистентность и resume
 
-Три транспорта, один демон с тёплым пулом. Полный контракт: [api.md](api.md).
+```mermaid
+flowchart TB
+  Open["open_run_store(resume=...)"] --> Begin["begin_run(args_hash, fingerprint)"]
+  Begin -->|resume and fp match| Reuse["reuse latest runs.id"]
+  Begin -->|no resume or new fp| New["insert new runs.id"]
+  Reuse --> Skip["get_resume_skip_tcp_keys(run_id, WORKING)"]
+  New --> Ins["append-only INSERT tcp_results"]
+  Skip --> Ins
+  Ins --> Flush["batch flush (WAL)"]
+  Flush --> Finalize["run_finalize + export"]
+```
+
+`SqliteRunStore`: WAL, long-lived writer, batch flush, `epoch_ms` / `settle_ms`, `PRAGMA wal_checkpoint`. Схема: [database.md](database.md).
+
+- Без `--resume`: новый `run_id`, skip пуст, карантин не сидируется.
+- С `--resume` и drift fingerprint: отказ.
+- Skip keys scoped к `run_id` + fingerprint. Latest row = `MAX(id)` на пару `(strategy, domain)`. UNIQUE на `tcp_results` нет.
+- XDG `pass_strategies`: `UNIQUE(strategy, domain, protocol)`.
+- После `full`: `run_finalize` → `nfconf` + `conf_builder` (санитизация, `4pda`→`b4pda`). Runtime пишет только XDG `data_block/providers/<slug>/`. Git-снимок: `bs data-block`. `--data-block-sync` — export+commit если есть `data_block/.git`.
+- `latency_ms=0` — валидный лучший результат.
+
+---
+
+## 14. Persistent curl worker: чтение stdout
 
 ```mermaid
 flowchart LR
-  LLM[LLM client]
-  Mcp[bs-mcp stdio]
-  Sock[unix blockchecks.sock]
-  Http[HTTP 127.0.0.1]
-  Serve[bs serve ProbeService]
-  LLM --> Mcp --> Sock --> Serve
-  Http --> Serve
+  A["invoke_curl_probe_worker"] --> B["_get_worker(ns, py)"]
+  B --> C["Persistent _PersistentCurlWorker"]
+  C --> D["stdin: JSON payload"]
+  D --> E["curl probe in netns"]
+  E --> F["stdout line JSON"]
+  F --> G["os.read fd + remainder buffer"]
+  G --> H["_loads_probe_json"]
+  H --> I["result dict"]
 ```
 
-- Сокет: `~/.local/state/blockcheckS/blockchecks.sock` (не `/var/run`), 0600.
-- HTTP: только localhost, без `--http-token` мост **не стартует**.
-- MCP: optional extra `mcp>=1.1,<2`; без extra `bs --help` жив, `bs mcp` печатает hint.
-- **Fair exclusion:** активная серия держит `run.lock` → `probe` / `find_strategy` → **423 busy**. Статус серии без демона: MCP `get_series_status` читает lock+DB.
-
-`ProbeService` держит `AsyncTestRunner` + пул; `find_strategy` берёт `workers` из **размера пула**, не из несуществующего `runner.pool_size`.
+- `_readline_timed` использует `os.read` + `bytearray` remainder, а не `TextIOWrapper.read(1)`.
+- `select` ждёт появления данных; `os.read` читает чанками. Если JSON уже в буфере, `TextIOWrapper` мог проглотить его на первом байте и вызвать ложный timeout.
+- stderr дренируется в отдельном thread с кольцевым буфером 8KB, чтобы pipe не забился.
+- При destroy namespace `release_curl_probe_worker(ns)` убивает процесс и убирает из `_WORKERS`.
 
 ---
 
-## `run.lock`
+## 15. `bs serve`, HTTP и MCP
 
-`service/run_control.py`: одна кампания (`full`/`scan`/`pair`) или `serve` на хост. Файл XDG state, не cwd. `bs stop --force` снимает. Integration e2e чистит через `scripts/cleanup_env.sh` до/после теста.
+```mermaid
+flowchart LR
+  LLM["LLM client"] --> Mcp["bs-mcp stdio"]
+  Mcp --> Sock["unix blockchecks.sock"]
+  Sock --> Serve["bs serve ProbeServer"]
+  Mcp --> Disk["get_series_status / get_live_events"]
+  Http["HTTP 127.0.0.1:8089"] --> Serve
+  Full["bs full run.lock"] -.-> Serve
+  StopCli["bs stop SIGTERM"] --> Full
+  StopMcp["stop_campaign socket"] --> Serve
+```
+
+- Сокет: `~/.local/state/blockcheckS/blockchecks.sock`, 0600. Не `/var/run`.
+- HTTP bridge: localhost; без `--http-token` мост не стартует. Все маршруты кроме `/api/health` требуют `Authorization: Bearer <token>`.
+- MCP extra `mcp>=1.1,<2`. 22 tools: дисковые во время кампаний; демонные — живые пробы.
+- **`stop_campaign`**: сначала `request_graceful_stop` (как CLI `bs stop` по `run.lock`); если активного прогона нет — socket `stop` демона `bs serve`.
+- Fair exclusion: `run.lock` → probe возвращает **423 busy**.
+- `get_series_status.backend` всегда `"lua_bridge"`. TCP PASS-агрегации MCP/DAO: `bridge_applied IS NULL OR = 1`.
+- Live: `events_live.<pid>.jsonl`, `current_probe.json`, SIGUSR1 debug toggle.
 
 ---
 
-## Карта модулей (по слоям)
+## 16. `run.lock` и XDG
+
+`service/run_control.py`: одна кампания или `serve` на хост. `run.lock` содержит `pid`, `command`, `started_at`, `db_path`, `cwd`, `argv`. Пути через `paths._resolve_xdg`: euid 0 + `SUDO_USER` → home пользователя, не `/root`. `bs stop --force` снимает lock. Не запускай `sudo bs` целиком — sudo только внутри движка (netns/nfqws2).
+
+---
+
+## 17. Карта модулей
 
 ### CLI и оркестрация
 
@@ -400,88 +641,67 @@ flowchart LR
 |---|---|
 | CliApp / argparse | `cli/cliapp.py`, `cli/parser.py` |
 | Профили | `cli/profiles.py` |
-| Пресеты (jail путей) | `cli/presets.py`, `engine/preset_paths.py` |
-| `bs full` фазы | `main.py`, `main_phases.py` |
-| `scan`/`pair` фазы | `cli/commands/pair.py`, `pair_phases.py` |
+| Пресеты | `cli/presets.py`, `engine/preset_paths.py` |
+| `bs full` | `main.py`, `main_phases.py` |
+| `scan`/`pair` | `cli/commands/pair.py`, `pair_phases.py` |
+| Дедлайн | `engine/run_deadline.py` |
 | Терминал | `terminal.py` |
-| Дедлайн 20h | `engine/run_deadline.py` |
 
-### Движок прогона
+### Движок
 
 | Задача | Модуль |
 |---|---|
-| Typed spec | `engine/run_spec.py` |
-| Матрица | `engine/matrix_generator.py` |
-| Семьи TCP | `engine/generators/` + `families/{split,fake,tamper}.py` |
-| Flowseal / custom lists | `generators/flowseal.py`, `custom.py` |
-| Статический валидатор | `engine/static_validator.py` |
-| Блобы | `engine/blob_aliases.py`, `blob_filter.py` |
-| Preflight / triage / fail_phase | `preflight.py`, `triage.py`, `fail_phase.py` |
+| Typed spec | `run_spec.py` |
+| Матрица / семьи | `matrix_generator.py`, `generators/families/` |
+| Preflight / fail | `preflight.py`, `triage.py`, `fail_phase.py` |
 | AQ | `adaptive_queue.py`, `adaptive_runner.py` |
-| Domain quarantine | `domain_quarantine.py` |
-| GGC SNI pool | `ggc_pool.py` |
-| Probe executors | `probe_executors.py` |
-| Pair matrix | `pair_matrix_runner.py` |
-| Bridge worker pool | `bridge_worker_pool.py` |
-| Family gates | `family_needs.py`, `family_registry.py` |
+| Quarantine | `domain_quarantine.py` |
+| GGC | `ggc_pool.py` |
+| Executors / pair / bridge pool | `probe_executors.py`, `pair_matrix_runner.py`, `bridge_worker_pool.py`; `service/batch_scheduler.py` |
 | Fan-out | `tcp_fanout.py` |
-| Async / sync раннер | `async_runner.py`, `test_runner.py` |
-| Воркеры в ns | `in_ns_workers.py` |
-| Конф nfqws2 | `conf_builder.py`, `nfqws_config.py` |
-| Settle | `settle_profile.py`, `service/nfqws2_settle.py` |
+| Results | `results.py` (`campaign_pass`) |
+| Async runner | `async_runner.py` |
+| Conf builder | `conf_builder.py` |
+| Store | `engine/store/` |
 | XDG / deps | `paths.py`, `system_deps.py` |
 
-### Service
+### Service runtime
 
 | Задача | Модуль |
 |---|---|
-| Пул ns | `netns_pool.py`, `firewall.py`, `ns_firewall.py` |
-| nfqws2 | `nfqws2.py`, `nfqws2_launcher.py` |
-| RSS / pkill helpers | `metrics.py` |
-| Live probe journal | `live_events.py` |
-| Батч lua_bridge | `batch_service.py`, `batch_bridge_probe.py`, `lua_session.py` |
-| Lua IPC | `lua_bridge_ipc.py`, `lua_conf.py`, `lua_netns.py` |
-| Тёплый probe | `probe_service.py`, `probe.py` |
-| Unix+HTTP сервер | `server.py` |
-| Lock | `run_control.py` |
+| Пул ns / iptables | `netns_pool.py`; `ns_firewall.py` (`NsFirewall` in-ns, `HostFirewall` host); `firewall.py` shim |
+| nfqws2 lifecycle | `nfqws2.py`, `nfqws2_launcher.py`, `nfqws2_settle.py` |
+| pkill / RSS | `metrics.py` |
+| Live journal | `live_events.py` |
+| lua_bridge batch | `batch_service.py`, `batch_bridge_probe.py`, `lua_session.py` |
+| IPC | `lua_bridge_ipc.py`, `lua_conf.py`, `lua_netns.py` |
+| Curl/UDP workers | `probe.py`, `in_ns_workers.py` |
+| Oneshot sync runner | `test_runner.py` |
+| Serve / lock | `server.py`, `run_control.py` |
 
-### Checkers
+### Checkers / persist
 
 `tcp_tls`, `curl_probe`, `dns_secure`, `l3_probe`, `ip_block`, `port_block`, `quic_raw`, `http3`, `udp_voice`, `voice_dns`, `voice_discovery`, `youtube_url`, `dpi_diag/*`, `composite_runner`.
 
-### Persist / export
-
-`engine/store/` · `nfconf.py` · `data_block/` · `harvest_batch.py` (manifest v1) ·
-`shortlist_export.py` / `shortlist_import.py` · `provider_import.py`.
-
-Альтернативный движок стратегий (не дефолт): `byedpi_translator.py` — [byedpi_engine.md](byedpi_engine.md).
+`nfconf.py` · `data_block/` · `harvest_batch.py` · `shortlist` · `provider_import.py`. byedpi: [byedpi_engine.md](byedpi_engine.md).
 
 ---
 
-## Публичный vs внутренний API
+## 18. Публичный API
 
-**Стабильно снаружи пакета:**
+Стабильно: entry points; `StrategyItem`, `RunStateStore`, `matrix_fingerprint`, `open_run_store`; `invoke_curl_probe_worker`; `start_daemon`, `Nfqws2Manager`; `TlsResult`, `check_tls`; `build_keenetic_conf` / `build_raw_conf`; `preset_paths.resolve_*`.
 
-- entry points `bs`, `bc-main`, `bc-nfconf`, `bs-mcp`
-- `blockchecks.engine`: `StrategyItem`, `RunStateStore`, `matrix_fingerprint`, `open_run_store`
-- `service.probe.invoke_curl_probe_worker`
-- `service.nfqws2.start_daemon`, `Nfqws2Manager`
-- `checkers.TlsResult`, `check_tls`
-- `conf_builder.build_keenetic_conf` / `build_raw_conf`
-- `preset_paths.resolve_*`
-
-**Не импортировать снаружи:** private settle helpers; тонкие алиасы `async_runner._nfqws2_daemon`; `_probe_worker` proxies; поля `argparse.Namespace`, которых нет в `RunSpec`.
-
-Правила слоёв (archon): checkers/engine/service не импортируют `cli` и entry (`bs`, `main`). См. `[tool.blockchecks.architecture]` в pyproject и [api.md](api.md) §10.
+Не импортировать снаружи: private settle; `async_runner._nfqws2_daemon`; `_probe_worker` proxies; поля `Namespace` вне `RunSpec`.
 
 ---
 
-## Известные ограничения (архитектурные)
+## 19. Известные ограничения 1.4.0
 
-1. `bs scan` — TCP-only; `--auto-discover` на scan бесполезен (сбрасывается).
-2. Pair / discover-dns: в матрицу идёт `eps[0]`, остальные endpoints только логируются.
-3. Fan-out (`--curl-parallel`) на одной волне — **one-shot** `start_daemon`, не `scan_pick` (WARN once). Campaign classic path удалён.
-4. Host-mode (без netns) и Lua Mode A (демон на весь прогон) — бэклог, не текущий data-path.
-5. `stderr=PIPE` у nfqws2 без drain на success — риск заполнения pipe на болтливом `--debug`.
+1. `bs scan` — TCP-only; `--auto-discover` сбрасывается.
+2. Pair / discover-dns: в матрицу используется только `eps[0]`.
+3. Fan-out волна — one-shot, не `scan_pick`.
+4. Host-mode (nfqws2 на хосте без netns) и Lua Mode A (демон на весь прогон) — бэклог.
+5. Persistent curl worker (`service/probe.py`) держит stderr в PIPE и дренирует его; launcher nfqws2 пишет stdout+stderr в `open_out_capture` (файл / DEVNULL), не в PIPE.
+6. QUIC на Fryazino не работает; curl_cffi `http_version=3` даёт ALPN-ложняк.
 
-Операционный гайд: [guide.md](guide.md). Скрипты кампаний: [scripts/README.md](../scripts/README.md). Смоки: [dev/README.md](../dev/README.md).
+Операторский гайд: [guide.md](guide.md). Кампании: [scripts/README.md](../scripts/README.md). Смоки и отладка: [dev/README.md](../dev/README.md).

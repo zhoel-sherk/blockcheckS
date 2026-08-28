@@ -1,8 +1,8 @@
 # Cookbook: add a generator family
 
-Strategy families live in [`engine/generators/families/`](../src/blockchecks/engine/generators/families/),
-exposed through the [`standard.py`](../src/blockchecks/engine/generators/standard.py) facade
-(`StandardGenerator`) and [`matrix_generator.py`](../src/blockchecks/engine/matrix_generator.py).
+Strategy families live in [`engine/generators/families/`](../../src/blockchecks/engine/generators/families/),
+exposed through the [`standard.py`](../../src/blockchecks/engine/generators/standard.py) facade
+(`StandardGenerator`) and [`matrix_generator.py`](../../src/blockchecks/engine/matrix_generator.py).
 
 ## 1. Add the family axis
 

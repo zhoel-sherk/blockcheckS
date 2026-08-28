@@ -13,11 +13,16 @@ build/
 .cursor/
 .cursor-audit/
 
-# Project
+# Project — runtime state, logs, campaign artifacts
 state.db
 state.db-journal
 state.db-wal
 state.db-shm
+# Root-level campaign DBs (e.g. week_cov.db); logs/*.db covered by logs/
+/*.db
+/*.db-journal
+/*.db-wal
+/*.db-shm
 run.lock
 *.lock
 logs/
@@ -25,6 +30,16 @@ output/
 .env
 reports/
 tmp-scripts/
+
+# Secrets / local credentials (settings.example.* stay tracked)
+token.txt
+settings.ini
+
+# Packet captures (dev/diag; blobs/ stays tracked)
+*.pcap
+*.pcapng
+*.sqlite
+*.sqlite3
 
 # pytest / lint
 .pytest_cache/
@@ -49,6 +64,6 @@ bin/
 # local agent onboarding file (not committed)
 AGENTS.md
 
-# local MCP planning/notes (not committed) — root dir only, NOT src/blockchecks/mcp/
+# Local agent notes — root /mcp/ only, NOT src/blockchecks/mcp/
 /mcp/
-global_audit.md
+*_audit.md

@@ -89,6 +89,7 @@ SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
 WHERE t.status IN ('PASS', 'THROTTLED')
+  AND (t.bridge_applied IS NULL OR t.bridge_applied = 1)
 ORDER BY t.domain, t.latency_ms;
 CREATE VIEW IF NOT EXISTS v_coverage AS
 SELECT s.name AS strategy, s.proto,
@@ -97,6 +98,7 @@ SELECT s.name AS strategy, s.proto,
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
 WHERE t.status IN ('PASS', 'THROTTLED')
+  AND (t.bridge_applied IS NULL OR t.bridge_applied = 1)
   AND t.id = (
     SELECT t2.id FROM tcp_results t2
     WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
@@ -107,7 +109,8 @@ HAVING domains_passed > 0
 ORDER BY domains_passed DESC;
 CREATE VIEW IF NOT EXISTS v_latest_run AS
 SELECT domain, COUNT(*) AS total,
-       SUM(CASE WHEN status IN ('PASS','THROTTLED') THEN 1 ELSE 0 END) AS passed,
+       SUM(CASE WHEN status IN ('PASS','THROTTLED')
+                AND (t.bridge_applied IS NULL OR t.bridge_applied = 1) THEN 1 ELSE 0 END) AS passed,
        MAX(timestamp) AS last_test
 FROM tcp_results t
 WHERE t.id = (
@@ -244,6 +247,7 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         FROM tcp_results t
         JOIN strategies s ON t.strategy_id = s.id
         WHERE t.status IN ('PASS', 'THROTTLED')
+          AND (t.bridge_applied IS NULL OR t.bridge_applied = 1)
         ORDER BY t.domain, t.latency_ms;
         CREATE VIEW v_coverage AS
         SELECT s.name AS strategy, s.proto,
@@ -252,6 +256,7 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         FROM tcp_results t
         JOIN strategies s ON t.strategy_id = s.id
         WHERE t.status IN ('PASS', 'THROTTLED')
+          AND (t.bridge_applied IS NULL OR t.bridge_applied = 1)
           AND t.id = (
             SELECT t2.id FROM tcp_results t2
             WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
@@ -262,7 +267,8 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
         ORDER BY domains_passed DESC;
         CREATE VIEW v_latest_run AS
         SELECT domain, COUNT(*) AS total,
-               SUM(CASE WHEN status IN ('PASS','THROTTLED') THEN 1 ELSE 0 END) AS passed,
+               SUM(CASE WHEN status IN ('PASS','THROTTLED')
+                        AND (t.bridge_applied IS NULL OR t.bridge_applied = 1) THEN 1 ELSE 0 END) AS passed,
                MAX(timestamp) AS last_test
         FROM tcp_results t
         WHERE t.id = (

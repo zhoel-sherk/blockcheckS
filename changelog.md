@@ -1,3 +1,10 @@
+## Unreleased
+
+- MCP `stop_campaign` calls `bs stop` (`run.lock`) first; daemon socket stop only if no campaign.
+- TCP ranking (`get_best_*`, `v_coverage`, MCP `query_strategies` / `generate_router_config`)
+  keeps `bridge_applied IS NULL OR = 1`.
+- `dbg_validate_strategy_syntax` warns on digit blob ids and rewrites `4pda`→`b4pda`.
+
 ## 1.4.0 — campaign lua_bridge-only, CLI slim, run-scoped resume (2026-08-28)
 
 Campaign TCP is **lua_bridge only**. Classic per-strategy nfqws2 restart is gone

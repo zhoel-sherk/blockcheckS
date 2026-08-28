@@ -293,6 +293,16 @@ async def test_validate_strategy_syntax_escapes_lt():
     assert "\\<" in result.escaped_conf_lines[1]
 
 
+async def test_validate_strategy_syntax_renames_digit_blob():
+    from blockchecks.mcp.server import dbg_validate_strategy_syntax
+
+    result = await dbg_validate_strategy_syntax("fake:blob=4pda:repeats=6:tcp_ts=-1000")
+    assert result.is_valid is True
+    assert any("b4pda" in line for line in result.escaped_conf_lines)
+    assert not any("blob=4pda" in line for line in result.escaped_conf_lines)
+    assert any("digit" in c.lower() or "4pda" in c for c in result.detected_conflicts)
+
+
 def test_get_manifest_path_resolves_dev_tree():
     from blockchecks.mcp.server import get_manifest_path
 
@@ -505,6 +515,44 @@ async def test_query_strategies_pass_excludes_throttled(tmp_path):
     assert result[0]["status"] == "PASS"
 
 
+async def test_query_strategies_excludes_pass_without_applied(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "applied.db"
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE strategies (id INTEGER PRIMARY KEY, name TEXT, proto TEXT, flags TEXT)"
+    )
+    con.execute(
+        "CREATE TABLE tcp_results (id INTEGER PRIMARY KEY, strategy_id INTEGER, "
+        "domain TEXT, status TEXT, http_code INTEGER, latency_ms REAL, "
+        "timestamp TEXT, fail_phase TEXT, probe_host TEXT DEFAULT '', "
+        "bridge_applied INTEGER)"
+    )
+    con.executemany(
+        "INSERT INTO strategies (name, proto) VALUES (?,?)",
+        [("no_apply", "tcp"), ("applied", "tcp"), ("oneshot", "tcp")],
+    )
+    con.executemany(
+        "INSERT INTO tcp_results "
+        "(strategy_id, domain, status, http_code, latency_ms, timestamp, fail_phase, bridge_applied) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        [
+            (1, "a.com", "PASS", 200, 40.0, "2026-08-16", "", 0),
+            (2, "a.com", "PASS", 200, 80.0, "2026-08-16", "", 1),
+            (3, "a.com", "PASS", 200, 70.0, "2026-08-16", "", None),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    from blockchecks.mcp.server import query_strategies
+
+    result = await query_strategies("a.com", status="PASS", limit=10, db_path=str(db))
+    names = {r["strategy"] for r in result}
+    assert names == {"applied", "oneshot"}
+
+
 async def test_query_strategies_throttled_only(tmp_path):
     import sqlite3
 
@@ -583,27 +631,54 @@ async def test_get_presets_invalid_kind():
 async def test_stop_campaign_delegates_to_daemon(monkeypatch):
     from blockchecks.mcp import server as ms
 
+    def fake_lock(*, force=False, wait_sec=30.0):
+        return 2, "No active blockcheckS run (missing or stale run.lock)"
+
     async def fake_send(action, payload, timeout=30.0, socket_path=None):
         assert action == "stop"
         return {"ok": True, "error": None, "data": {"action_status": "stopping"}}
 
+    monkeypatch.setattr("blockchecks.service.run_control.request_graceful_stop", fake_lock)
     monkeypatch.setattr(ms, "_send_daemon_request", fake_send)
     result = await ms.stop_campaign()
     assert result.get("status") == "stopping"
     assert result.get("action_status") == "stopping"
     assert result.get("ok") is True
+    assert result.get("source") == "daemon"
 
 
 async def test_stop_campaign_parses_legacy_stopping_envelope(monkeypatch):
     from blockchecks.mcp import server as ms
 
+    def fake_lock(*, force=False, wait_sec=30.0):
+        return 2, "No active blockcheckS run (missing or stale run.lock)"
+
     async def fake_send(action, payload, timeout=30.0, socket_path=None):
         return {"ok": False, "error": "cmd failed: stopping", "status": "stopping", "data": {}}
 
+    monkeypatch.setattr("blockchecks.service.run_control.request_graceful_stop", fake_lock)
     monkeypatch.setattr(ms, "_send_daemon_request", fake_send)
     result = await ms.stop_campaign()
     assert result.get("ok") is True
     assert result.get("status") == "stopping"
+
+
+async def test_stop_campaign_uses_run_lock(monkeypatch):
+    from blockchecks.mcp import server as ms
+
+    def fake_lock(*, force=False, wait_sec=30.0):
+        assert force is False
+        return 0, "Stopped pid 9 (full) — DB flush/export should have completed on graceful shutdown"
+
+    async def boom(*_a, **_k):
+        raise AssertionError("daemon stop must not run when run.lock is active")
+
+    monkeypatch.setattr("blockchecks.service.run_control.request_graceful_stop", fake_lock)
+    monkeypatch.setattr(ms, "_send_daemon_request", boom)
+    result = await ms.stop_campaign()
+    assert result["ok"] is True
+    assert result["source"] == "run.lock"
+    assert result["status"] == "stopped"
 
 
 async def test_query_strategies_sqlite_error_returns_list(tmp_path, monkeypatch):

@@ -111,6 +111,8 @@ def _resolve_impersonate() -> str:
 
 
 _WORKING_STATUSES = "('PASS','THROTTLED')"
+# Latest-row harvest/export: keep oneshot (NULL) and APPLIED; drop lua PASS without APPLIED.
+_CAMPAIGN_PASS_TCP = "(t.bridge_applied IS NULL OR t.bridge_applied = 1)"
 _DEFAULT_FLUSH_INTERVAL_SEC = 15.0
 _WAL_CHECKPOINT_EVERY = 5
 _WAL_CHECKPOINT_ELAPSED_SEC = 60.0
@@ -699,7 +701,8 @@ class SqliteRunStore:
             await SqliteRunStore._apply_pragmas(db)
             cur = await db.execute(
                 f"SELECT domain, COUNT(*), "
-                f"SUM(CASE WHEN status IN {_WORKING_STATUSES} THEN 1 ELSE 0 END) "
+                f"SUM(CASE WHEN status IN {_WORKING_STATUSES} "
+                f"AND (bridge_applied IS NULL OR bridge_applied = 1) THEN 1 ELSE 0 END) "
                 f"FROM tcp_results GROUP BY domain"
             )
             rows = await cur.fetchall()
@@ -817,7 +820,8 @@ class SqliteRunStore:
             await SqliteRunStore._apply_pragmas(db)
             row = await db.execute(
                 f"""SELECT COUNT(*),
-                           SUM(CASE WHEN t.status IN {_WORKING_STATUSES} THEN 1 ELSE 0 END)
+                           SUM(CASE WHEN t.status IN {_WORKING_STATUSES}
+                                     AND {_CAMPAIGN_PASS_TCP} THEN 1 ELSE 0 END)
                     FROM tcp_results t
                     JOIN strategies s ON t.strategy_id = s.id
                     WHERE t.domain=? AND s.proto IN ({placeholders})
@@ -843,6 +847,7 @@ class SqliteRunStore:
                     f"""SELECT COUNT(*) FROM tcp_results t
                        JOIN strategies s ON t.strategy_id=s.id
                        WHERE t.status IN {_WORKING_STATUSES} AND s.proto='tcp'
+                         AND {_CAMPAIGN_PASS_TCP}
                          AND t.id = (
                            SELECT t2.id FROM tcp_results t2
                            WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
@@ -879,7 +884,8 @@ class SqliteRunStore:
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain=?
                        ORDER BY t2.id DESC LIMIT 1
-                   ) AND t.status IN {_WORKING_STATUSES}""",
+                   ) AND t.status IN {_WORKING_STATUSES}
+                     AND {_CAMPAIGN_PASS_TCP}""",
                 (proto, domain, domain),
             )
             cols = ["name", "status", "latency_ms"]
@@ -931,7 +937,8 @@ class SqliteRunStore:
                          AND t2.run_id = ?
                        ORDER BY t2.id DESC LIMIT 1
                      )
-                     AND t.status IN {_WORKING_STATUSES}""",
+                     AND t.status IN {_WORKING_STATUSES}
+                     AND {_CAMPAIGN_PASS_TCP}""",
                 (proto, run_id, run_id),
             )
             return {(r[0], r[1]) for r in await rows.fetchall()}
@@ -1047,6 +1054,7 @@ class SqliteRunStore:
                    FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.proto='tcp' AND t.domain=? AND t.status IN {_WORKING_STATUSES}
+                     AND {_CAMPAIGN_PASS_TCP}
                      AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain=?
@@ -1068,6 +1076,7 @@ class SqliteRunStore:
                    FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.proto='quic' AND t.domain=? AND t.status IN {_WORKING_STATUSES}
+                     AND {_CAMPAIGN_PASS_TCP}
                      AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain=?
@@ -1131,6 +1140,7 @@ class SqliteRunStore:
                 f"""SELECT t.domain, t.latency_ms FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.name=? AND s.proto='tcp' AND t.status IN {_WORKING_STATUSES}
+                     AND {_CAMPAIGN_PASS_TCP}
                      AND t.id = (
                        SELECT t2.id FROM tcp_results t2
                        WHERE t2.strategy_id = s.id AND t2.domain = t.domain
@@ -1167,6 +1177,7 @@ class SqliteRunStore:
                     FROM tcp_results t
                     JOIN strategies s ON t.strategy_id = s.id
                     WHERE s.proto='tcp' AND t.status IN {_WORKING_STATUSES}
+                      AND {_CAMPAIGN_PASS_TCP}
                       AND t.id = (
                         SELECT t2.id FROM tcp_results t2
                         WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
@@ -1204,6 +1215,7 @@ class SqliteRunStore:
                     JOIN strategies s ON t.strategy_id = s.id
                     WHERE s.proto='tcp' AND t.domain IN ({placeholders})
                       AND t.status IN {_WORKING_STATUSES}
+                      AND {_CAMPAIGN_PASS_TCP}
                       AND t.id = (
                         SELECT t2.id FROM tcp_results t2
                         WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain

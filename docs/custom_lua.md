@@ -393,7 +393,7 @@ async_runner.test_tcp()
   pool.release(ns) → _cleanup_ns: pkill nfqws2 + iptables -F OUTPUT
 ```
 
-Код: `engine/in_ns_workers.py` (`_run_tcp_check`), `service/nfqws2.py` (`start_daemon`), `service/netns_pool.py` (`_cleanup_ns`).
+Код: `service/in_ns_workers.py` (`_run_tcp_check`), `service/nfqws2.py` (`start_daemon`), `service/netns_pool.py` (`_cleanup_ns`).
 
 #### Бюджет времени на один TLS-probe (FAIL, wssize retry)
 
@@ -691,7 +691,7 @@ NetNsPool worker bs-p-0 (persistent across many strategies)
 | **7.1** | `lua/blockchecks/init.lua`, `scan_bridge.lua`, `write_ipc()` |
 | **7.2** | `LuaBridge` Python module (`service/lua_bridge_ipc.py`) + `/dev/shm` layout |
 | **7.3** | `build_bridge_conf()` + rolling batch iterator |
-| **7.4** | `AsyncTestRunner` branch: `--lua-bridge` + `--bridge-batch 500` |
+| **7.4** | `AsyncTestRunner` default backend: lua_bridge (`--bridge-batch 500`, `--lua-bridge` deprecated no-op) |
 | **7.5** | Persistent iptables on worker acquire (не `-A` per test) |
 | **7.6** | Metrics: `settle_ms=0`, `bridge_batch`, `applied_gen` в DB |
 | **7.7** | Integration / smoke: lua_bridge batch vs one-shot `start_daemon` (classic campaign removed) |

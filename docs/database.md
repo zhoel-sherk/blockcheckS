@@ -176,9 +176,10 @@ attempts, default 300). Written by the campaign, read by MCP
 Suspicious lua-bridge PASSes (no APPLIED event) are marked
 `tcp_results.bridge_applied = 0`. After 1.4.0 campaign write path they are stored
 as `FAIL` (`fail_phase=no_bridge_applied`). `bs harvest-batch` and smoke asserts
-require `bridge_applied=1`. `bc-nfconf` / MCP `query_strategies` still filter
-`status IN ('PASS',…)` only — do not export a pre-fix `week_cov.db` through nfconf
-if you need validation-grade rows. Quarantine seed from `domain_pass_rows()` runs
+require `bridge_applied=1`. `bc-nfconf` / MCP `query_strategies` / `get_best_*`
+rank working rows with `bridge_applied IS NULL OR = 1` (drop lua PASS without
+APPLIED; keep oneshot NULL). MCP retries without the clause if the column is
+absent (warning). Quarantine seed from `domain_pass_rows()` runs
 **only** when `--resume` is set.
 
 ## Resume / fingerprint
@@ -273,5 +274,6 @@ validators (dpi-tester). Schema constant: `SCHEMA = "blockchecks.harvest/v1"` in
 bc-nfconf --db state.db --limit 3 --out-dir output
 ```
 
-Reads `v_coverage` / best strategies via `SqliteRunStore.get_best_*` (status PASS,
-**not** gated on `bridge_applied`). Validation-grade: `bs harvest-batch`.
+Reads `v_coverage` / best strategies via `SqliteRunStore.get_best_*`
+(`PASS`/`THROTTLED` and `bridge_applied IS NULL OR = 1`). Strict APPLIED=1:
+`bs harvest-batch`.

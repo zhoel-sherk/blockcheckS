@@ -210,7 +210,7 @@ Campaign `scan`/`pair`/`full` TCP всегда **lua_bridge**: один nfqws2 �
 
 One-shot (`bs tcp`, `bs composite`, fan-out `--curl-parallel`) по-прежнему поднимает nfqws2 через `start_daemon` (не campaign-batch).
 
-**Целостность PASS:** кампания пишет `PASS` в harvest/AQ только если HTTP OK **и** Lua APPLIED (`campaign_pass`). Строка `status=PASS` без `bridge_applied=1` — подозрительна (до 1.3.9/фиксов week_cov). Валидационный экспорт: `bs harvest-batch` (фильтр APPLIED). `bc-nfconf` и MCP `query_strategies` читают сырой `status='PASS'` — не кормите их legacy DB без оговорки.
+**Целостность PASS:** кампания пишет `PASS` в harvest/AQ только если HTTP OK **и** Lua APPLIED (`campaign_pass`). Строка `status=PASS` без `bridge_applied=1` — подозрительна (до 1.3.9/фиксов week_cov). Валидационный экспорт: `bs harvest-batch` (фильтр APPLIED=1). `bc-nfconf` и MCP `query_strategies` берут PASS с `bridge_applied IS NULL OR = 1`.
 
 Карантин mid-run исключает домены с 0 PASS за `--quarantine-min` попыток. Сид из истории БД — **только** `--resume` (повтор без resume не наследует карантин). Infra FAIL (shm EPERM и т.п.) в `quarantine_min` не входит.
 
@@ -479,6 +479,6 @@ PR: [CONTRIBUTING.md](../CONTRIBUTING.md). Устройство прогона:
 
 1. `bs scan` не тестирует голос (`auto_discover` сбрасывается).
 2. Discover/pair использует только `eps[0]`.
-3. `stderr=PIPE` у nfqws2 без drain — риск заполнения pipe на болтливом `--debug`.
+3. nfqws2 launcher пишет stdout+stderr в `open_out_capture` (файл / DEVNULL). PIPE+drain — у persistent curl worker (`service/probe.py`), не у демона.
 4. Не коммитить `state.db` и `*.egg-info`.
 5. Windows: только юнит-тесты; CLI больше не падает на `×` в cp1251.

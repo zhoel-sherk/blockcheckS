@@ -75,6 +75,45 @@ async def test_log_tcp_and_get_best_tcp_probe_host(tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_get_best_tcp_excludes_pass_without_applied(tmp_path):
+    store = open_run_store(tmp_path / "applied.db")
+    await store.init()
+    await store.log_tcp(
+        "lua_false",
+        "discord.com",
+        "PASS",
+        50.0,
+        200,
+        config_path="fake:blob=stun",
+        bridge_applied=False,
+    )
+    await store.log_tcp(
+        "lua_ok",
+        "discord.com",
+        "PASS",
+        90.0,
+        200,
+        config_path="fake:blob=max_ru",
+        bridge_applied=True,
+    )
+    await store.log_tcp(
+        "oneshot",
+        "discord.com",
+        "PASS",
+        80.0,
+        200,
+        config_path="fake:blob=google",
+        bridge_applied=None,
+    )
+    names = {r["strategy"] for r in await store.get_best_tcp("discord.com", limit=10)}
+    assert names == {"lua_ok", "oneshot"}
+    working = await store.get_working_tcp("discord.com")
+    assert "lua_false" not in working
+    assert await store.count_tcp_passes("discord.com") == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_migration_adds_fail_phase_column(tmp_path):
     import sqlite3
 

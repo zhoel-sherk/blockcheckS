@@ -26,6 +26,29 @@ DEFAULT_SOCKET_PATH = Path(
 )
 DEFAULT_TIMEOUT_SEC = 30.0
 
+# Keep oneshot (NULL) and lua APPLIED; drop PASS with bridge_applied=0.
+_CAMPAIGN_PASS = "(bridge_applied IS NULL OR bridge_applied = 1)"
+_CAMPAIGN_PASS_T = "(t.bridge_applied IS NULL OR t.bridge_applied = 1)"
+
+
+def _sqlite_exec_bridge_fallback(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
+    """Run SQL; if *bridge_applied* column is missing, strip the predicate and retry."""
+    import sqlite3
+
+    try:
+        return cur.execute(sql, params)
+    except sqlite3.OperationalError as err:
+        if "bridge_applied" not in str(err):
+            raise
+        log.warning("SQLite has no bridge_applied column (%s); retrying without filter", err)
+        stripped = (
+            sql.replace(f" AND {_CAMPAIGN_PASS_T}", "")
+            .replace(f" AND {_CAMPAIGN_PASS}", "")
+            .replace(f"AND {_CAMPAIGN_PASS_T}", "")
+            .replace(f"AND {_CAMPAIGN_PASS}", "")
+        )
+        return cur.execute(stripped, params)
+
 
 def get_manifest_path() -> Path:
     """Locate presets/manifest.toml in dev tree or packaged wheel.
@@ -258,13 +281,15 @@ async def generate_router_config(
         try:
             con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
             cur = con.cursor()
-            tcp_rows = cur.execute(
-                """SELECT s.name FROM strategies s
+            tcp_rows = _sqlite_exec_bridge_fallback(
+                cur,
+                f"""SELECT s.name FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.proto='tcp' AND t.status='PASS'
+                     AND {_CAMPAIGN_PASS_T}
                    GROUP BY s.name
                    ORDER BY COUNT(DISTINCT t.domain) DESC, AVG(t.latency_ms) ASC
-                   LIMIT 5"""
+                   LIMIT 5""",
             ).fetchall()
             tcp_strats = [r[0] for r in tcp_rows]
 
@@ -501,7 +526,10 @@ def _read_db_progress(db_path: Path) -> dict[str, Any]:
     try:
         cur = con.cursor()
         total = cur.execute("SELECT COUNT(*) FROM tcp_results").fetchone()[0]
-        passed = cur.execute("SELECT COUNT(*) FROM tcp_results WHERE status='PASS'").fetchone()[0]
+        passed = _sqlite_exec_bridge_fallback(
+            cur,
+            f"SELECT COUNT(*) FROM tcp_results WHERE status='PASS' AND {_CAMPAIGN_PASS}",
+        ).fetchone()[0]
         rates = {}
         for phase, cnt in cur.execute(
             "SELECT fail_phase, COUNT(*) FROM tcp_results "
@@ -510,8 +538,11 @@ def _read_db_progress(db_path: Path) -> dict[str, Any]:
             rates[str(phase)] = int(cnt)
 
         domain_pass = {}
-        for d, cnt in cur.execute(
-            "SELECT domain, COUNT(*) FROM tcp_results WHERE status='PASS' GROUP BY domain ORDER BY COUNT(*) DESC LIMIT 10"
+        for d, cnt in _sqlite_exec_bridge_fallback(
+            cur,
+            f"SELECT domain, COUNT(*) FROM tcp_results "
+            f"WHERE status='PASS' AND {_CAMPAIGN_PASS} "
+            f"GROUP BY domain ORDER BY COUNT(*) DESC LIMIT 10",
         ).fetchall():
             domain_pass[str(d)] = int(cnt)
 
@@ -659,6 +690,7 @@ async def query_strategies(
     """
     Returns top working strategies for a domain/target from state.db (read-only).
     Reads the latest PASS/THROTTLED result per strategy ordered by latency.
+    TCP rows with bridge_applied=0 are omitted; oneshot NULL and APPLIED=1 are kept.
     proto: 'tcp' (default) or 'udp'.
     db_path defaults to the campaign DB from run.lock, else the XDG default.
     """
@@ -695,11 +727,14 @@ async def query_strategies(
             cur = con.cursor()
             placeholders = ",".join("?" for _ in statuses)
             if proto_key == "tcp":
-                rows = cur.execute(
+                applied = f" AND {_CAMPAIGN_PASS_T}" if status_key != "FAIL" else ""
+                rows = _sqlite_exec_bridge_fallback(
+                    cur,
                     f"""SELECT s.name, t.latency_ms, t.http_code, t.status, t.timestamp, t.fail_phase, t.probe_host
                         FROM strategies s
                         JOIN tcp_results t ON t.strategy_id = s.id
                         WHERE s.proto='tcp' AND t.domain=? AND t.status IN ({placeholders})
+                          {applied}
                           AND t.id = (
                             SELECT t2.id FROM tcp_results t2
                             WHERE t2.strategy_id = s.id AND t2.domain=?
@@ -772,16 +807,22 @@ async def get_campaign_domains_summary(
             table = "tcp_results" if proto_key == "tcp" else "udp_results"
             target_col = "domain" if proto_key == "tcp" else "target"
 
-            rows = cur.execute(
+            pass_ok = (
+                f"status='PASS' AND {_CAMPAIGN_PASS}"
+                if proto_key == "tcp"
+                else "status='PASS'"
+            )
+            rows = _sqlite_exec_bridge_fallback(
+                cur,
                 f"""SELECT {target_col},
                            COUNT(*) as total_count,
-                           SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) as pass_count,
+                           SUM(CASE WHEN {pass_ok} THEN 1 ELSE 0 END) as pass_count,
                            SUM(CASE WHEN status='FAIL' THEN 1 ELSE 0 END) as fail_count,
-                           MIN(CASE WHEN status='PASS' THEN latency_ms ELSE NULL END) as min_latency,
-                           AVG(CASE WHEN status='PASS' THEN latency_ms ELSE NULL END) as avg_latency
+                           MIN(CASE WHEN {pass_ok} THEN latency_ms ELSE NULL END) as min_latency,
+                           AVG(CASE WHEN {pass_ok} THEN latency_ms ELSE NULL END) as avg_latency
                     FROM {table}
                     GROUP BY {target_col}
-                    ORDER BY pass_count DESC, total_count DESC"""
+                    ORDER BY pass_count DESC, total_count DESC""",
             ).fetchall()
 
             domains = []
@@ -870,18 +911,47 @@ async def get_presets(kind: str = "strategies") -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-async def stop_campaign(wait: float = 30.0) -> dict[str, Any]:
+async def stop_campaign(wait: float = 30.0, force: bool = False) -> dict[str, Any]:
     """
-    Gracefully stops the active long-term campaign via the daemon socket
-    (action=stop → SIGTERM → flush → export). Requires `bs serve` to be up.
+    Stops an active campaign the same way as CLI ``bs stop`` (SIGTERM via run.lock).
+    If no campaign lock exists, falls back to stopping the ``bs serve`` daemon.
     """
+    from blockchecks.service.run_control import request_graceful_stop
+
+    code, message = await asyncio.to_thread(
+        request_graceful_stop, force=force, wait_sec=wait
+    )
+    if code == 0:
+        return {
+            "ok": True,
+            "status": "stopped",
+            "action_status": "stopped",
+            "message": message,
+            "source": "run.lock",
+        }
+    lock_miss = "No active blockcheckS run" in message or "Stale run lock" in message
+    if not lock_miss:
+        return {
+            "ok": False,
+            "error": message,
+            "status": "error",
+            "exit_code": code,
+            "source": "run.lock",
+        }
+
     response = await _send_daemon_request("stop", {}, timeout=min(wait + 5.0, 90.0))
     data = dict(response.get("data") or {})
     status = data.get("action_status") or data.get("status") or response.get("status")
     # Older clients sent status="stopping" (ok=False).
     if response.get("ok") or status == "stopping":
         resolved = status or "stopping"
-        return {**data, "ok": True, "status": resolved, "action_status": resolved}
+        return {
+            **data,
+            "ok": True,
+            "status": resolved,
+            "action_status": resolved,
+            "source": "daemon",
+        }
     return {
         "ok": False,
         "error": response.get("error") or "stop failed",
@@ -987,7 +1057,11 @@ async def dbg_validate_strategy_syntax(
     Checks parameter naming, case sensitivity, conflict detection (e.g. invalid offsets,
     missing blobs, unescaped '<' symbols), and returns sanitized config lines.
     """
-    from blockchecks.engine.conf_builder import escape_conf_lt, split_cli_args
+    from blockchecks.engine.conf_builder import (
+        _rename_export_blobs,
+        escape_conf_lt,
+        split_cli_args,
+    )
     from blockchecks.engine.static_validator import validate_strategy
 
     # Static sanity checks without requiring network daemon.
@@ -1003,16 +1077,18 @@ async def dbg_validate_strategy_syntax(
 
     # Unified semantics from engine.static_validator (single source of truth).
     result = validate_strategy(strategy_cli)
-    conflicts = [i.message for i in result.issues if i.severity == "error"]
-    if not conflicts:
-        conflicts = [i.message for i in result.issues if i.severity == "warning"]
+    errors = [i.message for i in result.issues if i.severity == "error"]
+    warnings = [i.message for i in result.issues if i.severity == "warning"]
+    conflicts = errors + warnings
 
     # Unified sanitization from conf_builder (single source of truth 1.3.1).
-    escaped_lines = [escape_conf_lt(t) for t in split_cli_args(strategy_cli)]
+    escaped_lines = [
+        _rename_export_blobs(escape_conf_lt(t)) for t in split_cli_args(strategy_cli)
+    ]
 
     return StrategySyntaxCheck(
         raw_strategy=strategy_cli,
-        is_valid=len(conflicts) == 0,
+        is_valid=len(errors) == 0,
         parsed_tokens=tokens,
         escaped_conf_lines=escaped_lines,
         detected_conflicts=conflicts,

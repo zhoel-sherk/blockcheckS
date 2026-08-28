@@ -71,6 +71,8 @@ WARNING_CASES = [
     ("fakedsplit:tcp_ts=-1000", ["split_without_pos"]),
     # repeats=21 -> warning (not error)
     ("fake:blob=stun:repeats=21", ["repeats_range"]),
+    ("multisplit:pos=1:seqovl=568:seqovl_pattern=4pda", ["digit_blob_id"]),
+    ("fake:blob=4pda:repeats=6:tcp_ts=-1000", ["digit_blob_id"]),
 ]
 
 

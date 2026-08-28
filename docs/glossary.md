@@ -25,7 +25,7 @@
 | **curl fan-out** | `--curl-parallel` — multi-domain per nfqws2 (GP `curl_parallelism`, **not** repeats) |
 | **strategy repeats** | `:repeats=N` in lua-desync line — nfqws2 fake packet count (matrix only) |
 | **XDG** | XDG Base Directory spec — `~/.config`, `~/.local/state`, `~/.local/share`, `~/.cache` |
-| **ONB-7** | Packaging rule: editable install required for `configs/` and `presets/` resolution |
+| **ONB-7** | Packaging: wheel self-sufficient since 1.2.1a (`configs/`/`presets/`/`blobs` in data-files); editable install still recommended for development |
 | **T1 / T2** | Blob tiers: T1 = shipped, T2 = external (Flowseal/bol-van) |
 | **fan-out** | Multi-domain curl probe per single nfqws2 session (B2) |
 | **composite** | One `.conf` handling TCP+UDP with `--new=voice` profiles |
@@ -39,7 +39,7 @@
 | **GV-1** | Googlevideo videoplayback probe (signed CDN URL, not apex) |
 | **BC2** | blockcheck2.sh parity — foolings list, repeats logic, family ordering |
 | **shortlist** | JSON export of best strategies per domain for GP control-plane |
-| **JA4** | Browser TLS fingerprint — curl_cffi impersonates Chrome 124 BoringSSL |
+| **JA4** | Browser TLS fingerprint via curl_cffi; default pin `chrome124` (`BLOCKCHECKS_IMPERSONATE`, guide) |
 | **FailPhase** | Enum (32 tokens) классификации фазы сбоя пробы (DNS/L3/SNI/stall/QoS/QUIC/http) — единый источник для bandit/S0 и генераторов |
 | **TriageProfile** | Детерминированный профиль вмешательства DPI из preflight: dns/sinkhole, unbypassable L3, stream-stall 7-42KB, QoS throttle, QUIC drop, TLS-fingerprint block, post-quantum |
 | **L3/L4 probe** | `checkers/l3_probe.py` — SYN-проба + ICMP Type 3 → L4_SYN_DROP / L4_RST_AT_SYN / ICMP_BLOCK |
@@ -51,3 +51,12 @@
 | **HTTP bridge** | HTTP-слой поверх socket core в `bs serve` (порт 8089). Обеспечивает REST API и SSE. Задокументирован в `docs/api.md` |
 | **SSE (Server-Sent Events)** | Протокол для стриминга realtime-уведомлений (`/api/events`) о прогрессе проверок |
 | **Hybrid envelope** | Единый формат JSON-ответов (`{"status":"ok", "ok":true, "data":...}`) для HTTP, Socket и MCP слоёв |
+| **bridge_applied** | Lua bridge event: nfqws2 действительно выполнил стратегию; `campaign_pass` требует HTTP OK **и** `bridge_applied=True` |
+| **campaign_pass** | Строгое определение PASS для кампаний: HTTP OK ∧ `bridge_applied=True`; без APPLIED строка пишется как FAIL |
+| **domain quarantine** | Исключение домена из очереди mid-run при 0 PASS за `--quarantine-min` попыток; сид из БД только при `--resume` |
+| **harvest-batch** | Read-only экспорт топ-стратегий PASS+APPLIED в `batch.txt` + `manifest.json` для внешних валидаторов |
+| **live events** | NDJSON-журнал проб (`events_live.jsonl`) + `current_probe.json` для наблюдения за кампанией без рестарта |
+| **MCP** | Model Context Protocol сервер (`bs-mcp`): 22 инструмента для LLM-клиентов (Cursor/Claude/opencode) |
+| **stop_campaign** | MCP-инструмент: `bs stop` по `run.lock`; если кампании нет — останавливает демон `bs serve` |
+| **run_id / resume fingerprint** | `runs.id` + fingerprint матрицы; resume skip keys scoped только на этот `run_id`; без `--resume` — новый run_id |
+| **UNIQUE(strategy, domain, protocol)** | Уникальность в `data_block` таблице `pass_strategies`; legacy двух-колоночный unique мигрируется автоматически |

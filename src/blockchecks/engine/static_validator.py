@@ -136,6 +136,25 @@ def validate_strategy(
     return result
 
 
+def _warn_digit_blob_ids(result: StrategyValidationResult, blobs: list[str]) -> None:
+    """nfqws2 rejects identifiers that start with a digit (4pda → b4pda)."""
+    from blockchecks.engine.blob_aliases import safe_blob_name
+
+    for name in blobs:
+        if name[:1].isdigit() and not re.fullmatch(r"0x[0-9a-fA-F]+", name):
+            result.issues.append(
+                ValidationIssue(
+                    "digit_blob_id",
+                    (
+                        f"blob/pattern '{name}' starts with a digit "
+                        f"(nfqws2 fatal identifier); runtime/export uses "
+                        f"'{safe_blob_name(name)}'"
+                    ),
+                    "warning",
+                )
+            )
+
+
 def _validate_single(
     raw: str,
     *,
@@ -147,6 +166,7 @@ def _validate_single(
     is_fake = _is_fake_family(raw)
     is_split = _is_split_family(raw)
     blobs = _extract_blobs(raw)
+    _warn_digit_blob_ids(result, blobs)
 
     # blob requirements
     if is_fake and not blobs:

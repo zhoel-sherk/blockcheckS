@@ -1,6 +1,6 @@
 # ML/NN roadmap — blockcheckS (AQ → learned orchestrator)
 
-> **Версия:** 1.1 · **blockcheckS:** 1.3.8+ · **Обновлено:** 2026-08-24  
+> **Версия:** 1.1 · **blockcheckS:** 1.4.0+ · **Обновлено:** 2026-08-28  
 > Рабочий документ: на него опираемся при датасете, ранкере, LLM-копилоте и эмуляторе DPI.  
 > Sprint-чеклисты по-прежнему в [todo.md](todo.md). Этот файл — *зачем* и *как*, не дублирует открытые тикеты.
 
@@ -94,7 +94,7 @@ flowchart TB
 | Контекст сети | `TriageProfile` (40+ полей) | [`triage.py`](../src/blockchecks/engine/triage.py), таблица `triage_snapshots` |
 | Провайдер | `pass_strategies`, `triage.toml`, DNS cache | [`data_block/store.py`](../src/blockchecks/data_block/store.py) |
 | Positive export | `shortlist_export` schema v1 | готовые PASS для холодного старта |
-| MCP | 21 инструмент | API для LLM-оркестратора |
+| MCP | 22 инструмента | API для LLM-оркестратора |
 | Очередь | ε-greedy + boost_pass + fan-out | baseline, с которым сравниваем ML |
 | Метрика | recall@K в todo | скрипта пока **нет** |
 
@@ -232,7 +232,7 @@ vLLM: parser зависит от семьи — `--tool-call-parser hermes` (Qwe
 
 Узкий MCP (наш случай, ~21 tool): **500–2000** качественных траекторий часто важнее, чем 30k мусорных. 10–30k — если хотим широкую генерализацию на чужие схемы. В микс: ~20% «инструмент не нужен», 20–30% multi-turn, 30–50% общий instruction/tool replay против забывания. Loss только на assistant/tool-call токенах.
 
-Оценка: **BFCL v4** (обновлялся весной 2026) — уже не «один function call», а агентный/multi-turn бенч. Для нас обязателен **свой** BS-MCP bench по 21 инструменту; BFCL — санитарная проверка, что модель не разучилась вызывать tools вообще.
+Оценка: **BFCL v4** (обновлялся весной 2026) — уже не «один function call», а агентный/multi-turn бенч. Для нас обязателен **свой** BS-MCP bench по 22 инструментам; BFCL — санитарная проверка, что модель не разучилась вызывать tools вообще.
 
 Llama-Factory и Axolotl живы. Llama-Factory 0.9.3+ умеет Qwen3; конфликт TRL↔Unsloth для SFT закрывали в конце 2025 (PR #9617). PPO по-прежнему капризный — нам для Track B не нужен на старте.
 
@@ -333,7 +333,7 @@ Fan-out и пул netns **не трогаем**. Меняется только �
 
 ### 1.1 Качество данных
 
-- [`scripts/ml/export_features.py`](../scripts/ml/export_features.py) (новый): SQLite → parquet.
+- `scripts/ml/export_features.py` (новый): SQLite → parquet.
   - Join: `tcp_results` + `strategies` + optional `triage_snapshots` + `provider_slug`.
   - Фичи: family, blobs, traits (переиспользовать [`adaptive_queue.py`](../src/blockchecks/engine/adaptive_queue.py)), domain cluster, fail_phase.
   - Label: PASS/THROTTLED = 1, иначе 0; опционально регрессия `latency_ms`.
@@ -343,7 +343,7 @@ Fan-out и пул netns **не трогаем**. Меняется только �
 
 ### 1.2 Оценка без ML
 
-- [`scripts/ml/eval_queue.py`](../scripts/ml/eval_queue.py): replay БД, AQ vs random vs family-round-robin.
+- `scripts/ml/eval_queue.py`: replay БД, AQ vs random vs family-round-robin.
 - Метрики: **recall@K**, jobs-to-first-pass, passes-before-50%-jobs.
 - База: `week_cov.db` + агрегат `data_block`.
 
@@ -611,6 +611,6 @@ reward = 1 if probe PASS else 0
 | [todo.md](todo.md) | Sprint-чеклисты: офлайн-ранкер, LinUCB, Geneva |
 | [database.md](database.md) | SQLite, `tcp_results`, `scan_weights`, resume |
 | [architecture.md](architecture.md) | Data flow, AQ, netns, MCP |
-| [mcp.md](mcp.md) | 21 инструмент, установка клиентов |
+| [mcp.md](mcp.md) | 22 инструмента, установка клиентов |
 | [long_term_runs.md](long_term_runs.md) | Серии A→F, week_cov |
 | [glossary.md](glossary.md) | DPI/nfqws2 термины продукта |
