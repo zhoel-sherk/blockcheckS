@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blockchecks"
-version = "1.3.9"
+version = "1.4.0"
 description = "Asynchronous DPI strategy testing framework for nfqws2/zapret2"
 readme = "README.pypi.md"
 license = "MIT"

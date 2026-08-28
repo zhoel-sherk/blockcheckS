@@ -108,8 +108,8 @@ Raspberry Pi 2: [install-rpi.md](install-rpi.md) и раздел [Память](
 | `bs mcp` | мост для Cursor/Claude (`pip install 'blockchecks[mcp]'`) | `bs-mcp` |
 | `bs stop` | снять `run.lock` | `bs stop --force` |
 | `bs data-block` | снимок XDG-провайдера в git `data_block/` | `bs data-block --out ./data_block --git` |
-| `bs harvest-batch` | топ PASS-стратегий → batch.txt + manifest (+ raw-конфы) для внешнего валидатора (dpi-tester); read-only к state.db | `bs harvest-batch -d logs/week_cov.db --top 20 --write-confs` |
-| `bs gc` | dry-run prune логов nfqws2 / run_summary / harvest / zapret2-dl / voice_cache_old (не трогает week_cov*) | `bs gc` / `bs gc --dry-run` / `bs gc --apply --max-age-days 14` |
+| `bs harvest-batch` | топ PASS+APPLIED → batch.txt + manifest (+ raw-конфы) для внешнего валидатора (dpi-tester); read-only к state.db | `bs harvest-batch -d logs/week_cov.db --top 20 --write-confs [--exclude-quarantined]` |
+| `bs gc` | dry-run prune логов nfqws2 / run_summary / harvest / zapret2-dl / voice_cache_old (не трогает week_cov*); `--db-days` — opt-in prune строк SQLite | `bs gc` / `bs gc --apply --max-age-days 14` / `bs gc --apply --db-days 14` |
 | `bc-nfconf` | конфиг роутера из уже готовой БД | `bc-nfconf --db state.db --out-dir out` |
 
 `bs scan` — TCP-only обёртка над `pair`: UDP и `--auto-discover` на scan
@@ -185,7 +185,8 @@ sudo bs full --preset coverage-tcp --profile 20h   # только если ну�
 | Фича | Дефолт | Выключить |
 |---|---|---|
 | Adaptive queue | ON | `--no-adaptive` |
-| Domain quarantine | ON (min 300 fails) | `--no-quarantine` / `--quarantine-min N`; `--quarantine-auto-denylist` пишет в denylist.txt |
+| Domain quarantine | ON (min 300 fails; seed from DB **only** with `--resume`) | `--no-quarantine` / `--quarantine-min N`; `--quarantine-auto-denylist` пишет в denylist.txt |
+| Time limit | off | `--max-timem N` or `--max-timeh N` (graceful stop; `--export-on-stop` on full/pair) |
 | TLS fingerprint | `chrome124` (pin для сравнимости) | env `BLOCKCHECKS_IMPERSONATE=chrome` (latest, сейчас chrome150); см. `dev/capture_quic_blob.sh` для QUIC-блобов |
 | Preflight | ON | `--no-preflight` (всё) или `--quick` (только prolog) |
 | ECH | ON | `--no-ech` |
@@ -208,6 +209,10 @@ sudo bs full --preset coverage-tcp --profile 20h   # только если ну�
 Campaign `scan`/`pair`/`full` TCP всегда **lua_bridge**: один nfqws2 на батч, стратегия через `/dev/shm`. `--classic` / `--probe-backend classic` логируют warning и мапятся на lua_bridge.
 
 One-shot (`bs tcp`, `bs composite`, fan-out `--curl-parallel`) по-прежнему поднимает nfqws2 через `start_daemon` (не campaign-batch).
+
+**Целостность PASS:** кампания пишет `PASS` в harvest/AQ только если HTTP OK **и** Lua APPLIED (`campaign_pass`). Строка `status=PASS` без `bridge_applied=1` — подозрительна (до 1.3.9/фиксов week_cov). Валидационный экспорт: `bs harvest-batch` (фильтр APPLIED). `bc-nfconf` и MCP `query_strategies` читают сырой `status='PASS'` — не кормите их legacy DB без оговорки.
+
+Карантин mid-run исключает домены с 0 PASS за `--quarantine-min` попыток. Сид из истории БД — **только** `--resume` (повтор без resume не наследует карантин). Infra FAIL (shm EPERM и т.п.) в `quarantine_min` не входит.
 
 ```bash
 sudo bs scan -d discord.com --generate --max 50

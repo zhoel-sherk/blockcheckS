@@ -66,7 +66,7 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 |---|---|---|
 | A | `triage_domain` | Preflight Triage домена (L3/DNS/TLS/QUIC) + рекомендации генераторов |
 | A | `find_working_strategy` | AQ-поиск стратегий с `time_limit_sec` (≤60) |
-| A | `generate_router_config` | nfqws2 .conf для Keenetic / OpenWrt / Linux |
+| A | `generate_router_config` | nfqws2 .conf для Keenetic / OpenWrt / Linux (демон если жив; иначе offline SQL по PASS, **без** фильтра `bridge_applied`) |
 | A | `get_service_status` | Статус демона (pool, uptime, активная серия) — требует `bs serve` |
 | A | `set_debug_mode` | Unified debug: Python DEBUG + nfqws2 `--debug=1` (требует `bs serve`) |
 | A | `get_series_status` | Статус кампании **напрямую из диска** (run.lock + state.db) — без демона; работает пока серия A→F владеет pool |
@@ -74,8 +74,8 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 | A2 | `query_strategies` | Топ-стратегии для домена из state.db (read-only, без демона/root; `proto=tcp\|udp`) |
 | A2 | `get_campaign_domains_summary` | Сводка по доменам кампании: PASS/FAIL/попытки из state.db (read-only) |
 | A2 | `get_presets` | Список strategy/domain пресетов из `presets/` (read-only) |
-| A2 | `stop_campaign` | Graceful stop активной кампании через демон (`bs serve`) |
-| A2 | `get_live_events` | Live-журнал проб (`events_live.jsonl`) — без демона, во время A→F |
+| A2 | `stop_campaign` | Останавливает демон **`bs serve`** (socket `stop`), **не** кампанию `bs full`. Во время A→F сокета нет — используй CLI `bs stop` |
+| A2 | `get_live_events` | Live-журнал проб (`events_live.<pid>.jsonl` / `current_probe.json`) — без демона; поля включают `applied` |
 | B | `dbg_probe_raw` | Одиночная проба стратегии, `dry_run_db=True` по умолчанию |
 | B | `dbg_inspect_lua_ipc` | Трейс событий Lua bridge (APPLIED / rst_in / ttl) |
 | B | `dbg_validate_strategy_syntax` | Офлайн-валидация CLI-аргументов nfqws2 |
@@ -98,9 +98,15 @@ ls -la ~/.local/state/blockcheckS/blockchecks.sock   # srw------- zhoel
 > `query_strategies`, `get_campaign_domains_summary`, `get_presets`, `get_live_events`,
 > `dbg_validate_strategy_syntax`, `get_nfqws2_status`, `get_zapret2_config`,
 > `list_zapret2_blobs`, `get_ipset_status`, `get_provider_profile` + ресурс `presets/manifest`.
+> Offline-fallback: `generate_router_config` (сырой PASS в SQL).
 > **Требуют `bs serve`**: `triage_domain`, `find_working_strategy`,
-> `generate_router_config`, `get_service_status`, `set_debug_mode`, `stop_campaign`, `dbg_probe_raw`,
-> `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`, `probe_strategy`.
+> `get_service_status`, `set_debug_mode`, `stop_campaign` (это stop **демона**, не `bs full`),
+> `dbg_probe_raw`, `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`, `probe_strategy`.
+
+`get_series_status` (диск): `backend` всегда `"lua_bridge"`; `adaptive` = нет `--no-adaptive` в argv;
+`quarantined[]` из таблицы; `live` = `current_probe.json`; `domain_pass_counts` — топ-10 PASS (сырой статус).
+`query_strategies` / `get_campaign_domains_summary` / `tcp_pass` **не** фильтруют `bridge_applied`
+(в отличие от `harvest-batch`). Для кампании во время A→F: диск-инструменты; стоп — `bs stop`.
 
 > **Скилл для LLM-агентов**: [docs/mcp-skill.md](mcp-skill.md) — шпаргалка
 > по инструментам, fair-exclusion правило и воркфлоу-цепочки (обезличенная

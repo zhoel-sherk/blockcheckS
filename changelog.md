@@ -1,8 +1,48 @@
-## Unreleased — campaign lua_bridge-only, CLI slim
+## 1.4.0 — campaign lua_bridge-only, CLI slim, run-scoped resume (2026-08-28)
 
-- Campaign TCP no longer restarts nfqws2 per strategy (`_run_classic_batch` / classic AQ cut). `--classic` warns and maps to lua_bridge. `--lua-bridge-compare` removed from CLI.
-- `--no-settle-profile` alias (week_cov argv). GP `--http-off`/`--http3-off` share dests with `--no-http`/`--no-quic`. Backend flags stripped from `bs tcp`/`udp` help. Series D retired.
-- One-shot `bs tcp` / composite / fan-out still use `start_daemon`.
+Campaign TCP is **lua_bridge only**. Classic per-strategy nfqws2 restart is gone
+from `scan`/`pair`/`full`. One-shot `bs tcp` / `composite` / fan-out still use
+`start_daemon`. Harvest/smoke/`campaign_pass` require HTTP OK **and**
+`bridge_applied`; `bc-nfconf` and MCP SQL still rank raw `status='PASS'`
+(use `harvest-batch` for validation-grade export, especially on pre-fix week_cov DBs).
+
+### Campaign / CLI
+
+- Removed `_run_classic_batch` / classic AQ. `--classic`, `--probe-backend classic`,
+  `BLOCKCHECKS_PROBE_BACKEND=classic` warn and map to lua_bridge. `--lua-bridge`
+  is a deprecated no-op. `--lua-bridge-compare` removed.
+- Backend flags stripped from `bs tcp`/`udp` help. Series D retired (use A).
+- `--no-settle-profile` alias for long runs. GP `--http-off`/`--http3-off` share
+  dests with `--no-http`/`--no-quic`.
+- `--reprobe-failed N` retries infrastructure FAIL on resume (not DPI FAIL).
+- `--max-timem` / `--max-timeh` graceful stop (+ `--export-on-stop` on full/pair).
+- `harvest-batch --exclude-quarantined`. `gc --db-days N` (opt-in row retention;
+  skipped while `run.lock` exists).
+
+### Integrity / IPC / quarantine
+
+- Campaign PASS = `campaign_pass` (`http_ok ∧ bridge_applied`). Lua HTTP-200
+  without APPLIED is stored as FAIL (`fail_phase=no_bridge_applied`).
+- IPC: `mkdir` `/dev/shm/blockchecks/<ns>` uses sudo fallback (chmod-only was
+  not enough when overflow-uid owned the parent). Heartbeat-fence / bind-retry /
+  stdout capture unchanged from 1.3.9.
+- Quarantine **seed_from_rows only with `--resume`**. Infra FAIL (`dev/shm`,
+  `Permission denied`, …) does not count toward `quarantine_min`. Re-sync
+  `queue.excluded_domains` after seed.
+
+### Architecture
+
+- `PairMatrixRunner`, probe executors, `BridgeWorkerPool`.
+- `in_ns_workers` / `test_runner` live under `service/`.
+- `nfqws2_launcher` + HostFirewall split from `Nfqws2Manager`.
+- Store: long-lived writer, `runs`/`run_id`, `epoch_ms`/`settle_ms`, WAL checkpoint.
+- Resume skip keys are **run_id-scoped** (matching fingerprint). Same file without
+  `--resume` opens a new run and does not skip prior PASS keys.
+
+### Tests / CI
+
+- ~1938 unit + 165 quality; shards cover launcher/harvest-gate files.
+- Live smoke tiers; `integration-safe` resume test uses `begin_run` + PASS keys.
 
 ## 1.3.9 — harvest-batch, host hygiene, bridge integrity (2026-08-25)
 

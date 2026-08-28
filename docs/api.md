@@ -82,12 +82,14 @@
 
 Реализовано **22 инструмента**. Детали и контракты — в [docs/mcp.md](mcp.md), воркфлоу — в [docs/mcp-skill.md](mcp-skill.md).
 
-- **Слой A (требуют демон):** `triage_domain`, `find_working_strategy`, `generate_router_config`, `get_service_status`, `set_debug_mode`, `get_log_tail`
-- **Слой A (оффлайн / серия):** `get_series_status`
-- **Слой A2 (оффлайн / данные):** `query_strategies`, `get_campaign_domains_summary`, `get_presets`, `stop_campaign` (через socket при активном демоне), `get_live_events` (live-журнал проб кампании)
-- **Слой B (требуют демон, отладка):** `dbg_probe_raw`, `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`
+- **Слой A (требуют демон):** `triage_domain`, `find_working_strategy`, `get_service_status`, `set_debug_mode`
+- **Слой A (гибрид):** `generate_router_config` (демон или offline PASS SQL без `bridge_applied`)
+- **Слой A (оффлайн / серия):** `get_series_status`, `get_log_tail` (диск: `python` / `campaign` / `nfqws2`)
+- **Слой A2 (оффлайн / данные):** `query_strategies`, `get_campaign_domains_summary`, `get_presets`, `get_live_events` (live-журнал проб кампании)
+- **Слой A2 (демон):** `stop_campaign` — stop **`bs serve`**, не `bs full` (для кампании: CLI `bs stop`)
+- **Слой B (требуют демон, отладка):** `dbg_probe_raw`, `dbg_inspect_lua_ipc`, `dbg_dump_pool_state`, `probe_strategy`
 - **Слой B (без демона):** `dbg_validate_strategy_syntax`
-- **Слой C (без демона, RO):** `get_nfqws2_status`, `get_zapret2_config`, `list_zapret2_blobs`, `get_ipset_status`, `get_provider_profile`, `probe_strategy`
+- **Слой C (без демона, RO):** `get_nfqws2_status`, `get_zapret2_config`, `list_zapret2_blobs`, `get_ipset_status`, `get_provider_profile`
 *(Псевдоним `probe_strategy` маппится на `dbg_probe_raw`)*
 
 `get_log_tail` читает каналы `python` / `campaign` / `nfqws2` с диска (`LOG_SOURCES`); live-пробы — `get_live_events`.

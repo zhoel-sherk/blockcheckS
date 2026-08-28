@@ -694,12 +694,12 @@ NetNsPool worker bs-p-0 (persistent across many strategies)
 | **7.4** | `AsyncTestRunner` branch: `--lua-bridge` + `--bridge-batch 500` |
 | **7.5** | Persistent iptables on worker acquire (не `-A` per test) |
 | **7.6** | Metrics: `settle_ms=0`, `bridge_batch`, `applied_gen` в DB |
-| **7.7** | Integration test: 500 strategies, compare results vs classic restart |
+| **7.7** | Integration / smoke: lua_bridge batch vs one-shot `start_daemon` (classic campaign removed) |
 
 ```bash
-# future CLI
+# campaign TCP (lua_bridge is the only batch backend)
 sudo bs scan -d discord.com --generate standard --max 500 \
-  --lua-bridge --bridge-batch 500 --parallel 4
+  --bridge-batch 500 --parallel 4
 ```
 
 Env overrides:
@@ -719,7 +719,7 @@ export BLOCKCHECKS_BRIDGE_BATCH=500
 | Stale `STRATEGY_FAIL` | event от прошлого curl | `gen` fence |
 | nfqws2 OOM | batch too large | cap 500–2000 |
 | Empty `strategy.id` | race before rename | write `strategy.ready` last |
-| PASS rate drift vs classic | `scan_pick` bug / wrong id | A/B mode `--lua-bridge-compare` |
+| PASS without APPLIED | curl 200, no Lua APPLIED | stored FAIL (`campaign_pass`); check IPC / heartbeat |
 | Daemon zombie | crash without pool cleanup | `nfqws2.pid` watch + restart |
 
 Debug: `--debug=@logs/...` + `events.ndjson` tail; `APPLIED` event на каждый ClientHello.
@@ -821,7 +821,7 @@ CLI: `scan`/`pair`/`full` — `--bridge-batch`, `--lua-extra`. `--classic` depre
 
 `bs full`: sequential + adaptive AQ используют batch service; fan-out остаётся one-shot (WARN once).
 
-Поэтапный flip default → `lua_bridge`: см. [todo.md](todo.md) (открытое / lua_bridge).
+Default уже `lua_bridge`; открытый бэклог (early-abort, host-mode): [todo.md](todo.md).
 
 ### 9.2 nfqws2.conf generation (lua_bridge) — ✅ done
 
@@ -848,8 +848,8 @@ class LuaBridge:
 
 ### 9.4 async_runner branch
 
-- default backend → `lua_bridge` (`DEFAULT_PROBE_BACKEND`); `--classic` /
-  `--probe-backend {classic,lua_bridge}` явно выбирают.
+- campaign TCP backend is **always** `lua_bridge`; `--classic` /
+  `--probe-backend {classic,lua_bridge}` warn and map (no second path).
 - shm cleanup: `netns_pool`, `run_control.run_session`
 
 ### 9.5 DB schema extensions (deferred)
@@ -866,8 +866,8 @@ class LuaBridge:
 - `tests/unit/test_lua_bridge.py` — IPC/conf
 - `tests/unit/test_batch_probe.py` — scheduler, accumulator, service mocks
 - `tests/unit/test_batch_probe_runner.py` — runner delegation
-- Integration: `sudo bs scan --lua-bridge --max 10`
-- **Не** ломать default path без `--lua-bridge`
+- Integration: `sudo bs scan --max 10` (lua_bridge campaign default)
+- One-shot: `sudo bs tcp` / `composite` still use `start_daemon`
 
 ---
 

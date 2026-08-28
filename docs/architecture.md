@@ -124,11 +124,11 @@ sequenceDiagram
   CLI->>Sched: configure_tcp_execution
   CLI->>AR: start pool
   AR->>Pool: acquire ns
-  alt lua_bridge default
+  alt lua_bridge campaign TCP
     AR->>Batch: one nfqws2 per batch
     Batch->>NFQ: scan_pick plus shm IPC
-  else classic
-    AR->>NFQ: restart per strategy
+  else one-shot tcp composite fan-out
+    AR->>NFQ: start_daemon per conf
   end
   AR->>W: curl or udp subprocess
   W-->>AR: status latency fail_phase
@@ -175,7 +175,7 @@ Campaign `scan`/`pair`/`full` крутит nfqws2 только через **lua_
 
 Подробности shm-файлов и `smart_fallback`: [custom_lua.md](custom_lua.md).
 
-Проба HTTPS: не host-curl, а **субпроцесс** `python -m blockchecks.engine.in_ns_workers --mode curl` внутри netns (`service/probe.py` → `invoke_curl_probe_worker`). UDP voice — тот же модуль `--mode udp`. Прокси `_probe_worker.py` / `_curl_probe_worker.py` — только back-compat импорты.
+Проба HTTPS: не host-curl, а **субпроцесс** `python -m blockchecks.service.in_ns_workers --mode curl` внутри netns (`service/probe.py` → `invoke_curl_probe_worker`). UDP voice — тот же модуль `--mode udp`. Прокси `engine/_probe_worker.py` / `_curl_probe_worker.py` — только back-compat импорты.
 
 ---
 
@@ -436,10 +436,10 @@ flowchart LR
 | Задача | Модуль |
 |---|---|
 | Пул ns | `netns_pool.py`, `firewall.py`, `ns_firewall.py` |
-| nfqws2 | `nfqws2.py` |
+| nfqws2 | `nfqws2.py`, `nfqws2_launcher.py` |
 | RSS / pkill helpers | `metrics.py` |
 | Live probe journal | `live_events.py` |
-| Батч classic/bridge | `batch_service.py`, `batch_bridge_probe.py`, `lua_session.py` |
+| Батч lua_bridge | `batch_service.py`, `batch_bridge_probe.py`, `lua_session.py` |
 | Lua IPC | `lua_bridge_ipc.py`, `lua_conf.py`, `lua_netns.py` |
 | Тёплый probe | `probe_service.py`, `probe.py` |
 | Unix+HTTP сервер | `server.py` |
@@ -480,7 +480,7 @@ flowchart LR
 
 1. `bs scan` — TCP-only; `--auto-discover` на scan бесполезен (сбрасывается).
 2. Pair / discover-dns: в матрицу идёт `eps[0]`, остальные endpoints только логируются.
-3. Fan-out и lua_bridge на одной волне несовместимы → classic.
+3. Fan-out (`--curl-parallel`) на одной волне — **one-shot** `start_daemon`, не `scan_pick` (WARN once). Campaign classic path удалён.
 4. Host-mode (без netns) и Lua Mode A (демон на весь прогон) — бэклог, не текущий data-path.
 5. `stderr=PIPE` у nfqws2 без drain на success — риск заполнения pipe на болтливом `--debug`.
 

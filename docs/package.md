@@ -1,6 +1,6 @@
 # Package structure — blockcheckS
 
-Аудит layout после packaging + CLI modernization (2026-08, 1.3.8).
+Аудит layout после 1.4.0 (lua_bridge-only campaign, service split, 2026-08-28).
 
 ## Канон
 
@@ -35,10 +35,6 @@ blockcheckS/
 │   │   ├── matrix_generator.py  # facade: generate_tcp/udp
 │   │   ├── conf_builder.py    # single-source nfqws2 arg sanitization
 │   │   ├── async_runner.py
-│   │   ├── test_runner.py
-│   │   ├── in_ns_workers.py   # subprocess curl/UDP worker (--mode curl|udp)
-│   │   ├── _probe_worker.py   # back-compat proxy → in_ns_workers (udp)
-│   │   ├── _curl_probe_worker.py # back-compat proxy → in_ns_workers (curl)
 │   │   └── ...
 │   └── checkers/
 │       ├── l3_probe.py        # L3/L4 SYN/ICMP blackhole probe
@@ -54,7 +50,10 @@ blockcheckS/
 │   ├── ns_firewall.py         # per-netns iptables OUTPUT rules
 │   ├── lua_bridge_ipc.py      # nfqws2 Lua bridge IPC (+ TTL-RST events)
 │   ├── nfqws2.py              # start_daemon / Nfqws2Manager
-│   └── nfqws2_settle.py       # wait_nfqws2_ready / _wait_nfqws2_gone
+│   ├── nfqws2_launcher.py     # Popen + bind-retry
+│   ├── nfqws2_settle.py       # wait_nfqws2_ready / _wait_nfqws2_gone
+│   ├── in_ns_workers.py       # subprocess curl/UDP worker (--mode curl|udp)
+│   └── test_runner.py         # oneshot host/netns TestRunner
 ├── configs/                   # repo-root .conf (CONFIGS_DIR)
 ├── presets/                   # manifest.toml registry + domains/ + strategies/
 ├── tests/
@@ -114,10 +113,10 @@ Flags: `--no-fetch-deps`, `--offline`, `--skip-deps-check`.
 ## Import graph
 
 ```
-bs ──► cli.parser (pydantic CliApp) ──► commands + async_runner / test_runner
+bs ──► cli.parser (pydantic CliApp) ──► commands + async_runner / service.test_runner
      └── add_campaign_args (scan/pair/full) + profiles.apply_profile
 main ──► RunSpec.from_args ──► CampaignContext ──► async_runner + nfconf
-async_runner ──► service.probe.invoke_curl_probe_worker ──► in_ns_workers --mode curl|udp
+async_runner ──► service.probe.invoke_curl_probe_worker ──► service.in_ns_workers --mode curl|udp
 in_ns_workers ──► checkers + service.netns_pool + service.nfqws2
 matrix_generator ──► generators/* (standard facade → families/)
 ```
@@ -133,13 +132,13 @@ Re-exported from `blockchecks.engine` and `blockchecks.checkers` — see
 ## Repository Structure & Metrics
 
 Full tree with line counts (Python / shell / lua / md; binaries excluded).
-Unit suite: **1528 passed**, quality **139**, integration **22** (sudo E2E).
+Unit suite: **1938 collected**, quality **165**, integration **22** (sudo E2E).
 
 ```
 src/blockchecks/                      (≈25 700 строк, 108+ py-файлов)
 ├── bs.py 17 | terminal.py 97 | main.py 234 | main_phases.py 1102 | nfconf.py 229
 ├── harvest_batch.py 310 | provider_import.py 230 | shortlist_export.py 188 | shortlist_import.py 206
-├── cli/  cliapp.py 602 | parser.py 916 | profiles.py 46 | presets.py 65 | user_config.py 104
+├── cli/  cliapp.py 602 | parser.py 1293 | profiles.py 46 | presets.py 65 | user_config.py 104
 │   └── commands/  bench_settle 161 | pair 208 | pair_phases 802 | serve 62 |
 │                  stop 14 | tcp 117 | udp 123
 ├── checkers/  composite_runner 189 | curl_probe 941 | dns_secure 497 |
@@ -151,20 +150,21 @@ src/blockchecks/                      (≈25 700 строк, 108+ py-файло�
 │   bridge_worker_pool 273 | blob_aliases 169 | byedpi_matrix_generator 144 |
 │   byedpi_translator 323 | conf_builder 361 | config 433 | db_logger 22 |
 │   domain_loader 175 | domain_quarantine 168 | fail_phase 128 | family_needs 192 |
-│   ggc_pool 317 | in_ns_workers 784 | matrix_generator 287 | nfqws_config 94 |
+│   ggc_pool 317 | matrix_generator 287 | nfqws_config 94 |
 │   pair_matrix_runner 271 | paths 322 | preflight 487 | probe_executors 531 |
 │   preset_paths 101 | results 82 | run_deadline 144 | run_finalize 154 |
 │   run_spec 185 | secure_io 24 | settings 107 | settle_profile 178 | strategy_loader 64 |
-│   system_deps 489 | tcp_fanout 100 | test_runner 353 | triage 130
+│   system_deps 489 | tcp_fanout 100 | triage 130
 │   ├── generators/  base 41 | custom 155 | flowseal 335 | standard 882 (facade)
 │   │   └── families/  fake 213 | split 253 | tamper 244 | _helpers 112
-│   └── store/  models 16 | schema 201 | sqlite_store 743
+│   └── store/  models 16 | schema 277 | sqlite_store 1269
 ├── service/  batch_bridge_probe 186 | batch_models 67 | batch_scheduler 110 |
-│   batch_service 385 | firewall 120 | live_events 211 | lua_bridge_ipc 133 |
+│   batch_service 385 | firewall 120 | live_events 211 | lua_bridge_ipc 458 |
 │   lua_conf 112 | lua_netns 82 | lua_session 141 | metrics 334 |
-│   netns_pool 228 | ns_firewall 211 | nfqws2 316 |
-│   nfqws2_settle 71 | probe 107 | probe_service 219 | run_control 178 | server 181
-tests/unit/                        (≈18 600 строк, 122 файла)   — 1528 passed
+│   netns_pool 228 | ns_firewall 211 | nfqws2 200 | nfqws2_launcher 370 |
+│   nfqws2_settle 71 | probe 107 | probe_service 219 | run_control 178 | server 181 |
+│   in_ns_workers 842 | test_runner 419
+tests/unit/                        (≈18 600 строк, 141 файла)   — 1938 collected
 tests/integration/                 (≈670 строк, 5 файлов)       — 22 passed (sudo)
 lua/blockchecks/                   (≈200 строк): geneva 65 | scan_bridge 90 |
                                    write_ipc 44 | init 3
@@ -176,9 +176,8 @@ systemd/                           blockcheck-series.service 18 | blockcheck-ser
 docs/                              (≈3 560 строк, 9 md + cookbook 5)
 ```
 
-Biggest modules: `main_phases` 1102 | `async_runner` 1007 | `curl_probe` 941 |
-`parser` 835 | `pair_phases` 802 | `in_ns_workers` 784 | `sqlite_store` 743 |
-`cliapp` 602 | `system_deps` 489 | `preflight` 487 | `config` 433.
+Biggest modules: `parser` 1293 | `sqlite_store` 1269 | `main_phases` 1102 | `async_runner` 1007 | `curl_probe` 941 |
+`in_ns_workers` 842 | `pair_phases` 802 | `cliapp` 602 | `system_deps` 489 | `preflight` 487 | `lua_bridge_ipc` 458.
 
 ## Quality
 

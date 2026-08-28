@@ -1,9 +1,9 @@
 # blockcheckS — подбор стратегий обхода DPI
 
-[![version](https://img.shields.io/badge/version-1.3.9-green)](#)
+[![version](https://img.shields.io/badge/version-1.4.0-green)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1528%20unit-success)](#)
+[![tests](https://img.shields.io/badge/tests-1938%20unit-success)](#)
 
 Программа на Linux перебирает стратегии **nfqws2 / zapret2** и показывает,
 какие из них реально открывают заблокированный сайт у твоего провайдера.
@@ -144,9 +144,15 @@ export DOCKER_HOST="unix://${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock
 | `bs pair` | То же + голос Discord (UDP) | `sudo bs pair -d discord.com --generate --auto-discover 5` |
 | `bs full` | Длинная кампания и экспорт | `sudo bs full --profile 20h` |
 | `bs tcp` / `bs udp` | Проверить одну готовую стратегию | `sudo bs tcp -d discord.com -c configs/simple_fake__fake_ts.conf` |
+| `bs composite` | Один составной `.conf` на пачку доменов | `sudo bs composite -c configs/composite_discord.conf` |
+| `bs bench-settle` | Подобрать settle/curl таймауты | `sudo bs bench-settle -d discord.com` |
 | `bs preflight` | Только диагноз DPI, без перебора | `sudo bs preflight -d youtube.com` |
 | `bs serve` | Демон для повторных проб | `sudo bs serve --pool 2` |
 | `bs mcp` | Мост для Cursor / Claude / opencode | `bs-mcp` — [docs/mcp.md](docs/mcp.md) |
+| `bs stop` | Снять `run.lock` (кампания, не `bs serve`) | `bs stop` |
+| `bs harvest-batch` | Топ PASS+APPLIED → batch.txt / manifest | `bs harvest-batch -d logs/week_cov.db --top 20` |
+| `bs gc` | Prune логов (dry-run); `--db-days` — retention SQLite | `bs gc` / `bs gc --apply --db-days 14` |
+| `bs data-block` | Снимок XDG-провайдера в git checkout | `bs data-block --out ./data_block --git` |
 | `bc-nfconf` | Собрать конфиг роутера из БД | `bc-nfconf --db state.db --out-dir output` |
 
 Готовые наборы флагов: `--profile smoke` (20 стратегий), `fast` (100),
@@ -154,7 +160,10 @@ export DOCKER_HOST="unix://${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock
 
 Полезные вещи включены по умолчанию. Выключить явно:
 `--no-adaptive`, `--no-preflight` (или `--quick`), `--no-ech`, `--no-wssize`,
-`--no-voice`.
+`--no-voice`. Лимит стены: `--max-timem N` / `--max-timeh N`.
+
+**1.4.0:** кампании TCP только через lua_bridge (`--classic` = warning).
+Harvest считает PASS только с `bridge_applied`; `bc-nfconf` читает сырой статус.
 
 Полный справочник: [docs/guide.md](docs/guide.md).
 
@@ -201,7 +210,7 @@ bc-nfconf --db logs/run.db --out-dir /path/to/out --ipset   # плюс IP-фил
 | [Raspberry Pi](docs/install-rpi.md) | Установка на armv7l |
 | [Glossary](docs/glossary.md) | Термины |
 | [API](docs/api.md) | HTTP / сокет / MCP |
-| [Changelog](changelog.md) | История (1.3.7 и ранее) |
+| [Changelog](changelog.md) | История (1.4.0 и ранее) |
 | [Roadmap](docs/todo.md) | Что ещё не сделано |
 
 Скрипты кампаний: [scripts/README.md](scripts/README.md).

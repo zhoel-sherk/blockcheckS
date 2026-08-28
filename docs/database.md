@@ -10,6 +10,8 @@ WAL mode; DAO connections set `busy_timeout=30000` (schema bootstrap uses 5000).
 
 ```mermaid
 erDiagram
+  runs ||--o{ tcp_results : run_id
+  runs ||--o{ udp_results : run_id
   strategies ||--o{ tcp_results : strategy_id
   strategies ||--o{ udp_results : strategy_id
   strategies {
@@ -19,9 +21,19 @@ erDiagram
     text config_path
     text first_seen
   }
+  runs {
+    int id PK
+    text started_at
+    text code_version
+    text args_hash
+    text fingerprint
+    text impersonate
+    text nfqws2_version
+  }
   tcp_results {
     int id PK
     int strategy_id FK
+    int run_id FK
     text domain
     text status
     int http_code
@@ -35,6 +47,7 @@ erDiagram
     text resolved_ip
     text dns_verdict
     text doh_server
+    int bridge_applied
     int bridge_batch_id
     int bridge_gen
     text probe_host
@@ -45,6 +58,7 @@ erDiagram
   udp_results {
     int id PK
     int strategy_id FK
+    int run_id FK
     text target
     text status
     real latency_ms
@@ -81,6 +95,12 @@ erDiagram
     real weight
     text updated_at
   }
+  triage_snapshots {
+    int id PK
+    text domain
+    text payload_json
+    text created_at
+  }
   dns_audit_results {
     int id PK
     text domain
@@ -112,7 +132,7 @@ erDiagram
 
 | Status | Meaning |
 |--------|---------|
-| `PASS` | HTTP OK + content validation passed |
+| `PASS` | HTTP OK + content validation (campaign harvest additionally requires `bridge_applied=1`) |
 | `FAIL` | timeout, TLS error, DPI stub, etc. |
 | `THROTTLED` | read rate below threshold (window clamp) |
 
@@ -154,15 +174,33 @@ attempts, default 300). Written by the campaign, read by MCP
 `get_series_status` → `quarantined[]`. `--no-quarantine` disables;
 `--quarantine-auto-denylist` also appends to `presets/domains/denylist.txt`.
 Suspicious lua-bridge PASSes (no APPLIED event) are marked
-`tcp_results.bridge_applied = 0` and should be excluded from exports/scoring.
+`tcp_results.bridge_applied = 0`. After 1.4.0 campaign write path they are stored
+as `FAIL` (`fail_phase=no_bridge_applied`). `bs harvest-batch` and smoke asserts
+require `bridge_applied=1`. `bc-nfconf` / MCP `query_strategies` still filter
+`status IN ('PASS',…)` only — do not export a pre-fix `week_cov.db` through nfconf
+if you need validation-grade rows. Quarantine seed from `domain_pass_rows()` runs
+**only** when `--resume` is set.
 
 ## Resume / fingerprint
 
 `matrix_fingerprint(tcp_strategies, udp_strategies, scan_level, max_count)` returns
-a 16-char SHA256 prefix. `bs pair --resume` refuses to continue if fingerprint
-drifted (matrix changed).
+a 16-char SHA256 prefix. `bs pair --resume` / `bs full --resume` refuse to continue
+if fingerprint drifted (matrix changed). Matching fingerprint reuses the latest
+`runs.id`; skip keys (`get_resume_skip_tcp_keys`) are **that `run_id` only**,
+latest WORKING row per `(strategy, domain)` (`PASS`/`THROTTLED`). Opening the same
+file **without** `--resume` starts a new `runs` row — prior PASS keys are not skipped.
+FAIL rows stay append-only; they are not resume skip keys.
 
-`bs full --resume` skips `(strategy, domain)` pairs already in `tcp_results`.
+`tcp_results` has no UNIQUE on `(strategy, domain)`: latest row is `MAX(id)`.
+
+## XDG `strategies.db` (data_block)
+
+Separate from campaign `state.db`. Path:
+`~/.local/share/blockcheckS/data_block/providers/<slug>/strategies.db`.
+
+Table `pass_strategies`: `UNIQUE(strategy, domain, protocol)` (legacy two-column
+unique is auto-migrated). Campaign lua_bridge PASS+APPLIED upserts here; harvest-batch
+reads the campaign DB, not this file. Git submodule snapshot: `bs data-block`.
 
 ## Example queries
 
@@ -235,4 +273,5 @@ validators (dpi-tester). Schema constant: `SCHEMA = "blockchecks.harvest/v1"` in
 bc-nfconf --db state.db --limit 3 --out-dir output
 ```
 
-Reads `v_coverage` / best strategies via `SqliteRunStore.get_best_*`.
+Reads `v_coverage` / best strategies via `SqliteRunStore.get_best_*` (status PASS,
+**not** gated on `bridge_applied`). Validation-grade: `bs harvest-batch`.
