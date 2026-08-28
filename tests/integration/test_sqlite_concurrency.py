@@ -3,6 +3,8 @@
 Stress test for the B8 batch-flush path: N parallel async writers call
 ``log_tcp`` while others call ``flush``. Verifies zero row loss / duplication
 in ``tcp_results`` — the race fixed by the atomic ``_flush_lock`` drain.
+Resume skip after reopen uses ``begin_run(resume, fingerprint)`` and counts
+WORKING rows only.
 
 Runs with the same shared-store batch mode the production series uses
 (batch_size=DEFAULT_DB_BATCH), so WAL contention / concurrent flushes are
@@ -72,11 +74,19 @@ async def test_concurrent_flush_no_row_loss(tmp_path):
 
 @pytest.mark.asyncio
 async def test_concurrent_flush_resume_consistency(tmp_path):
-    """Every row written by a writer must be visible to get_completed_tcp_keys."""
-    store = open_run_store(tmp_path / "resume.db", batch_size=BATCH)
-    await store.init()
+    """PASS rows survive concurrent flush and show up after ``--resume``.
 
+    ``get_completed_tcp_keys`` is run-scoped WORKING (PASS/THROTTLED) only.
+    Reopen without ``begin_run(resume=True, fingerprint=…)`` starts a new
+    campaign and correctly returns no skip keys.
+    """
     import asyncio
+
+    fp = "concurrent-flush-resume"
+    db_path = tmp_path / "resume.db"
+    store = open_run_store(db_path, batch_size=BATCH)
+    await store.init()
+    await store.begin_run(fingerprint=fp)
 
     async def flusher():
         for _ in range(80):
@@ -87,12 +97,13 @@ async def test_concurrent_flush_resume_consistency(tmp_path):
     tasks.append(asyncio.create_task(flusher()))
     await asyncio.gather(*tasks)
     await store.flush()
+    run_id = store.run_id
     await store.close()
 
-    # Reopen and count completed keys — every strategy x domain pair present.
-    store2 = open_run_store(tmp_path / "resume.db")
+    store2 = open_run_store(db_path, resume=True)
     await store2.init()
+    assert await store2.begin_run(fingerprint=fp) == run_id
     keys = await store2.get_completed_tcp_keys()
-    expected = N_WORKERS * ROWS_PER_WORKER
-    assert len(keys) == expected, f"resume keys: expected {expected}, got {len(keys)}"
+    expected_pass = N_WORKERS * (ROWS_PER_WORKER // 2)
+    assert len(keys) == expected_pass, f"resume PASS keys: expected {expected_pass}, got {len(keys)}"
     await store2.close()
