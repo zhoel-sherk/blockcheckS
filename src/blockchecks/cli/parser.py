@@ -756,7 +756,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Python DEBUG logs + nfqws2 --debug=1 (toggle at runtime with SIGUSR1)",
     )
 
-    tcp = sub.add_parser("tcp", help="Single TCP strategy test (sync)")
+    tcp = sub.add_parser(
+        "tcp",
+        help="Single TCP strategy test on HOST (sync; use --ns for netns)",
+        description=(
+            "Oneshot TCP/TLS probe via TestRunner. Without --ns, traffic runs on "
+            "the host network namespace (not an isolated netns pool slot)."
+        ),
+    )
     tcp.add_argument("-d", "--domain", required=True)
     tcp.add_argument("-s", "--strategy")
     tcp.add_argument("-c", "--config")
@@ -775,7 +782,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="nfqws2 hostlist filter (default: ON)",
     )
     tcp.add_argument("--qnum", type=int, default=200)
-    tcp.add_argument("--ns")
+    tcp.add_argument(
+        "--ns",
+        metavar="NAME",
+        help="Run inside netns NAME (default: HOST, not netns)",
+    )
     add_secure_dns_args(tcp, include_data_block_sync=False)
     add_system_deps_args(tcp)
     add_time_limit_args(tcp)

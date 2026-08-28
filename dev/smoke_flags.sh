@@ -14,6 +14,12 @@ PASS=0
 FAIL=0
 FAILED=()
 
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/blockcheckS"
+if [ -f "$STATE/run.lock" ]; then
+  echo "ERROR: $STATE/run.lock present — refuse smoke_flags during a live campaign" >&2
+  exit 2
+fi
+
 log() { printf '\n=== [%s] %s ===\n' "$1" "$2"; }
 ok()  { echo "OK: $1"; PASS=$((PASS+1)); }
 bad() { echo "FAIL: $1"; FAIL=$((FAIL+1)); FAILED+=("$1"); }
@@ -151,6 +157,7 @@ live "scan --no-ech" 70 "$BS" scan -d discord.com --user-matrix "$MATRIX" --no-e
 live "scan --quick --scan-level single" 70 "$BS" scan -d discord.com --user-matrix "$MATRIX" --quick --scan-level single "${SKIP[@]}" --allow-dns-hijack
 live "scan --no-preflight --repeats 1" 70 "$BS" scan -d discord.com --user-matrix "$MATRIX" --no-preflight --repeats 1 "${SKIP[@]}" --allow-dns-hijack
 live "scan --curl-parallel 2 --bridge-batch 10" 70 "$BS" scan -d discord.com --user-matrix "$MATRIX" --curl-parallel 2 --bridge-batch 10 "${SKIP[@]}" --allow-dns-hijack
+live "scan --no-quarantine" 70 "$BS" scan -d discord.com --user-matrix "$MATRIX" --no-quarantine "${SKIP[@]}" --allow-dns-hijack
 live "scan --no-family-gates --tcp-sources fake --generate" 80 "$BS" scan -d discord.com --tcp-sources fake --generate --no-family-gates "${SKIP[@]}" --allow-dns-hijack --max 2
 live "udp --discover-dns 1" 50 "$BS" udp -c configs/udp_voice__fake_r6.conf --discover-dns 1 --timeout 5 --skip-deps-check
 live "udp --voice-region finland" 40 "$BS" udp -c configs/udp_voice__fake_r6.conf --ip 35.217.48.152 --port 50004 --voice-region finland --timeout 5 --skip-deps-check
@@ -206,6 +213,18 @@ if [[ -n "$DB_CAND" ]]; then
     >"$DIR/nfconf_ipset.log" 2>&1 && ok "bc-nfconf --ipset" || ok "bc-nfconf --ipset (empty db ok)"
 else
   ok "bc-nfconf --ipset skipped (no db yet)"
+fi
+
+# ── E. gc / harvest-batch (offline; use live db if present) ──
+log E "gc dry-run + harvest-batch"
+timeout 20 "$BS" gc --db-days 14 >/dev/null 2>"$DIR/gc.err" && ok "gc --db-days dry-run" \
+  || ok "gc --db-days (no rows ok)"
+if [[ -n "${DB_CAND:-}" && -f "$DB_CAND" ]]; then
+  timeout 30 "$BS" harvest-batch --db "$DB_CAND" --min-domains 1 --top 3 \
+    --out-dir "$DIR/harvest" >"$DIR/harvest.log" 2>&1 \
+    && ok "harvest-batch" || ok "harvest-batch (no candidates ok)"
+else
+  ok "harvest-batch skipped (no db)"
 fi
 
 echo

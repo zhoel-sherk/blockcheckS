@@ -23,6 +23,12 @@ cleanup_run() {
 }
 trap cleanup_run EXIT
 
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/blockcheckS"
+if [ -f "$STATE/run.lock" ]; then
+  echo "ERROR: $STATE/run.lock present — refuse smoke_full_quick during a live campaign" >&2
+  exit 2
+fi
+
 echo "=== smoke_full_quick domain=$DOMAIN max=$MAX $(date -Is) ===" | tee "$LOG"
 sudo -n "$BS" full \
   -d "$DOMAIN" \
@@ -41,3 +47,4 @@ ls -la "$OUT"/ 2>/dev/null | grep -E "nfqws2|user.list|run_summary" || echo "NO 
 echo "=== summary ==="
 cat "$OUT"/run_summary_*.json 2>/dev/null || echo "no run_summary"
 echo "=== log: $LOG ==="
+"$ROOT/.venv/bin/python3" "$ROOT/dev/assert_smoke_db.py" --db "$DB" --log "$LOG" --require-backend

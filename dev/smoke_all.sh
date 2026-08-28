@@ -64,15 +64,24 @@ run() { # run <label> <timeout-sec> <cmd...>
 echo "smoke_all $TS budget=${BUDGET}s" | tee "$OUT/summary.log"
 echo "host=$(hostname) bs=$ROOT/.venv/bin/bs" | tee -a "$OUT/summary.log"
 
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/blockcheckS"
+if [ -f "$STATE/run.lock" ]; then
+  echo "ERROR: $STATE/run.lock present — refuse smoke_all (would host-wide pkill a campaign)" | tee -a "$OUT/summary.log"
+  exit 2
+fi
+
 # Offline / unit first (no nfqws2 contention)
 run gate_all 180 bash "$ROOT/dev/gate_all.sh"
-run smoke_flags 1500 bash "$ROOT/dev/smoke_flags.sh"
+run flags_pytest 60 "$ROOT/.venv/bin/python" -m pytest -q --timeout=30 \
+  -o addopts= -m "not integration and not mutation" \
+  tests/unit/test_cli_modernization.py tests/unit/test_dead_cli_flags.py tests/unit/test_cliapp.py
+run smoke_full_quick 180 bash "$ROOT/dev/smoke_full_quick.sh"
 run functional_smoke 1200 bash "$ROOT/dev/functional_smoke.sh"
+run smoke_flags 1500 bash "$ROOT/dev/smoke_flags.sh"
 run smoke_backend_matrix 600 bash "$ROOT/dev/smoke_backend_matrix.sh"
 run smoke_20min 2700 bash "$ROOT/dev/smoke_20min.sh"
 run voice_smoke 180 bash "$ROOT/dev/voice_smoke.sh"
 run gv1_smoke 240 bash "$ROOT/dev/gv1_smoke.sh"
-run smoke_full_quick 180 bash "$ROOT/dev/smoke_full_quick.sh"
 run smoke_scan 180 bash "$ROOT/dev/smoke_scan.sh"
 # fan-out can hang past --max-timem; keep a hard cap
 run release_smoke 1080 bash "$ROOT/dev/release_smoke.sh"

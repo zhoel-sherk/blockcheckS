@@ -73,13 +73,13 @@ jobs:
               tests/unit/test_batch_probe_runner.py tests/unit/test_lua_bridge.py
               tests/unit/test_lua_bridge_edge_cases.py tests/unit/test_lua_bridge_runner.py
               tests/unit/test_lua_netns.py tests/unit/test_lua_session.py
-              tests/unit/test_netns_pool.py tests/unit/test_nfqws2_manager.py
-              tests/unit/test_nfqws2_settle.py tests/unit/test_firewall_unit.py
+              tests/unit/test_netns_pool.py               tests/unit/test_nfqws2_manager.py
+              tests/unit/test_nfqws2_launcher.py tests/unit/test_nfqws2_settle.py tests/unit/test_firewall_unit.py
               tests/unit/test_metrics.py tests/unit/test_probe_backend.py
               tests/unit/test_probe_service.py tests/unit/test_probe_worker.py
               tests/unit/test_probe_worker_ipc.py
-              tests/unit/test_http_server.py tests/unit/test_mcp_server.py tests/unit/test_async_runner_methods.py
-              tests/unit/test_async_runner_tcp.py
+              tests/unit/test_http_server.py tests/unit/test_mcp_server.py               tests/unit/test_async_runner_methods.py
+              tests/unit/test_async_runner_tcp.py tests/unit/test_async_runner_harvest_gate.py
               tests/unit/test_batch_scheduler.py tests/unit/test_live_and_impersonate.py
           - name: "S3 CLI, Store & System"
             files: >-

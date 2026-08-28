@@ -118,6 +118,18 @@ def test_gc_parses_dry_run():
 
 
 @pytest.mark.unit
+def test_tcp_help_documents_host_default():
+    buf = StringIO()
+    with patch("sys.stdout", buf), pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(["tcp", "--help"])
+    assert exc.value.code in (0, None)
+    help_text = buf.getvalue()
+    assert "HOST" in help_text
+    assert "not netns" in help_text.lower()
+    assert "Without --ns" in help_text
+
+
+@pytest.mark.unit
 def test_scan_help_shows_short_flags():
     buf = StringIO()
     with patch("sys.stdout", buf), pytest.raises(SystemExit) as exc:

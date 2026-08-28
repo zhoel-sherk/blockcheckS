@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 
 def cmd_gc(args: argparse.Namespace) -> int:
     dry = not bool(getattr(args, "apply", False))
+    if getattr(args, "dry_run", False):
+        dry = True
     plan = collect_gc(
         max_age_days=float(getattr(args, "max_age_days", DEFAULT_MAX_AGE_DAYS)),
         nfqws2_keep=int(getattr(args, "nfqws2_keep", NFQWS2_LOG_KEEP)),

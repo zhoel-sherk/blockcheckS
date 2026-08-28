@@ -3,10 +3,8 @@
 #
 # Usage:
 #   bash dev/smoke_scan.sh [backend] [domain]
-#     backend: default | classic | bridge   (default: default)
-#   classic is accepted but maps to lua_bridge.
-#
-# Verifies the chosen backend appears in the batch line and prints PASS/FAIL.
+#     backend: default | bridge | classic-maps
+#   default/bridge run lua_bridge. classic-maps: deprecated --classic (maps).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -14,8 +12,16 @@ cd "$ROOT"
 BS="${BS:-$ROOT/.venv/bin/bs}"
 BACKEND="${1:-default}"
 DOMAIN="${2:-discord.com}"
-LOG="logs/smoke_scan_$(date +%Y%m%d_%H%M%S).log"
+TS="$(date +%Y%m%d_%H%M%S)"
+LOG="logs/smoke_scan_${TS}.log"
+DB="logs/smoke_scan_${TS}.db"
 mkdir -p logs
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/blockcheckS"
+if [ -f "$STATE/run.lock" ]; then
+  echo "ERROR: $STATE/run.lock present — refuse smoke_scan during a live campaign" >&2
+  exit 2
+fi
 
 MATRIX=$(mktemp)
 trap 'rm -f "$MATRIX"' EXIT
@@ -28,9 +34,9 @@ EOF
 BACKEND_ARGS=()
 case "$BACKEND" in
   default)  BACKEND_ARGS=() ;;
-  classic)  BACKEND_ARGS=(--classic) ;;
   bridge)   BACKEND_ARGS=(--probe-backend lua_bridge) ;;
-  *) echo "ERROR: unknown backend '$BACKEND' (default|classic|bridge)" >&2; exit 2 ;;
+  classic-maps|classic)  BACKEND_ARGS=(--classic) ;;
+  *) echo "ERROR: unknown backend '$BACKEND' (default|bridge|classic-maps)" >&2; exit 2 ;;
 esac
 
 echo "=== smoke_scan backend=$BACKEND domain=$DOMAIN $(date -Is) ===" | tee "$LOG"
@@ -41,7 +47,8 @@ sudo -n env BLOCKCHECKS_PROBE_BACKEND= "$BS" scan \
   --scan-level fast \
   --skip-deps-check --skip-dns-audit --skip-prolog \
   --skip-ip-block --skip-port-block --skip-baseline \
-  --no-wssize --quick --timeout 8 \
+  --no-wssize --quick --timeout 8 --db "$DB" \
   "${BACKEND_ARGS[@]}" 2>&1 | tee -a "$LOG"
 
 echo "=== log: $LOG ==="
+"$ROOT/.venv/bin/python3" "$ROOT/dev/assert_smoke_db.py" --db "$DB" --log "$LOG" --require-backend

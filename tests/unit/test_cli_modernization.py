@@ -66,3 +66,88 @@ def test_profile_args_parser():
     add_profile_args(p)
     parsed = p.parse_args(["--profile", "20h"])
     assert parsed.profile == "20h"
+
+
+def _help(argv: list[str]) -> str:
+    from io import StringIO
+    from unittest.mock import patch
+
+    import pytest
+
+    from blockchecks.cli.parser import build_parser
+
+    buf = StringIO()
+    with patch("sys.stdout", buf), pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(argv)
+    assert exc.value.code in (0, None)
+    return buf.getvalue()
+
+
+def test_scan_help_classic_deprecated_not_second_backend():
+    text = _help(["scan", "--help"])
+    assert "--classic" in text
+    assert "Deprecated" in text or "deprecated" in text
+    assert "lua_bridge" in text
+    assert "second backend" not in text.lower()
+
+
+def test_scan_and_full_help_have_quarantine_flags():
+    scan = _help(["scan", "--help"])
+    assert "--no-quarantine" in scan
+    assert "--quarantine-min" in scan
+    from io import StringIO
+    from unittest.mock import patch
+
+    import pytest
+
+    from blockchecks.main import build_arg_parser
+
+    buf = StringIO()
+    with patch("sys.stdout", buf), pytest.raises(SystemExit) as exc:
+        build_arg_parser().parse_args(["--help"])
+    assert exc.value.code in (0, None)
+    full = buf.getvalue()
+    assert "--no-quarantine" in full
+    assert "--quarantine-min" in full
+
+
+def test_unknown_flag_and_bogus_profile_level_rejected():
+    import pytest
+
+    from blockchecks.cli.parser import build_parser
+
+    cases = (
+        ["tcp", "--not-a-flag"],
+        ["scan", "--profile", "nope", "-d", "x.com"],
+        ["scan", "--scan-level", "nope", "-d", "x.com"],
+    )
+    for argv in cases:
+        with pytest.raises(SystemExit) as exc:
+            build_parser().parse_args(argv)
+        assert exc.value.code == 2, argv
+
+
+def test_classic_and_probe_backend_classic_map_to_lua_bridge(caplog):
+    import logging
+
+    from blockchecks.cli.parser import build_parser, iter_subparsers
+    from blockchecks.engine.config import resolve_probe_backend
+
+    scan = iter_subparsers(build_parser())["scan"]
+    for argv in (["--classic"], ["--probe-backend", "classic"]):
+        ns = scan.parse_args(["-d", "x.com", *argv, "--max", "1"])
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            assert resolve_probe_backend(ns) == "lua_bridge"
+        assert "mapping to lua_bridge" in caplog.text
+
+
+def test_curl_parallel_parses_1_and_8():
+    from blockchecks.cli.parser import build_parser, iter_subparsers
+    from blockchecks.engine.config import MAX_CURL_PARALLEL
+
+    assert MAX_CURL_PARALLEL == 8
+    scan = iter_subparsers(build_parser())["scan"]
+    for n in (1, 8):
+        ns = scan.parse_args(["-d", "x.com", "--curl-parallel", str(n), "--max", "1"])
+        assert ns.curl_parallel == n

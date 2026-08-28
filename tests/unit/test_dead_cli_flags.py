@@ -65,7 +65,21 @@ def _read_bundle(paths: list[str]) -> str:
 
 @pytest.mark.parametrize(
     "command",
-    ["tcp", "udp", "scan", "pair", "composite", "bench-settle", "stop", "serve", "preflight"],
+    [
+        "tcp",
+        "udp",
+        "scan",
+        "pair",
+        "composite",
+        "bench-settle",
+        "stop",
+        "serve",
+        "preflight",
+        "gc",
+        "harvest-batch",
+        "mcp",
+        "data-block",
+    ],
 )
 def test_no_dead_cli_flags(command: str) -> None:
     cfg = tool_section("tool", "blockchecks", "dead_flags")

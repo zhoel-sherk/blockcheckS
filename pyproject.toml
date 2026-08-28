@@ -344,6 +344,7 @@ preflight = [
 data-block = ["src/blockchecks/cli/commands/data_block.py"]
 harvest-batch = ["src/blockchecks/cli/commands/harvest_batch.py"]
 gc = ["src/blockchecks/cli/commands/gc.py"]
+mcp = ["src/blockchecks/cli/commands/mcp.py"]
 
 [tool.blockchecks.settings]
 env_prefix = "BLOCKCHECKS_"
