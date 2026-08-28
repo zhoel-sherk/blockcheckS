@@ -55,6 +55,7 @@ jobs:
               tests/unit/test_static_validator.py tests/unit/test_static_validator_fuzzing.py
               tests/unit/test_ipset_catalog.py tests/unit/test_ggc_pool.py
               tests/unit/test_domain_quarantine.py
+              tests/unit/test_resume_triage.py tests/unit/test_wssize_retry.py
           - name: "S2 Checkers & Service"
             files: >-
               tests/unit/test_checkers.py tests/unit/test_composite_runner.py
@@ -78,9 +79,12 @@ jobs:
               tests/unit/test_metrics.py tests/unit/test_probe_backend.py
               tests/unit/test_probe_service.py tests/unit/test_probe_worker.py
               tests/unit/test_probe_worker_ipc.py
-              tests/unit/test_http_server.py tests/unit/test_mcp_server.py               tests/unit/test_async_runner_methods.py
+              tests/unit/test_http_server.py tests/unit/test_mcp_server.py tests/unit/test_mcp_docs.py
+              tests/unit/test_async_runner_methods.py
               tests/unit/test_async_runner_tcp.py tests/unit/test_async_runner_harvest_gate.py
               tests/unit/test_batch_scheduler.py tests/unit/test_live_and_impersonate.py
+              tests/unit/test_dns_pin_service.py tests/unit/test_firewall.py
+              tests/unit/test_ns_firewall.py tests/unit/test_probe_result_logger.py
           - name: "S3 CLI, Store & System"
             files: >-
               tests/unit/test_cliapp.py tests/unit/test_commands_pair.py
@@ -106,6 +110,7 @@ jobs:
               tests/unit/test_profiles.py tests/unit/test_run_spec.py
               tests/unit/test_terminal.py tests/unit/test_gc.py
               tests/unit/test_harvest_batch.py
+              tests/unit/test_parser_reprobe.py tests/unit/test_preset_paths.py
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
