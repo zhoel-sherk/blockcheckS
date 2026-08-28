@@ -121,7 +121,7 @@ async def run_tcp_with_family_gates(
 
     Returns (results, done, skipped, passed).
     """
-    from blockchecks.engine.async_runner import TcpTestResult
+    from blockchecks.engine.results import TcpTestResult
 
     tracker = FamilyNeedTracker()
     sorted_items = sort_by_family(items)

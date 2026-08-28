@@ -9,6 +9,17 @@ if TYPE_CHECKING:
     from blockchecks.engine.generators.base import StrategyItem
 
 
+def campaign_pass(*, http_ok: bool, bridge_applied: bool | None) -> bool:
+    """Campaign/AQ pass: bridge requires APPLIED; oneshot (``None``) uses HTTP only."""
+    match bridge_applied:
+        case True:
+            return http_ok
+        case False:
+            return False
+        case None:
+            return http_ok
+
+
 @dataclass
 class TcpTestResult:
     item: StrategyItem
@@ -32,6 +43,9 @@ class TcpTestResult:
     bridge_applied: bool | None = None
     bridge_batch_id: int = 0
     bridge_gen: int = 0
+
+    def campaign_pass(self) -> bool:
+        return campaign_pass(http_ok=self.success, bridge_applied=self.bridge_applied)
 
 
 def tcp_results_from_details(
