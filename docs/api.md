@@ -180,7 +180,13 @@ bs scan -d <domain>... [--preset P] --scan-level {single|fast|full}
 ```
 
 - **Мульти-домен:** `-d/--domain` повторяемый (с 1.4.1); тестируется весь
-  набор. Альтернативы: `--preset` (presets/domains) или `--domains-file`.
+  набор. Альтернативы: `--preset` (presets/domains) или `--domains-file`
+  (файл, bare FQDN — побеждает `-d`/`--preset`; GP передаёт его для больших
+  v2fly-списков).
+- **Матрица стратегий:** `-M/--strategy-preset` (gp-verified / flowseal-fast /
+  gp-custom-*…) — матрица строго из пресета; иначе конфиги BS по умолчанию.
+  `--protocol tls12|tls13`, `--repeats-mode fast|stable`, `--no-adaptive`,
+  `--skip-ip-block`, `--debug` управляют поведением прогона.
 - **БД и скоуп:** каждый run пишет в `--db` (по умолчанию XDG `state.db`) и
   отдельную строку в `runs`; завершение фиксируется `run_summary_*.json`
   (`run_id`, `domains`). GP для изоляции задач передаёт свежий `--db`.

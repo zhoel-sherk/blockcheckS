@@ -27,12 +27,21 @@ With `--repeats-mode stable` and `--scan-level fast|single`, FAIL stops repeat l
 ## Мульти-домен и скоуп (1.4.1+)
 
 `bs scan`/`pair` принимают **повторяемый `-d`** (тестируется весь набор), либо
-`--preset`, либо (в `full`) `--domains-file`:
+`--preset`, либо **`--domains-file`** (файл bare FQDN, побеждает `-d`/`--preset`;
+GP передаёт его для больших v2fly-списков — порог GP: >50 доменов):
 
 ```bash
 sudo bs scan -d youtube.com -d discord.com -M gp-verified --scan-level fast \
   --repeats 3 --max 400 --db /tmp/gp-run.db --skip-dns-audit
+
+sudo bs scan --domains-file /gp/state/google.txt -M gp-verified --db /tmp/gp-run.db
 ```
+
+- **Матрица стратегий:** `-M/--strategy-preset` (`gp-verified`, `flowseal-fast`,
+  `gp-custom-*`, …) — матрица строго из пресета. `--protocol tls12|tls13`,
+  `--repeats-mode fast|stable`, `--no-adaptive`, `--skip-ip-block`, `--debug`
+  — управляющие флаги прогона (GP-ключи `strategy_preset`/`repeats_mode`/
+  `bs_adaptive`/`debug_stdout`/`skip_ipblock`).
 
 - Завершение пишет `run_summary_<ts>.json` (`run_id`, `domains`, `db_path`) в
   `--out-dir` или XDG `~/.local/share/blockcheckS`. GP передаёт **свежий
