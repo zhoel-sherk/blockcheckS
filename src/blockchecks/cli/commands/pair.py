@@ -223,4 +223,6 @@ async def _cmd_pair_run(args):
     finally:
         # ST-2: long-lived writer держит поток aiosqlite — без close()
         # процесс висит после завершения работы (найдено смоком).
+        log.debug("SqliteRunStore.close begin")
         await db.close()
+        log.debug("SqliteRunStore.close done")

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
+
+log = logging.getLogger(__name__)
 
 from blockchecks.cli.parser import (
     add_campaign_args,
@@ -53,62 +56,66 @@ async def run_full(args) -> int:
 async def _run_full_campaign(args) -> int:
     apply_profile(args)
     db = await open_full_run_db(args)
-
-    domains, domains_file, domains_rc = load_run_domains(args)
-    if domains_rc is not None:
-        return domains_rc
-
-    dns_cache, dns_audits, dns_rc = prepare_run_dns(args, domains)
-    if dns_rc:
-        return dns_rc
-
-    domains, primary, preflight_rc = await run_preflight_filter(
-        args, domains, args.domain or domains[0], dns_cache, db, dns_audits=dns_audits
-    )
-    if preflight_rc is not None:
-        return preflight_rc
-
-    ctx = build_full_run_context(args, db, domains, domains_file, dns_cache, dns_audits)
-    ctx.primary = primary
-
-    print_full_run_banner(ctx)
-
-    gen = MatrixGenerator()
-    gen_rc = await generate_strategy_items(ctx, gen)
-    if gen_rc is not None:
-        return gen_rc
-
-    configure_tcp_execution(ctx)
-
-    ctx.settle_profile = resolve_settle_profile(args)
-    print_settle_profile(ctx.settle_profile)
-
-    ctx.fp = build_matrix_fingerprint(ctx)
-    await ctx.db.begin_run(
-        fingerprint=ctx.fp,
-        args_hash=campaign_args_hash(args),
-    )
-
-    ctx.runner = build_async_runner(ctx)
-    restore_signals = arm_stop_handlers(ctx)
-    await arm_run_deadline(ctx)
-
-    await ctx.runner.start()
     try:
-        await run_tcp_coverage_phase(ctx)
+        domains, domains_file, domains_rc = load_run_domains(args)
+        if domains_rc is not None:
+            return domains_rc
 
-        if ctx.stop.is_set():
-            print_optional_phases_skip(ctx)
-        else:
-            await run_http_phase(ctx)
-            voice_ip, voice_port = await discover_voice_endpoint(ctx)
-            await run_quic_phase(ctx)
-            await run_pairs_phase(ctx, voice_ip, voice_port)
+        dns_cache, dns_audits, dns_rc = prepare_run_dns(args, domains)
+        if dns_rc:
+            return dns_rc
+
+        domains, primary, preflight_rc = await run_preflight_filter(
+            args, domains, args.domain or domains[0], dns_cache, db, dns_audits=dns_audits
+        )
+        if preflight_rc is not None:
+            return preflight_rc
+
+        ctx = build_full_run_context(args, db, domains, domains_file, dns_cache, dns_audits)
+        ctx.primary = primary
+
+        print_full_run_banner(ctx)
+
+        gen = MatrixGenerator()
+        gen_rc = await generate_strategy_items(ctx, gen)
+        if gen_rc is not None:
+            return gen_rc
+
+        configure_tcp_execution(ctx)
+
+        ctx.settle_profile = resolve_settle_profile(args)
+        print_settle_profile(ctx.settle_profile)
+
+        ctx.fp = build_matrix_fingerprint(ctx)
+        await ctx.db.begin_run(
+            fingerprint=ctx.fp,
+            args_hash=campaign_args_hash(args),
+        )
+
+        ctx.runner = build_async_runner(ctx)
+        restore_signals = arm_stop_handlers(ctx)
+        await arm_run_deadline(ctx)
+
+        await ctx.runner.start()
+        try:
+            await run_tcp_coverage_phase(ctx)
+
+            if ctx.stop.is_set():
+                print_optional_phases_skip(ctx)
+            else:
+                await run_http_phase(ctx)
+                voice_ip, voice_port = await discover_voice_endpoint(ctx)
+                await run_quic_phase(ctx)
+                await run_pairs_phase(ctx, voice_ip, voice_port)
+        finally:
+            restore_signals()
+            await cleanup_runner(ctx)
+
+        return await export_and_summarize(ctx)
     finally:
-        restore_signals()
-        await cleanup_runner(ctx)
-
-    return await export_and_summarize(ctx)
+        log.info("SqliteRunStore.close begin")
+        await db.close()
+        log.info("SqliteRunStore.close done")
 
 
 def build_arg_parser(user_config: dict | None = None) -> argparse.ArgumentParser:

@@ -8,6 +8,10 @@
 
 # Voice/media CDN — 0% on TLS apex (UDP probe only)
 discord.media  # voice CDN apex
+# NODATA apexes — no A/AAAA (not HTTPS targets; DoH Status=0 empty Answer)
+discordapp.net  # zone apex, NODATA (use media.discordapp.net / dl.discordapp.net)
+router.discord.media  # not a public A; voice is {region}N.discord.media via API
+url-protection.discord.com  # SPF-only, no HTTPS target
 
 # Static YouTube thumbnail/asset CDN (duplicate youtube.com DPI category)
 i.ytimg.com  # static CDN

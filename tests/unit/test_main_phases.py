@@ -202,6 +202,35 @@ def test_load_run_domains_file_wins_over_dash_d():
     assert fname == "x.txt"
 
 
+def test_load_run_domains_filters_junk_fqdn():
+    args = _args(domains_file="x.txt")
+    loaded = MagicMock()
+    loaded.domains = [
+        "youtube.com",
+        "8.8.8.8",
+        "*.discord.com",
+        "https://discord.com/",
+        "DISCORD.COM",
+        "gateway.discord.gg/",
+    ]
+    loaded.skipped = []
+    with (
+        patch("blockchecks.main_phases.load_domains", return_value=loaded),
+        patch("blockchecks.main_phases.auto_enable_gv_ggc"),
+    ):
+        domains, fname, rc = load_run_domains(args)
+    assert rc is None
+    assert domains == ["youtube.com", "discord.com", "gateway.discord.gg"]
+    assert fname == "x.txt"
+
+
+def test_load_run_domains_dash_d_rejects_ip():
+    args = _args(domain="8.8.8.8", domains_file=None)
+    domains, _, rc = load_run_domains(args)
+    assert rc == 1
+    assert domains == []
+
+
 def test_load_run_domains_preset():
     args = _args(domain="", domains_file=None, preset="discord")
     loaded = MagicMock()
@@ -857,6 +886,7 @@ def test_tcp_adaptive_seeds_quarantine_on_resume():
     ctx.domains = ["a.com"]
     ctx.db = MagicMock()
     ctx.db.domain_pass_rows = AsyncMock(return_value=[("dead.example", 400, 0)])
+    ctx.db.domain_dns_resolve_fail_rows = AsyncMock(return_value=[])
     ctx.db.quarantine_domain = AsyncMock()
     ctx.db.get_resume_skip_tcp_keys = AsyncMock(return_value=set())
     ctx.args.resume = True

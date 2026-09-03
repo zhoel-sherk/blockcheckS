@@ -247,13 +247,13 @@ count = 9
 file = "coverage-tcp.txt"
 tags = ["coverage", "tcp", "default"]
 description = "Lean TCP coverage preset (default for bs full)"
-count = 16
+count = 15
 
 [domains.coverage]
 file = "coverage.txt"
 tags = ["coverage", "full"]
-description = "Full service coverage (40 domains)"
-count = 40
+description = "Full service coverage (39 domains)"
+count = 39
 
 [domains.critical]
 file = "critical.txt"
@@ -265,7 +265,7 @@ count = 4
 file = "denylist.txt"
 tags = ["denylist", "filter"]
 description = "Deny list filter (not selectable as a preset)"
-count = 28
+count = 31
 
 [domains.diagnostic]
 file = "diagnostic.txt"
@@ -277,7 +277,7 @@ count = 1
 file = "discord.txt"
 tags = ["discord"]
 description = "Discord domains"
-count = 32
+count = 29
 
 [domains.google-youtube]
 file = "google-youtube.txt"
@@ -290,3 +290,9 @@ file = "pi2.txt"
 tags = ["pi2", "low-ram"]
 description = "Pi2 / low-RAM lean domain list"
 count = 3
+
+[domains.nonsense]
+file = "nonsense.txt"
+tags = ["dev", "chaos"]
+description = "Human-usage chaos list for nonsense_user harness (not for production scans)"
+count = 22

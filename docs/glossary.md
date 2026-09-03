@@ -53,7 +53,7 @@
 | **Hybrid envelope** | Единый формат JSON-ответов (`{"status":"ok", "ok":true, "data":...}`) для HTTP, Socket и MCP слоёв |
 | **bridge_applied** | Lua bridge event: nfqws2 действительно выполнил стратегию; `campaign_pass` требует HTTP OK **и** `bridge_applied=True` |
 | **campaign_pass** | Строгое определение PASS для кампаний: HTTP OK ∧ `bridge_applied=True`; без APPLIED строка пишется как FAIL |
-| **domain quarantine** | Исключение домена из очереди mid-run при 0 PASS за `--quarantine-min` попыток; сид из БД только при `--resume` |
+| **domain quarantine** | Исключение домена из очереди mid-run: 0 PASS за `--quarantine-min` DPI-проб **или** `--dns-resolve-quarantine-min` `dns_resolve`; сид из БД только при `--resume`; NODATA drop на старте |
 | **harvest-batch** | Read-only экспорт топ-стратегий PASS+APPLIED в `batch.txt` + `manifest.json` для внешних валидаторов |
 | **live events** | NDJSON-журнал проб (`events_live.jsonl`) + `current_probe.json` для наблюдения за кампанией без рестарта |
 | **MCP** | Model Context Protocol сервер (`bs-mcp`): 22 инструмента для LLM-клиентов (Cursor/Claude/opencode) |

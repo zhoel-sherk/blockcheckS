@@ -10,6 +10,17 @@ if [[ ! -x "$PY" ]]; then
 fi
 LOG="logs/voice_smoke_$(date +%Y%m%d_%H%M%S).log"
 mkdir -p logs
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/blockcheckS"
+if [ -f "$STATE/run.lock" ]; then
+  echo "ERROR: $STATE/run.lock present — refuse voice_smoke" >&2
+  exit 2
+fi
+cleanup_run() {
+  sudo -n "${PWD}/.venv/bin/bs" stop --wait 2 >/dev/null 2>&1 || true
+  bash "${PWD}/scripts/cleanup_env.sh" >/dev/null 2>&1 || true
+}
+trap cleanup_run EXIT
+bash "$(dirname "$0")/smoke_host_reset.sh"
 UDP_CONF="${UDP_CONF:-configs/udp_voice__fake_r6.conf}"
 DISCOVER_N="${DISCOVER_N:-2}"
 echo "=== Voice UDP smoke $(date -Is) ===" | tee "$LOG"

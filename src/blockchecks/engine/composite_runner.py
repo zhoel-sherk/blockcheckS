@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from blockchecks.checkers.curl_probe import CurlProbeRequest, worker_wall_timeout
-from blockchecks.engine.config import NETNS_BASE, NFQUEUE_UDP
+from blockchecks.engine.config import NETNS_BASE, NFQUEUE_TCP, NFQUEUE_UDP
 from blockchecks.engine.config import PYTHON_BIN as PYTHON
 from blockchecks.engine.generators.base import StrategyItem
 from blockchecks.engine.results import TcpTestResult
@@ -96,6 +96,34 @@ def _wait_queue_bind(ns_name: str, deadline_sec: float) -> bool:
     return False
 
 
+def overlay_composite_conf(conf_text: str, ipc_dir: Path) -> str | None:
+    """Ensure writable IPC, zapret lua-init, qnum, bind-fix4, and bridge Lua.
+
+    User ``.conf`` files often already have zapret ``--lua-init=``; skipping
+    the whole inject then leaves ``init.lua`` / heartbeat unloaded.
+    """
+    from blockchecks.engine.config import NFQUEUE_TCP, get_lua_init_scripts
+    from blockchecks.service.lua_conf import stage_blockchecks_lua
+
+    prefix: list[str] = []
+    suffix: list[str] = []
+    if "--writable=" not in conf_text:
+        prefix.append(f"--writable={ipc_dir}")
+    if "--lua-init=" not in conf_text:
+        prefix += [f"--lua-init=@{p}" for p in get_lua_init_scripts()]
+    if "--qnum=" not in conf_text:
+        prefix.append(f"--qnum={NFQUEUE_TCP}")
+    if "--bind-fix4" not in conf_text:
+        prefix.append("--bind-fix4")
+    if "scan_bridge.lua" not in conf_text and "write_ipc.lua" not in conf_text:
+        suffix += [f"--lua-init=@{p}" for p in stage_blockchecks_lua(ipc_dir)]
+    if not prefix and not suffix:
+        return None
+    body = conf_text.rstrip("\n")
+    parts = [*prefix, body, *suffix] if body else [*prefix, *suffix]
+    return "\n".join(parts) + "\n"
+
+
 def _wait_bridge_heartbeat(bridge: LuaBridge, ns_name: str, *, within: float = 1.2) -> bool:
     """Campaign-parity Lua heartbeat ready-fence (wait_heartbeat_fresh)."""
     from blockchecks.service.lua_bridge_ipc import wait_heartbeat_fresh
@@ -128,27 +156,16 @@ async def run(
     bridge = LuaBridge(ns_name)
     bridge.setup()
 
-    # Автоинъекция окружения для `-c` конфигов: их часто пишут минимально,
-    # без --lua-init/--qnum, что раньше давало мгновенную смерть демона
-    # ("desync function does not exist" / "Need queue number").
+    # Автоинъекция: минимальные .conf без lua-init/qnum, плюс bridge Lua
+    # когда в файле уже есть только zapret --lua-init= (heartbeat иначе мёртв).
     mod_conf: str | None = None
     try:
         conf_text = Path(config_abs).read_text(encoding="utf-8")
-        inject: list[str] = []
-        from blockchecks.engine.config import NFQUEUE_TCP, get_lua_init_scripts
-
-        if "--lua-init=" not in conf_text:
-            inject += [f"--lua-init=@{p}" for p in get_lua_init_scripts()]
-        if "--qnum=" not in conf_text:
-            inject.append(f"--qnum={NFQUEUE_TCP}")
-        if "--bind-fix4" not in conf_text:
-            inject.append("--bind-fix4")
-        if inject:
+        rewritten = overlay_composite_conf(conf_text, bridge.paths.base)
+        if rewritten is not None:
             mod_conf = f"{config_abs}.composite.{os.getpid()}.conf"
-            Path(mod_conf).write_text(
-                "\n".join(inject) + "\n" + conf_text, encoding="utf-8"
-            )
-            log.info("%s", f"  composite: injected {len(inject)} env lines into config copy")
+            Path(mod_conf).write_text(rewritten, encoding="utf-8")
+            log.info("%s", "  composite: wrote overlay conf (writable/lua-init/bridge)")
             config_abs = mod_conf
     except OSError as exc:
         log.warning("composite config injection skipped: %s", exc)

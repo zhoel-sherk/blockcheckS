@@ -9,7 +9,7 @@ One domain per line, `#` comments.
 bs scan --preset discord              # 22 Discord domains
 bs scan --preset google-youtube       # 23 YouTube CDN domains
 bs scan -d discord.com --preset critical   # -d + preset: all preset domains
-bs scan --preset coverage             # 40 domains, full GP coverage
+bs scan --preset coverage             # 39 domains, full GP coverage
 bs scan --preset coverage-tcp         # 16 domains, lean TCP default for bs full
 bs scan --preset benchmark            # 6 domains, lightweight test
 bs scan --preset pi2                  # 3 domains, Pi2 / low-RAM lean

@@ -995,3 +995,150 @@ def test_cmd_preflight_runs_without_matrix(monkeypatch):
     assert rc == 0
     pf.run_preflight_async.assert_awaited_once()
     assert pf.run_preflight_async.await_args.args[0] == ["discord.com"]
+
+
+@pytest.mark.unit
+def test_preflight_json_payload_contract(tmp_path, monkeypatch):
+    from blockchecks.cli.commands.preflight import preflight_json_payload
+    from blockchecks.engine.preflight import PreflightReport
+    from blockchecks.engine.triage import TriageProfile
+
+    class _Store:
+        triage_file = tmp_path / "triage.toml"
+        hosts_file = tmp_path / "hosts"
+
+    monkeypatch.setattr(
+        "blockchecks.cli.commands.preflight._provider_store", lambda: _Store()
+    )
+    monkeypatch.setattr(
+        "blockchecks.data_block.provider.provider_name", lambda **_k: "fryazino"
+    )
+    report = PreflightReport(
+        skip_domains={"ok.example"},
+        triage=TriageProfile(voice_ok=False, udp_blocked=True),
+    )
+    payload = preflight_json_payload(report, exit_code=0, domains=["discord.com"])
+    assert payload["ok"] is True
+    assert payload["exit_code"] == 0
+    assert payload["provider"] == "fryazino"
+    assert payload["skip_domains"] == ["ok.example"]
+    assert payload["voice_ok"] is False
+    assert payload["udp_blocked"] is True
+    assert payload["triage_path"].endswith("triage.toml")
+    assert payload["triage"]["udp_blocked"] is True
+
+
+@pytest.mark.unit
+def test_cmd_preflight_json_stdout(monkeypatch, capsys):
+    import asyncio
+    from argparse import Namespace
+    from unittest.mock import AsyncMock
+
+    from blockchecks.cli.commands import preflight as pf
+    from blockchecks.engine.preflight import PreflightReport
+    from blockchecks.engine.triage import TriageProfile
+
+    class _Store:
+        triage_file = "/tmp/triage.toml"
+        hosts_file = "/tmp/hosts"
+
+    monkeypatch.setattr(pf, "_provider_store", lambda: _Store())
+    monkeypatch.setattr("blockchecks.data_block.provider.provider_name", lambda **_k: "testp")
+    monkeypatch.setattr(
+        pf,
+        "prepare_dns_for_run",
+        lambda *_a, **_k: (MagicMock(pins=lambda: {}), [], 0),
+    )
+    monkeypatch.setattr(pf, "_resolve_pin_path", lambda _a: "")
+    monkeypatch.setattr(pf, "_maybe_skip_fooling_for_lock", lambda _a: None)
+    report = PreflightReport(triage=TriageProfile(voice_ok=True))
+    report.exit_code = 0
+    monkeypatch.setattr(pf, "run_preflight_async", AsyncMock(return_value=report))
+    rc = asyncio.run(
+        pf.cmd_preflight(
+            Namespace(
+                domain=["discord.com"],
+                preset=None,
+                domains_file=None,
+                list_presets=False,
+                no_secure_dns=True,
+                skip_dns_audit=True,
+                allow_dns_hijack=True,
+                doh_server=None,
+                data_block_sync=False,
+                timeout=3.0,
+                json=True,
+            )
+        )
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    import json
+
+    payload = json.loads(out)
+    assert payload["ok"] is True
+    assert payload["voice_ok"] is True
+
+
+@pytest.mark.unit
+def test_apply_triage_from_args_missing_file(tmp_path):
+    from types import SimpleNamespace
+
+    from blockchecks.engine.preflight import apply_triage_from_args
+    from blockchecks.engine.triage import TriageProfile
+
+    args = SimpleNamespace(triage_from=str(tmp_path / "nope.toml"), triage=None)
+    apply_triage_from_args(args)
+    assert isinstance(args.triage, TriageProfile)
+    assert args.triage.voice_ok is False
+
+
+@pytest.mark.unit
+def test_apply_triage_from_args_loads_toml(tmp_path):
+    from types import SimpleNamespace
+
+    from blockchecks.data_block.store import ProviderStore
+    from blockchecks.engine.preflight import apply_triage_from_args
+    from blockchecks.engine.triage import TriageProfile
+
+    store = ProviderStore(tmp_path)
+    store.save_triage(TriageProfile(voice_ok=True, udp_blocked=True), primary_domain="discord.com")
+    args = SimpleNamespace(triage_from=str(store.triage_file), triage=None)
+    apply_triage_from_args(args)
+    assert args.triage.voice_ok is True
+    assert args.triage.udp_blocked is True
+
+
+@pytest.mark.unit
+def test_run_diagnostics_skips_fooling_grid(monkeypatch):
+    import asyncio
+
+    from blockchecks.engine.preflight import PreflightOptions, _run_diagnostics
+    from blockchecks.engine.triage import TriageProfile
+
+    live = AsyncMock(return_value=(None, None))
+    monkeypatch.setattr("blockchecks.engine.preflight._try_live_strategy_probe", live)
+    monkeypatch.setattr(
+        "blockchecks.engine.preflight._run_fooling_and_blob_grids",
+        AsyncMock(),
+    )
+    opts = PreflightOptions(skip_fooling_grid=True, timeout=1.0)
+    cache = MagicMock()
+    cache.primary_ip.return_value = None
+    asyncio.run(_run_diagnostics(TriageProfile(), "discord.com", cache, opts))
+    live.assert_not_called()
+
+
+@pytest.mark.unit
+def test_maybe_skip_fooling_for_lock(monkeypatch):
+    from argparse import Namespace
+
+    from blockchecks.cli.commands.preflight import _maybe_skip_fooling_for_lock
+
+    monkeypatch.setattr(
+        "blockchecks.service.run_control.read_active_run",
+        lambda: object(),
+    )
+    args = Namespace()
+    _maybe_skip_fooling_for_lock(args)
+    assert args.skip_fooling_grid is True

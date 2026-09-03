@@ -706,3 +706,27 @@ def prepare_dns_for_run(
 
     cache.prime(domains, doh_url=url)
     return cache, results, 0
+
+
+def filter_resolvable_domains(
+    domains: list[str],
+    cache: DnsRunCache | None,
+    audits: list[DnsAuditResult] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Keep domains with a pin or DoH A record; drop NODATA/NXDOMAIN names.
+
+    Call after ``cache.prime`` (works with ``--skip-dns-audit``).
+    """
+    if cache is None:
+        return list(domains), []
+    verdict_by = {a.domain: a.verdict for a in (audits or []) if getattr(a, "domain", None)}
+    kept: list[str] = []
+    dropped: list[str] = []
+    for domain in domains:
+        if cache.pinned_ip(domain) or cache.primary_ip(domain):
+            kept.append(domain)
+            continue
+        verdict = verdict_by.get(domain) or "no_resolution"
+        log.warning("skipping unresolvable: %s (verdict=%s)", domain, verdict)
+        dropped.append(domain)
+    return kept, dropped

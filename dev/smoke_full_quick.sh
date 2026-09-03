@@ -30,7 +30,11 @@ if [ -f "$STATE/run.lock" ]; then
 fi
 
 echo "=== smoke_full_quick domain=$DOMAIN max=$MAX $(date -Is) ===" | tee "$LOG"
-sudo -n "$BS" full \
+# --foreground: SIGTERM hits bs so EXIT trap can cleanup_env (GNU timeout
+# on a wrapper otherwise SIGKILLs the whole group and leaves NFQUEUE busy).
+# set +e: timeout rc=124 must not skip artifact asserts.
+set +e
+timeout --foreground --kill-after=15s 150s sudo -n "$BS" full \
   -d "$DOMAIN" \
   --tcp-sources flowseal \
   --max "$MAX" --parallel 2 --timeout 4 \
@@ -41,6 +45,7 @@ sudo -n "$BS" full \
   --no-http \
   --db "$DB" --out-dir "$OUT" \
   2>&1 | tee -a "$LOG"
+set -e
 
 echo "=== artifacts ==="
 ls -la "$OUT"/ 2>/dev/null | grep -E "nfqws2|user.list|run_summary" || echo "NO EXPORT"

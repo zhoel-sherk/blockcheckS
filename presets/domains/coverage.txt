@@ -1,4 +1,4 @@
-# GP COVERAGE_DOMAINS — full service coverage (40 domains)
+# GP COVERAGE_DOMAINS — full service coverage (39 domains)
 youtube.com
 googlevideo.com
 youtu.be
@@ -19,7 +19,7 @@ discord.com
 discord.gg
 discord.media
 discordapp.com
-discordapp.net
+# discordapp.net — NODATA apex (see denylist.txt)
 discordcdn.com
 discord.co
 discord.design

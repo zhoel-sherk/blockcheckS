@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blockchecks.checkers.curl_probe import repeats_from_args
-from blockchecks.checkers.dns_secure import prepare_dns_for_run
+from blockchecks.checkers.dns_secure import filter_resolvable_domains, prepare_dns_for_run
 from blockchecks.checkers.http3 import supports_http3
 from blockchecks.engine.adaptive_runner import (
     build_adaptive_queue,
@@ -31,6 +31,7 @@ from blockchecks.engine.config import (
 from blockchecks.engine.domain_loader import (
     DEFAULT_DOMAINS_FILE,
     auto_enable_gv_ggc,
+    filter_probe_domains,
     format_skip_summary,
     load_domains,
     load_preset,
@@ -187,16 +188,18 @@ async def open_full_run_db(args) -> Any:
 
 
 def _finish_loaded_domains(loaded: Any, label: str) -> tuple[list[str], str, int | None]:
-    if not loaded.domains:
-        log.error(
-            "%s",
-            f"{RED}ERROR: no domains left after denylist filter (use --allow-unsafe-domains){RESET}",
-        )
-        return [], label, 1
     if loaded.skipped:
         log.info("%s", f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
-    auto_enable_gv_ggc(loaded.domains)
-    return loaded.domains, label, None
+    domains = filter_probe_domains(list(loaded.domains or []))
+    if not domains:
+        log.error(
+            "%s",
+            f"{RED}ERROR: no domains left after denylist/FQDN filter "
+            f"(use --allow-unsafe-domains; drop IPs/URLs/wildcards){RESET}",
+        )
+        return [], label, 1
+    auto_enable_gv_ggc(domains)
+    return domains, label, None
 
 
 def _load_preset_domains(name: str, allow_unsafe: bool) -> tuple[list[str], str, int | None]:
@@ -230,9 +233,12 @@ def load_run_domains(args) -> tuple[list[str], str, int | None]:
     if preset_name:
         return _load_preset_domains(preset_name, allow_unsafe)
     if explicit:
-        domains = [explicit]
+        domains = filter_probe_domains([explicit])
+        if not domains:
+            log.error("%s", f"{RED}ERROR: -d {explicit!r} is not a probe FQDN{RESET}")
+            return [], explicit, 1
         auto_enable_gv_ggc(domains)
-        return domains, explicit, None
+        return domains, domains[0], None
     try:
         loaded = load_domains(DEFAULT_DOMAINS_FILE, allow_unsafe=allow_unsafe)
     except FileNotFoundError:
@@ -255,6 +261,17 @@ def prepare_run_dns(args, domains: list[str]) -> tuple[Any, list[Any], int | Non
     )
     if dns_rc:
         return dns_cache, dns_audits, dns_rc
+    if dns_cache is not None:
+        kept, dropped = filter_resolvable_domains(domains, dns_cache, dns_audits)
+        domains[:] = kept
+        if dropped:
+            log.warning(
+                "%s",
+                f"  {YELLOW}DNS drop (no A/pin): {', '.join(dropped)}{RESET}",
+            )
+        if not kept:
+            log.error("%s", f"{RED}ERROR: no resolvable domains after DoH filter{RESET}")
+            return dns_cache, dns_audits, 1
     return dns_cache, dns_audits, None
 
 
@@ -266,7 +283,7 @@ async def run_preflight_filter(
     store: Any = None,
     dns_audits: list | None = None,
 ) -> tuple[list[str], str, int | None]:
-    from blockchecks.engine.preflight import run_preflight_async
+    from blockchecks.engine.preflight import apply_triage_from_args, run_preflight_async
 
     preflight = await run_preflight_async(
         domains,
@@ -281,6 +298,7 @@ async def run_preflight_filter(
 
     t = preflight.triage
     args.triage = t if isinstance(t, TriageProfile) else None
+    apply_triage_from_args(args)
     if preflight.skip_domains:
         skipped = sorted(preflight.skip_domains)
         log.info("%s", f"  {YELLOW}Prolog skip: {', '.join(skipped)}{RESET}")
@@ -652,11 +670,22 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
         try:
             rows = await ctx.db.domain_pass_rows()
             seeded = quarantine.seed_from_rows(rows)
+            try:
+                dns_rows = await ctx.db.domain_dns_resolve_fail_rows()
+            except Exception as exc:
+                log.warning("%s", f"  [quarantine] dns_resolve seed skipped ({exc})")
+                dns_rows = []
+            seeded.extend(
+                d
+                for d in quarantine.seed_dns_resolve_from_rows(dns_rows)
+                if d not in seeded
+            )
             if seeded:
                 log.warning(
                     "%s",
                     f"  [quarantine] pre-seeded {len(seeded)} dead domains from DB "
-                    f"(0 PASS in >= {qcfg.min_attempts} attempts): "
+                    f"(0 PASS in >= {qcfg.min_attempts} attempts / "
+                    f"dns_resolve >= {qcfg.dns_resolve_min_attempts}): "
                     f"{', '.join(sorted(seeded))}",
                 )
                 # Persist the seed so the quarantined table (and MCP status)
@@ -667,7 +696,7 @@ async def _run_tcp_adaptive(ctx: FullRunContext, progress: TcpProgress) -> None:
                         await ctx.db.quarantine_domain(
                             dom,
                             reason=info.get("reason", ""),
-                            failed=info.get("attempts", 0),
+                            failed=info.get("failed", info.get("attempts", 0)),
                         )
                     except Exception as exc:
                         log.warning(

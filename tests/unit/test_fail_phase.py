@@ -105,6 +105,15 @@ def test_is_infra_fail_shm_permission_denied():
     assert is_infra_fail_phase("tls_silent_drop_after_sni", error=err)
     assert not is_infra_fail_phase("tls_silent_drop_after_sni", error="timeout")
     assert is_infra_fail_phase("connect_timeout", error="")
+    assert not is_infra_fail_phase("dns_resolve", error="")
+
+
+@pytest.mark.unit
+def test_classify_nodata_skip_is_dns_resolve():
+    from blockchecks.engine.fail_phase import DNS_NODATA_SKIP
+
+    assert classify_fail_phase(DNS_NODATA_SKIP).value == "dns_resolve"
+
 
 
 @pytest.mark.unit

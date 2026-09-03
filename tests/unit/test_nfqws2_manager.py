@@ -421,6 +421,24 @@ def test_stop_kill_failure_handled():
     assert mgr._pid is None
 
 
+def test_host_stop_kills_sudo_children():
+    mgr = Nfqws2Manager()
+    mgr._pid = 10
+    mgr._proc = None
+    killed: list[int] = []
+
+    def _kill(pid: int) -> bool:
+        killed.append(pid)
+        return True
+
+    with (
+        patch("blockchecks.service.metrics.descendant_pids", return_value=[99]),
+        patch("blockchecks.service.metrics._kill_pid_sigkill", side_effect=_kill),
+    ):
+        mgr._kill_owned_nfqws2()
+    assert killed == [99, 10]
+
+
 def test_reclaim_debug_log(tmp_path):
     from blockchecks.service.nfqws2 import _reclaim_debug_log
 

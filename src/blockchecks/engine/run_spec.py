@@ -81,6 +81,7 @@ class RunSpec:
     zero_pass_warn: int = 10
     no_quarantine: bool = False
     quarantine_min: int = 300
+    dns_resolve_quarantine_min: int = 50
     quarantine_auto_denylist: bool = False
     isp_interface: str = field(default_factory=default_isp_interface)
     prefix: str = "/opt/etc/nfqws2"
@@ -170,6 +171,11 @@ class RunSpec:
                 300
                 if (qmin := getattr(args, "quarantine_min", None)) is None
                 else int(qmin)
+            ),
+            dns_resolve_quarantine_min=(
+                50
+                if (dqmin := getattr(args, "dns_resolve_quarantine_min", None)) is None
+                else int(dqmin)
             ),
             quarantine_auto_denylist=bool(
                 getattr(args, "quarantine_auto_denylist", False)

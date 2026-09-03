@@ -2,12 +2,65 @@
 
 from __future__ import annotations
 
+import ipaddress
+import logging
 import os
+import re
 from dataclasses import dataclass
 
 from blockchecks.engine.config import PROJECT_DIR
 from blockchecks.engine.paths import USER_PRESETS_DIR
 from blockchecks.engine.preset_paths import RESERVED_DOMAIN_FILES, resolve_domain_preset
+
+log = logging.getLogger(__name__)
+
+_FQDN_RE = re.compile(
+    r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+)
+
+
+def _is_literal_ip(token: str) -> bool:
+    try:
+        ipaddress.ip_address(token)
+        return True
+    except ValueError:
+        return False
+
+
+def canonicalize_probe_domain(raw: str) -> tuple[str | None, str | None]:
+    """Return ``(fqdn, normalize_warning)`` or ``(None, drop_reason)``."""
+    s = (raw or "").strip()
+    if not s:
+        return None, "empty"
+    if "://" in s or "*" in s or any(ch.isspace() for ch in s):
+        return None, f"not a hostname ({raw!r})"
+    if _is_literal_ip(s):
+        return None, f"IP address {s}"
+    if s.endswith("/"):
+        s = s.rstrip("/")
+    folded = s.lower().rstrip(".")
+    if not _FQDN_RE.match(folded):
+        return None, f"not an FQDN ({raw!r})"
+    note = f"normalized {raw!r} → {folded}" if folded != raw.strip() else None
+    return folded, note
+
+
+def filter_probe_domains(domains: list[str]) -> list[str]:
+    """Keep probe FQDNs; log WARNING and drop URL/wildcard/IP/junk."""
+    kept: list[str] = []
+    seen: set[str] = set()
+    for raw in domains:
+        fqdn, note = canonicalize_probe_domain(raw)
+        if fqdn is None:
+            log.warning("skipping domain: %s", note)
+            continue
+        if note:
+            log.warning("%s", note)
+        if fqdn in seen:
+            continue
+        seen.add(fqdn)
+        kept.append(fqdn)
+    return kept
 
 
 def auto_enable_gv_ggc(domains: list[str]) -> None:

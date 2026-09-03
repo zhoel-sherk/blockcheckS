@@ -225,19 +225,33 @@ class TcpProbeExecutor:
         runner = self._runner
         result = TcpTestResult(item=item, domain=domain)
         timeout, settle_max = self.timing_for(item, timeout)
+        resolved_ip = None
+        dns_verdict = ""
+        doh_server = ""
+        if runner.secure_dns and runner.dns_cache:
+            resolved_ip = runner.dns_cache.primary_ip(domain)
+            audit = runner.dns_audit.get(domain)
+            if audit:
+                dns_verdict = audit.verdict
+                doh_server = audit.doh_server or runner.dns_cache.doh_server
+            if not resolved_ip:
+                from blockchecks.engine.fail_phase import DNS_NODATA_SKIP, FailPhase
+
+                result.error = DNS_NODATA_SKIP
+                result.fail_phase = FailPhase.DNS_RESOLVE.value
+                await self._result_logger.log_tcp_probe(
+                    item,
+                    domain,
+                    result,
+                    resolved_ip=resolved_ip,
+                    dns_verdict=dns_verdict,
+                    doh_server=doh_server,
+                )
+                return result
 
         async with self.semaphore:
             ns_name = await self.pool.acquire()
             try:
-                resolved_ip = None
-                dns_verdict = ""
-                doh_server = ""
-                if runner.secure_dns and runner.dns_cache:
-                    resolved_ip = runner.dns_cache.primary_ip(domain)
-                    audit = runner.dns_audit.get(domain)
-                    if audit:
-                        dns_verdict = audit.verdict
-                        doh_server = audit.doh_server or runner.dns_cache.doh_server
                 protocol = getattr(item, "protocol", "tls12") or "tls12"
                 ip_candidates = self.resolve_domain_ips(domain)
                 data = await asyncio.to_thread(

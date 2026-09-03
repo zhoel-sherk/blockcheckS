@@ -175,7 +175,8 @@ def test_find_nfqws2_pids_eperm_sudo_fail_returns_empty():
 def test_pkill_nfqws2_in_ns_eperm_retries_sudo(caplog):
     import logging
 
-    with caplog.at_level(logging.WARNING):
+    metrics_log = "blockchecks.service.metrics"
+    with caplog.at_level(logging.DEBUG, logger=metrics_log):
         with (
             patch("blockchecks.service.metrics._find_nfqws2_pids", return_value=([4242], 0)),
             patch("blockchecks.service.metrics.os.kill", side_effect=PermissionError("EPERM")),
@@ -190,6 +191,9 @@ def test_pkill_nfqws2_in_ns_eperm_retries_sudo(caplog):
         check=False,
     )
     assert "EPERM killing pid 4242" in caplog.text
+    assert all(
+        r.levelno < logging.WARNING for r in caplog.records if r.name == metrics_log
+    )
 
 
 def test_pkill_nfqws2_in_ns_sudo_failure_logs_warning(caplog):
@@ -369,3 +373,16 @@ def test_summary_shape():
     s = mon.summary()
     assert s["enabled"] is True
     assert s["windows"] == {"5": 1}
+
+
+def test_descendant_pids_walks_pgrep_tree():
+    from blockchecks.service.metrics import descendant_pids
+
+    tree = {10: [20, 21], 20: [30], 21: [], 30: []}
+
+    with patch(
+        "blockchecks.service.metrics._pgrep_child_pids",
+        side_effect=lambda ppid: tree.get(ppid, []),
+    ):
+        kids = descendant_pids(10)
+    assert set(kids) == {20, 21, 30}

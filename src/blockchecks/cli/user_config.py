@@ -77,6 +77,22 @@ def apply_parser_defaults(parser: argparse.ArgumentParser, cfg: dict[str, Any]) 
         for key, env_name in env_map.items():
             if key in run and not os.environ.get(env_name):
                 os.environ[env_name] = str(run[key])
+    quarantine = cfg.get("quarantine") or {}
+    if isinstance(quarantine, dict):
+        from blockchecks.engine.domain_quarantine import (
+            DEFAULT_DNS_RESOLVE_MIN,
+            DEFAULT_MIN_ATTEMPTS,
+            clamp_quarantine_min,
+        )
+
+        if "min_attempts" in quarantine:
+            defaults["quarantine_min"] = clamp_quarantine_min(
+                quarantine.get("min_attempts"), DEFAULT_MIN_ATTEMPTS
+            )
+        if "dns_resolve_min_attempts" in quarantine:
+            defaults["dns_resolve_quarantine_min"] = clamp_quarantine_min(
+                quarantine.get("dns_resolve_min_attempts"), DEFAULT_DNS_RESOLVE_MIN
+            )
     tools = cfg.get("tools") or {}
     if isinstance(tools, dict):
         if tools.get("nfqws2") and not os.environ.get("BLOCKCHECKS_NFQWS2"):

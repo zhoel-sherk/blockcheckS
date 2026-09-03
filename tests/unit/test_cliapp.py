@@ -470,6 +470,68 @@ def test_invalid_scan_level_rejected():
 
 
 @pytest.mark.unit
+def test_warn_live_cli_flags_domains_file_overrides(caplog):
+    from types import SimpleNamespace
+
+    from blockchecks.cli.parser import warn_live_cli_flags
+
+    caplog.set_level("WARNING")
+    args = SimpleNamespace(
+        domains_file="/tmp/n.txt",
+        domain="youtube.com",
+        preset="coverage",
+        classic=True,
+        probe_backend=None,
+    )
+    warn_live_cli_flags(args)
+    text = caplog.text
+    assert "overrides -d" in text
+    assert "overrides --preset" in text
+    assert "classic" in text.lower()
+    assert "lua_bridge" in text
+
+
+@pytest.mark.unit
+def test_require_passwordless_sudo_exit_2(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from blockchecks.cli.parser import (
+        ensure_system_deps_or_exit,
+        require_passwordless_sudo,
+    )
+
+    monkeypatch.setattr("blockchecks.cli.parser.os.geteuid", lambda: 1000)
+    monkeypatch.setattr(
+        "blockchecks.cli.parser.subprocess.run",
+        lambda *_a, **_k: MagicMock(returncode=1, stderr="a password is required", stdout=""),
+    )
+    assert require_passwordless_sudo() == 2
+    args = SimpleNamespace(
+        skip_deps_check=True,
+        domains_file=None,
+        domain="",
+        preset=None,
+        classic=False,
+        probe_backend=None,
+    )
+    assert ensure_system_deps_or_exit(args) == 2
+
+
+@pytest.mark.unit
+def test_require_passwordless_sudo_root_skips(monkeypatch):
+    from blockchecks.cli.parser import require_passwordless_sudo
+
+    monkeypatch.setattr("blockchecks.cli.parser.os.geteuid", lambda: 0)
+
+    def boom(*_a, **_k):
+        raise AssertionError("sudo -n must not run as root")
+
+    monkeypatch.setattr("blockchecks.cli.parser.subprocess.run", boom)
+    assert require_passwordless_sudo() == 0
+
+
+@pytest.mark.unit
 def test_invalid_profile_rejected():
     with pytest.raises(SystemExit):
         _parse(["scan", "--profile", "nope", "-d", "x.com"])

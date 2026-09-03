@@ -95,6 +95,8 @@ def test_scan_and_full_help_have_quarantine_flags():
     scan = _help(["scan", "--help"])
     assert "--no-quarantine" in scan
     assert "--quarantine-min" in scan
+    assert "--dns-resolve-quarantine-min" in scan
+    assert "--triage-from" in scan
     from io import StringIO
     from unittest.mock import patch
 
@@ -109,6 +111,13 @@ def test_scan_and_full_help_have_quarantine_flags():
     full = buf.getvalue()
     assert "--no-quarantine" in full
     assert "--quarantine-min" in full
+    assert "--dns-resolve-quarantine-min" in full
+    assert "--triage-from" in full
+
+
+def test_preflight_help_has_json():
+    text = _help(["preflight", "--help"])
+    assert "--json" in text
 
 
 def test_unknown_flag_and_bogus_profile_level_rejected():
@@ -120,6 +129,8 @@ def test_unknown_flag_and_bogus_profile_level_rejected():
         ["tcp", "--not-a-flag"],
         ["scan", "--profile", "nope", "-d", "x.com"],
         ["scan", "--scan-level", "nope", "-d", "x.com"],
+        ["scan", "--quarantine-min", "0", "-d", "x.com"],
+        ["scan", "--dns-resolve-quarantine-min", "10001", "-d", "x.com"],
     )
     for argv in cases:
         with pytest.raises(SystemExit) as exc:

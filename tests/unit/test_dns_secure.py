@@ -446,3 +446,32 @@ def test_format_audit_table_shows_untrusted_only_when_answered():
     assert "77.88.8.8" in text
     assert "untrusted" in text
     assert "Yandex DoH: no answers" not in text
+
+
+@pytest.mark.unit
+def test_filter_resolvable_domains_drops_nodata():
+    from blockchecks.checkers.dns_secure import DnsRunCache, filter_resolvable_domains
+
+    cache = DnsRunCache()
+    cache.set("live.example", ["1.2.3.4"])
+    cache.set_pins({"pinned.example": "9.9.9.9"})
+    cache.primary_ip = lambda domain, doh_url=None: (  # type: ignore[method-assign]
+        "1.2.3.4"
+        if domain == "live.example"
+        else ("9.9.9.9" if domain == "pinned.example" else None)
+    )
+    kept, dropped = filter_resolvable_domains(
+        ["live.example", "dead.example", "pinned.example"],
+        cache,
+    )
+    assert kept == ["live.example", "pinned.example"]
+    assert dropped == ["dead.example"]
+
+
+@pytest.mark.unit
+def test_filter_resolvable_domains_none_cache():
+    from blockchecks.checkers.dns_secure import filter_resolvable_domains
+
+    kept, dropped = filter_resolvable_domains(["a.com"], None)
+    assert kept == ["a.com"] and dropped == []
+

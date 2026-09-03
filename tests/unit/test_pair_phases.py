@@ -25,6 +25,7 @@ from blockchecks.cli.commands.pair_phases import (
     resolve_resume_checkpoint,
     run_adaptive_pair_phase,
     run_standard_pair_phase,
+    udp_generate_max,
     validate_pair_domain,
 )
 
@@ -338,6 +339,13 @@ def test_resume_match():
 # ── load_strategy_items ───────────────────────────────────────────────
 
 
+def test_udp_generate_max_user_matrix_not_halved():
+    assert udp_generate_max(100, user_matrix="") == 50
+    assert udp_generate_max(100, user_matrix="/tmp/m.txt") == 100
+    assert udp_generate_max(0, user_matrix="/tmp/m.txt") == 10_000
+    assert udp_generate_max(1, user_matrix="") == 50
+
+
 def test_load_strategy_items_config_path():
     args = _args(config="/tmp/my.conf", generate=False, user_matrix="")
     res = asyncio.run(load_strategy_items(args, MagicMock()))
@@ -443,6 +451,31 @@ def test_finalize_tcp_passed_returns_exit_code():
             finalize_pair_run(args, db, None, asyncio.Event(), StopHandlerState(), 2, [], None)
         )
     assert rc == 0
+
+
+def test_finalize_export_ioerr_keeps_ok_exit(caplog):
+    import sqlite3
+
+    args = _args(tcp_only=True, out_dir="/tmp/export-fail")
+    db = MagicMock()
+    with (
+        patch(
+            "blockchecks.engine.run_finalize.maybe_write_best_config_data_block", new=AsyncMock()
+        ),
+        patch("blockchecks.engine.run_finalize.maybe_sync_data_block", new=AsyncMock()),
+        patch(
+            "blockchecks.cli.commands.pair_phases.maybe_export_configs",
+            new=AsyncMock(side_effect=sqlite3.OperationalError("disk I/O error")),
+        ),
+        patch("blockchecks.cli.commands.pair_phases.write_run_summary", return_value=None),
+        patch("blockchecks.cli.commands.pair_phases.run_exit_code", return_value=0),
+        caplog.at_level(logging.WARNING),
+    ):
+        rc = asyncio.run(
+            finalize_pair_run(args, db, None, asyncio.Event(), StopHandlerState(), 2, [], None)
+        )
+    assert rc == 0
+    assert "export skipped after sqlite/IO error" in caplog.text
 
 
 def test_finalize_pairs_fail_returns_1():
@@ -634,6 +667,7 @@ def test_run_adaptive_pair_phase_passes_quarantine():
     db = MagicMock()
     db.get_completed_tcp_keys = AsyncMock(return_value=set())
     db.domain_pass_rows = AsyncMock(return_value=[])
+    db.domain_dns_resolve_fail_rows = AsyncMock(return_value=[])
     quarantine = MagicMock()
     quarantine.exclude_domains.return_value = set()
     with (

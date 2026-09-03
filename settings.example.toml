@@ -42,6 +42,12 @@ retry_ip_timeout = 1.0
 # Also: --curl-parallel 1, --preset pi2, -M timeout-benchmark, --max 20
 # Env: BLOCKCHECKS_POOL=1  (now wired into --parallel default)
 
+[quarantine]
+# Standard: 0 PASS after N DPI probes (not infra: shm/ns/batch-loop). Range 1–10000.
+min_attempts = 300
+# Separate counter for fail_phase=dns_resolve (NODATA / no pin). Range 1–10000.
+dns_resolve_min_attempts = 50
+
 [tools]
 nfqws2 = "/opt/zapret2/nfq2/nfqws2"
 blobs = "/opt/zapret2/blobs"

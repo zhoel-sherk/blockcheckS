@@ -1,5 +1,6 @@
 """Tests for domain list loading and denylist."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -117,3 +118,47 @@ async def test_count_tcp_passes_latest_row(tmp_path: Path):
     await db.log_tcp("s1", "discord.com", "FAIL", 0, 0, config_path="fake:blob=stun")
     assert await db.count_tcp_passes("discord.com") == 0
     assert await db.count_tcp_passes() == 0
+
+
+@pytest.mark.unit
+def test_nonsense_keeps_junk_ip_wildcard_url():
+    from blockchecks.engine.domain_loader import DOMAINS_PRESET_DIR
+
+    path = os.path.join(DOMAINS_PRESET_DIR, "nonsense.txt")
+    lines = read_domain_lines(path)
+    assert "8.8.8.8" in lines
+    assert "1.1.1.1" in lines
+    assert "*.googlevideo.com" in lines
+    assert "*.discord.com" in lines
+    assert "https://discord.com/" in lines
+    assert "not a domain" in lines
+    assert "torproject.org" in lines
+    assert "nordvpn.com" in lines
+    assert "protonvpn.com" in lines
+    assert "surfshark.com" in lines
+    assert "expressvpn.com" in lines
+    assert "youtube.com" in lines
+    assert not any(ln.startswith("#") for ln in lines)
+
+
+@pytest.mark.unit
+def test_filter_probe_domains_drops_ip_wildcard_url(caplog):
+    from blockchecks.engine.domain_loader import (
+        DOMAINS_PRESET_DIR,
+        filter_probe_domains,
+    )
+
+    caplog.set_level("WARNING")
+    path = os.path.join(DOMAINS_PRESET_DIR, "nonsense.txt")
+    kept = filter_probe_domains(read_domain_lines(path))
+    assert "youtube.com" in kept
+    assert "torproject.org" in kept
+    assert "nordvpn.com" in kept
+    assert "8.8.8.8" not in kept
+    assert "*.discord.com" not in kept
+    assert "https://discord.com/" not in kept
+    assert "not a domain" not in kept
+    assert "discord.com" in kept
+    assert "gateway.discord.gg" in kept
+    assert "DISCORD.COM" not in kept
+    assert any("skipping domain" in r.message for r in caplog.records)

@@ -68,3 +68,4 @@ class RunnerProbeDeps:
     run_tcp_check: Callable[..., dict]
     acquire_ns: Callable[[], Awaitable[str]]
     release_ns: Callable[[str], Awaitable[None]]
+    secure_dns: bool = False

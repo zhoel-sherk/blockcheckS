@@ -20,6 +20,18 @@ def cmd_label(prefix: str, cmd: str) -> str:
     return f"{prefix}_{digest}"
 
 
+_PAIR_LABEL_WIDTH = 22
+_PAIR_LABEL_TAIL = 7  # "_" + 6 hex digest
+
+
+def format_pair_label(label: str, width: int = _PAIR_LABEL_WIDTH) -> str:
+    """Fit ``cmd_label`` into ``width`` without dropping the digest suffix."""
+    if len(label) <= width:
+        return label
+    tail_n = min(_PAIR_LABEL_TAIL, width)
+    return f"{label[: width - tail_n]}{label[-tail_n:]}"
+
+
 def _ttl_clause(ttl_val: str | int | None) -> str:
     if ttl_val is None or ttl_val == "":
         return ""

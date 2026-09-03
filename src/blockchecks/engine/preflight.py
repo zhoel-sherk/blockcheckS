@@ -88,6 +88,7 @@ class PreflightOptions:
     skip_udp_16kb: bool = False
     skip_l3_triage: bool = False
     skip_persist: bool = False
+    skip_fooling_grid: bool = False
     dpi_diag: bool = False
     force: bool = False
     verify_content: bool = False
@@ -122,6 +123,7 @@ class PreflightOptions:
             skip_udp_16kb=no_preflight or quick,
             skip_l3_triage=no_preflight,
             skip_persist=no_preflight,
+            skip_fooling_grid=bool(getattr(args, "skip_fooling_grid", False)),
             dpi_diag=bool(getattr(args, "dpi_diag", False)) and not no_preflight,
             force=getattr(args, "force", False),
             verify_content=getattr(args, "prolog_content", False),
@@ -588,7 +590,10 @@ async def _run_diagnostics(
 
     probe_fn = opts.fooling_probe_fn
     runner = None
-    if not callable(probe_fn):
+    if opts.skip_fooling_grid:
+        log.warning("%s", "  live fooling grid skipped (run.lock or skip_fooling_grid)")
+        probe_fn = None
+    elif not callable(probe_fn):
         probe_fn, runner = await _try_live_strategy_probe(domain, opts, cache)
     try:
         if callable(probe_fn):
@@ -664,6 +669,26 @@ async def _try_live_strategy_probe(domain: str, opts: PreflightOptions, cache: A
     except Exception as e:  # noqa: BLE001 — no root / no nfqws2 / pool fail
         log.info("%s", f"  Triage {domain}: live fooling grid skipped ({e})")
         return None, None
+
+
+def apply_triage_from_args(args: Any) -> None:
+    """Override ``args.triage`` from ``--triage-from``; missing file → empty profile."""
+    raw = getattr(args, "triage_from", None) or ""
+    if not raw:
+        return
+    from blockchecks.data_block.store import load_triage_toml
+    from blockchecks.engine.triage import TriageProfile
+
+    loaded = load_triage_toml(raw)
+    if loaded is None:
+        log.warning(
+            "%s",
+            f"  WARNING: --triage-from {raw!r} missing or invalid; using empty profile",
+        )
+        args.triage = TriageProfile()
+        return
+    args.triage = loaded
+    log.info("%s", f"  triage-from {raw}")
 
 
 def _load_prior_triage() -> TriageProfile:

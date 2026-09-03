@@ -187,7 +187,12 @@ class MatrixGenerator:
         import time as _time
 
         if triage is not None and triage.voice_ok and not triage.udp_blocked:
-            return []
+            if not user_matrix:
+                return []
+            log.info(
+                "%s",
+                "generate_udp: voice_ok=True but user_matrix is set; keeping UDP items",
+            )
 
         if not sources:
             sources = ["custom", "standard_udp"]

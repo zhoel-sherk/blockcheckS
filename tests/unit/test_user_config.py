@@ -99,3 +99,18 @@ def test_apply_parser_defaults_run_env(monkeypatch):
     assert os.environ.get("BLOCKCHECKS_RETRY_IP_TIMEOUT") == "1.0"
     assert os.environ.get("BLOCKCHECKS_AQ_DOMAIN_ISOLATE") == "True"
     assert os.environ.get("BLOCKCHECKS_BRIDGE_BATCH") == "10"
+
+
+@pytest.mark.unit
+def test_apply_parser_defaults_quarantine(monkeypatch):
+    p = argparse.ArgumentParser()
+    p.add_argument("--quarantine-min", type=int, default=300)
+    p.add_argument("--dns-resolve-quarantine-min", type=int, default=50)
+    user_config.apply_parser_defaults(
+        p,
+        {"quarantine": {"min_attempts": 12, "dns_resolve_min_attempts": 7}},
+    )
+    args = p.parse_args([])
+    assert args.quarantine_min == 12
+    assert args.dns_resolve_quarantine_min == 7
+

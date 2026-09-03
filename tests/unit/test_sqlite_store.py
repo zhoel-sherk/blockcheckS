@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
+import time
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,6 +23,131 @@ async def test_count_tcp_passes_no_leak(tmp_path):
     assert await store.count_tcp_passes() == 1
     assert await store.count_tcp_passes("discord.com") == 1
     assert store.path == (tmp_path / "t.db").resolve()
+    await store.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_count_tcp_passes_uses_writer_not_new_connect(tmp_path, monkeypatch):
+    from blockchecks.engine.store import sqlite_store as mod
+
+    store = open_run_store(tmp_path / "w.db")
+    await store.init()
+    await store.log_tcp("s1", "discord.com", "PASS", 100.0, 200, config_path="fake:blob=stun")
+    await store.flush()
+
+    def boom(*_a, **_k):
+        raise AssertionError("count_tcp_passes must not open a second sqlite connect")
+
+    monkeypatch.setattr(mod.aiosqlite, "connect", boom)
+    assert await store.count_tcp_passes() == 1
+    await store.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reader_pragmas_skip_mmap_and_wal(tmp_path):
+    from contextlib import asynccontextmanager
+
+    from blockchecks.engine.store import sqlite_store as mod
+
+    store = open_run_store(tmp_path / "r.db")
+    await store.init()
+    pragmas: list[str] = []
+    real_connect = mod.aiosqlite.connect
+
+    @asynccontextmanager
+    async def spy_connect(*a, **k):
+        async with real_connect(*a, **k) as db:
+            orig = db.execute
+
+            async def rec(sql, *args, **kwargs):
+                if isinstance(sql, str) and "PRAGMA" in sql.upper():
+                    pragmas.append(sql)
+                return await orig(sql, *args, **kwargs)
+
+            db.execute = rec
+            yield db
+
+    mod.aiosqlite.connect = spy_connect
+    try:
+        await store.get_quarantined()
+    finally:
+        mod.aiosqlite.connect = real_connect
+        await store.close()
+    blob = " ".join(pragmas).lower()
+    assert "mmap" not in blob
+    assert "journal_mode" not in blob
+    assert "busy_timeout" in blob
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sqlite_retry_on_disk_io(monkeypatch, caplog):
+    from blockchecks.engine.store import sqlite_store as mod
+
+    n = {"i": 0}
+
+    async def op():
+        n["i"] += 1
+        if n["i"] < 2:
+            raise sqlite3.OperationalError("disk I/O error")
+        return 7
+
+    monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock())
+    with caplog.at_level(logging.WARNING, logger=mod.log.name):
+        assert await mod._sqlite_retry(op, what="count_tcp_passes") == 7
+    assert "retry 1/3" in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compact_times_out(tmp_path, caplog):
+    from blockchecks.engine.store import sqlite_store as mod
+
+    store = open_run_store(tmp_path / "c.db")
+    await store.init()
+    orig = store._conn.execute
+
+    async def slow(sql, *a, **k):
+        if "wal_checkpoint" in str(sql).lower():
+            await asyncio.sleep(10)
+        return await orig(sql, *a, **k)
+
+    store._conn.execute = slow
+    t0 = time.monotonic()
+    with caplog.at_level(logging.WARNING, logger=mod.log.name):
+        await store.compact()
+    assert time.monotonic() - t0 < 4
+    assert "compact timed out" in caplog.text
+    await store.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_close_does_not_compact(tmp_path):
+    store = open_run_store(tmp_path / "nc.db")
+    await store.init()
+    store.compact = AsyncMock()
+    await store.close()
+    store.compact.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_close_flush_timeout_continues(tmp_path, caplog):
+    caplog.set_level(logging.WARNING)
+    store = open_run_store(tmp_path / "hang.db")
+    await store.init()
+
+    async def hang_flush(*, wal_checkpoint=True):
+        await asyncio.sleep(30)
+
+    store.flush = hang_flush
+    t0 = time.monotonic()
+    await store.close()
+    assert time.monotonic() - t0 < 8
+    assert "flush on close timed out" in caplog.text
 
 
 @pytest.mark.unit

@@ -261,7 +261,7 @@ def test_prune_db_skips_delete_when_run_lock_held(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_cmd_gc_db_days_dry_run(tmp_path: Path, monkeypatch) -> None:
+def test_cmd_gc_db_days_dry_run(tmp_path: Path, monkeypatch, capsys) -> None:
     import argparse
 
     from blockchecks.cli.commands.gc import cmd_gc
@@ -284,6 +284,7 @@ def test_cmd_gc_db_days_dry_run(tmp_path: Path, monkeypatch) -> None:
         db=str(db),
     )
     assert cmd_gc(ns) == 0
+    assert "re-run with --apply to delete" in capsys.readouterr().out
     with sqlite3.connect(str(db)) as con:
         assert con.execute("SELECT COUNT(*) FROM tcp_results").fetchone()[0] == 3
 

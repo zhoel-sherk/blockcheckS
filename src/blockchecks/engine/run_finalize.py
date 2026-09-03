@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import time
 from pathlib import Path
 from typing import Any
@@ -154,21 +155,25 @@ async def maybe_export_configs(
     stop_set: bool,
     deadline: RunDeadline | None,
 ) -> dict[str, Any] | None:
-    await store.flush()
-    passes = await store.count_tcp_passes()
-    if not should_export(args, stop_set=stop_set, _deadline=deadline, pass_count=passes):
+    try:
+        await store.flush()
+        passes = await store.count_tcp_passes()
+        if not should_export(args, stop_set=stop_set, _deadline=deadline, pass_count=passes):
+            return None
+        return await export_configs(
+            store=store,
+            domain=primary,
+            limit=getattr(args, "export_limit", 3),
+            out_dir=args.out_dir,
+            isp_interface=_resolve_isp_interface(args),
+            prefix=getattr(args, "prefix", "/opt/etc/nfqws2"),
+            mode=getattr(args, "mode", "auto"),
+            domains_file=domains_file,
+            common_only=not getattr(args, "no_common_only", False),
+        )
+    except (sqlite3.OperationalError, OSError) as exc:
+        log.warning("export skipped after sqlite/IO error: %s", exc)
         return None
-    return await export_configs(
-        store=store,
-        domain=primary,
-        limit=getattr(args, "export_limit", 3),
-        out_dir=args.out_dir,
-        isp_interface=_resolve_isp_interface(args),
-        prefix=getattr(args, "prefix", "/opt/etc/nfqws2"),
-        mode=getattr(args, "mode", "auto"),
-        domains_file=domains_file,
-        common_only=not getattr(args, "no_common_only", False),
-    )
 
 
 def write_run_summary(

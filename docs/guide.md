@@ -101,7 +101,7 @@ Raspberry Pi 2: [install-rpi.md](install-rpi.md) и раздел [Память](
 | `bs scan` | только TCP, без голоса | `sudo bs scan --preset discord --generate --parallel 4` |
 | `bs pair` | TCP + UDP-голос | `sudo bs pair -d discord.com --generate --discover-dns 5` |
 | `bs tcp` / `bs udp` | одна готовая стратегия / `.conf` | `sudo bs tcp -d youtube.com -c configs/simple_fake__fake_ts.conf` |
-| `bs preflight` | только диагноз DPI, без перебора | `sudo bs preflight --preset discord` |
+| `bs preflight` | только диагноз DPI, без перебора | `bs preflight --preset discord --json` |
 | `bs composite` | один составной `.conf` на пачку доменов | `sudo bs composite -c configs/composite_discord.conf` |
 | `bs bench-settle` | подобрать settle/curl таймауты | `sudo bs bench-settle -d discord.com` |
 | `bs serve` | демон для повторных проб | `sudo bs serve --pool 2` |
@@ -117,6 +117,36 @@ Raspberry Pi 2: [install-rpi.md](install-rpi.md) и раздел [Память](
 
 Список пресетов: `bs scan --list-presets`. Справка команды: `bs full -h`.
 
+### Отдельный preflight для оркестратора
+
+`bs preflight` пишет `triage.toml` + `hosts` в data_block провайдера и **не** берёт
+`run.lock`. Кампания потом грузит профиль без повторных проб:
+
+```bash
+bs preflight --preset discord --json
+bs pair --preset discord --no-preflight --user-matrix /path/to/matrix.txt --udp-bypass
+# или явный файл:
+bs pair --preset discord --no-preflight --triage-from ~/.local/share/blockcheckS/data_block/providers/<slug>/triage.toml
+```
+
+`--json` печатает один объект в stdout (`ok`, `exit_code`, `triage_path`,
+`hosts_path`, `provider`, `skip_domains`, `voice_ok`, `udp_blocked`,
+`primary_domain`, `triage`). Human-лог — stderr. Тот же HOME/XDG, что и у
+кампании: не оборачивать весь CLI в `sudo bs` (sudo внутри netns/nfqws2).
+Если жив `run.lock`, live fooling grid пропускается (warning), чтобы не
+драться с пулом netns кампании.
+
+`--no-preflight` на `scan`/`pair`/`full` не отключает загрузку профиля: probes
+скипаются, `triage.toml` читается. Без файла — пустой `TriageProfile`.
+
+### `--user-matrix`
+
+Один файл на TCP и UDP. Секции `# --- TCP ---` / `# --- UDP ---` / `# --- QUIC ---`
+переключают lane. Без секции UDP-путь отбрасывает TCP-fooling (`tcp_ack`,
+`tcp_ts_up`, `tls_client_hello`) и `--filter-tcp`, но оставляет короткие
+`fake:blob=stun:repeats=6:tcp_ts=-1000`. `--filter-udp` / `discord_udp` не
+попадают в TCP. Кап UDP при `--user-matrix` равен `--max` (не `max/2`).
+
 ---
 
 ## Пресеты
@@ -125,7 +155,7 @@ Raspberry Pi 2: [install-rpi.md](install-rpi.md) и раздел [Память](
 
 | Пресет | Доменов | Зачем |
 |---|---:|---|
-| `coverage-tcp` | 16 | **дефолт `bs full`**: YouTube + Discord + Signal/ECH |
+| `coverage-tcp` | 15 | **дефолт `bs full`**: YouTube + Discord + Signal/ECH |
 | `critical` | 4 | youtube, discord, discordcdn, signal — самый короткий «боевой» набор |
 | `benchmark` | 6 | дымовой прогон |
 | `discord` / `google-youtube` | ~22 / ~23 | один сервис целиком |
@@ -185,7 +215,7 @@ sudo bs full --preset coverage-tcp --profile 20h   # только если ну�
 | Фича | Дефолт | Выключить |
 |---|---|---|
 | Adaptive queue | ON | `--no-adaptive` |
-| Domain quarantine | ON (min 300 fails; seed from DB **only** with `--resume`) | `--no-quarantine` / `--quarantine-min N`; `--quarantine-auto-denylist` пишет в denylist.txt |
+| Domain quarantine | ON (DPI min 300; dns_resolve min 50; seed from DB **only** with `--resume`) | `--no-quarantine` / `--quarantine-min N` / `--dns-resolve-quarantine-min N` (1–10000); `--quarantine-auto-denylist`; `[quarantine]` in `config.toml` |
 | Time limit | off | `--max-timem N` or `--max-timeh N` (graceful stop; `--export-on-stop` on full/pair) |
 | TLS fingerprint | `chrome124` (pin для сравнимости) | env `BLOCKCHECKS_IMPERSONATE=chrome` (latest, сейчас chrome150); см. `dev/capture_quic_blob.sh` для QUIC-блобов |
 | Preflight | ON | `--no-preflight` (всё) или `--quick` (только prolog) |
@@ -212,7 +242,12 @@ One-shot (`bs tcp`, `bs composite`, fan-out `--curl-parallel`) по-прежне
 
 **Целостность PASS:** кампания пишет `PASS` в harvest/AQ только если HTTP OK **и** Lua APPLIED (`campaign_pass`). Строка `status=PASS` без `bridge_applied=1` — подозрительна (до 1.3.9/фиксов week_cov). Валидационный экспорт: `bs harvest-batch` (фильтр APPLIED=1). `bc-nfconf` и MCP `query_strategies` берут PASS с `bridge_applied IS NULL OR = 1`.
 
-Карантин mid-run исключает домены с 0 PASS за `--quarantine-min` попыток. Сид из истории БД — **только** `--resume` (повтор без resume не наследует карантин). Infra FAIL (shm EPERM и т.п.) в `quarantine_min` не входит.
+Карантин mid-run исключает домены с 0 PASS за `--quarantine-min` DPI-проб
+(default 300) **или** `--dns-resolve-quarantine-min` FAIL `dns_resolve`
+(default 50). Оба порога 1–10000, задаются CLI или `[quarantine]` в
+`~/.config/blockcheckS/config.toml`. Сид из истории БД — **только** `--resume`.
+Infra FAIL (shm EPERM, ns pool, batch-loop) в счётчики не входит. Домены без
+A-записи (NODATA) отфильтровываются на старте после DoH prime (`filter_resolvable_domains`).
 
 ```bash
 sudo bs scan -d discord.com --generate --max 50

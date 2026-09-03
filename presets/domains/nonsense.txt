@@ -1,0 +1,41 @@
+# Chaos notepad dump for dev/nonsense_user.sh (not a recommended --preset).
+# Mix of coverage, TSPU-blocked, denylist, wildcards, IPs, junk.
+
+# coverage-tcp slice
+youtube.com
+googlevideo.com
+discord.com
+signal.org
+
+# denylist (skipped unless --allow-unsafe-domains)
+discord.media
+
+# tracker / TSPU
+rutracker.org
+
+# fully blocked VPN / Tor (not denylist)
+torproject.org
+nordvpn.com
+protonvpn.com
+surfshark.com
+expressvpn.com
+
+# junk a human pastes
+https://discord.com/
+DISCORD.COM
+gateway.discord.gg/
+
+not a domain
+
+# wildcards
+*.googlevideo.com
+*.discord.com
+
+# IPs (public DNS, LAN)
+8.8.8.8
+1.1.1.1
+192.168.1.1
+
+# unblocked reference
+ya.ru
+ripe.net

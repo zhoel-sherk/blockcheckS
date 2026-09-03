@@ -112,6 +112,14 @@ class ProbeBatchService:
                 return await self._finalize_batch(
                     ctx, self._empty_stopped_result(ctx), resolved_by_domain
                 )
+            if self.deps.secure_dns and resolved_by_domain and all(
+                not meta[0] for meta in resolved_by_domain.values()
+            ):
+                names = ",".join(resolved_by_domain)
+                log.warning("skipping batch curl: no DoH A record for %s", names)
+                return await self._finalize_batch(
+                    ctx, self._dns_nodata_result(ctx), resolved_by_domain, ns=ns
+                )
             wall_start = time.monotonic()
             sync_task: asyncio.Task | None = None
             try:
@@ -204,6 +212,30 @@ class ProbeBatchService:
     def _pool_exhausted_result(ctx: BatchContext) -> BatchProbeResult:
         """Empty result when no netns could be acquired within the pool timeout."""
         return ProbeBatchService._skipped_batch_result(ctx, NS_POOL_EXHAUSTED)
+
+    @staticmethod
+    def _dns_nodata_result(ctx: BatchContext) -> BatchProbeResult:
+        """FAIL every item without curling when DoH/pin produced no A record."""
+        from blockchecks.engine.fail_phase import DNS_NODATA_SKIP, FailPhase
+        from blockchecks.engine.results import TcpTestResult
+
+        results = [
+            TcpTestResult(
+                item=item,
+                domain=dom,
+                success=False,
+                error=DNS_NODATA_SKIP,
+                fail_phase=FailPhase.DNS_RESOLVE.value,
+            )
+            for item, dom in zip(ctx.items, ctx.item_domains(), strict=True)
+        ]
+        return BatchProbeResult(
+            results=results,
+            settle_ms=0,
+            backend="lua_bridge",
+            batch_wall_ms=0,
+            batch_fill_ratio=0,
+        )
 
     @staticmethod
     def _skipped_batch_result(ctx: BatchContext, error: str) -> BatchProbeResult:
@@ -329,6 +361,17 @@ class ProbeBatchService:
                 timeout_i, _ = self.deps.timing_for(item, timeout)
                 item_proto = getattr(item, "protocol", protocol) or protocol
                 resolved_ip, _, _ = resolved_by_domain[dom]
+                if self.deps.secure_dns and not resolved_ip:
+                    from blockchecks.engine.fail_phase import DNS_NODATA_SKIP
+
+                    data = {
+                        "success": False,
+                        "error": DNS_NODATA_SKIP,
+                        "batch_id": ctx.batch_id,
+                    }
+                    result = self.deps.tcp_result_from_data(item, dom, data)
+                    results.append(result)
+                    continue
                 live_events.set_current(
                     domain=dom,
                     strategy=getattr(item, "label", item.strategy),
