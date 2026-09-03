@@ -535,3 +535,11 @@ def test_require_passwordless_sudo_root_skips(monkeypatch):
 def test_invalid_profile_rejected():
     with pytest.raises(SystemExit):
         _parse(["scan", "--profile", "nope", "-d", "x.com"])
+
+
+@pytest.mark.unit
+def test_warn_live_cli_flags_accepts_repeatable_scan_domain():
+    from blockchecks.cli.parser import warn_live_cli_flags
+
+    ns = _parse(["scan", "-d", "youtube.com", "-d", "discord.com"])
+    warn_live_cli_flags(ns)

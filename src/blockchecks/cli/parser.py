@@ -730,7 +730,11 @@ def ensure_system_deps_or_exit(args) -> int:
 def warn_live_cli_flags(args) -> None:
     """Human-usage warnings: ignored -d/--preset, deprecated --classic."""
     domains_file = getattr(args, "domains_file", None)
-    domain = (getattr(args, "domain", None) or "").strip()
+    raw_domain = getattr(args, "domain", None)
+    if isinstance(raw_domain, (list, tuple)):
+        domain = ",".join(str(d) for d in raw_domain if str(d).strip())
+    else:
+        domain = str(raw_domain or "").strip()
     preset = getattr(args, "preset", None)
     if domains_file and domain:
         log.warning(
