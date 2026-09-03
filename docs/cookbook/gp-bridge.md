@@ -43,6 +43,22 @@ sudo bs scan --domains-file /gp/state/google.txt -M gp-verified --db /tmp/gp-run
   — управляющие флаги прогона (GP-ключи `strategy_preset`/`repeats_mode`/
   `bs_adaptive`/`debug_stdout`/`skip_ipblock`).
 
+## UDP и пары TCP×UDP (bs pair)
+
+GP-режим «TCP + UDP/пары» вызывает `bs pair` по **одному домену** на
+инвокацию (pair-матрица выполняется только на primary-домене). UDP-лейн
+создаётся только если preflight домена показал `udp_blocked` (иначе UDP и так
+работает, стратегии не нужны). Результаты: `udp_results` (без домена → GP
+атрибутирует к домену запуска, кандидаты `protocol='udp'`) и `pair_results`
+(пары `overall` PASS/THROTTLED → таблица GP `strategy_pairs`). Exit 1 у
+`bs pair` при «TCP PASS есть, но UDP-обход не найден» — валидный отрицательный
+результат, не сбой.
+
+```bash
+sudo bs pair -d discord.com --db /tmp/gp-run.db --out-dir /tmp/gp-out \
+  --skip-dns-audit --skip-deps-check
+```
+
 - Завершение пишет `run_summary_<ts>.json` (`run_id`, `domains`, `db_path`) в
   `--out-dir` или XDG `~/.local/share/blockcheckS`. GP передаёт **свежий
   `--db`** на каждый run → чтение результата не пересекается с другими

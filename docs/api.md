@@ -187,6 +187,13 @@ bs scan -d <domain>... [--preset P] --scan-level {single|fast|full}
   gp-custom-*…) — матрица строго из пресета; иначе конфиги BS по умолчанию.
   `--protocol tls12|tls13`, `--repeats-mode fast|stable`, `--no-adaptive`,
   `--skip-ip-block`, `--debug` управляют поведением прогона.
+- **UDP / пары (GP-режим `bs pair`):** GP передаёт команду `pair` (по одному
+  домену на инвокацию). UDP-лейн генерируется только для доменов, где preflight
+  показал `udp_blocked`; pair-матрица идёт на primary-домене и пишет
+  `udp_results` (нет колонки domain) + `pair_results` (обозначения стратегий,
+  нет run_id). GP читает их через свежий `--db` на run: UDP-кандидаты
+  `protocol='udp'`, пары — отдельная таблица GP `strategy_pairs`. Экспорт
+  config-файлов и пар по-прежнему через `bc-nfconf`.
 - **БД и скоуп:** каждый run пишет в `--db` (по умолчанию XDG `state.db`) и
   отдельную строку в `runs`; завершение фиксируется `run_summary_*.json`
   (`run_id`, `domains`). GP для изоляции задач передаёт свежий `--db`.
