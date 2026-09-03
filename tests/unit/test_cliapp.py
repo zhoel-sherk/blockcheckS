@@ -71,7 +71,7 @@ def test_collect_cli_shortcuts_includes_domain_and_strategy_preset():
 @pytest.mark.unit
 def test_scan_short_flags_parse_domain_and_preset():
     sub = _parse(["scan", "-d", "discord.com", "-M", "gp-verified", "--max", "1"])
-    assert sub.domain == "discord.com"
+    assert sub.domain == ["discord.com"]
     assert sub.strategy_preset == "gp-verified"
     assert sub.max == 1
 

@@ -949,6 +949,7 @@ async def finalize_pair_run(
     tcp_passed: int,
     pairs: list,
     aq_result: Any | None,
+    test_domains: list[str] | None = None,
 ) -> int:
     """Export configs, write summary, and compute final exit code."""
     from blockchecks.engine.run_finalize import (
@@ -978,8 +979,23 @@ async def finalize_pair_run(
             log.info("%s", f"  {GREEN}{export_result['raw']}{RESET}")
             log.info("%s", f"  {GREEN}{export_result['user_list']}{RESET}")
 
+    raw_domain = getattr(args, "domain", None)
+    if isinstance(raw_domain, str):
+        primary_domain = raw_domain
+    elif raw_domain:
+        primary_domain = raw_domain[0]
+    else:
+        primary_domain = None
+    summary_domains = list(
+        dict.fromkeys(
+            list(test_domains or []) + ([primary_domain] if primary_domain else [])
+        )
+    )
     summary_payload = {
         "command": "scan" if getattr(args, "tcp_only", False) else "pair",
+        "run_id": getattr(db, "run_id", None),
+        "domains": summary_domains,
+        "domain": primary_domain,
         "deadline_sec": deadline.budget_sec if deadline else None,
         "stopped_reason": (
             deadline.reason
@@ -988,7 +1004,6 @@ async def finalize_pair_run(
         ),
         "db_path": args.db,
         "export_paths": export_result,
-        "domain": args.domain,
     }
     if aq_result:
         summary_payload["jobs_done"] = aq_result.done

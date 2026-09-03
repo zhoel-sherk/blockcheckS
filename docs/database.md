@@ -126,6 +126,43 @@ erDiagram
 | `v_coverage` | strategies × domains passed, avg latency |
 | `v_latest_run` | per-domain pass counts |
 
+## Стратегия: slug (`strategies.name`) vs аргументы (`strategies.config_path`)
+
+`strategies.name` — **слаг** (ключ, `UNIQUE(name, proto)`), например
+`std_fake_stun_r6_tcp_ack=-66000`. Настоящая строка аргументов nfqws2 лежит в
+`strategies.config_path`, например `fake:blob=stun:repeats=6:tcp_ack=-66000`.
+
+Внешние потребители (GP/control plane, harvest, экспорт) обязаны брать
+аргументы через `config_path`, а **не** `name`:
+
+- через DAO: `SqliteRunStore.get_strategy_config(name, proto="tcp")` → `config_path`;
+- `bc-nfconf`/`harvest-batch` уже резолвят args из `config_path` (включая
+  переименование цифровых blob-id `4pda→b4pda`).
+
+## `run_summary_*.json` (внешний контракт)
+
+`scan`/`pair`/`full` при завершении пишут `run_summary_<ts>.json` в
+`--out-dir`, либо в XDG-дефолт `~/.local/share/blockcheckS` (когда `--out-dir`
+не задан). Ключи (scan/pair):
+
+```json
+{
+  "command": "scan",
+  "run_id": 42,
+  "domains": ["youtube.com", "discord.com"],
+  "domain": "youtube.com",
+  "db_path": ".../state.db",
+  "export_paths": null,
+  "deadline_sec": null,
+  "stopped_reason": null
+}
+```
+
+`run_id` — идентификатор `runs.id` в `state.db`: оркестратор скоупит чтение
+результатов по нему либо передаст `bs scan --db <свежий путь>`, чтобы
+каждая задача читала только свою БД. Файлы чистятся `bs gc`
+(`run_summary_age`).
+
 ## Status values
 
 ### `tcp_results.status`

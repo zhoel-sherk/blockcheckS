@@ -257,3 +257,39 @@ def test_pair_tcp_only_uses_scan_session():
     assert rc == 0
     # run_session registers "scan" for tcp_only
     assert any(c.args[0] == "scan" for c in reg.call_args_list)
+
+
+def test_pair_parser_accepts_repeated_domain_for_scan_and_pair():
+    from blockchecks.cli.parser import build_parser
+
+    parser = build_parser()
+    for cmd in ("scan", "pair"):
+        ns = parser.parse_args([cmd, "-d", "youtube.com", "-d", "discord.com"])
+        assert ns.domain == ["youtube.com", "discord.com"], cmd
+        assert ns.preset is None, cmd
+
+
+def test_pair_scan_repeated_domain_is_folded_into_dns_set():
+    args = _pair_args(domain=["youtube.com", "discord.com"])
+    captured = {}
+
+    async def fake_prep(_args, preset_domains, **kwargs):
+        captured["domains"] = list(preset_domains)
+        return SimpleNamespace(exit_code=7, dns_cache=None, dns_audits=[])
+
+    with (
+        patch("blockchecks.service.run_control.register_active_run"),
+        patch("blockchecks.service.run_control.clear_active_run"),
+        patch("blockchecks.cli.commands.pair.open_run_store") as open_store,
+        patch("blockchecks.cli.commands.pair.resolve_preset_domains") as resolve_preset,
+        patch("blockchecks.cli.commands.pair.validate_pair_domain") as validate,
+        patch("blockchecks.cli.commands.pair.prepare_dns_and_preflight") as prep,
+    ):
+        open_store.return_value.init = AsyncMock()
+        open_store.return_value.close = AsyncMock()
+        resolve_preset.return_value = ([], None)
+        validate.return_value = None
+        prep.side_effect = fake_prep
+        rc = _run(cmd_pair(args))
+    assert rc == 7
+    assert captured["domains"] == ["youtube.com", "discord.com"]

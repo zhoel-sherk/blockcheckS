@@ -71,6 +71,15 @@ async def _cmd_pair_run(args):
         if domain_rc is not None:
             return domain_rc
 
+        raw_domain = getattr(args, "domain", None)
+        if isinstance(raw_domain, str):
+            explicit_domains = [raw_domain] if raw_domain else []
+        else:
+            explicit_domains = list(raw_domain or [])
+        if explicit_domains:
+            preset_domains = list(dict.fromkeys((preset_domains or []) + explicit_domains))
+            args.domain = preset_domains[0]
+
         pool_size = args.parallel or effective_default_pool_size()
         dns_result = await prepare_dns_and_preflight(args, preset_domains, store=db)
         if dns_result.exit_code is not None:
@@ -219,6 +228,7 @@ async def _cmd_pair_run(args):
             tcp_passed,
             pairs,
             aq_result,
+            preset_domains,
         )
     finally:
         # ST-2: long-lived writer держит поток aiosqlite — без close()

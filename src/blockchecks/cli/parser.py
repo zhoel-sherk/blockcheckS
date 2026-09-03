@@ -406,7 +406,13 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     Synchronizes flag names and default values across all campaign commands.
     """
     if mode in ("scan", "pair"):
-        parser.add_argument("-d", "--domain", default=None, help="Target domain (e.g. youtube.com)")
+        parser.add_argument(
+            "-d",
+            "--domain",
+            action="append",
+            default=None,
+            help="Target domain (repeatable; scan/pair test the whole set)",
+        )
     else:  # full
         parser.add_argument("-d", "--domain", help="Single domain to test")
         parser.add_argument("--domains-file", help="Path to domain list file")
