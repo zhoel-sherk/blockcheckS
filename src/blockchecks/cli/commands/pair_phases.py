@@ -34,6 +34,7 @@ from blockchecks.engine.domain_loader import (
     auto_enable_gv_ggc,
     filter_probe_domains,
     format_skip_summary,
+    load_domains,
     load_preset,
 )
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
@@ -122,6 +123,34 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
         return preset_domains, 1
     auto_enable_gv_ggc(preset_domains)
     return preset_domains, None
+
+
+def resolve_scan_domains_file(args) -> tuple[list[str], int | None]:
+    """Load --domains-file for scan/pair (file wins over -d/--preset).
+
+    Returns (domains, exit_code); ([], None) when no --domains-file given.
+    """
+    domains_file = getattr(args, "domains_file", None)
+    if not domains_file:
+        return [], None
+    allow_unsafe = getattr(args, "allow_unsafe_domains", False)
+    try:
+        loaded = load_domains(domains_file, allow_unsafe=allow_unsafe)
+    except FileNotFoundError:
+        log.error("%s", f"{RED}ERROR: domains file not found: {domains_file}{RESET}")
+        return [], 1
+    if loaded.skipped:
+        log.info("%s", f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
+    domains = filter_probe_domains(list(loaded.domains or []))
+    if not domains:
+        log.error(
+            "%s",
+            f"{RED}ERROR: no domains left after denylist/FQDN filter in {domains_file}{RESET}",
+        )
+        return [], 1
+    auto_enable_gv_ggc(domains)
+    log.info("%s", f"  {CYAN}Domains file '{domains_file}': {len(domains)} domains{RESET}")
+    return domains, None
 
 
 def validate_pair_domain(args, preset_domains: list[str]) -> int | None:
@@ -966,7 +995,7 @@ async def finalize_pair_run(
                 db,
                 args,
                 primary=args.domain,
-                domains_file=None,
+                domains_file=getattr(args, "domains_file", None),
                 stop_set=stop_event.is_set(),
                 deadline=deadline,
             )

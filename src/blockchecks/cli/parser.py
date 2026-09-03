@@ -413,6 +413,11 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
             default=None,
             help="Target domain (repeatable; scan/pair test the whole set)",
         )
+        parser.add_argument(
+            "--domains-file",
+            default=None,
+            help="Path to domain list file (one FQDN per line; wins over -d/--preset)",
+        )
     else:  # full
         parser.add_argument("-d", "--domain", help="Single domain to test")
         parser.add_argument("--domains-file", help="Path to domain list file")

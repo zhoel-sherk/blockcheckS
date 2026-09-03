@@ -293,3 +293,36 @@ def test_pair_scan_repeated_domain_is_folded_into_dns_set():
         rc = _run(cmd_pair(args))
     assert rc == 7
     assert captured["domains"] == ["youtube.com", "discord.com"]
+
+
+def test_scan_parser_accepts_domains_file():
+    from blockchecks.cli.parser import build_parser
+
+    ns = build_parser().parse_args(
+        ["scan", "-d", "youtube.com", "--domains-file", "/tmp/doms.txt"]
+    )
+    assert ns.domains_file == "/tmp/doms.txt"
+    assert ns.domain == ["youtube.com"]
+
+
+def test_resolve_scan_domains_file_loads_and_filters(tmp_path):
+    from blockchecks.cli.commands.pair_phases import resolve_scan_domains_file
+
+    doms = tmp_path / "list.txt"
+    doms.write_text("# comment\nyoutube.com\ndiscord.com\nnot-a-host 2\n", encoding="utf-8")
+    domains, rc = resolve_scan_domains_file(
+        SimpleNamespace(domains_file=str(doms), allow_unsafe_domains=False)
+    )
+    assert rc is None
+    assert "youtube.com" in domains and "discord.com" in domains
+    assert "not-a-host 2" not in domains
+
+
+def test_resolve_scan_domains_file_missing_returns_1(tmp_path):
+    from blockchecks.cli.commands.pair_phases import resolve_scan_domains_file
+
+    domains, rc = resolve_scan_domains_file(
+        SimpleNamespace(domains_file=str(tmp_path / "missing.txt"), allow_unsafe_domains=False)
+    )
+    assert rc == 1
+    assert domains == []

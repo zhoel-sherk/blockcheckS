@@ -16,6 +16,7 @@ from blockchecks.cli.commands.pair_phases import (
     register_stop_handlers,
     resolve_preset_domains,
     resolve_resume_checkpoint,
+    resolve_scan_domains_file,
     run_adaptive_pair_phase,
     run_standard_pair_phase,
     validate_pair_domain,
@@ -63,22 +64,29 @@ async def _cmd_pair_run(args):
     await db.init()
     try:
 
-        preset_domains, preset_rc = resolve_preset_domains(args)
-        if preset_rc is not None:
-            return preset_rc
-
-        domain_rc = validate_pair_domain(args, preset_domains)
-        if domain_rc is not None:
-            return domain_rc
-
-        raw_domain = getattr(args, "domain", None)
-        if isinstance(raw_domain, str):
-            explicit_domains = [raw_domain] if raw_domain else []
-        else:
-            explicit_domains = list(raw_domain or [])
-        if explicit_domains:
-            preset_domains = list(dict.fromkeys((preset_domains or []) + explicit_domains))
+        file_domains, file_rc = resolve_scan_domains_file(args)
+        if file_rc is not None:
+            return file_rc
+        if file_domains:
+            preset_domains = list(file_domains)
             args.domain = preset_domains[0]
+        else:
+            preset_domains, preset_rc = resolve_preset_domains(args)
+            if preset_rc is not None:
+                return preset_rc
+
+            domain_rc = validate_pair_domain(args, preset_domains)
+            if domain_rc is not None:
+                return domain_rc
+
+            raw_domain = getattr(args, "domain", None)
+            if isinstance(raw_domain, str):
+                explicit_domains = [raw_domain] if raw_domain else []
+            else:
+                explicit_domains = list(raw_domain or [])
+            if explicit_domains:
+                preset_domains = list(dict.fromkeys((preset_domains or []) + explicit_domains))
+                args.domain = preset_domains[0]
 
         pool_size = args.parallel or effective_default_pool_size()
         dns_result = await prepare_dns_and_preflight(args, preset_domains, store=db)
