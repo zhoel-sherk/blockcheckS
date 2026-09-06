@@ -166,6 +166,7 @@ jobs:
       - name: Mutmut (scoped via pyproject)
         run: |
           mutmut run
+          mutmut export-cicd-stats || true
           mutmut results
           python -c "
           import json
@@ -174,11 +175,16 @@ jobs:
           s = json.loads(p.read_text()) if p.exists() else {}
           survived = int(s.get('survived') or 0)
           total = int(s.get('total') or 0)
+          killed = int(s.get('killed') or 0)
+          no_tests = int(s.get('no_tests') or 0)
+          suspicious = int(s.get('suspicious') or 0)
           if survived:
-              raise SystemExit(f'mutmut: {survived} survivors / {total} mutants')
+              raise SystemExit(f'mutmut: {survived} survivors / {total} mutants '
+                               f'(killed={killed}, no_tests={no_tests}, suspicious={suspicious})')
           if total <= 0:
               raise SystemExit(f'mutmut: total={total}; no mutants checked')
-          print(f'mutmut OK: killed={s.get(\"killed\")} no_tests={s.get(\"no_tests\")} total={total}')
+          score = killed / total if total else 0.0
+          print(f'mutmut OK: killed={killed} no_tests={no_tests} suspicious={suspicious} total={total} score={score:.0%}')
           "
 
   integration:

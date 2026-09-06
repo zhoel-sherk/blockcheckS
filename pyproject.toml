@@ -180,45 +180,36 @@ ignore_names = [
 ignore_decorators = ["@pytest.fixture"]
 
 [tool.mutmut]
+# Mutation scope = deterministic ENGINE core only (pure classification / mapping
+# / selection / offline validation). I/O-heavy modules (netns, nfqws2 lifecycle,
+# lua bridge, sqlite store), checkers with network paths, CLI/TUI and logging
+# formatting are intentionally excluded: their mutants mostly encode mocking
+# noise instead of business logic. Keep this list small — run batches
+# sequentially in CI (workflow_dispatch) rather than on a dev machine.
 source_paths = [
-    "src/blockchecks/engine/store/sqlite_store.py",
-    "src/blockchecks/service/nfqws2_settle.py",
-    "src/blockchecks/checkers/dns_secure.py",
-    "src/blockchecks/checkers/voice_dns.py",
-    "src/blockchecks/engine/results.py",
-    "src/blockchecks/engine/nfqws_config.py",
-    "src/blockchecks/service/in_ns_workers.py",
+    "src/blockchecks/engine/fail_phase.py",
+    "src/blockchecks/engine/static_validator.py",
+    "src/blockchecks/engine/family_spec.py",
+    "src/blockchecks/engine/family_needs.py",
+    "src/blockchecks/engine/family_registry.py",
+    "src/blockchecks/engine/blob_filter.py",
+    "src/blockchecks/engine/blob_aliases.py",
     "src/blockchecks/engine/tcp_fanout.py",
-    "src/blockchecks/engine/conf_builder.py",
-    "src/blockchecks/checkers/tcp_tls.py",
-    "src/blockchecks/checkers/ip_pin.py",
-    "src/blockchecks/service/netns_pool.py",
-    "src/blockchecks/service/lua_session.py",
-    "src/blockchecks/engine/adaptive_queue.py",
-    "src/blockchecks/service/batch_bridge_probe.py",
 ]
 pytest_add_cli_args_test_selection = [
     # NOTE: do NOT pass "-m" here — [tool.pytest.ini_options].addopts already
     # sets `-m "not integration and not quality and not mutation"`.
     # Scoped to tests that cover [tool.mutmut].source_paths (full tests/unit
     # hits unrelated file reads / shims under mutants/ and -x aborts stats).
-    "tests/unit/test_sqlite_store.py",
-    "tests/unit/test_nfqws2_settle.py",
-    "tests/unit/test_settle_profile.py",
-    "tests/unit/test_dns_secure.py",
-    "tests/unit/test_voice_dns.py",
+    "tests/unit/test_fail_phase.py",
+    "tests/unit/test_static_validator.py",
+    "tests/unit/test_static_validator_fuzzing.py",
+    "tests/unit/test_family_spec.py",
+    "tests/unit/test_family_needs.py",
+    "tests/unit/test_family_registry.py",
+    "tests/unit/test_blob_filter.py",
+    "tests/unit/test_blob_aliases.py",
     "tests/unit/test_tcp_fanout.py",
-    "tests/unit/test_conf_builder.py",
-    "tests/unit/test_tcp_tls.py",
-    "tests/unit/test_ip_pin.py",
-    "tests/unit/test_in_ns_workers.py",
-    "tests/unit/test_netns_pool.py",
-    "tests/unit/test_lua_session.py",
-    "tests/unit/test_lua_bridge.py",
-    "tests/unit/test_adaptive_queue.py",
-    "tests/unit/test_batch_bridge_probe.py",
-    "tests/unit/test_batch_probe.py",
-    "tests/unit/test_nfqws2_manager.py",
 ]
 pytest_add_cli_args = ["-q"]
 # Scoped source_paths copy only those files into mutants/; tests import
