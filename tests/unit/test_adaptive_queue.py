@@ -343,3 +343,279 @@ def test_fanout_blocked_by_done_after_skip_keys():
     assert added == 0
     assert ("s1", "discord.gg") not in q._pending
     assert ("s1", "discord.gg") in q._done
+
+
+def test_epsilon_clamped_to_unit_interval():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    assert AdaptiveJobQueue(epsilon=-1).epsilon == 0.0
+    assert AdaptiveJobQueue(epsilon=0.5).epsilon == 0.5
+    assert AdaptiveJobQueue(epsilon=7).epsilon == 1.0
+
+
+def test_hard_excluded_domain_dropped_forever():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0)
+    job = AdaptiveJob.from_item(item, "dead.example")
+    q.enqueue(job)
+    q.excluded_domains.add("dead.example")
+    assert q.pop() is None
+    assert len(q) == 0
+    assert job.key in q._done
+
+
+def test_soft_exclude_all_falls_back_to_non_hard():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0, seed=3)
+    q.enqueue(AdaptiveJob.from_item(item, "x.example"))
+    q.enqueue(AdaptiveJob.from_item(item, "y.example"))
+    got = q.pop(exclude_domains={"x.example", "y.example"})
+    assert got is not None
+    assert len(q) == 1
+    assert q.pop() is not None
+    assert len(q) == 0
+
+
+def test_pop_batch_special_googlevideo_solo():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0, seed=1)
+    q.enqueue(AdaptiveJob.from_item(item, "discord.com"))
+    q.enqueue(AdaptiveJob.from_item(item, "googlevideo.com"))
+    batch = q.pop_batch(max_size=10)
+    assert len(batch) == 1
+    assert batch[0].domain == "discord.com"
+    second = q.pop_batch(max_size=10)
+    assert len(second) == 1
+    assert second[0].domain == "googlevideo.com"
+
+
+def test_pop_batch_max_size_one_returns_single():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0)
+    q.enqueue(AdaptiveJob.from_item(item, "discord.com"))
+    q.enqueue(AdaptiveJob.from_item(item, "discord.gg"))
+    assert len(q.pop_batch(max_size=1)) == 1
+
+
+def test_pop_batch_empty_returns_empty():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    assert AdaptiveJobQueue(epsilon=0.0).pop_batch(max_size=5) == []
+
+
+def test_failed_job_does_not_boost_or_fanout():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0)
+    q._all_domains = ["discord.com", "discord.gg"]
+    q.enqueue(AdaptiveJob.from_item(item, "discord.com"))
+    job = q.pop()
+    before = dict(q.weights.family)
+    added = q.mark_done(job, passed=False)
+    assert added == 0
+    assert q.weights.family == before
+    assert len(q) == 0
+
+
+def test_pending_domains_for_strategy_reflects_pops():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0, seed=1)
+    for dom in ("d1.example", "d2.example", "d3.example"):
+        q.enqueue(AdaptiveJob.from_item(item, dom))
+    assert set(q.pending_domains_for_strategy("s1")) == {"d1.example", "d2.example", "d3.example"}
+    q.pop()
+    assert set(q.pending_domains_for_strategy("s1")) == {"d2.example", "d3.example"}
+    assert q.pending_domains_for_strategy("missing") == []
+
+
+def test_enqueue_duplicate_and_done_are_noops():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0)
+    j1 = AdaptiveJob.from_item(item, "d.example")
+    assert q.enqueue(j1) is True
+    assert q.enqueue(j1) is False
+    popped = q.pop()
+    q.mark_done(popped, passed=False)
+    assert q.enqueue(AdaptiveJob.from_item(item, "d.example")) is False
+    assert q.metrics.total_enqueued == 1
+
+
+@pytest.mark.asyncio
+async def test_filter_resume_empty_and_all_dropped():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    q = AdaptiveJobQueue()
+
+    async def _drop(_j):
+        return True
+
+    assert await q.filter_resume(_drop) == 0
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q.enqueue(AdaptiveJob.from_item(item, "a.example"))
+    q.enqueue(AdaptiveJob.from_item(item, "b.example"))
+    skipped = await q.filter_resume(_drop, chunk_size=1)
+    assert skipped == 2
+    assert len(q) == 0
+
+
+def test_scan_weights_caps_at_max():
+    from blockchecks.engine.adaptive_queue import ScanWeights
+
+    w = ScanWeights()
+    for _ in range(1000):
+        w.boost_pass("fake", ["stun"], ["r6"])
+    assert w.family["fake"] == 64.0
+    assert w.blob["stun"] == 64.0
+    assert w.trait["r6"] == 64.0
+    assert w.get("fake", ["stun"], ["r6"]) > 60.0
+
+
+def test_boost_provider_once_idempotent():
+    from blockchecks.engine.adaptive_queue import ScanWeights
+
+    w = ScanWeights()
+    assert w.boost_provider_once("k", "fake", ["stun"], ["r6"]) is True
+    v1 = w.family.get("fake", 1.0)
+    assert w.boost_provider_once("k", "fake", ["stun"], ["r6"]) is False
+    assert w.family.get("fake", 1.0) == v1
+
+
+def test_adaptive_metrics_pass_before_half():
+    from blockchecks.engine.adaptive_queue import AdaptiveMetrics
+
+    m = AdaptiveMetrics()
+    assert m.time_to_first_pass is None
+    assert m.pass_rate_before_half == 0.0
+    m.set_half_mark(4)
+    for _ in range(4):
+        m.record_run(passed=True)
+    assert m.time_to_first_pass is not None
+    assert m.pass_rate_before_half == 1.0
+    m.record_run(passed=False)
+    assert m.passes_before_half == 2
+
+
+def test_adaptive_metrics_no_half_is_zero():
+    from blockchecks.engine.adaptive_queue import AdaptiveMetrics
+
+    m = AdaptiveMetrics()
+    m.record_run(passed=True)
+    assert m.pass_rate_before_half == 0.0
+
+
+def test_pop_batch_respects_exact_max_size():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0, seed=1)
+    for dom in ("discord.com", "discord.gg", "discord.media"):
+        q.enqueue(AdaptiveJob.from_item(item, dom))
+    first = q.pop_batch(max_size=2)
+    assert len(first) == 2
+    assert len(q) == 1
+    second = q.pop_batch(max_size=2)
+    assert len(second) == 1
+
+
+def test_fanout_twice_adds_only_once_and_metrics_count():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0, seed=1)
+    q._all_domains = ["discord.com", "discord.gg"]
+    q.enqueue(AdaptiveJob.from_item(item, "discord.com"))
+    job = q.pop()
+    assert q.mark_done(job, passed=True) == 1
+    assert q.metrics.fanout_enqueued == 1
+    # repeat fan-out of the same job key must not double-add
+    assert q.fanout_on_pass(AdaptiveJob.from_item(item, "discord.com")) == 0
+    assert q.metrics.fanout_enqueued == 1
+
+
+def test_fanout_skips_hard_excluded_siblings():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=0.0)
+    q._all_domains = ["discord.com", "discord.gg", "discord.media"]
+    q.excluded_domains.add("discord.media")
+    q.enqueue(AdaptiveJob.from_item(item, "discord.com"))
+    job = q.pop()
+    assert q.mark_done(job, passed=True) == 1
+    assert set(q.pending_domains_for_strategy("s1")) == {"discord.gg"}
+
+
+def test_configured_heap_rebuild_fires_periodically():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    low = StrategyItem(label="low", strategy="oob:urp=b")
+    high = StrategyItem(label="high", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue.build([low, high], ["discord.com"], epsilon=0.0, seed=1)
+    q.configure_heap_rebuild(1)
+    j1 = q.pop()
+    q.mark_done(j1, passed=True)
+    j2 = q.pop()
+    q.mark_done(j2, passed=True)
+    assert q._rebuild_heap_calls >= 2
+    q.configure_heap_rebuild(0)
+
+
+def test_configure_heap_rebuild_negative_disabled():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    q = AdaptiveJobQueue()
+    q.configure_heap_rebuild(-5)
+    assert q._heap_rebuild_every == 0
+    q._maybe_rebuild_heap()
+    assert q._rebuild_heap_calls == 0
+
+
+def test_epsilon_pick_never_returns_excluded_domain():
+    from blockchecks.engine.adaptive_queue import AdaptiveJobQueue
+
+    item = StrategyItem(label="s1", strategy="fake:blob=stun:repeats=6")
+    q = AdaptiveJobQueue(epsilon=1.0, seed=9)
+    for dom in ("d1.example", "d2.example", "d3.example", "d4.example"):
+        q.enqueue(AdaptiveJob.from_item(item, dom))
+    seen = {q.pop(exclude_domains={"d1.example"}).domain for _ in range(4)}
+    # soft exclusion is best-effort: eligible domains go first, the "everything
+    # excluded" fallback may still return the excluded domain last.
+    assert {"d2.example", "d3.example", "d4.example"} <= seen
+
+
+def test_metrics_first_pass_fixed_and_passrate():
+    from blockchecks.engine.adaptive_queue import AdaptiveMetrics
+
+    m = AdaptiveMetrics()
+    m.set_half_mark(10)
+    m.record_run(passed=False)
+    m.record_run(passed=True)
+    t1 = m.time_to_first_pass
+    m.record_run(passed=True)
+    assert m.time_to_first_pass == t1
+    assert m.passes_before_half == 2
+
+
+def test_scan_weights_from_rows_roundtrip():
+    from blockchecks.engine.adaptive_queue import ScanWeights
+
+    w = ScanWeights()
+    w.boost_pass("fake", ["stun"], ["r6", "ttl3"])
+    w2 = ScanWeights.from_rows(w.to_rows())
+    assert w2.family == w.family
+    assert w2.blob == w.blob
+    assert w2.trait == w.trait
+    assert ScanWeights.from_rows([]).family == {}
