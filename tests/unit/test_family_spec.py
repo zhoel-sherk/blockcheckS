@@ -95,3 +95,64 @@ def test_triple_fake_label_prefix() -> None:
         "fake:blob=stun",
     )
     assert classify_strategy_family(item) == "triple_fake"
+
+
+def test_protocol_family_lists_consistent():
+    from blockchecks.engine.family_spec import (
+        FAMILIES_BY_PROTOCOL,
+        HTTP_FAMILIES,
+        QUIC_HTTP3_FAMILIES,
+        REGISTRY,
+        UDP_VOICE_FAMILIES,
+    )
+
+    for spec in REGISTRY:
+        if "http" in spec.protocols:
+            assert spec.name in HTTP_FAMILIES
+        if "udp_voice" in spec.protocols:
+            assert spec.name in UDP_VOICE_FAMILIES
+        if "quic" in spec.protocols:
+            assert spec.name in QUIC_HTTP3_FAMILIES
+    assert set(UDP_VOICE_FAMILIES) & set(HTTP_FAMILIES) == set()
+    assert FAMILIES_BY_PROTOCOL["udp_game"] == ["udp_game"]
+
+
+def test_aliases_and_expanders_map():
+    from blockchecks.engine.family_spec import (
+        BY_NAME,
+        FAMILY_ALIASES,
+        FAMILY_EXPANDERS,
+        REGISTRY,
+    )
+
+    assert FAMILY_ALIASES == {"ipfrag_tcp": "tcp_ipfrag", "ipfrag_udp": "quic_ipfrag"}
+    assert FAMILY_EXPANDERS["fake"] == "_fam_fake"
+    assert set(FAMILY_EXPANDERS) == set(BY_NAME)
+    for spec in REGISTRY:
+        assert FAMILY_EXPANDERS[spec.name] == spec.expander
+
+
+def test_all_triage_families_exist():
+    from blockchecks.engine.family_spec import BY_NAME, TRIAGE_TO_FAMILIES
+
+    for fams in TRIAGE_TO_FAMILIES.values():
+        for name in fams:
+            assert name in BY_NAME
+
+
+def test_default_families_head_tcp_order():
+    from blockchecks.engine.family_spec import DEFAULT_FAMILIES, TCP_FAMILIES
+
+    assert TCP_FAMILIES[0] == "fake"
+    assert DEFAULT_FAMILIES[0] == "fake"
+    assert all(f in TCP_FAMILIES for f in DEFAULT_FAMILIES)
+
+
+def test_registry_names_unique_and_protocols_known():
+    from blockchecks.engine.family_spec import REGISTRY
+
+    names = [s.name for s in REGISTRY]
+    assert len(names) == len(set(names))
+    known = {"tcp", "http", "udp_voice", "udp_game", "quic"}
+    for spec in REGISTRY:
+        assert set(spec.protocols) <= known

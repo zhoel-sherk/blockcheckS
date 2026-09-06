@@ -235,3 +235,88 @@ def test_clamp_quarantine_min() -> None:
     assert clamp_quarantine_min("50", 300) == 50
     assert clamp_quarantine_min("nope", 300) == 300
 
+
+
+def test_record_returns_domain_once_and_is_idempotent():
+    from blockchecks.engine.domain_quarantine import DomainQuarantine, QuarantineConfig
+
+    q = DomainQuarantine(QuarantineConfig(min_attempts=3))
+    assert q.record("a.example", False) is None
+    assert q.record("a.example", False) is None
+    assert q.record("a.example", False) == "a.example"
+    assert q.record("a.example", False) is None
+    assert len(q.quarantined) == 1
+    assert "a.example" in q.exclude_domains()
+
+
+def test_record_pass_then_fail_never_quarantines():
+    q = DomainQuarantine(QuarantineConfig(min_attempts=2))
+    q.record("a.example", True)
+    for _ in range(5):
+        assert q.record("a.example", False) is None
+    assert "a.example" not in q.quarantined
+
+
+def test_status_passed_counters_working_probes():
+    q = DomainQuarantine(QuarantineConfig(min_attempts=2))
+    assert q.record("a.example", False, status="PASS") is None
+    for _ in range(4):
+        assert q.record("a.example", False, status="FAIL") is None
+    assert "a.example" not in q.quarantined
+
+
+def test_infra_fail_does_not_increment_attempts():
+    q = DomainQuarantine(QuarantineConfig(min_attempts=2))
+    err = "[Errno 13] Permission denied: '/dev/shm/blockchecks/bs-p-1-1'"
+    q.record("a.example", False, fail_phase="other", error=err)
+    q.record("a.example", False, fail_phase="other", error=err)
+    q.record("a.example", False, fail_phase="other", error=err)
+    assert "a.example" not in q.quarantined
+    assert "a.example" not in q.stats or q.stats["a.example"].attempts == 0
+
+
+def test_seed_ignores_rows_with_passes_and_duplicates():
+    q = DomainQuarantine(QuarantineConfig(min_attempts=5))
+    newly = q.seed_from_rows([("x.example", 5, 0), ("y.example", 5, 1), ("z.example", 2, 0)])
+    assert newly == ["x.example"]
+    assert q.seed_from_rows([("x.example", 6, 0)]) == []
+
+
+def test_dns_resolve_pass_blocks_quarantine():
+    from blockchecks.engine.fail_phase import FailPhase
+
+    q = DomainQuarantine(QuarantineConfig(dns_resolve_min_attempts=3))
+    q.record("a.example", False, status="PASS")
+    for _ in range(5):
+        assert (
+            q.record("a.example", False, fail_phase=FailPhase.DNS_RESOLVE.value) is None
+        )
+    assert "a.example" not in q.quarantined
+
+
+def test_append_denylist_dedupes_case_and_comments(tmp_path):
+    from blockchecks.engine.domain_quarantine import append_denylist
+
+    p = tmp_path / "deny.txt"
+    p.write_text("Mixed.Example  # existing\n")
+    entries = [
+        {"domain": "mixed.example", "ts": "t", "reason": "r"},
+        {"domain": "new.example", "ts": "t", "reason": "r"},
+        {"domain": "", "ts": "t", "reason": "r"},
+        {"domain": "  ", "ts": "t", "reason": "r"},
+    ]
+    written = append_denylist(entries, str(p))
+    assert written == ["new.example"]
+    text = p.read_text()
+    assert text.lower().count("mixed.example") == 1
+    assert "new.example" in text
+    assert append_denylist([{"domain": "new.example", "ts": "t", "reason": "r"}], str(p)) == []
+
+
+def test_append_denylist_creates_missing_path(tmp_path):
+    from blockchecks.engine.domain_quarantine import append_denylist
+
+    p = tmp_path / "sub" / "deny.txt"
+    written = append_denylist([{"domain": "one.example", "ts": "t", "reason": "r"}], str(p))
+    assert written == ["one.example"]
+    assert p.is_file()
