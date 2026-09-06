@@ -186,6 +186,7 @@ _.coverage_score  # unused method in DAO API
 get_quarantined  # DAO API for MCP/series status consumers
 quarantine_domain  # DAO API — campaign quarantine persistence
 domain_pass_rows  # DAO API — quarantine seeding on resume
+domain_dns_resolve_fail_rows  # DAO API — dns_resolve quarantine seed on resume
 get_live_events  # MCP tool (@mcp.tool() registration is invisible to vulture)
 heartbeat_age  # LuaBridge API used by batch_service freshness gate
 cwd_db_migrate_enabled
@@ -231,3 +232,5 @@ StandardGenerator.STRATEGY_FAMILIES
 AdaptiveJobQueue.pop_batch
 nfqws2_pid_in_ns
 RunnerProbeDeps.run_tcp_check
+
+compact  # unused method (src/blockchecks/engine/store/sqlite_store.py:229); exercised by unit tests after WAL-close no longer compacts

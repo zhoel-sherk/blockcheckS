@@ -320,6 +320,7 @@ class AsyncTestRunner:
             run_tcp_check=_run_tcp_check,
             acquire_ns=self.pool.acquire,
             release_ns=self.pool.release,
+            secure_dns=bool(self.secure_dns),
         )
 
     def _probe_service(self, backend: str) -> ProbeBatchService:

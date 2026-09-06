@@ -2,7 +2,7 @@
 discord.com
 discord.gg
 discordapp.com
-discordapp.net
+# discordapp.net — NODATA zone apex (denylist)
 discordcdn.com
 discord.media
 discord.co
@@ -24,14 +24,14 @@ dis.gd
 # --- Прямые FQDN инфраструктуры (Voice, Gateways, CDN, Updates) ---
 gateway.discord.gg
 latency.discord.media
-router.discord.media
+# router.discord.media — no public A (denylist)
 cdn.discordapp.com
 media.discordapp.net
 images-ext-1.discordapp.net
 images-ext-2.discordapp.net
 updates.discord.com
 dl.discordapp.net
-url-protection.discord.com
+# url-protection.discord.com — SPF-only, no HTTPS (denylist)
 
 # --- Внешний CDN-сторадж ---
 discord-attachments-uploads-prd.storage.googleapis.com

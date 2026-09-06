@@ -200,7 +200,7 @@ flowchart TB
 | `bs full` | `main.run_full` → `main_phases` | async, все фазы | adaptive queue по умолчанию |
 | `bs tcp` / `bs udp` | `cmd_tcp` / `cmd_udp` | sync `TestRunner` | host или один netns |
 | `bs composite` | `checkers.composite_runner` | один ns + один nfqws2 | one-shot `start_daemon` |
-| `bs preflight` | `engine.preflight` | без матрицы | `TriageProfile` в stdout |
+| `bs preflight` | `engine.preflight` | без матрицы | `triage.toml` + `--json`; кампания: `--no-preflight` |
 | `bs serve` | `service.server` + `ProbeService` | тёплый пул | unix-socket + HTTP |
 | `bs mcp` / `bs-mcp` | FastMCP stdio → unix-сокет | extra `[mcp]` | ленивый импорт |
 | `bs stop` | `run_control.request_graceful_stop` | SIGTERM | по pid из `run.lock` |
@@ -398,7 +398,7 @@ def campaign_pass(*, http_ok: bool, bridge_applied: bool | None) -> bool:
 - **`bc-nfconf`**, MCP SQL (`query_strategies`, `generate_router_config`) и `SqliteRunStore.get_best_*` / `v_coverage` берут working-строки с `bridge_applied IS NULL OR = 1` (oneshot без колонки/NULL сохраняются; lua PASS без APPLIED отбрасывается). Старые DB без колонки MCP ретраит SQL без фильтра (warning в лог).
 - **Infra FAIL** (`STOPPED_BEFORE_PROBE`, `NS_POOL_EXHAUSTED`, ошибки IPC) не засчитываются в `quarantine_min` — только реальные пробы DPI.
 
-Карантин: 0 PASS за `--quarantine-min` (default 300) → таблица `quarantined`, AQ `excluded_domains`. Seed из истории — **только `--resume`**. После `seed_from_rows` обязателен ре-синк `queue.excluded_domains |= quarantine.exclude_domains()`, иначе мёртвые домены из БД продолжают пробоваться.
+Карантин: 0 PASS за `--quarantine-min` DPI (default 300) **или** `--dns-resolve-quarantine-min` `dns_resolve` (default 50) → таблица `quarantined`, AQ `excluded_domains`. `dns_resolve` не infra. Seed из истории — **только `--resume`** (`seed_from_rows` + `seed_dns_resolve_from_rows`). После seed обязателен ре-синк `queue.excluded_domains |= quarantine.exclude_domains()`, иначе мёртвые домены из БД продолжают пробоваться.
 
 ---
 

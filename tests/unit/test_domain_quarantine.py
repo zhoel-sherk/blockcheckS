@@ -33,6 +33,7 @@ def test_record_zero_pass_domain_hits_threshold() -> None:
     # further probes on the quarantined domain are no-ops
     assert q.record("dead.example", False) is None
     assert q.quarantined["dead.example"]["attempts"] == 3
+    assert q.quarantined["dead.example"]["failed"] == 3
 
 
 @pytest.mark.unit
@@ -64,18 +65,23 @@ def test_quarantine_from_args() -> None:
     class Args:
         no_quarantine = False
         quarantine_min = 150
+        dns_resolve_quarantine_min = 40
         quarantine_auto_denylist = True
 
     cfg = quarantine_from_args(Args())
-    assert cfg is not None and cfg.min_attempts == 150 and cfg.auto_denylist
+    assert cfg is not None
+    assert cfg.min_attempts == 150 and cfg.dns_resolve_min_attempts == 40
+    assert cfg.auto_denylist
 
     class Zero:
         no_quarantine = False
         quarantine_min = 0
+        dns_resolve_quarantine_min = 0
         quarantine_auto_denylist = False
 
     z = quarantine_from_args(Zero())
-    assert z is not None and z.min_attempts == 0
+    assert z is not None and z.min_attempts == 1
+    assert z.dns_resolve_min_attempts == 1
 
     class Off:
         no_quarantine = True
@@ -131,6 +137,32 @@ async def test_domain_pass_rows_counts_throttled_as_pass(temp_db) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_domain_dns_resolve_fail_rows(temp_db) -> None:
+    await temp_db.log_tcp(
+        "s1", "nodata.example", "FAIL", 10.0, 0, config_path="fake:1", fail_phase="dns_resolve"
+    )
+    await temp_db.log_tcp(
+        "s2", "nodata.example", "FAIL", 10.0, 0, config_path="fake:2", fail_phase="dns_resolve"
+    )
+    await temp_db.log_tcp(
+        "s3", "ok.example", "PASS", 10.0, 200, config_path="fake:3"
+    )
+    await temp_db.flush()
+    by_domain = {
+        d: (dns_n, passed)
+        for d, dns_n, passed in await temp_db.domain_dns_resolve_fail_rows()
+    }
+    assert by_domain["nodata.example"] == (2, 0)
+    assert by_domain["ok.example"] == (0, 1)
+    q = DomainQuarantine(QuarantineConfig(dns_resolve_min_attempts=2))
+    assert q.seed_dns_resolve_from_rows(await temp_db.domain_dns_resolve_fail_rows()) == [
+        "nodata.example"
+    ]
+
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_store_quarantine_roundtrip(temp_db) -> None:
     await temp_db.quarantine_domain(
         "router.discord.media", reason="0 PASS in 300 attempts", failed=300
@@ -162,3 +194,44 @@ def test_append_denylist_writes_once(tmp_path) -> None:
     text = p.read_text(encoding="utf-8")
     assert text.count("dead.example") == 1
     assert "# auto-quarantine" in text
+
+
+@pytest.mark.unit
+def test_record_dns_resolve_uses_separate_threshold() -> None:
+    q = DomainQuarantine(
+        QuarantineConfig(min_attempts=300, dns_resolve_min_attempts=3)
+    )
+    for _ in range(2):
+        assert q.record("nodata.example", False, fail_phase="dns_resolve") is None
+    assert q.record("nodata.example", False, fail_phase="dns_resolve") == "nodata.example"
+    assert "nodata.example" in q.exclude_domains()
+    assert "dns_resolve" in q.quarantined["nodata.example"]["reason"]
+    assert q.quarantined["nodata.example"]["failed"] == 3
+
+
+@pytest.mark.unit
+def test_seed_dns_resolve_from_rows() -> None:
+    q = DomainQuarantine(
+        QuarantineConfig(min_attempts=300, dns_resolve_min_attempts=50)
+    )
+    newly = q.seed_dns_resolve_from_rows(
+        [
+            ("url-protection.discord.com", 80, 0),
+            ("discord.com", 2, 100),
+            ("fresh.example", 5, 0),
+        ]
+    )
+    assert newly == ["url-protection.discord.com"]
+    assert "url-protection.discord.com" in q.exclude_domains()
+
+
+@pytest.mark.unit
+def test_clamp_quarantine_min() -> None:
+    from blockchecks.engine.domain_quarantine import clamp_quarantine_min
+
+    assert clamp_quarantine_min(None, 300) == 300
+    assert clamp_quarantine_min(0, 300) == 1
+    assert clamp_quarantine_min(99_999, 300) == 10_000
+    assert clamp_quarantine_min("50", 300) == 50
+    assert clamp_quarantine_min("nope", 300) == 300
+

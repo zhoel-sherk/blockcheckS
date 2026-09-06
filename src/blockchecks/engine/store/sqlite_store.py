@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -42,6 +43,38 @@ _ENSURE_STRATEGY_SQL = """INSERT INTO strategies(name, proto, config_path, first
      END"""
 
 _SELECT_STRATEGY_ID_SQL = "SELECT id FROM strategies WHERE name=? AND proto=?"
+
+_SQLITE_RETRY_ATTEMPTS = 3
+_SQLITE_RETRYABLE = ("disk i/o", "locked", "busy")
+_COMPACT_TIMEOUT_S = 2.0
+
+
+def _retryable_sqlite(exc: BaseException) -> bool:
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    msg = str(exc).lower()
+    return any(tok in msg for tok in _SQLITE_RETRYABLE)
+
+
+async def _sqlite_retry(op, *, what: str):
+    """Retry *op* on WAL/IO contention. Logs each retry (no silent fallback)."""
+    last: sqlite3.OperationalError | None = None
+    for attempt in range(_SQLITE_RETRY_ATTEMPTS):
+        try:
+            return await op()
+        except sqlite3.OperationalError as exc:
+            last = exc
+            if not _retryable_sqlite(exc) or attempt == _SQLITE_RETRY_ATTEMPTS - 1:
+                raise
+            log.warning(
+                "sqlite %s failed (%s); retry %d/%d",
+                what,
+                exc,
+                attempt + 1,
+                _SQLITE_RETRY_ATTEMPTS,
+            )
+            await asyncio.sleep(0.05 * (attempt + 1))
+    raise last  # pragma: no cover
 
 
 def matrix_fingerprint(
@@ -183,7 +216,7 @@ class SqliteRunStore:
             except Exception as exc:
                 log.error("sqlite writer connect failed path=%s: %s", self._path, exc)
                 raise
-            await SqliteRunStore._apply_pragmas(conn)
+            await SqliteRunStore._apply_writer_pragmas(conn)
             self._conn = conn
             return conn
 
@@ -194,19 +227,63 @@ class SqliteRunStore:
         self._conn = None
 
     async def compact(self) -> None:
-        """Passive WAL checkpoint + incremental vacuum pages (ST-7)."""
+        """Passive WAL checkpoint + incremental vacuum pages (ST-7).
+
+        Bounded so a stuck checkpoint cannot pin the process after export.
+        """
+
+        async def _run() -> None:
+            async with self._write_lock:
+                if self._conn is None:
+                    return
+                db = self._conn
+                try:
+                    await db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                except Exception as exc:
+                    log.warning("wal_checkpoint(PASSIVE) failed: %s", exc)
+                try:
+                    await db.execute("PRAGMA incremental_vacuum(64)")
+                except Exception as exc:
+                    log.warning("incremental_vacuum failed: %s", exc)
+
+        try:
+            await asyncio.wait_for(_run(), timeout=_COMPACT_TIMEOUT_S)
+        except TimeoutError:
+            log.warning(
+                "compact timed out after %.1fs (wal_checkpoint/vacuum); continuing",
+                _COMPACT_TIMEOUT_S,
+            )
+
+    async def close(self) -> None:
+        log.info("sqlite close begin path=%s", self._path)
+        if self._flush_timer_task is not None:
+            self._flush_timer_task.cancel()
+            try:
+                await self._flush_timer_task
+            except asyncio.CancelledError:
+                pass
+            self._flush_timer_task = None
+        try:
+            await asyncio.wait_for(
+                self.flush(wal_checkpoint=False), timeout=_COMPACT_TIMEOUT_S
+            )
+        except TimeoutError:
+            log.warning("sqlite flush on close timed out path=%s", self._path)
+        except Exception as exc:
+            log.warning("sqlite flush on close failed: %s", exc)
+        # Do not compact() here: wal_checkpoint on the mmap writer can hang
+        # the aiosqlite worker so the process never exits (smoke rc=124).
+        try:
+            await asyncio.wait_for(self._close_writer_locked(), timeout=_COMPACT_TIMEOUT_S)
+        except TimeoutError:
+            log.warning("sqlite writer close timed out path=%s", self._path)
+            self._conn = None
+        reclaim_sudo_ownership(self._path)
+        log.info("sqlite close done path=%s", self._path)
+
+    async def _close_writer_locked(self) -> None:
         async with self._write_lock:
-            if self._conn is None:
-                return
-            db = self._conn
-            try:
-                await db.execute("PRAGMA wal_checkpoint(PASSIVE)")
-            except Exception as exc:
-                log.warning("wal_checkpoint(PASSIVE) failed: %s", exc)
-            try:
-                await db.execute("PRAGMA incremental_vacuum(64)")
-            except Exception as exc:
-                log.warning("incremental_vacuum failed: %s", exc)
+            await self._close_writer()
 
     async def _maybe_wal_checkpoint(self) -> None:
         self._flush_count += 1
@@ -336,20 +413,6 @@ class SqliteRunStore:
             entry.get("content_len"),
         )
 
-    async def close(self) -> None:
-        if self._flush_timer_task is not None:
-            self._flush_timer_task.cancel()
-            try:
-                await self._flush_timer_task
-            except asyncio.CancelledError:
-                pass
-            self._flush_timer_task = None
-        await self.flush()
-        await self.compact()
-        async with self._write_lock:
-            await self._close_writer()
-        reclaim_sudo_ownership(self._path)
-
     def _row_timestamp(self) -> str:
         return time.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -398,16 +461,30 @@ class SqliteRunStore:
             await self.flush()
 
     @staticmethod
-    async def _apply_pragmas(db: aiosqlite.Connection) -> None:
+    async def _apply_writer_pragmas(db: aiosqlite.Connection) -> None:
         # WAL: writers don't block readers; parallel worker flushes no longer
         # race into "database is locked" (seen at end of long runs). busy_timeout
         # stays as backstop for WAL checkpoint contention.
+        # mmap/WAL only on the long-lived writer — a second connect repeating
+        # journal_mode=WAL + mmap_size caused disk I/O error at scan export.
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA busy_timeout = 30000")
         await db.execute("PRAGMA synchronous = NORMAL")
         await db.execute("PRAGMA mmap_size = 268435456")
         await db.execute("PRAGMA cache_size = -64000")
         await db.execute("PRAGMA temp_store = MEMORY")
+
+    @staticmethod
+    async def _apply_reader_pragmas(db: aiosqlite.Connection) -> None:
+        await db.execute("PRAGMA busy_timeout = 30000")
+
+    async def _on_writer(self, fn, *, what: str):
+        async def _run():
+            async with self._write_lock:
+                db = await self._writer()
+                return await fn(db)
+
+        return await _sqlite_retry(_run, what=what)
 
     async def ensure_strategy(
         self,
@@ -438,7 +515,7 @@ class SqliteRunStore:
             conn = await self._writer()
             return await _body(conn, commit=True)
 
-    async def flush(self) -> None:
+    async def flush(self, *, wal_checkpoint: bool = True) -> None:
         """Flush buffered log_tcp/log_udp rows (B8 batch mode).
 
         Drains pending rows and commits under ``_flush_lock`` for the entire
@@ -507,7 +584,8 @@ class SqliteRunStore:
                             except Exception:
                                 await db.rollback()
                                 raise
-                        await self._maybe_wal_checkpoint()
+                        if wal_checkpoint:
+                            await self._maybe_wal_checkpoint()
                         last_err = None
                         break
                     except aiosqlite.OperationalError as e:
@@ -681,7 +759,7 @@ class SqliteRunStore:
     async def get_quarantined(self) -> list[dict]:
         """All quarantined domains recorded for this campaign DB."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             cur = await db.execute(
                 "SELECT domain, reason, failed, created FROM quarantined ORDER BY created"
             )
@@ -698,9 +776,23 @@ class SqliteRunStore:
         probes), matching latest-row working semantics elsewhere in the store.
         """
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             cur = await db.execute(
                 f"SELECT domain, COUNT(*), "
+                f"SUM(CASE WHEN status IN {_WORKING_STATUSES} "
+                f"AND (bridge_applied IS NULL OR bridge_applied = 1) THEN 1 ELSE 0 END) "
+                f"FROM tcp_results GROUP BY domain"
+            )
+            rows = await cur.fetchall()
+        return [(r[0], int(r[1] or 0), int(r[2] or 0)) for r in rows]
+
+    async def domain_dns_resolve_fail_rows(self) -> list[tuple[str, int, int]]:
+        """(domain, dns_resolve FAIL count, passed) for dns-resolve quarantine seed."""
+        async with aiosqlite.connect(self._path) as db:
+            await SqliteRunStore._apply_reader_pragmas(db)
+            cur = await db.execute(
+                f"SELECT domain, "
+                f"SUM(CASE WHEN fail_phase='dns_resolve' THEN 1 ELSE 0 END), "
                 f"SUM(CASE WHEN status IN {_WORKING_STATUSES} "
                 f"AND (bridge_applied IS NULL OR bridge_applied = 1) THEN 1 ELSE 0 END) "
                 f"FROM tcp_results GROUP BY domain"
@@ -788,7 +880,7 @@ class SqliteRunStore:
     async def latest_checkpoint(self) -> Checkpoint | None:
         """Return latest Checkpoint or None."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             row = await db.execute(
                 "SELECT tcp_idx,udp_idx,timestamp,note,fingerprint,"
                 "tcp_label,udp_label FROM checkpoints ORDER BY id DESC LIMIT 1"
@@ -816,10 +908,7 @@ class SqliteRunStore:
         if not protos:
             return {"total": 0, "passed": 0}
         placeholders = ",".join("?" * len(protos))
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
-            row = await db.execute(
-                f"""SELECT COUNT(*),
+        sql = f"""SELECT COUNT(*),
                            SUM(CASE WHEN t.status IN {_WORKING_STATUSES}
                                      AND {_CAMPAIGN_PASS_TCP} THEN 1 ELSE 0 END)
                     FROM tcp_results t
@@ -829,22 +918,23 @@ class SqliteRunStore:
                         SELECT t2.id FROM tcp_results t2
                         WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
                         ORDER BY t2.id DESC LIMIT 1
-                      )""",
-                (domain, *protos),
-            )
-            r = await row.fetchone()
+                      )"""
+
+        async def _run():
+            async with aiosqlite.connect(self._path) as db:
+                await SqliteRunStore._apply_reader_pragmas(db)
+                row = await db.execute(sql, (domain, *protos))
+                r = await row.fetchone()
             return {"total": int(r[0] or 0), "passed": int(r[1] or 0)}
+
+        return await _sqlite_retry(_run, what="domain_pass_stats")
 
     async def count_tcp_passes(self, domain: str | None = None) -> int:
         """Count latest-row PASS/THROTTLED for tcp proto (optionally per domain)."""
         if domain:
             stats = await self.domain_pass_stats(domain, protos=("tcp",))
             return int(stats.get("passed", 0))
-        async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
-            row = await (
-                await db.execute(
-                    f"""SELECT COUNT(*) FROM tcp_results t
+        sql = f"""SELECT COUNT(*) FROM tcp_results t
                        JOIN strategies s ON t.strategy_id=s.id
                        WHERE t.status IN {_WORKING_STATUSES} AND s.proto='tcp'
                          AND {_CAMPAIGN_PASS_TCP}
@@ -853,9 +943,12 @@ class SqliteRunStore:
                            WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
                            ORDER BY t2.id DESC LIMIT 1
                          )"""
-                )
-            ).fetchone()
-        return int(row[0] or 0)
+
+        async def _count(db):
+            row = await (await db.execute(sql)).fetchone()
+            return int(row[0] or 0)
+
+        return await self._on_writer(_count, what="count_tcp_passes")
 
     async def get_working_tcp(self, domain: str) -> list[str]:
         """Names whose *latest* result for domain is PASS or THROTTLED (proto=tcp)."""
@@ -876,7 +969,7 @@ class SqliteRunStore:
     async def get_working_proto_details(self, domain: str, proto: str) -> list[dict]:
         await self.flush()
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.status, t.latency_ms FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
@@ -894,7 +987,7 @@ class SqliteRunStore:
     async def get_completed_pair_keys(self, domain: str) -> set[tuple[str, str]]:
         """All (tcp, udp) pairs already logged for domain (any overall) — resume skip."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 "SELECT DISTINCT tcp_strategy, udp_strategy FROM pair_results WHERE domain=?",
                 (domain,),
@@ -986,7 +1079,7 @@ class SqliteRunStore:
 
         run_id = self._run_id
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 """SELECT s.name, t.domain, t.fail_phase, t.error
                    FROM tcp_results t
@@ -1048,7 +1141,7 @@ class SqliteRunStore:
     async def get_best_tcp(self, domain: str, *, limit: int = 5) -> list[dict]:
         """Latest PASS/THROTTLED per strategy for domain, ordered by latency_ms ASC."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.latency_ms, t.http_code, t.timestamp, t.probe_host
                    FROM strategies s
@@ -1070,7 +1163,7 @@ class SqliteRunStore:
     async def get_best_quic(self, domain: str, *, limit: int = 5) -> list[dict]:
         """Latest PASS/THROTTLED per QUIC strategy for domain, ordered by latency_ms ASC."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.latency_ms, t.http_code, t.timestamp, t.probe_host
                    FROM strategies s
@@ -1092,7 +1185,7 @@ class SqliteRunStore:
     async def get_best_udp(self, *, limit: int = 5) -> list[dict]:
         """Latest PASS/THROTTLED UDP strategies, ordered by latency."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name, t.target, t.latency_ms, t.timestamp
                    FROM strategies s
@@ -1113,7 +1206,7 @@ class SqliteRunStore:
     async def get_best_pairs(self, domain: str, *, limit: int = 10) -> list[dict]:
         """Latest PASS/THROTTLED pair per (tcp,udp,domain), best by tcp_ms+udp_ms."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 f"""SELECT tcp_strategy, udp_strategy, tcp_ms, udp_ms, overall
                    FROM pair_results p
@@ -1135,7 +1228,7 @@ class SqliteRunStore:
     async def coverage_score(self, strategy: str) -> dict:
         """PASS domain count + avg latency for a TCP strategy (latest per domain)."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 f"""SELECT t.domain, t.latency_ms FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
@@ -1169,7 +1262,7 @@ class SqliteRunStore:
         """TCP strategies ranked by domains_passed DESC, then avg latency ASC."""
         await self.flush()
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name,
                            COUNT(DISTINCT t.domain) AS domains_passed,
@@ -1206,7 +1299,7 @@ class SqliteRunStore:
         placeholders = ",".join("?" * len(domains))
         need = len(domains)
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute(
                 f"""SELECT s.name,
                            COUNT(DISTINCT t.domain) AS domains_passed,
@@ -1239,7 +1332,7 @@ class SqliteRunStore:
     async def get_strategy_config(self, name: str, proto: str = "tcp") -> str | None:
         """Return stored config_path/strategy string for name."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             row = await db.execute(
                 "SELECT config_path FROM strategies WHERE name=? AND proto=?",
                 (name, proto),
@@ -1250,7 +1343,7 @@ class SqliteRunStore:
     async def load_scan_weights(self) -> list[tuple[str, float]]:
         """Load AQ4 weight rows (key, weight)."""
         async with aiosqlite.connect(self._path) as db:
-            await SqliteRunStore._apply_pragmas(db)
+            await SqliteRunStore._apply_reader_pragmas(db)
             rows = await db.execute("SELECT key, weight FROM scan_weights ORDER BY key")
             return [(r[0], float(r[1])) for r in await rows.fetchall()]
 

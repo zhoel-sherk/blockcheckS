@@ -148,5 +148,66 @@ GET /api/logs?source=python&tail=200&offset=0
 6. **Версионирование:** Изменение схемы ответа "ok"/"data" допускается только в мажорных релизах. Legacy-поля можно удалять только при предупреждении.
 7. **Тестирование:** Слой HTTP-моста покрывается тестами (см. `tests/unit/test_http_server.py`, шард `S2` в CI). Модули `service/server.py` и `mcp/server.py` должны сохранять изоляцию.
 
+## 10a. GP control-plane: движок blockcheckS
+
+В варианте GP с двумя движками webui выбирает `discovery_engine`
+(`blockcheck2` | `blockchecks`); переключение движка меняет панель подбора,
+preflight-ридинг и кнопки экспорта, но HTTP-контракт `/api/...` остаётся тем же.
+Ниже — карта «единица функционала BS → вызов из GP».
+
+| GP-действие | BS-единица (субпроцесс CLI) | BS-единица (демон `bs serve`) |
+|---|---|---|
+| Быстрый подбор стратегии домена | `bs scan -d D -M gp-verified --scan-level single --max 24` | `POST /api/find-strategy` (AQ, time-boxed) |
+| Discovery-run по доменам (кампания) | `bs scan [-d D1 -d D2 ...] [-M preset] [--db PATH]` | `POST /api/probe` (ad-hoc, без БД) |
+| Одиночная проверка стратегии | `bs tcp -d D -s <strategy>` | `POST /api/probe` |
+| Preflight / ридинг | `bs preflight --json -d D` (stdout-JSON) | `POST /api/triage` |
+| Остановка | `bs stop --wait 120` (run.lock) | `POST /api/stop` |
+| Экспорт nfqws2 | `bc-nfconf --db <db> --out-dir <dir>` | `POST /api/generate-config` |
+| Прогресс / live | stdout `[N/M] pass=`, `run_summary_*.json`, `logs/` | `GET /api/status`, `/api/logs`, SSE `/api/events` |
+| Результаты (PASS) | `state.db` (`tcp_results`), `run_summary` | `GET /api/results` |
+
+### Контракт вызова `bs scan` из GP
+
+`bs scan` (движок B в GP) вызывается как subprocess с флагами, совместимыми с
+`DiscoveryOptions` GP:
+
+```
+bs scan -d <domain>... [--preset P] --scan-level {single|fast|full}
+       --repeats N --parallel-repeats [--repeats-mode fast|stable]
+       --curl-parallel N --parallel N --timeout SEC
+       --max N | --max-timem MIN | --max-timeh HOURS
+       [--tcp-sources custom,configs] [--skip-dns-audit] [--db PATH]
+```
+
+- **Мульти-домен:** `-d/--domain` повторяемый (с 1.4.1); тестируется весь
+  набор. Альтернативы: `--preset` (presets/domains) или `--domains-file`
+  (файл, bare FQDN — побеждает `-d`/`--preset`; GP передаёт его для больших
+  v2fly-списков).
+- **Матрица стратегий:** `-M/--strategy-preset` (gp-verified / flowseal-fast /
+  gp-custom-*…) — матрица строго из пресета; иначе конфиги BS по умолчанию.
+  `--protocol tls12|tls13`, `--repeats-mode fast|stable`, `--no-adaptive`,
+  `--skip-ip-block`, `--debug` управляют поведением прогона.
+- **UDP / пары (GP-режим `bs pair`):** GP передаёт команду `pair` (по одному
+  домену на инвокацию). UDP-лейн генерируется только для доменов, где preflight
+  показал `udp_blocked`; pair-матрица идёт на primary-домене и пишет
+  `udp_results` (нет колонки domain) + `pair_results` (обозначения стратегий,
+  нет run_id). GP читает их через свежий `--db` на run: UDP-кандидаты
+  `protocol='udp'`, пары — отдельная таблица GP `strategy_pairs`. Экспорт
+  config-файлов и пар по-прежнему через `bc-nfconf`.
+- **БД и скоуп:** каждый run пишет в `--db` (по умолчанию XDG `state.db`) и
+  отдельную строку в `runs`; завершение фиксируется `run_summary_*.json`
+  (`run_id`, `domains`). GP для изоляции задач передаёт свежий `--db`.
+- **Harvest:** аргументы кандидатов — `strategies.config_path`
+  (`SqliteRunStore.get_strategy_config`), не `strategies.name` (слаг).
+  PASS-фильтр: `tcp_results.status IN ('PASS','THROTTLED')` и
+  `bridge_applied IS NULL OR bridge_applied = 1`; для кампании строго `=1`.
+- **Окружение/пути:** `BLOCKCHECKS_{STATE,DATA,CONFIG,CACHE}_HOME` — **корень**
+  XDG; приложение добавляет `/blockcheckS`. `BLOCKCHECKS_ZAPRET2` /
+  `BLOCKCHECKS_NFQWS2` указывают на zapret2-дерево GP.
+- **Привилегии / exclusion:** live-команды требуют passwordless `sudo` и
+  nfqws2 в PATH/`BLOCKCHECKS_NFQWS2`. `bs serve` и CLI-кампания взаимо
+  исключаются через `run.lock` (fair exclusion, HTTP 423): GP не поднимает
+  демон во время своего discovery-run.
+
 ## 11. Открытые вопросы
 - На данный момент нет (все заявленные TODO по HTTP bridge и `GET /api/results` были реализованы).

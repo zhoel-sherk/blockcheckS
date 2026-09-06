@@ -115,7 +115,7 @@ def prune_nfqws2_debug_logs(log_dir: Path | None = None, keep: int = NFQWS2_LOG_
         except OSError as exc:
             log.warning("nfqws2 log unlink failed (%s): %s", p, exc)
     if deleted:
-        log.info("pruned %d nfqws2 debug logs (keep=%d)", len(deleted), keep)
+        log.debug("pruned %d nfqws2 debug logs (keep=%d)", len(deleted), keep)
     return deleted
 
 

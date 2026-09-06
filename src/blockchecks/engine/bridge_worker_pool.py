@@ -146,7 +146,7 @@ async def persist_quarantine(runner: Any, quarantine: Any, domain: str) -> None:
             await db.quarantine_domain(
                 domain,
                 reason=info.get("reason", ""),
-                failed=info.get("attempts", 0),
+                failed=info.get("failed", info.get("attempts", 0)),
             )
         except Exception as exc:
             log.warning("%s", f"  [quarantine] DB persist skipped for {domain} ({exc})")

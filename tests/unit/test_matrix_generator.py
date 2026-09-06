@@ -221,3 +221,59 @@ async def test_user_matrix_udp_keeps_tcp_ts(tmp_path):
     assert any("tcp_ts=-1000" in i.strategy for i in items)
     assert not any("--filter-tcp" in i.strategy.lower() for i in items)
     assert not any("--qnum=200" in i.strategy.lower() for i in items)
+
+
+@pytest.mark.asyncio
+async def test_user_matrix_mixed_tcp_udp_file(tmp_path):
+    """TCP lua-desync with tcp_ack must not occupy the UDP max_count slice."""
+    tcp = [
+        f"fake:blob=4pda:repeats={i}:tcp_ack=-66000:tcp_ts_up:ip_ttl=7" for i in range(1, 51)
+    ]
+    udp = [
+        f"--filter-udp=50000-50100 --lua-desync=fake:blob=discord_udp:repeats={n}"
+        for n in (6, 3, 12, 1, 2, 4)
+    ]
+    matrix = tmp_path / "champions.txt"
+    matrix.write_text("\n".join([*tcp, *udp]) + "\n", encoding="utf-8")
+    tcp_items = await MatrixGenerator().generate_tcp(
+        user_matrix=str(matrix), max_count=50, scan_level="full"
+    )
+    udp_items = await MatrixGenerator().generate_udp(
+        user_matrix=str(matrix), max_count=50, scan_level="full"
+    )
+    assert len(tcp_items) == 50
+    assert len(udp_items) == 6
+    assert all("tcp_ack" not in i.strategy for i in udp_items)
+    assert all("--filter-udp" in i.strategy for i in udp_items)
+
+
+@pytest.mark.asyncio
+async def test_user_matrix_udp_section_keeps_tcp_fooling(tmp_path, caplog):
+    matrix = tmp_path / "m.txt"
+    matrix.write_text(
+        "# --- UDP ---\n"
+        "fake:blob=google:repeats=6:tcp_ack=-66000:tcp_ts_up\n",
+        encoding="utf-8",
+    )
+    items = await UserMatrixGenerator(str(matrix)).generate("udp_voice", max_count=10)
+    assert len(items) == 1
+    assert "tcp_ack" in items[0].strategy
+    tcp_items = await UserMatrixGenerator(str(matrix)).generate("tls12", max_count=10)
+    assert tcp_items == []
+
+
+@pytest.mark.asyncio
+async def test_generate_udp_user_matrix_keeps_when_voice_ok(tmp_path):
+    from blockchecks.engine.triage import TriageProfile
+
+    matrix = tmp_path / "m.txt"
+    matrix.write_text(
+        "--filter-udp=50000-50100 --lua-desync=fake:blob=discord_udp:repeats=6\n",
+        encoding="utf-8",
+    )
+    items = await MatrixGenerator().generate_udp(
+        user_matrix=str(matrix),
+        triage=TriageProfile(voice_ok=True, udp_blocked=False),
+        max_count=10,
+    )
+    assert len(items) == 1

@@ -53,10 +53,12 @@
 | **Hybrid envelope** | Единый формат JSON-ответов (`{"status":"ok", "ok":true, "data":...}`) для HTTP, Socket и MCP слоёв |
 | **bridge_applied** | Lua bridge event: nfqws2 действительно выполнил стратегию; `campaign_pass` требует HTTP OK **и** `bridge_applied=True` |
 | **campaign_pass** | Строгое определение PASS для кампаний: HTTP OK ∧ `bridge_applied=True`; без APPLIED строка пишется как FAIL |
-| **domain quarantine** | Исключение домена из очереди mid-run при 0 PASS за `--quarantine-min` попыток; сид из БД только при `--resume` |
+| **domain quarantine** | Исключение домена из очереди mid-run: 0 PASS за `--quarantine-min` DPI-проб **или** `--dns-resolve-quarantine-min` `dns_resolve`; сид из БД только при `--resume`; NODATA drop на старте |
 | **harvest-batch** | Read-only экспорт топ-стратегий PASS+APPLIED в `batch.txt` + `manifest.json` для внешних валидаторов |
 | **live events** | NDJSON-журнал проб (`events_live.jsonl`) + `current_probe.json` для наблюдения за кампанией без рестарта |
 | **MCP** | Model Context Protocol сервер (`bs-mcp`): 22 инструмента для LLM-клиентов (Cursor/Claude/opencode) |
 | **stop_campaign** | MCP-инструмент: `bs stop` по `run.lock`; если кампании нет — останавливает демон `bs serve` |
 | **run_id / resume fingerprint** | `runs.id` + fingerprint матрицы; resume skip keys scoped только на этот `run_id`; без `--resume` — новый run_id |
 | **UNIQUE(strategy, domain, protocol)** | Уникальность в `data_block` таблице `pass_strategies`; legacy двух-колоночный unique мигрируется автоматически |
+| **strategies.config_path** | Каноническая строка аргументов nfqws2 (напр. `fake:blob=stun:repeats=6`); `strategies.name` — только слаг. Внешние читатели используют `get_strategy_config()` / `bc-nfconf` |
+| **run_summary_\*.json** | Machine-readable финиш scan/pair/full: `run_id`, `domains`, `db_path` (XDG data dir или `--out-dir`); основа run-scoping для GP/orchestrator |

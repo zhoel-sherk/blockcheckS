@@ -15,6 +15,7 @@ from blockchecks.engine.generators.families._helpers import (
     cmd_label,
     emit_rows,
     expand_axes,
+    format_pair_label,
     required_foolings,
 )
 from blockchecks.engine.generators.standard import StandardGenerator
@@ -104,6 +105,19 @@ def test_cmd_label_same_truncated_prefix_differs():
     assert name_a.rsplit("_", 1)[-1] != name_b.rsplit("_", 1)[-1]
     assert len(name_a.rsplit("_", 1)[-1]) == 6
     assert cmd_label(prefix, cmd_a) == name_a  # stable
+
+
+@pytest.mark.unit
+def test_format_pair_label_keeps_digest():
+    prefix = "fake_blob=4pda_repeats" * 3
+    a = cmd_label(prefix, "fake:blob=4pda:repeats=5:tcp_ack=-66000")
+    b = cmd_label(prefix, "fake:blob=4pda:repeats=11:tcp_ack=-66000")
+    fa, fb = format_pair_label(a), format_pair_label(b)
+    assert len(fa) == 22
+    assert len(fb) == 22
+    assert fa != fb
+    assert fa[-6:] == a[-6:]
+    assert fb[-6:] == b[-6:]
 
 
 @pytest.mark.unit

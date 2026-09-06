@@ -415,6 +415,16 @@ def main(argv: list[str] | None = None) -> int:
             use_all_providers=not args.no_all_providers,
         )
     )
+    log.info("%s", f"  keenetic: {result['keenetic']}")
+    log.info("%s", f"  raw:      {result['raw']}")
+    log.info("%s", f"  user.list:{result['user_list']}")
+    print(f"  keenetic: {result['keenetic']}", flush=True)  # noqa: print
+    log.info("%s", f"  TCP ({len(result['tcp'])}):")
+    for s in result["tcp"]:
+        log.info("%s", f"    - {s[:90]}")
+    log.info("%s", f"  UDP ({len(result['udp'])}):")
+    for s in result["udp"]:
+        log.info("%s", f"    - {s[:90]}")
     if not args.allow_stock_fallback and (not result["udp"] or not result["quic"]):
         missing = [label for label, items in (("UDP", result["udp"]), ("QUIC", result["quic"])) if not items]
         log.error(
@@ -422,15 +432,6 @@ def main(argv: list[str] | None = None) -> int:
             ", ".join(missing),
         )
         return 1
-    log.info("%s", f"  keenetic: {result['keenetic']}")
-    log.info("%s", f"  raw:      {result['raw']}")
-    log.info("%s", f"  user.list:{result['user_list']}")
-    log.info("%s", f"  TCP ({len(result['tcp'])}):")
-    for s in result["tcp"]:
-        log.info("%s", f"    - {s[:90]}")
-    log.info("%s", f"  UDP ({len(result['udp'])}):")
-    for s in result["udp"]:
-        log.info("%s", f"    - {s[:90]}")
     return 0
 
 

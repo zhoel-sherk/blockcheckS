@@ -234,6 +234,25 @@ def test_main_returns_nonzero_when_udp_quic_empty():
     assert rc == 1
 
 
+def test_main_prints_keenetic_path_before_stock_fail(capsys):
+    with patch(
+        "blockchecks.nfconf.export_configs",
+        new=AsyncMock(
+            return_value={
+                "keenetic": "/tmp/out/nfqws2_keenetic.conf",
+                "raw": "r",
+                "user_list": "u",
+                "tcp": ["a"],
+                "udp": [],
+                "quic": [],
+            }
+        ),
+    ):
+        rc = main(["--limit", "1"])
+    assert rc == 1
+    assert "keenetic: /tmp/out/nfqws2_keenetic.conf" in capsys.readouterr().out
+
+
 def test_main_allows_empty_udp_quic_with_stock_flag():
     with patch(
         "blockchecks.nfconf.export_configs",

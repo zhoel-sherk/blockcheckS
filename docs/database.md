@@ -126,6 +126,43 @@ erDiagram
 | `v_coverage` | strategies × domains passed, avg latency |
 | `v_latest_run` | per-domain pass counts |
 
+## Стратегия: slug (`strategies.name`) vs аргументы (`strategies.config_path`)
+
+`strategies.name` — **слаг** (ключ, `UNIQUE(name, proto)`), например
+`std_fake_stun_r6_tcp_ack=-66000`. Настоящая строка аргументов nfqws2 лежит в
+`strategies.config_path`, например `fake:blob=stun:repeats=6:tcp_ack=-66000`.
+
+Внешние потребители (GP/control plane, harvest, экспорт) обязаны брать
+аргументы через `config_path`, а **не** `name`:
+
+- через DAO: `SqliteRunStore.get_strategy_config(name, proto="tcp")` → `config_path`;
+- `bc-nfconf`/`harvest-batch` уже резолвят args из `config_path` (включая
+  переименование цифровых blob-id `4pda→b4pda`).
+
+## `run_summary_*.json` (внешний контракт)
+
+`scan`/`pair`/`full` при завершении пишут `run_summary_<ts>.json` в
+`--out-dir`, либо в XDG-дефолт `~/.local/share/blockcheckS` (когда `--out-dir`
+не задан). Ключи (scan/pair):
+
+```json
+{
+  "command": "scan",
+  "run_id": 42,
+  "domains": ["youtube.com", "discord.com"],
+  "domain": "youtube.com",
+  "db_path": ".../state.db",
+  "export_paths": null,
+  "deadline_sec": null,
+  "stopped_reason": null
+}
+```
+
+`run_id` — идентификатор `runs.id` в `state.db`: оркестратор скоупит чтение
+результатов по нему либо передаст `bs scan --db <свежий путь>`, чтобы
+каждая задача читала только свою БД. Файлы чистятся `bs gc`
+(`run_summary_age`).
+
 ## Status values
 
 ### `tcp_results.status`
@@ -153,13 +190,18 @@ drains them atomically under `_flush_lock` before any await, so a concurrent
 ("database is locked" retry ×5) the drained rows are re-queued — results are
 never silently lost. Writer uses one long-lived connection (`SqliteRunStore._writer`);
 read paths may open short-lived connections (WAL allows concurrent readers).
-Periodic `PRAGMA wal_checkpoint(PASSIVE)` runs every N flushes; `close()` calls
-`compact()` (passive checkpoint + incremental vacuum pages). Schema sets
+Periodic `PRAGMA wal_checkpoint(PASSIVE)` runs every N flushes. Schema sets
 `PRAGMA auto_vacuum=INCREMENTAL` at bootstrap.
 
 WAL pragmas on writer connections: `synchronous=NORMAL`, `mmap_size`,
 `cache_size=-64000`, `temp_store=MEMORY`, `busy_timeout=30000` (schema bootstrap
-uses 5000).
+uses 5000). Short-lived readers set only `busy_timeout=30000` — they must not
+repeat `journal_mode=WAL` or `mmap_size` on a second fd (that caused
+`disk I/O error` at scan export). `count_tcp_passes` (no domain) uses the
+long-lived writer. Transient `OperationalError` (disk I/O / locked / busy)
+retries up to 3 times with a warning. `close()` does **not** run
+`wal_checkpoint`/`vacuum` (those can hang the aiosqlite worker after export);
+`compact()` is explicit and timeboxed to 2s.
 
 ## DNS audit
 
@@ -169,11 +211,16 @@ persists adaptive-queue family/blob/trait weights between runs.
 
 ## Quarantine
 
-`quarantined` holds domains auto-skipped mid-run (0 PASS in >= `--quarantine-min`
-attempts, default 300). Written by the campaign, read by MCP
+`quarantined` holds domains auto-skipped mid-run: 0 PASS in >= `--quarantine-min`
+DPI attempts (default 300), **or** >= `--dns-resolve-quarantine-min` rows with
+`fail_phase=dns_resolve` (default 50). Reasons look like `0 PASS in 300 attempts`
+or `N dns_resolve failures (no pin)`. Written by the campaign, read by MCP
 `get_series_status` → `quarantined[]`. `--no-quarantine` disables;
 `--quarantine-auto-denylist` also appends to `presets/domains/denylist.txt`.
-Suspicious lua-bridge PASSes (no APPLIED event) are marked
+Thresholds are 1–10000 via CLI or `[quarantine]` in `config.toml`.
+NODATA names (no DoH A and no pin) are dropped at campaign start so they never
+enter the TCP matrix. `dns_resolve` is **not** an infra skip (unlike shm/ns
+pool). Suspicious lua-bridge PASSes (no APPLIED event) are marked
 `tcp_results.bridge_applied = 0`. After 1.4.0 campaign write path they are stored
 as `FAIL` (`fail_phase=no_bridge_applied`). `bs harvest-batch` and smoke asserts
 require `bridge_applied=1`. `bc-nfconf` / MCP `query_strategies` / `get_best_*`

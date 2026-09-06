@@ -96,7 +96,13 @@ _PHASE_PATTERNS: tuple[tuple[FailPhase, re.Pattern], ...] = (
     (FailPhase.DATA_STALL_TLS_CERT, re.compile(r"stall.*cert|cert.*stall|stalled at 2", re.I)),
     (FailPhase.DELAYED_RST, re.compile(r"reset after|rst after", re.I)),
     (FailPhase.DELAYED_FIN, re.compile(r"fin after|fin_ack|fake fin", re.I)),
-    (FailPhase.DNS_RESOLVE, re.compile(r"Could not resolve|Failed to resolve|getaddrinfo", re.I)),
+    (
+        FailPhase.DNS_RESOLVE,
+        re.compile(
+            r"Could not resolve|Failed to resolve|getaddrinfo|no DoH A record",
+            re.I,
+        ),
+    ),
     (FailPhase.DNS_TAMPERED, re.compile(r"TAMPERED|dns.*mismatch", re.I)),
     (
         FailPhase.DNS_SINKHOLE,
@@ -126,9 +132,11 @@ _PASS_HTTP = frozenset({200, 204, 206, 401, 403, 404})
 INFRA_FAIL_PHASES = frozenset(
     {
         FailPhase.CONNECT_TIMEOUT,
-        FailPhase.DNS_RESOLVE,
     }
 )
+
+#: Synthetic curl skip when DoH/pin produced no A record (maps to dns_resolve).
+DNS_NODATA_SKIP = "no DoH A record (skipped probe)"
 
 _INFRA_ERROR_MARKERS = (
     "dev/shm",

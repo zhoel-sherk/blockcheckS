@@ -42,5 +42,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
         if stats.skipped_lock:
             log.warning("gc db skipped DELETE (run.lock present) path=%s", stats.db_path)
     if dry and (plan.deletes or db_days is not None):
+        # stdout: smoke greps this; log.info can miss the operator stream
+        print("  re-run with --apply to delete", flush=True)  # noqa: print
         log.info("%s", "  re-run with --apply to delete")
     return 0

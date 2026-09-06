@@ -46,7 +46,10 @@ class _FlushStreamHandler(logging.StreamHandler):
     def emit(self, record: logging.LogRecord) -> None:
         super().emit(record)
         if record.levelno >= logging.ERROR:
-            self.flush()
+            try:
+                self.flush()
+            except ValueError:
+                pass
 
 
 class _FlushRotatingFileHandler(logging.handlers.RotatingFileHandler):

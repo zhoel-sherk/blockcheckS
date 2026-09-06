@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
+import subprocess
 import sys
 from collections.abc import Callable
 
 from blockchecks.terminal import init_terminal
 
 init_terminal()
+
+log = logging.getLogger(__name__)
 
 from blockchecks.cli.commands.pair import cmd_pair
 from blockchecks.cli.commands.tcp import cmd_tcp
@@ -27,6 +31,23 @@ from blockchecks.engine.paths import DEFAULT_DB_PATH, DEFAULT_OUT_DIR
 from blockchecks.engine.settle_profile import DEFAULT_PROFILE_PATH
 
 _BOOL = argparse.BooleanOptionalAction
+
+_QUARANTINE_MIN_LO = 1
+_QUARANTINE_MIN_HI = 10_000
+
+
+def _quarantine_bound(value: str) -> int:
+    """argparse type: integer in 1..10000."""
+    try:
+        n = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if n < _QUARANTINE_MIN_LO or n > _QUARANTINE_MIN_HI:
+        raise argparse.ArgumentTypeError(
+            f"must be {_QUARANTINE_MIN_LO}..{_QUARANTINE_MIN_HI}"
+        )
+    return n
+
 
 # Positive BooleanOptionalAction dest → legacy ``no_*`` handler field (inverted).
 _LEGACY_NO_FROM_POSITIVE: tuple[tuple[str, str], ...] = (
@@ -385,7 +406,18 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     Synchronizes flag names and default values across all campaign commands.
     """
     if mode in ("scan", "pair"):
-        parser.add_argument("-d", "--domain", default=None, help="Target domain (e.g. youtube.com)")
+        parser.add_argument(
+            "-d",
+            "--domain",
+            action="append",
+            default=None,
+            help="Target domain (repeatable; scan/pair test the whole set)",
+        )
+        parser.add_argument(
+            "--domains-file",
+            default=None,
+            help="Path to domain list file (one FQDN per line; wins over -d/--preset)",
+        )
     else:  # full
         parser.add_argument("-d", "--domain", help="Single domain to test")
         parser.add_argument("--domains-file", help="Path to domain list file")
@@ -500,9 +532,16 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     )
     g.add_argument(
         "--quarantine-min",
-        type=int,
+        type=_quarantine_bound,
         default=300,
-        help="Failed attempts on a domain before it is quarantined (default: 300)",
+        help="DPI FAILs (0 PASS) on a domain before quarantine (1–10000, default: 300)",
+    )
+    g.add_argument(
+        "--dns-resolve-quarantine-min",
+        dest="dns_resolve_quarantine_min",
+        type=_quarantine_bound,
+        default=50,
+        help="dns_resolve FAILs before quarantine (1–10000, default: 50)",
     )
     g.add_argument(
         "--quarantine-auto-denylist",
@@ -518,6 +557,12 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
             help="UDP voice probe timeout in seconds (default: 3.0)",
         )
     parser.add_argument("--user-matrix", default="", help="Path to custom strategy list file")
+    parser.add_argument(
+        "--triage-from",
+        default="",
+        metavar="PATH",
+        help="Load TriageProfile from triage.toml (overrides provider file after preflight)",
+    )
 
     add_store_args(parser)
     parser.add_argument(
@@ -670,7 +715,10 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
 
 
 def ensure_system_deps_or_exit(args) -> int:
-    """Run deps check before live nfqws2 work. Returns 0 or error exit code."""
+    """Live-run gates, then optional zapret/nfqws2 deps check. Returns 0 or 2."""
+    warn_live_cli_flags(args)
+    if rc := require_passwordless_sudo():
+        return rc
     if getattr(args, "skip_deps_check", False):
         return 0
     from blockchecks.engine.system_deps import verify_system_dependencies
@@ -680,6 +728,61 @@ def ensure_system_deps_or_exit(args) -> int:
     report = verify_system_dependencies(fetch=fetch, offline=offline)
     report.print_report()
     if not report.ok:
+        return 2
+    return 0
+
+
+def warn_live_cli_flags(args) -> None:
+    """Human-usage warnings: ignored -d/--preset, deprecated --classic."""
+    domains_file = getattr(args, "domains_file", None)
+    raw_domain = getattr(args, "domain", None)
+    if isinstance(raw_domain, (list, tuple)):
+        domain = ",".join(str(d) for d in raw_domain if str(d).strip())
+    else:
+        domain = str(raw_domain or "").strip()
+    preset = getattr(args, "preset", None)
+    if domains_file and domain:
+        log.warning(
+            "--domains-file=%s overrides -d/--domain=%s (file wins)",
+            domains_file,
+            domain,
+        )
+    if domains_file and preset:
+        log.warning(
+            "--domains-file=%s overrides --preset=%s (file wins)",
+            domains_file,
+            preset,
+        )
+    from blockchecks.engine.config import resolve_probe_backend
+
+    resolve_probe_backend(args)
+
+
+def require_passwordless_sudo() -> int:
+    """Exit 2 before DNS if not root and ``sudo -n`` fails. Not skipped by --skip-deps-check."""
+    if os.geteuid() == 0:
+        return 0
+    try:
+        r = subprocess.run(
+            ["sudo", "-n", "true"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        log.error(
+            "ERROR: live runs need passwordless sudo (`sudo -n`); %s",
+            exc,
+        )
+        return 2
+    if r.returncode != 0:
+        log.error(
+            "ERROR: live runs need passwordless sudo (`sudo -n` / NOPASSWD). "
+            "Do not wait for DNS: netns/nfqws2 cannot start. rc=%s %s",
+            r.returncode,
+            (r.stderr or r.stdout or "").strip()[:200],
+        )
         return 2
     return 0
 
@@ -899,6 +1002,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="nfqws2 --debug: 1=logs/file, syslog, or @path/path",
     )
+    preflight.add_argument(
+        "--json",
+        action="store_true",
+        help="Print one JSON object to stdout (human logs on stderr)",
+    )
     add_secure_dns_args(
         preflight, include_preflight=True, include_preflight_toggle=False
     )
@@ -1079,6 +1187,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def dispatch(args: argparse.Namespace) -> int:  # noqa: C901
+    # Machine contract: bs preflight --json must keep stdout as pure JSON, so
+    # redirect the console stream to stderr BEFORE dependency verification
+    # (its log lines would otherwise precede the JSON object on stdout).
+    if args.command == "preflight" and getattr(args, "json", False):
+        from blockchecks.cli.commands.preflight import _keep_json_stdout_clean
+
+        _keep_json_stdout_clean(args)
+
     if getattr(args, "debug", False):
         from blockchecks.engine.log import set_debug_mode
 

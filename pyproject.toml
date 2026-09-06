@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blockchecks"
-version = "1.4.0"
+version = "1.4.1"
 description = "Asynchronous DPI strategy testing framework for nfqws2/zapret2"
 readme = "README.pypi.md"
 license = "MIT"
@@ -71,9 +71,10 @@ youtube = ["yt-dlp>=2024.1.0"]
 where = ["src"]
 
 # BLOB-1: ship baked data inside the package so a plain `pip install` wheel is
-# self-sufficient (no editable install required). data-files land under
-# site-packages/blockchecks/{blobs,configs,lua}; config.PROJECT_DIR resolves
-# to the package dir when configs/ is present there.
+# self-sufficient (no editable install required). data-files are installed on
+# the distutils *data* scheme — `sys.prefix[/local]/blockchecks` (or
+# `site.getuserbase()/blockchecks` for `pip install --user`) — not inside
+# site-packages. config.PROJECT_DIR probes those roots (see engine/config.py).
 [tool.setuptools.data-files]
 "blockchecks/blobs" = ["blobs/*.bin"]
 "blockchecks/configs" = ["configs/*.conf"]

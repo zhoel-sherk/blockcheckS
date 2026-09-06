@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from blockchecks.engine.generators.families._helpers import format_pair_label
 from blockchecks.engine.matrix_generator import StrategyItem
 from blockchecks.engine.results import PairResult, TcpTestResult
 from blockchecks.terminal import CYAN, GREEN, RED, RESET, YELLOW
@@ -184,8 +185,8 @@ class PairMatrixRunner:
                     voice_tag = " [voice]" if full_voice else ""
                     log.info(
                         "%s",
-                        f"  [{pair_tag}] {tcp_r.item.label[:22]:22s} "
-                        f"+ {udp_s.label[:22]:22s}  udp={udp_tag}{voice_tag}",
+                        f"  [{pair_tag}] {format_pair_label(tcp_r.item.label):22s} "
+                        f"+ {format_pair_label(udp_s.label):22s}  udp={udp_tag}{voice_tag}",
                     )
 
                     if udp_ok:
@@ -265,7 +266,11 @@ class PairMatrixRunner:
                 else:
                     tag = f"{RED}FAIL{RESET}"
                 udp_lat = f"{p.udp_ms:.0f}ms" if p.udp_ok else "timeout"
-                log.info("%s", f"  {tag:12s} {tcp[:22]:22s} + {udp[:22]:22s}  udp={udp_lat}")
+                log.info(
+                    "%s",
+                    f"  {tag:12s} {format_pair_label(tcp):22s} + {format_pair_label(udp):22s}  "
+                    f"udp={udp_lat}",
+                )
 
         log.info("%s", f"  {CYAN}{'═' * 60}{RESET}")
         log.info("%s", f"  {GREEN}{passed} PASS{RESET} / {len(pairs)} pairs")

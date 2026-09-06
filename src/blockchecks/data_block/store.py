@@ -381,19 +381,7 @@ class ProviderStore:
 
     def load_triage(self):
         """Load ``triage.toml`` if present; ``None`` when missing/invalid."""
-        path = self.triage_file
-        if not path.is_file():
-            return None
-        try:
-            import tomllib
-
-            raw = tomllib.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            log.warning("%s", f"  WARNING: triage.toml unreadable ({exc})")
-            return None
-        from blockchecks.engine.triage import TriageProfile
-
-        return TriageProfile.from_dict(_flatten_triage_toml(raw))
+        return load_triage_toml(self.triage_file)
 
     # sync (opt-in)
 
@@ -428,6 +416,23 @@ class ProviderStore:
                 log.warning("%s", f"  WARNING: data_block push failed (creds?): {r.stderr[:200]}")
                 return False
         return True
+
+
+def load_triage_toml(path: str | Path):
+    """Load a ``triage.toml`` file; ``None`` if missing or invalid."""
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        import tomllib
+
+        raw = tomllib.loads(p.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        log.warning("%s", f"  WARNING: triage.toml unreadable ({exc})")
+        return None
+    from blockchecks.engine.triage import TriageProfile
+
+    return TriageProfile.from_dict(_flatten_triage_toml(raw))
 
 
 def _toml_str(value: str) -> str:

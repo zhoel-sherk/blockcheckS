@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
+import tempfile
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -33,6 +35,9 @@ def _composite_patches(*, pool, start_daemon=None, worker_data=None, get_fw=None
     bridge = MagicMock()
     bridge.setup = MagicMock()
     bridge.heartbeat_age = MagicMock(return_value=0.05)
+    ipc = Path(tempfile.mkdtemp(prefix="bs_comp_ipc_"))
+    bridge.paths = MagicMock()
+    bridge.paths.base = ipc
 
     with ExitStack() as stack:
         stack.enter_context(patch("blockchecks.engine.composite_runner.NetNsPool", return_value=pool))
@@ -50,7 +55,10 @@ def _composite_patches(*, pool, start_daemon=None, worker_data=None, get_fw=None
             )
         )
         stack.enter_context(patch("blockchecks.engine.composite_runner.get_ns_firewall", get_fw))
-        yield bridge
+        try:
+            yield bridge
+        finally:
+            shutil.rmtree(ipc, ignore_errors=True)
 
 
 def test_valid_domain():
@@ -178,6 +186,21 @@ def test_run_minimal_fixture_injects_lua_init_and_probes(tmp_path, monkeypatch):
     assert "--lua-init=@/opt/zapret2/lua/zapret-lib.lua" in launched_text
     assert "--qnum=" in launched_text  # qnum preserved from fixture
     assert "--bind-fix4" in launched_text
+    assert "--writable=" in launched_text
+    assert "scan_bridge.lua" in launched_text or "write_ipc.lua" in launched_text
+
+
+def test_overlay_adds_bridge_lua_when_zapret_lua_init_present(tmp_path):
+    from blockchecks.engine.composite_runner import overlay_composite_conf
+
+    ipc = tmp_path / "ipc"
+    ipc.mkdir()
+    src = "--lua-init=@/opt/zapret2/lua/zapret-lib.lua\n--qnum=200\n--bind-fix4\n"
+    out = overlay_composite_conf(src, ipc)
+    assert out is not None
+    assert "--writable=" in out
+    assert "scan_bridge.lua" in out or "write_ipc.lua" in out
+    assert "--lua-init=@/opt/zapret2/lua/zapret-lib.lua" in out
 
 
 def test_run_calls_lua_bridge_setup_before_daemon(tmp_path):
@@ -194,6 +217,8 @@ def test_run_calls_lua_bridge_setup_before_daemon(tmp_path):
         order.append("setup")
 
     bridge.setup = _setup
+    bridge.paths.base = tmp_path / "ipc"
+    (tmp_path / "ipc").mkdir()
 
     def _start(ns_name: str, config_abs: str) -> None:
         order.append("start_daemon")

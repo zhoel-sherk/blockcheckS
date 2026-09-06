@@ -90,6 +90,7 @@ def test_campaign_domains_error():
         rc = asyncio.run(_run_full_campaign(args))
     assert rc == 4
     db_open.assert_awaited_once()
+    db_open.return_value.close.assert_awaited_once()
 
 
 def test_campaign_dns_error():
@@ -171,6 +172,7 @@ def test_campaign_full_success():
     ctx.runner.start.assert_awaited_once()
     cleanup.assert_awaited_once()
     db_open.assert_awaited_once()
+    db_open.return_value.close.assert_awaited_once()
 
 
 def test_campaign_skips_remaining_phases_on_stop():

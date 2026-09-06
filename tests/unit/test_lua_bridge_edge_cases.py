@@ -211,10 +211,39 @@ class TestTornReadPublish:
         lb.teardown()
 
 
+def test_chmod_or_sudo_warns_once_then_skips(tmp_path, caplog, monkeypatch):
+    from blockchecks.service import lua_bridge_ipc as ipc
+
+    ipc._chmod_eperm_logged.clear()
+    ipc._chmod_sudo_ok.clear()
+    path = tmp_path / "ns"
+    path.mkdir()
+    sudo_calls: list[list[str]] = []
+
+    def fail_chmod(*_a, **_k):
+        raise OSError(errno.EPERM, "Operation not permitted")
+
+    def fake_run(cmd, **_kw):
+        sudo_calls.append(list(cmd))
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(ipc.os, "chmod", fail_chmod)
+    monkeypatch.setattr(ipc.sp, "run", fake_run)
+    with caplog.at_level(logging.WARNING, logger=ipc.log.name):
+        assert ipc._chmod_or_sudo(path, 0o770, is_dir=True)
+        assert ipc._chmod_or_sudo(path, 0o770, is_dir=True)
+    warnings = [r.getMessage() for r in caplog.records if "IPC chmod" in r.getMessage()]
+    assert len(warnings) == 1
+    assert str(path) in warnings[0]
+    assert len(sudo_calls) == 1
+
+
 def test_world_writable_warning_includes_path_and_uid(tmp_path, caplog, monkeypatch):
     from blockchecks.service import lua_bridge_ipc as ipc
 
     ipc._world_warned.clear()
+    ipc._chmod_eperm_logged.clear()
+    ipc._chmod_sudo_ok.clear()
     ipc._setfacl_available = False
     path = tmp_path / "shm"
     path.mkdir()
@@ -278,6 +307,8 @@ def test_ipc_relax_raises_when_all_chmod_paths_fail(tmp_path, monkeypatch):
     from blockchecks.service import lua_bridge_ipc as ipc
 
     ipc._setfacl_available = False
+    ipc._chmod_eperm_logged.clear()
+    ipc._chmod_sudo_ok.clear()
     path = tmp_path / "shm"
     path.mkdir()
 

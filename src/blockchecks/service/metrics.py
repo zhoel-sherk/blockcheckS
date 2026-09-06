@@ -135,11 +135,53 @@ def _kill_pid_sigkill(pid: int) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        log.warning("EPERM killing pid %d; retrying sudo -n kill -9", pid)
+        log.debug("EPERM killing pid %d; retrying sudo -n kill -9", pid)
         return _sudo_kill_pid(pid)
     except OSError as exc:
         log.warning("failed to kill pid %d: %s", pid, exc)
         return False
+
+
+def _pgrep_child_pids(ppid: int) -> list[int]:
+    """Direct children of *ppid* via ``pgrep -P`` (empty if none / missing)."""
+    try:
+        proc = subprocess.run(
+            ["pgrep", "-P", str(ppid)],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return []
+    if proc.returncode != 0:
+        return []
+    return [int(x) for x in proc.stdout.split() if x.strip().isdigit()]
+
+
+def descendant_pids(root_pid: int) -> list[int]:
+    """BFS of ``pgrep -P`` descendants (not including *root_pid*)."""
+    found: list[int] = []
+    pending = [root_pid]
+    seen = {root_pid}
+    while pending:
+        pid = pending.pop()
+        new = [k for k in _pgrep_child_pids(pid) if k not in seen]
+        seen.update(new)
+        found.extend(new)
+        pending.extend(new)
+    return found
+
+
+def pkill_host_process_tree(root_pid: int) -> int:
+    """SIGKILL descendants then *root_pid*.
+
+    Host ``sudo -n nfqws2`` stores the sudo wrapper as ``Popen.pid``; SIGKILL
+    on the wrapper leaves overflow-uid nfqws2 holding NFQUEUE. Never
+    ``pgrep -f nfqws2`` here (that would hit live campaign daemons).
+    """
+    kids = descendant_pids(root_pid)
+    return sum(1 for pid in [*kids, root_pid] if _kill_pid_sigkill(pid))
 
 
 def _pkill_nfqws2_in_ns(ns_name: str) -> PkillResult:

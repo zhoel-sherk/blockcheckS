@@ -168,6 +168,23 @@ def test_maybe_export_configs_calls_export():
     exp.assert_awaited_once()
 
 
+def test_maybe_export_configs_sqlite_ioerr_returns_none(caplog):
+    import logging
+    import sqlite3
+
+    store = MagicMock()
+    store.flush = AsyncMock()
+    store.count_tcp_passes = AsyncMock(side_effect=sqlite3.OperationalError("disk I/O error"))
+    with caplog.at_level(logging.WARNING):
+        res = asyncio.run(
+            maybe_export_configs(
+                store, _args(), primary="x.com", domains_file=None, stop_set=False, deadline=None
+            )
+        )
+    assert res is None
+    assert "export skipped after sqlite/IO error" in caplog.text
+
+
 # ── data_block best-config / sync ─────────────────────────────────────
 
 

@@ -16,6 +16,8 @@ from blockchecks.engine.config import SHM_BASE
 
 log = logging.getLogger(__name__)
 _world_warned: set[str] = set()
+_chmod_eperm_logged: set[str] = set()
+_chmod_sudo_ok: set[str] = set()
 _setfacl_available: bool | None = None
 
 #: Lua ``bs_heartbeat`` timer period (``init.lua``). Ready/stale thresholds must
@@ -88,12 +90,24 @@ def _mkdir_or_sudo(path: Path) -> None:
 
 
 def _chmod_or_sudo(path: Path, mode: int, *, is_dir: bool) -> bool:
-    """Try os.chmod; on failure retry via passwordless sudo. Return True on success."""
+    """Try os.chmod; on failure retry via passwordless sudo. Return True on success.
+
+    Overflow-uid owns leftover shm dirs, so native chmod stays EPERM forever.
+    Sudo ``a+rwX`` does not change owner — cache success per path so publish
+    does not warn+sudo on every strategy.
+    """
+    key = str(path)
+    if key in _chmod_sudo_ok:
+        return True
     try:
         os.chmod(path, mode)
         return True
     except OSError as exc:
-        log.warning("IPC chmod %s to %o failed (%s) — retrying via sudo", path, mode, exc)
+        if key not in _chmod_eperm_logged:
+            _chmod_eperm_logged.add(key)
+            log.warning("IPC chmod %s to %o failed (%s) — retrying via sudo", path, mode, exc)
+        else:
+            log.debug("IPC chmod %s still EPERM (%s) — sudo", path, exc)
     fix = sp.run(
         ["sudo", "-n", "chmod", "-R", "a+rwX" if is_dir else "a+rw", str(path)],
         capture_output=True,
@@ -108,6 +122,7 @@ def _chmod_or_sudo(path: Path, mode: int, *, is_dir: bool) -> bool:
             fix.stderr.strip()[:200],
         )
         return False
+    _chmod_sudo_ok.add(key)
     return True
 
 

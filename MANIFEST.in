@@ -20,3 +20,21 @@ include docs/package.md
 include changelog.md
 recursive-include systemd *.service
 recursive-include src/blockchecks *.py
+
+# Release hygiene: keep the sdist lean regardless of the build environment.
+# (Tests/dev/caches/mutation artefacts are not needed by pip consumers; a VCS
+# file-finder in the build env would otherwise pull them into the sdist.)
+prune tests
+prune dev
+prune mutants
+prune .hypothesis
+prune .ruff_cache
+prune .pytest_cache
+prune logs
+prune reports
+prune build
+prune dist
+prune .venv
+global-exclude __pycache__ *.py[cod]
+global-exclude .coverage
+global-exclude state.db-wal state.db-shm

@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import sys
 
 from blockchecks.engine.generators.base import StrategyGenerator, StrategyItem
@@ -153,6 +154,61 @@ _UDP_SKIP_ON_TCP = (
     "blob=discord_udp",
     "discord_ip_discovery",
 )
+# TCP fooling that is not ``tcp_ts=-1000`` (that form is valid on UDP lua lines).
+_TCP_ONLY_FOOLING = ("tcp_ack", "tcp_ts_up", "tls_client_hello", "--filter-l7=tls")
+_SECTION_RE = re.compile(r"^#\s*-+\s*(TCP|UDP|QUIC)\b", re.I)
+_PROTO_LANE = {"udp_voice": "udp", "udp_game": "udp", "quic": "quic"}
+
+
+def _parse_matrix_section(line: str) -> str | None:
+    m = _SECTION_RE.match(line)
+    return m.group(1).lower() if m else None
+
+
+def _keep_matrix_line(protocol: str, strategy: str, section: str | None) -> bool:
+    """Keep a user-matrix line for ``protocol``; log skips (no silent drop)."""
+    lane = _PROTO_LANE.get(protocol, "tcp")
+    low = strategy.lower()
+    preview = strategy.replace("\n", " ")[:80]
+    if section is not None and section != lane:
+        log.info("%s", f"[matrix] skip {lane} generate in {section} section: {preview}")
+        return False
+    if section == lane:
+        if lane == "udp" and any(tok in low for tok in _TCP_ONLY_FOOLING):
+            log.warning("%s", f"[matrix] UDP section keeps TCP-fooling line: {preview}")
+        return True
+    if lane != "udp":
+        if any(kw in low for kw in _UDP_SKIP_ON_TCP):
+            log.info("%s", f"[matrix] skip UDP CLI on {lane}: {preview}")
+            return False
+        return True
+    tcp_shaped = any(tok in low for tok in (*_UDP_SKIP_TCP_CLI, *_TCP_ONLY_FOOLING))
+    if tcp_shaped:
+        log.info("%s", f"[matrix] skip TCP-shaped line on UDP path: {preview}")
+    return not tcp_shaped
+
+
+def _iter_user_matrix_items(lines: list[str], protocol: str, scan_level: str):
+    section: str | None = None
+    for raw in lines:
+        line = raw.strip()
+        if not line or line == "---":
+            continue
+        if (sec := _parse_matrix_section(line)) is not None:
+            section = sec
+            continue
+        if line.startswith("#"):
+            continue
+        strategy = line.replace("\\n", "\n")
+        if not _keep_matrix_line(protocol, strategy, section):
+            continue
+        yield StrategyItem(
+            label=_cmd_human_label(strategy),
+            strategy=strategy,
+            protocol=protocol,
+        )
+        if scan_level == "single":
+            return
 
 
 class UserMatrixGenerator(StrategyGenerator):
@@ -161,6 +217,10 @@ class UserMatrixGenerator(StrategyGenerator):
     ``-`` reads from stdin (piped matrix).  A literal ``\\n`` sequence in a
     line becomes a real newline so multi-desync / CLI companion strategies fit
     on one matrix line.
+
+    ``# --- TCP ---`` / ``# --- UDP ---`` / ``# --- QUIC ---`` switch lanes;
+    without a section, UDP drops TCP-only fooling (``tcp_ack``, ``tcp_ts_up``)
+    but keeps short ``fake:blob=…:tcp_ts=-1000`` lines.
     """
 
     def __init__(self, filepath: str):
@@ -184,19 +244,5 @@ class UserMatrixGenerator(StrategyGenerator):
             with open(self.filepath) as f:
                 lines = f.read().splitlines()
 
-        items = []
-        for raw in lines:
-            line = raw.strip()
-            if not line or line.startswith("#") or line == "---":
-                continue
-            strategy = line.replace("\\n", "\n")
-            low = strategy.lower()
-            if protocol != "udp_voice" and any(kw in low for kw in _UDP_SKIP_ON_TCP):
-                continue
-            if protocol == "udp_voice" and any(tok in low for tok in _UDP_SKIP_TCP_CLI):
-                continue
-            label = _cmd_human_label(strategy)
-            items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
-            if scan_level == "single" and items:
-                break
+        items = list(_iter_user_matrix_items(lines, protocol, scan_level))
         return items[:max_count]

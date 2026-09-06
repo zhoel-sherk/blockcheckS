@@ -7,12 +7,13 @@ import glob
 import logging
 import os
 import signal
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from blockchecks.checkers.curl_probe import repeats_from_args
-from blockchecks.checkers.dns_secure import prepare_dns_for_run
+from blockchecks.checkers.dns_secure import filter_resolvable_domains, prepare_dns_for_run
 from blockchecks.checkers.voice_dns import pair_log_domain, resolve_voice_targets
 from blockchecks.engine.adaptive_runner import (
     build_adaptive_queue,
@@ -31,7 +32,9 @@ from blockchecks.engine.config import (
 from blockchecks.engine.domain_loader import (
     RESERVED_DOMAIN_FILES,
     auto_enable_gv_ggc,
+    filter_probe_domains,
     format_skip_summary,
+    load_domains,
     load_preset,
 )
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
@@ -107,17 +110,47 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
             log.info("%s", f"    {os.path.basename(f).replace('.txt', '')}")
         return preset_domains, 1
 
-    preset_domains = loaded.domains
+    preset_domains = filter_probe_domains(list(loaded.domains))
     log.info("%s", f"  {CYAN}Preset '{preset_name}': {len(preset_domains)} domains{RESET}")
     if loaded.skipped:
         log.info("%s", f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
     if not preset_domains:
         log.error(
-            "%s", f"  {RED}ERROR: preset empty after denylist (use --allow-unsafe-domains){RESET}"
+            "%s",
+            f"  {RED}ERROR: preset empty after denylist/FQDN filter "
+            f"(use --allow-unsafe-domains; drop IPs/URLs/wildcards){RESET}",
         )
         return preset_domains, 1
     auto_enable_gv_ggc(preset_domains)
     return preset_domains, None
+
+
+def resolve_scan_domains_file(args) -> tuple[list[str], int | None]:
+    """Load --domains-file for scan/pair (file wins over -d/--preset).
+
+    Returns (domains, exit_code); ([], None) when no --domains-file given.
+    """
+    domains_file = getattr(args, "domains_file", None)
+    if not domains_file:
+        return [], None
+    allow_unsafe = getattr(args, "allow_unsafe_domains", False)
+    try:
+        loaded = load_domains(domains_file, allow_unsafe=allow_unsafe)
+    except FileNotFoundError:
+        log.error("%s", f"{RED}ERROR: domains file not found: {domains_file}{RESET}")
+        return [], 1
+    if loaded.skipped:
+        log.info("%s", f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
+    domains = filter_probe_domains(list(loaded.domains or []))
+    if not domains:
+        log.error(
+            "%s",
+            f"{RED}ERROR: no domains left after denylist/FQDN filter in {domains_file}{RESET}",
+        )
+        return [], 1
+    auto_enable_gv_ggc(domains)
+    log.info("%s", f"  {CYAN}Domains file '{domains_file}': {len(domains)} domains{RESET}")
+    return domains, None
 
 
 def validate_pair_domain(args, preset_domains: list[str]) -> int | None:
@@ -187,7 +220,7 @@ async def prepare_dns_and_preflight(
 
     # Load hosts file (--fixed-ip, else provider hosts) into the
     # cache; pinned IPs override DoH order so per-IP throttling cannot
-    # flip the result.
+    # flip the result. Filter NODATA after pins so a hosts-file IP still counts.
     pins = {}
     pin_path = _resolve_pin_path(args)
     if pin_path:
@@ -203,10 +236,28 @@ async def prepare_dns_and_preflight(
         if dns_cache is not None:
             dns_cache.set_pins(pins)
 
+    if dns_cache is not None:
+        kept, dropped = filter_resolvable_domains(domains_for_dns, dns_cache, dns_audits)
+        if dropped:
+            log.warning(
+                "%s",
+                f"  {YELLOW}DNS drop (no A/pin): {', '.join(dropped)}{RESET}",
+            )
+        dropped_set = set(dropped)
+        if preset_domains:
+            preset_domains[:] = [d for d in preset_domains if d not in dropped_set]
+        if args.domain in dropped_set:
+            args.domain = (
+                preset_domains[0] if preset_domains else (kept[0] if kept else args.domain)
+            )
+        if not kept:
+            log.error("%s", f"{RED}ERROR: no resolvable domains after DoH filter{RESET}")
+            return DnsPreflightResult(dns_cache, dns_audits, exit_code=1)
+
     test_domains = list(
         dict.fromkeys((preset_domains or []) + ([args.domain] if args.domain else []))
     )
-    from blockchecks.engine.preflight import run_preflight_async
+    from blockchecks.engine.preflight import apply_triage_from_args, run_preflight_async
 
     preflight = await run_preflight_async(
         test_domains,
@@ -221,6 +272,8 @@ async def prepare_dns_and_preflight(
 
     t = preflight.triage if isinstance(preflight.triage, TriageProfile) else None
     args.triage = t
+    apply_triage_from_args(args)
+    t = args.triage if isinstance(args.triage, TriageProfile) else t
     if args.domain and args.domain in preflight.skip_domains and not getattr(args, "force", False):
         log.info(
             "%s", f"{YELLOW}Prolog: {args.domain} works without bypass — nothing to test{RESET}"
@@ -449,6 +502,13 @@ async def discover_voice_endpoints(args) -> tuple[VoiceContext | None, int | Non
     ), None
 
 
+def udp_generate_max(max_n: int, *, user_matrix: str) -> int:
+    """UDP matrix cap; user-matrix uses full ``max`` so voice lines are not sliced off."""
+    if user_matrix:
+        return max_n if max_n else 10_000
+    return max(1, max_n // 2) if max_n >= 2 else 50
+
+
 async def load_strategy_items(args, db) -> StrategyLoadResult:
     """Load or generate TCP/UDP strategy items."""
     strategy_preset = getattr(args, "strategy_preset", None)
@@ -521,7 +581,10 @@ async def load_strategy_items(args, db) -> StrategyLoadResult:
                 sources=udp_sources,
                 domain=args.domain,
                 scan_level=args.scan_level,
-                max_count=max(1, args.max // 2) if args.max >= 2 else 50,
+                max_count=udp_generate_max(
+                    int(getattr(args, "max", 100) or 0),
+                    user_matrix=user_matrix,
+                ),
                 state_db=db,
                 user_matrix=user_matrix,
                 triage=gen_triage,
@@ -665,13 +728,24 @@ async def _seed_quarantine_from_db(db, quarantine, queue, qcfg, *, resume: bool)
     try:
         rows = await db.domain_pass_rows()
         seeded = quarantine.seed_from_rows(rows)
+        try:
+            dns_rows = await db.domain_dns_resolve_fail_rows()
+        except Exception as exc:
+            log.warning("%s", f"  [quarantine] dns_resolve seed skipped ({exc})")
+            dns_rows = []
+        seeded.extend(
+            d
+            for d in quarantine.seed_dns_resolve_from_rows(dns_rows)
+            if d not in seeded
+        )
         if queue is not None and hasattr(queue, "excluded_domains"):
             queue.excluded_domains |= quarantine.exclude_domains()
         if seeded:
             log.warning(
                 "%s",
                 f"  [quarantine] pre-seeded {len(seeded)} dead domains from DB "
-                f"(0 PASS in >= {qcfg.min_attempts} attempts): "
+                f"(0 PASS in >= {qcfg.min_attempts} attempts / "
+                f"dns_resolve >= {qcfg.dns_resolve_min_attempts}): "
                 f"{', '.join(sorted(seeded))}",
             )
             for dom in seeded:
@@ -680,7 +754,7 @@ async def _seed_quarantine_from_db(db, quarantine, queue, qcfg, *, resume: bool)
                     await db.quarantine_domain(
                         dom,
                         reason=info.get("reason", ""),
-                        failed=info.get("attempts", 0),
+                        failed=info.get("failed", info.get("attempts", 0)),
                     )
                 except Exception as exc:
                     log.warning(
@@ -904,6 +978,7 @@ async def finalize_pair_run(
     tcp_passed: int,
     pairs: list,
     aq_result: Any | None,
+    test_domains: list[str] | None = None,
 ) -> int:
     """Export configs, write summary, and compute final exit code."""
     from blockchecks.engine.run_finalize import (
@@ -915,22 +990,41 @@ async def finalize_pair_run(
     await maybe_sync_data_block(args)
     export_result = None
     if getattr(args, "out_dir", None):
-        export_result = await maybe_export_configs(
-            db,
-            args,
-            primary=args.domain,
-            domains_file=None,
-            stop_set=stop_event.is_set(),
-            deadline=deadline,
-        )
+        try:
+            export_result = await maybe_export_configs(
+                db,
+                args,
+                primary=args.domain,
+                domains_file=getattr(args, "domains_file", None),
+                stop_set=stop_event.is_set(),
+                deadline=deadline,
+            )
+        except (OSError, sqlite3.OperationalError) as exc:
+            log.warning("export skipped after sqlite/IO error: %s", exc)
+            export_result = None
         if export_result:
             log.info("%s", f"\n  {CYAN}Export configs...{RESET}")
             log.info("%s", f"  {GREEN}{export_result['keenetic']}{RESET}")
             log.info("%s", f"  {GREEN}{export_result['raw']}{RESET}")
             log.info("%s", f"  {GREEN}{export_result['user_list']}{RESET}")
 
+    raw_domain = getattr(args, "domain", None)
+    if isinstance(raw_domain, str):
+        primary_domain = raw_domain
+    elif raw_domain:
+        primary_domain = raw_domain[0]
+    else:
+        primary_domain = None
+    summary_domains = list(
+        dict.fromkeys(
+            list(test_domains or []) + ([primary_domain] if primary_domain else [])
+        )
+    )
     summary_payload = {
         "command": "scan" if getattr(args, "tcp_only", False) else "pair",
+        "run_id": getattr(db, "run_id", None),
+        "domains": summary_domains,
+        "domain": primary_domain,
         "deadline_sec": deadline.budget_sec if deadline else None,
         "stopped_reason": (
             deadline.reason
@@ -939,7 +1033,6 @@ async def finalize_pair_run(
         ),
         "db_path": args.db,
         "export_paths": export_result,
-        "domain": args.domain,
     }
     if aq_result:
         summary_payload["jobs_done"] = aq_result.done

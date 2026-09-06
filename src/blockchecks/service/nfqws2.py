@@ -164,9 +164,10 @@ class Nfqws2Manager:
             return
         if self._pid is None:
             return
-        from blockchecks.service.metrics import _kill_pid_sigkill
+        from blockchecks.service.metrics import pkill_host_process_tree
 
-        _kill_pid_sigkill(self._pid)
+        n = pkill_host_process_tree(self._pid)
+        log.debug("host nfqws2 tree kill wrapper_pid=%s killed=%s", self._pid, n)
 
     def stop(self) -> None:
         """Kill owned nfqws2 via PID-scoped kill; unlink temp files."""
