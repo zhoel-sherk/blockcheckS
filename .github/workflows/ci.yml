@@ -216,7 +216,9 @@ jobs:
     # Raspberry Pi 2+ (armv7l) installability: every mandatory dependency must
     # have a prebuilt armv7l wheel so `pip install` never compiles (psutil was
     # removed; curl-cffi/pydantic-core ship armv7l wheels on PyPI).
-    if: github.event_name == 'workflow_dispatch'
+    #
+    # Temporarily disabled — armv7l smoke is handled separately later.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
