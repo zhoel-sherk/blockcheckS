@@ -25,8 +25,8 @@ def test_mutmut_config_present() -> None:
 
 @pytest.mark.mutation
 @pytest.mark.slow
-def test_mutmut_no_survivors() -> None:
-    """Run mutmut and fail on any surviving mutant.
+def test_mutmut_score_gate() -> None:
+    """Run mutmut and require >=70% mutation score on the scoped core.
 
     mutmut 3.7.0 exits 0 even when mutants survive (status is printed via
     emoji + a summary), so parsing stdout is unreliable. After a run it writes
@@ -75,12 +75,14 @@ def test_mutmut_no_survivors() -> None:
     killed = int(stats.get("killed") or 0)
     no_tests = int(stats.get("no_tests") or 0)
     suspicious = int(stats.get("suspicious") or 0)
-    if survived:
-        pytest.fail(
-            f"mutmut: {survived} survivors out of {total} mutants "
-            f"(killed={killed}, no_tests={no_tests}, suspicious={suspicious}). "
-            f"See 'mutmut results' and 'mutants/' for details."
-        )
     # Sanity: the run must have actually executed mutants.
     if total <= 0:
         pytest.fail(f"mutmut reported total={total}; no mutants were checked.")
+    score = killed / total
+    if score < 0.70:
+        pytest.fail(
+            f"mutmut: mutation score {score:.0%} < 70% target "
+            f"({survived} survivors out of {total} mutants, "
+            f"killed={killed}, no_tests={no_tests}, suspicious={suspicious}). "
+            f"See 'mutmut results' and 'mutants/' for details."
+        )

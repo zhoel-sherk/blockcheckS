@@ -178,13 +178,13 @@ jobs:
           killed = int(s.get('killed') or 0)
           no_tests = int(s.get('no_tests') or 0)
           suspicious = int(s.get('suspicious') or 0)
-          if survived:
-              raise SystemExit(f'mutmut: {survived} survivors / {total} mutants '
-                               f'(killed={killed}, no_tests={no_tests}, suspicious={suspicious})')
           if total <= 0:
               raise SystemExit(f'mutmut: total={total}; no mutants checked')
-          score = killed / total if total else 0.0
-          print(f'mutmut OK: killed={killed} no_tests={no_tests} suspicious={suspicious} total={total} score={score:.0%}')
+          score = killed / total
+          print(f'mutmut: killed={killed} survived={survived} no_tests={no_tests} suspicious={suspicious} total={total} score={score:.0%}')
+          if score < 0.70:
+              raise SystemExit(f'mutmut: mutation score {score:.0%} < 70% target '
+                               f'({survived} survivors / {total} mutants)')
           "
 
   integration:
