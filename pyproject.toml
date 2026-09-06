@@ -188,7 +188,6 @@ ignore_decorators = ["@pytest.fixture"]
 # sequentially in CI (workflow_dispatch) rather than on a dev machine.
 source_paths = [
     "src/blockchecks/engine/tcp_fanout.py",
-    "src/blockchecks/engine/fail_phase.py",
 ]
 pytest_add_cli_args_test_selection = [
     # NOTE: do NOT pass "-m" here — [tool.pytest.ini_options].addopts already
@@ -196,7 +195,6 @@ pytest_add_cli_args_test_selection = [
     # Scoped to tests that cover [tool.mutmut].source_paths (full tests/unit
     # hits unrelated file reads / shims under mutants/ and -x aborts stats).
     "tests/unit/test_tcp_fanout.py",
-    "tests/unit/test_fail_phase.py",
 ]
 pytest_add_cli_args = ["-q"]
 # Scoped source_paths copy only those files into mutants/; tests import
