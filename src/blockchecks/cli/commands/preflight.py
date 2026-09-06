@@ -109,6 +109,29 @@ def _emit_preflight(args, payload: dict[str, Any]) -> None:
     log.info("%s", f"  hosts:  {payload['hosts_path']}")
 
 
+def _keep_json_stdout_clean(args) -> None:
+    """Route console logs to stderr so ``--json`` leaves stdout as pure JSON.
+
+    The CLI configures the console stream on stdout by default (parser main).
+    Machine consumers (e.g. GP ``bs_engine/_triage.py``) parse stdout only when
+    it starts with ``{``, so any INFO line emitted before the JSON object would
+    break the contract. Reset handlers once and reconfigure on stderr.
+    """
+    if not getattr(args, "json", False):
+        return
+    from blockchecks.engine.log import LOGGER_NAME, configure_logging
+
+    root = logging.getLogger(LOGGER_NAME)
+    level = root.level if root.level != logging.NOTSET else None
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:  # noqa: BLE001
+            pass
+    configure_logging(level=level, console="stderr")
+
+
 def _maybe_skip_fooling_for_lock(args) -> None:
     from blockchecks.service.run_control import read_active_run
 
@@ -182,4 +205,5 @@ async def cmd_preflight(args) -> int:
 def run_preflight_cmd(args) -> int:
     import asyncio
 
+    _keep_json_stdout_clean(args)
     return asyncio.run(cmd_preflight(args))

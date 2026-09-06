@@ -454,7 +454,10 @@ def _run_mcp(model: BaseModel) -> int:
 
 
 def _run_preflight(model: BaseModel) -> int:
-    from blockchecks.cli.commands.preflight import run_preflight_cmd
+    from blockchecks.cli.commands.preflight import (
+        _keep_json_stdout_clean,
+        run_preflight_cmd,
+    )
     from blockchecks.cli.parser import ensure_system_deps_or_exit
 
     ns = _to_namespace(model)
@@ -462,6 +465,9 @@ def _run_preflight(model: BaseModel) -> int:
     if getattr(ns, "list_presets", False):
         code = 0
     else:
+        # Machine contract: --json must keep stdout as pure JSON, so move the
+        # console stream to stderr BEFORE dependency verification logs.
+        _keep_json_stdout_clean(ns)
         code = ensure_system_deps_or_exit(ns)
     return code or run_preflight_cmd(ns)
 

@@ -1187,6 +1187,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def dispatch(args: argparse.Namespace) -> int:  # noqa: C901
+    # Machine contract: bs preflight --json must keep stdout as pure JSON, so
+    # redirect the console stream to stderr BEFORE dependency verification
+    # (its log lines would otherwise precede the JSON object on stdout).
+    if args.command == "preflight" and getattr(args, "json", False):
+        from blockchecks.cli.commands.preflight import _keep_json_stdout_clean
+
+        _keep_json_stdout_clean(args)
+
     if getattr(args, "debug", False):
         from blockchecks.engine.log import set_debug_mode
 

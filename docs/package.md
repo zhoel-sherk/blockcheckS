@@ -41,7 +41,7 @@ blockcheckS/
 │       ├── quic_raw.py        # raw QUIC Initial drop probe
 │       ├── curl_probe.py      # stream-triage + TLS-profile probes
 │       └── ...
-├── service/
+├── service/                   # ← on disk this lives under src/blockchecks/service/
 │   ├── probe.py               # invoke_curl_probe_worker (netns subprocess API)
 │   ├── probe_service.py       # resident on-the-fly probe service
 │   ├── server.py              # Unix-socket core + HTTP bridge
@@ -63,19 +63,23 @@ blockcheckS/
 └── pyproject.toml
 ```
 
-Entry points: `bs` → `blockchecks.bs:main`, `bc-main`, `bc-nfconf`.
+Entry points: `bs` → `blockchecks.bs:main`, `bs-mcp` → `blockchecks.mcp:main`,
+`bc-main` → `blockchecks.main:main`, `bc-nfconf` → `blockchecks.nfconf:main`.
 
 ## Path resolution & configs policy (ONB-7)
 
-**Recommended:** `pip install -e .` from git checkout.
+**Recommended:** `pip install .` (wheel) — no git checkout needed.
 
-`PROJECT_DIR` in `config.py` resolves repo root (parent of `src/`). For a plain
-`pip install` wheel (no checkout), it falls back to `sys.prefix/blockchecks`,
-where `[tool.setuptools.data-files]` ships `blobs/`, `configs/`, `lua/` and
-`presets/` — the wheel is self-sufficient. Runtime paths:
+`PROJECT_DIR` in `config.py` resolves repo root (parent of `src/`) for an
+editable install, otherwise probes the distutils *data* roots that a wheel
+carries baked data to via `[tool.setuptools.data-files]`:
+`sys.prefix/blockchecks`, `sys.prefix/local/blockchecks` (Debian/Ubuntu system
+Python) and `site.getuserbase()/blockchecks` (`pip install --user`). Arbitrary
+`pip install --prefix=...` targets are not probed (runtime cannot know a
+foreign prefix without PYTHONPATH). The wheel is self-sufficient. Runtime paths:
 
-- `configs/*.conf` — repo root only (`PROJECT_DIR`)
-- `presets/` — repo root (shipped catalog)
+- `configs/*.conf` — at `PROJECT_DIR` (repo root, or the wheel data root: `sys.prefix[/local]/blockchecks`, `~/.local/blockchecks`)
+- `presets/` — shipped catalog at `PROJECT_DIR` (same roots)
 - **Runtime data (XDG):**
   - `~/.config/blockcheckS/config.toml` — user defaults
   - `~/.config/blockcheckS/presets/` — reserved (`USER_PRESETS_DIR`)

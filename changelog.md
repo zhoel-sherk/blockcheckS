@@ -3,6 +3,23 @@
 Отправная точка связки с GP-control-plane (`discovery_engine=blockchecks`).
 Никаких изменений движка пробы; только внешний контракт и версия.
 
+### Релизная гигиена и machine-контракт (2026-09-06)
+
+- `bs preflight --json`: консольный лог переведён на stderr (и до проверки
+  зависимостей) — **stdout содержит ровно один JSON**; закрывает парсинг у GP
+  (`bs_engine/_triage.py`), который читает stdout только со стартового `{`.
+- Wheel/установка: `PROJECT_DIR` дополнительно пробует
+  `site.getuserbase()/blockchecks` — ресурсы (configs/presets/blobs/lua)
+  находятся и при `pip install --user`; произвольный `--prefix` явно
+  задокументирован как вне поддержки.
+- `MANIFEST.in`: `prune` tests/dev/mutants/логов и `global-exclude`
+  `__pycache__ *.py[cod]` — sdist не тащит dev-мусор при VCS-finder.
+- zapret2/nfqws2: **не тянем второй zapret2**. Если задан любой из
+  `BLOCKCHECKS_NFQWS2/BLOCKCHECKS_ZAPRET2/ZAPRET2_ROOT/BLOCKCHECKS_LUA_DIR`,
+  корень авторитетен: авто-fetch отключён, при отсутствии бинаря — явная
+  ошибка; добавлен кандидат `<root>/binaries/<arch>/nfqws2`; lua не
+  докачивается вторым деревом при найденном nfqws2.
+
 ### CLI: мульти-домен scan/pair
 
 - `bs scan` / `bs pair`: `-d/--domain` **повторяемый** — тестируется весь

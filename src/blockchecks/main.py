@@ -7,8 +7,6 @@ import asyncio
 import logging
 import sys
 
-log = logging.getLogger(__name__)
-
 from blockchecks.cli.parser import (
     add_campaign_args,
     ensure_system_deps_or_exit,
@@ -42,6 +40,8 @@ from blockchecks.main_phases import (
     run_tcp_coverage_phase,
 )
 from blockchecks.terminal import init_terminal
+
+log = logging.getLogger(__name__)
 
 init_terminal()
 

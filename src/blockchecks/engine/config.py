@@ -2,6 +2,7 @@
 
 import logging
 import os
+import site
 import sys
 import time
 from pathlib import Path
@@ -20,14 +21,18 @@ _REPO_CANDIDATE = os.path.dirname(_PARENT)  # repo root (editable src layout)
 def _resolve_project_dir() -> str:
     """Repo root (editable) or package dir (wheel with packaged configs).
 
-    Wheel data (blobs/configs/lua via [tool.setuptools.data-files]) lands under
-    ``sys.prefix/blockchecks`` (PEP 427 install scheme), not inside
-    site-packages — check it as a fallback so a plain ``pip install`` wheel is
-    self-sufficient.
+    Wheel data (blobs/configs/lua via [tool.setuptools.data-files]) is installed
+    on the distutils *data* scheme, not inside site-packages. Probe the known
+    data roots as a fallback so a plain ``pip install`` wheel is self-sufficient:
 
-    On Debian/Ubuntu system Python ``sys.prefix`` is ``/usr`` but distutils
-    installs data under ``/usr/local/blockchecks`` — also probe
-    ``sys.prefix/local/blockchecks`` so presets/configs are found.
+    - venv / system Python: ``sys.prefix/blockchecks`` (PEP 427 install scheme);
+    - Debian/Ubuntu system Python: distutils installs data under
+      ``sys.prefix/local/blockchecks`` (also probed);
+    - ``pip install --user``: data lands under ``site.getuserbase()``
+      (``~/.local/blockchecks``), which is probed as well.
+
+    Arbitrary ``pip install --prefix=...`` targets are intentionally not probed:
+    the runtime interpreter cannot know a foreign prefix without PYTHONPATH.
     """
     candidates = [_REPO_CANDIDATE, _PARENT, _PACKAGE_DIR]
     prefix_roots = [sys.prefix]
@@ -35,6 +40,10 @@ def _resolve_project_dir() -> str:
         prefix_roots.append(os.path.join(sys.prefix, "local"))
     for root in prefix_roots:
         candidates.append(os.path.join(root, "blockchecks"))
+    try:
+        candidates.append(os.path.join(site.getuserbase(), "blockchecks"))
+    except (AttributeError, OSError):  # pragma: no cover - exotic interpreter
+        pass
     for candidate in candidates:
         if os.path.isdir(os.path.join(candidate, "configs")):
             return candidate
