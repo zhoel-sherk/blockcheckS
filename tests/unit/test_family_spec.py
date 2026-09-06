@@ -146,3 +146,13 @@ def test_default_families_head_tcp_order():
     assert TCP_FAMILIES[0] == "fake"
     assert DEFAULT_FAMILIES[0] == "fake"
     assert all(f in TCP_FAMILIES for f in DEFAULT_FAMILIES)
+
+
+def test_registry_names_unique_and_protocols_known():
+    from blockchecks.engine.family_spec import REGISTRY
+
+    names = [s.name for s in REGISTRY]
+    assert len(names) == len(set(names))
+    known = {"tcp", "http", "udp_voice", "udp_game", "quic"}
+    for spec in REGISTRY:
+        assert set(spec.protocols) <= known

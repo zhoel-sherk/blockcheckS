@@ -194,3 +194,32 @@ def test_fanout_allowed_special_reason_formatting():
     assert "+2" in reason
     for name in many[:3]:
         assert name in reason
+
+
+def test_fanout_batches_parallel_bounds():
+    from blockchecks.engine.tcp_fanout import fanout_batches
+
+    ds = ["a.example", "b.example", "c.example"]
+    assert fanout_batches(ds, curl_parallel=0) == [[d] for d in ds]
+    assert fanout_batches(ds, curl_parallel=-2) == [[d] for d in ds]
+    assert fanout_batches(ds, curl_parallel=100) == [ds]
+
+
+def test_fanout_batches_exact_multiple_chunks():
+    from blockchecks.engine.tcp_fanout import fanout_batches
+
+    ds = [f"y{i}.example" for i in range(4)]
+    assert fanout_batches(ds, curl_parallel=2) == [
+        ["y0.example", "y1.example"],
+        ["y2.example", "y3.example"],
+    ]
+
+
+def test_fanout_allowed_four_special_reports_plus_one():
+    from blockchecks.engine.tcp_fanout import fanout_allowed
+
+    many = [f"googlevideo{i}.com" for i in range(4)]
+    ok, reason = fanout_allowed(curl_parallel=2, use_family_gates=False, domains=many)
+    assert ok is True
+    assert "+1" in reason
+    assert "googlevideo0.com" in reason

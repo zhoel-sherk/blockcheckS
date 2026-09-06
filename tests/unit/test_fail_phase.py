@@ -120,3 +120,11 @@ def test_classify_nodata_skip_is_dns_resolve():
 def test_data_stall_7k_not_70():
     assert classify_fail_phase("stalled at 7kb").value == "data_stall_7k"
     assert classify_fail_phase("stalled at 70kb").value != "data_stall_7k"
+
+
+@pytest.mark.unit
+def test_every_static_member_value_equals_snake_name():
+    # Kills mutmut enum-value mutants: each static token's .value must be its
+    # snake_case name (stable SQLite/JSON contract).
+    for member in FailPhase:
+        assert member.value == member.name.lower(), (member.name, member.value)

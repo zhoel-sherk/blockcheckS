@@ -180,21 +180,40 @@ ignore_names = [
 ignore_decorators = ["@pytest.fixture"]
 
 [tool.mutmut]
-# Mutation scope = deterministic ENGINE core only (pure classification / mapping
-# / selection / offline validation). I/O-heavy modules (netns, nfqws2 lifecycle,
-# lua bridge, sqlite store), checkers with network paths, CLI/TUI and logging
-# formatting are intentionally excluded: their mutants mostly encode mocking
-# noise instead of business logic. Keep this list small — run batches
-# sequentially in CI (workflow_dispatch) rather than on a dev machine.
+# Mutation scope = algorithmic generation/orchestration core (analogue of the
+# CI "S1 Engine & Generators" shard). Deterministic matrix generation, adaptive
+# queueing/fan-out, serialization & offline validation. Strictly EXCLUDED:
+# cli/, service/ (http_server, mcp_server, netns/lua/nfqws2 lifecycle), logging
+# formatters (engine/log.py, db_logger.py) and I/O-heavy store/checkers.
+# Mapped names: matrix/http generators live in matrix_generator.py +
+# byedpi_matrix_generator.py; "families_params" = generators/families/_helpers.py
+# (StrategyParams); there is no standalone fingerprint.py (matrix_fingerprint
+# lives in store/sqlite_store.py and stays out — I/O).
 source_paths = [
+    "src/blockchecks/engine/matrix_generator.py",
+    "src/blockchecks/engine/byedpi_matrix_generator.py",
+    "src/blockchecks/engine/generators/families/_helpers.py",
+    "src/blockchecks/engine/adaptive_queue.py",
+    "src/blockchecks/engine/adaptive_runner.py",
     "src/blockchecks/engine/tcp_fanout.py",
+    "src/blockchecks/engine/static_validator.py",
+    "src/blockchecks/engine/domain_quarantine.py",
 ]
 pytest_add_cli_args_test_selection = [
     # NOTE: do NOT pass "-m" here — [tool.pytest.ini_options].addopts already
     # sets `-m "not integration and not quality and not mutation"`.
     # Scoped to tests that cover [tool.mutmut].source_paths (full tests/unit
     # hits unrelated file reads / shims under mutants/ and -x aborts stats).
+    "tests/unit/test_matrix_generator.py",
+    "tests/unit/test_byedpi_matrix_generator.py",
+    "tests/unit/test_families_params.py",
+    "tests/unit/test_http_generator.py",
+    "tests/unit/test_adaptive_queue.py",
+    "tests/unit/test_adaptive_runner.py",
     "tests/unit/test_tcp_fanout.py",
+    "tests/unit/test_static_validator.py",
+    "tests/unit/test_static_validator_fuzzing.py",
+    "tests/unit/test_domain_quarantine.py",
 ]
 pytest_add_cli_args = ["-q"]
 # Scoped source_paths copy only those files into mutants/; tests import

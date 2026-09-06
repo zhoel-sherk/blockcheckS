@@ -108,3 +108,18 @@ def test_lua_files_dedupe():
     assert files == list(dict.fromkeys(files))
     assert len(files) == len(set(files))
     assert "dupfake.lua" in files
+
+
+def test_aliases_for_class_other_and_empty():
+    from blockchecks.engine.blob_filter import aliases_for_class, blob_class
+
+    assert aliases_for_class("other") == []
+    assert blob_class("") == "other"
+
+
+def test_filter_none_profile_stun_subset():
+    from blockchecks.engine.blob_filter import filter_blob_aliases
+    from blockchecks.engine.triage import TriageProfile
+
+    out = filter_blob_aliases(None, TriageProfile(viable_blobs=["stun"]))
+    assert set(out) == {"stun", "stun2"}
