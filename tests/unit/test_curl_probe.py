@@ -152,7 +152,9 @@ def test_run_curl_probe_googlevideo_request_shape():
     assert captured["kwargs"]["headers"]["Range"] == googlevideo_range_header()
     assert captured["kwargs"]["allow_redirects"] is False
     assert captured["url"] == req.curl_url
-    assert any(v == "" for o, v in setopts if "ECH" in str(o) or o == CURLOPT_ECH)
+    # CURLOPT_ECH="" is rejected by libcurl (CURLE_BAD_FUNCTION_ARGUMENT); only
+    # "false" disables ECH (AUDIT §12).
+    assert any(v == "false" for o, v in setopts if "ECH" in str(o) or o == CURLOPT_ECH)
     assert any("cdn.googlevideo.com:443:9.9.9.9" in str(v) for o, v in setopts)
     # GV CDN via SOCKS proxy (socks5h = DNS through proxy) — direct egress is DPI-blocked.
     assert captured["get_kwargs"]["proxy"] == "socks5h://127.0.0.1:11080"

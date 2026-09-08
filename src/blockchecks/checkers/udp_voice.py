@@ -176,7 +176,17 @@ def voice_burst_probe(
             stun = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442) + tid
             sock.settimeout(min(timeout, 1.5))
             sock.sendto(stun, (ip, port))
-            data, addr = sock.recvfrom(512)
+            while True:
+                data, addr = sock.recvfrom(512)
+                # AUDIT §12: any datagram used to pass as "STUN proof" —
+                # validate magic cookie + txn-id like stun_probe does.
+                if (
+                    len(data) >= 20
+                    and struct.unpack(">H", data[:2])[0] == 0x0101
+                    and struct.unpack(">I", data[4:8])[0] == 0x2112A442
+                    and data[8:20] == tid
+                ):
+                    break
             elapsed = (time.perf_counter() - start) * 1000
             return (
                 True,

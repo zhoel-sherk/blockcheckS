@@ -68,11 +68,7 @@ def _manage_singbox(start: bool) -> subprocess.Popen | None:
     with _singbox_lock:
         if start:
             if _singbox_proc is not None:
-                try:
-                    _singbox_proc.terminate()
-                    _singbox_proc.wait(timeout=2)
-                except Exception:
-                    pass
+                _terminate_singbox(_singbox_proc)
                 _singbox_proc = None
             if not os.path.exists(SING_BOX_CONFIG):
                 return None
@@ -84,13 +80,24 @@ def _manage_singbox(start: bool) -> subprocess.Popen | None:
             time.sleep(2)
             return _singbox_proc
         if _singbox_proc is not None:
-            try:
-                _singbox_proc.terminate()
-                _singbox_proc.wait(timeout=2)
-            except Exception:
-                pass
+            _terminate_singbox(_singbox_proc)
             _singbox_proc = None
         return None
+
+
+def _terminate_singbox(proc: subprocess.Popen) -> None:
+    """Graceful terminate → bounded wait → kill. Never leaves an orphan."""
+    try:
+        proc.terminate()
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+    except OSError as exc:
+        log.warning("sing-box terminate failed: %s", exc)
 
 
 @asynccontextmanager

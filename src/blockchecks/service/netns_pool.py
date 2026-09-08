@@ -187,6 +187,16 @@ class NetNsPool:
     @classmethod
     def _destroy_active_pools(cls) -> None:
         for pool in list(_ACTIVE_POOLS):
+            # AUDIT §12: the handler runs on the main thread; if the interrupted
+            # frame is create_all()/destroy_all(), the lock is held by THIS very
+            # thread — a blocking acquire would deadlock the process.
+            if pool._lock.locked():
+                log.warning(
+                    "signal cleanup: pool %r busy (create/destroy in progress) —"
+                    " skipped in-handler destroy",
+                    pool.base,
+                )
+                continue
             try:
                 pool.destroy_all()
             except Exception as exc:
@@ -270,6 +280,8 @@ class NetNsPool:
                 continue
             self._iface = name
             return self._iface
+        # AUDIT §12: silent "eth0" fallback broke MASQUERADE on bond/vlan hosts.
+        log.warning("no outbound iface detected via `ip -br link`; falling back to eth0")
         self._iface = "eth0"
         return self._iface
 

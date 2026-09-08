@@ -179,7 +179,18 @@ def _read_ips_cache_entries() -> dict[str, dict]:
         data = json.loads(ips_cache_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return data.get("ips", {}) if isinstance(data.get("ips"), dict) else {}
+    raw = data.get("ips", {}) if isinstance(data.get("ips"), dict) else {}
+    # AUDIT §12: legacy/hand-edited entries may be non-dict ("host": "ip") —
+    # those used to explode later inside pick_target()/remember_ggc_ip().
+    entries: dict[str, dict] = {}
+    for host, entry in raw.items():
+        if isinstance(entry, dict):
+            entries[host] = entry
+        elif isinstance(entry, str):
+            entries[host] = {"ip": entry, "ts": 0.0}
+        else:
+            log.debug("ggc ips-cache: dropping malformed entry %r", host)
+    return entries
 
 
 def _write_ips_cache(entries: dict[str, dict]) -> None:
@@ -265,11 +276,19 @@ def resolve_ip_chain(host: str) -> str | None:
     # Явная конфигурация оператора выше глобального кэша:
     # это сознательный override, а не «что-то недавно резолвилось».
     if configured := configured_fallback_ips():
+        log.info("GGC %s: using configured fallback IP %s", host, configured[0])
         return configured[0]
     if cached := cached_ips():
+        log.info("GGC %s: using cached resolve %s (live DoH unavailable)", host, cached[0])
         return cached[0]
     if DEFAULT_LAST_RESORT_IPS:
-        return _rotate_last_resort()
+        rotated = _rotate_last_resort()
+        log.warning(
+            "GGC %s: no dns.db/env/cache IP — rotating legacy last-resort %s",
+            host,
+            rotated,
+        )
+        return rotated
     return GGC_FALLBACK_IP if host == GGC_HOST else None
 
 

@@ -172,10 +172,21 @@ def test_voice_burst_probe_unauthenticated_rtp_stun_ok():
     from blockchecks.checkers.udp_voice import voice_burst_probe
 
     sock = MagicMock()
-    sock.recvfrom.side_effect = [
-        TimeoutError,
-        (b"\x01\x01\x00\x00\x21\x12\xa4\x42" + b"\x00" * 12, ("35.217.3.3", 50004)),
-    ]
+    # AUDIT §12: the STUN proof is now validated (magic cookie + txn-id),
+    # so the reply must echo the probe's own tid.
+    def _stun_reply(data, _to):
+        # Burst packets are packet_size bytes; the STUN probe is 20B.
+        # Arm the reply only for the STUN send — the burst stays unanswered
+        # → TimeoutError → STUN-confirm path.
+        if len(data) == 20:
+            tid = data[8:20]
+            sock.recvfrom.side_effect = [
+                (b"\x01\x01\x00\x00\x21\x12\xa4\x42" + tid, ("35.217.3.3", 50004)),
+            ]
+        return len(data)
+
+    sock.sendto.side_effect = _stun_reply
+    sock.recvfrom.side_effect = [TimeoutError]
 
     with patch("socket.socket", return_value=sock):
         ok, ms, detail = voice_burst_probe(

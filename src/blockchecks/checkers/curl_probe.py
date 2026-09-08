@@ -384,12 +384,14 @@ def _apply_ech_off(session: curl_cffi.Session) -> str | None:
     """
     global _ech_warned
     try:
-        session.curl.setopt(curl_cffi.CurlOpt.ECH, "")
+        # libcurl CURLOPT_ECH: only NULL/"false" disable ECH; "" is rejected
+        # with CURLE_BAD_FUNCTION_ARGUMENT (verified on 0.16.1/8.21 — AUDIT §12).
+        session.curl.setopt(curl_cffi.CurlOpt.ECH, "false")
         return None
     except Exception:
         pass
     try:
-        session.curl.setopt(CURLOPT_ECH, "")
+        session.curl.setopt(CURLOPT_ECH, "false")
         return None
     except Exception as e:
         if not _ech_warned:
@@ -528,11 +530,27 @@ def _curl_proxy_kwargs(req: CurlProbeRequest) -> dict:
     return {}
 
 
-def _open_curl_session(req: CurlProbeRequest) -> curl_cffi.Session | CurlProbeResult:
-    """Build a configured Session, or a CurlProbeResult on ECH/setopt failure."""
+def _apply_resolve(session: curl_cffi.Session, req: CurlProbeRequest) -> None:
+    """(Re-)pin CURLOPT_RESOLVE on a live session.
+
+    curl_cffi frees the resolve slist after every perform (clear_resolve
+    default), while the easy handle keeps a dangling pointer — a repeats loop
+    on a shared Session must re-apply before each attempt (AUDIT §12).
+    """
+    if not req.resolved_ip:
+        return
     is_http = req.protocol == "http"
     resolve_port = 80 if is_http else 443
     resolve_name = (req.resolve_name or req.domain).split("/")[0]
+    session.curl.setopt(
+        CURLOPT_RESOLVE,
+        [f"{resolve_name}:{resolve_port}:{req.resolved_ip}"],
+    )
+
+
+def _open_curl_session(req: CurlProbeRequest) -> curl_cffi.Session | CurlProbeResult:
+    """Build a configured Session, or a CurlProbeResult on ECH/setopt failure."""
+    is_http = req.protocol == "http"
     headers: dict[str, str] = {"Accept": "text/html"}
     if req.googlevideo:
         headers["Range"] = (
@@ -548,11 +566,7 @@ def _open_curl_session(req: CurlProbeRequest) -> curl_cffi.Session | CurlProbeRe
     )
     if req.googlevideo:
         session.curl.setopt(CURLOPT_IPRESOLVE, _CURL_IPRESOLVE_V4)
-    if req.resolved_ip:
-        session.curl.setopt(
-            CURLOPT_RESOLVE,
-            [f"{resolve_name}:{resolve_port}:{req.resolved_ip}"],
-        )
+    _apply_resolve(session, req)
     if not (req.disable_ech or req.googlevideo):
         return session
     if ech_err := _apply_ech_off(session):
@@ -707,11 +721,12 @@ def _probe_with_session(
         resp = _session_get(session, req)
     except RequestsError as e:
         msg = str(e)
+        low = msg.lower()
         return _finish_probe(
             req,
             CurlProbeResult(
                 latency_ms=(time.perf_counter() - start) * 1000,
-                error="timeout" if "Timeout" in msg else msg[:120],
+                error="timeout" if ("timeout" in low or "timed out" in low) else msg[:120],
             ),
         )
     except Exception as e:
@@ -808,6 +823,7 @@ def run_curl_probe_with_repeats(
         first_pass: CurlProbeResult | None = None
         last: CurlProbeResult | None = None
         for _ in range(n):
+            _apply_resolve(session, req)
             last = _probe_with_session(req, session)
             if last.success:
                 if first_pass is None:

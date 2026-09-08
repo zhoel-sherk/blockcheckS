@@ -547,7 +547,19 @@ def _run_tcp_check_multi(
         )
         raw = invoke_curl_probe_worker(ns_name, py, payload, wall)
         settle_ms = round(settle_elapsed * 1000, 1)
-        out = {d: {**raw.get(d, {}), "settle_ms": settle_ms} for d in domains_active}
+        # AUDIT §12: a worker death/timeout/parse failure returns a FLAT failure
+        # dict — per-domain raw.get(d, {}) used to swallow the real cause
+        # (fail_phase → UNKNOWN for the whole batch). Detect and distribute.
+        per_domain = any(d in raw for d in domains_active)
+        if per_domain:
+            out = {d: {**raw.get(d, {}), "settle_ms": settle_ms} for d in domains_active}
+        else:
+            log.warning(
+                "batch worker returned flat failure for %d domains: %s",
+                len(domains_active),
+                str(raw.get("error", raw))[:120],
+            )
+            out = {d: {**raw, "settle_ms": settle_ms} for d in domains_active}
         # Retry-on-next-IP for failed domains: nfqws2 is already up, so
         # re-probe each failed domain against its remaining candidate IPs.
         if resolved_ip_lists:

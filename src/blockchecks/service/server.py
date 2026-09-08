@@ -138,14 +138,25 @@ async def _pass_strategies_for_router_config(store: Any) -> tuple[list[str], lis
         try:
             con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
             cur = con.cursor()
-            tcp_rows = cur.execute(
-                """SELECT s.name FROM strategies s
+            tcp_sql = """SELECT s.name FROM strategies s
                    JOIN tcp_results t ON t.strategy_id = s.id
                    WHERE s.proto='tcp' AND t.status='PASS'
+                     {applied}
                    GROUP BY s.name
                    ORDER BY COUNT(DISTINCT t.domain) DESC, AVG(t.latency_ms) ASC
                    LIMIT 5"""
-            ).fetchall()
+            applied = "AND (t.bridge_applied IS NULL OR t.bridge_applied = 1)"
+            try:
+                tcp_rows = cur.execute(tcp_sql.format(applied=applied)).fetchall()
+            except sqlite3.OperationalError as err:
+                if "bridge_applied" not in str(err):
+                    raise
+                log.warning(
+                    "generate_config: DB has no bridge_applied column (%s);"
+                    " retrying without the filter",
+                    err,
+                )
+                tcp_rows = cur.execute(tcp_sql.format(applied="")).fetchall()
             tcp_strats = [r[0] for r in tcp_rows]
             try:
                 udp_rows = cur.execute(

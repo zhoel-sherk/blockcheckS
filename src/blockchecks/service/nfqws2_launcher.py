@@ -134,8 +134,11 @@ def _build_cmd(ns_name: str | None, config_arg: str) -> list[str]:
 
 
 def _build_daemon_cmd(ns_name: str, tmp_conf: str) -> list[str]:
+    # `-n` on par with _build_cmd: a sudo password prompt here would block
+    # Popen forever (no timeout on the daemon path).
     return [
         "sudo",
+        "-n",
         "ip",
         "netns",
         "exec",
@@ -159,7 +162,7 @@ class Nfqws2Launcher:
 
     def __init__(self, ns_name: str | None = None):
         self.ns_name = ns_name
-        self.last_debug_log: str | None = None
+        self.last_debug_log: Path | None = None
         self.last_out_log: Path | None = None
 
     def foreground(self, config_arg: str) -> ForegroundLaunch:
@@ -174,6 +177,7 @@ class Nfqws2Launcher:
         for attempt in range(1, max_bind_attempts + 1):
             out_fh, out_path = open_out_capture(self.ns_name or "host")
             self.last_out_log = out_path
+            self.last_debug_log = out_path
             try:
                 proc = subprocess.Popen(
                     _build_cmd(self.ns_name, config_arg),
@@ -193,6 +197,21 @@ class Nfqws2Launcher:
                 bound = nfqws2_out_shows_bind(self.last_out_log)
                 if settle >= settle_max and count == 0:
                     if not bound:
+                        # AUDIT §12: the process may simply be a slow starter
+                        # (sudo/netns chain > settle window). Raise only after
+                        # killing it, or the orphan later binds NFQUEUE and
+                        # poisons the ns with queue-busy retries.
+                        try:
+                            import signal as _signal
+
+                            os.killpg(os.getpgid(proc.pid), _signal.SIGKILL)
+                            log.warning(
+                                "nfqws2 not visible in %s after settle — killed orphan pid %d",
+                                self.ns_name,
+                                proc.pid,
+                            )
+                        except OSError:
+                            pass
                         raise RuntimeError(
                             f"nfqws2 not visible in {self.ns_name} after settle "
                             f"({settle:.2f}s >= {settle_max:.2f}s)"
@@ -216,7 +235,7 @@ class Nfqws2Launcher:
                     pid = real[0]
             else:
                 time.sleep(0.1)
-            _reclaim_debug_log(self.last_debug_log)
+            _reclaim_debug_log(str(self.last_debug_log) if self.last_debug_log else None)
 
             if proc.poll() is None:
                 last_err = None

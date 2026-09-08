@@ -142,7 +142,15 @@ class _IptablesTracker:
         if delete_args is None:
             return
         try:
-            self._run(*delete_args, check=False)
+            r = self._run(*delete_args, check=False)
+            if r.returncode != 0:
+                # Rule tracking is already popped — a non-zero `-D` means the
+                # rule outlives our bookkeeping (race/foreign cleanup); loud.
+                log.warning(
+                    "iptables detach_one rc=%d: %s",
+                    r.returncode,
+                    " ".join(delete_args),
+                )
         except (OSError, subprocess.SubprocessError) as exc:
             log.warning(
                 "iptables detach_one %s failed: %s",

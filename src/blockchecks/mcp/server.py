@@ -31,6 +31,44 @@ _CAMPAIGN_PASS = "(bridge_applied IS NULL OR bridge_applied = 1)"
 _CAMPAIGN_PASS_T = "(t.bridge_applied IS NULL OR t.bridge_applied = 1)"
 
 
+def _strip_applied_clause(sql: str) -> str:
+    """Remove every `AND (...)` group that references bridge_applied.
+
+    Paren-aware: the compound §5.3 predicate nests a group inside a group;
+    a literal `.replace()` of _CAMPAIGN_PASS(_T) leaves broken SQL behind.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    while i < n:
+        low = sql[i : i + 4].lower()
+        if low != "and ":
+            out.append(sql[i])
+            i += 1
+            continue
+        j = i + 4
+        while j < n and sql[j].isspace():
+            j += 1
+        if j < n and sql[j] == "(":
+            depth = 0
+            k = j
+            while k < n:
+                if sql[k] == "(":
+                    depth += 1
+                elif sql[k] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            group = sql[j : k + 1]
+            if "bridge_applied" in group:
+                i = k + 1
+                continue
+        out.append(sql[i])
+        i += 1
+    return "".join(out)
+
+
 def _sqlite_exec_bridge_fallback(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
     """Run SQL; if *bridge_applied* column is missing, strip the predicate and retry."""
     import sqlite3
@@ -41,12 +79,7 @@ def _sqlite_exec_bridge_fallback(cur: Any, sql: str, params: tuple[Any, ...] = (
         if "bridge_applied" not in str(err):
             raise
         log.warning("SQLite has no bridge_applied column (%s); retrying without filter", err)
-        stripped = (
-            sql.replace(f" AND {_CAMPAIGN_PASS_T}", "")
-            .replace(f" AND {_CAMPAIGN_PASS}", "")
-            .replace(f"AND {_CAMPAIGN_PASS_T}", "")
-            .replace(f"AND {_CAMPAIGN_PASS}", "")
-        )
+        stripped = _strip_applied_clause(sql)
         return cur.execute(stripped, params)
 
 
@@ -727,7 +760,16 @@ async def query_strategies(
             cur = con.cursor()
             placeholders = ",".join("?" for _ in statuses)
             if proto_key == "tcp":
-                applied = f" AND {_CAMPAIGN_PASS_T}" if status_key != "FAIL" else ""
+                if status_key != "FAIL":
+                    # AUDIT §5.3: THROTTLED counts as working only with
+                    # APPLIED (parity with v_working_tcp); PASS keeps the
+                    # oneshot-NULL allowance.
+                    applied = (
+                        " AND ((t.status='PASS' AND (t.bridge_applied IS NULL OR t.bridge_applied = 1))"
+                        " OR (t.status='THROTTLED' AND t.bridge_applied = 1))"
+                    )
+                else:
+                    applied = ""
                 rows = _sqlite_exec_bridge_fallback(
                     cur,
                     f"""SELECT s.name, t.latency_ms, t.http_code, t.status, t.timestamp, t.fail_phase, t.probe_host
