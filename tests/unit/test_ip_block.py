@@ -154,3 +154,60 @@ def test_print_ip_block_report_full(caplog):
     with caplog.at_level("INFO", logger="blockchecks"):
         print_ip_block_report(report)
     assert "SNI-based block likely" in caplog.text
+
+
+@pytest.mark.unit
+def test_ref_verified_skips_baseline_roundtrip():
+    """AUDIT §2: ref verified by run_unblocked_baseline → no check_tls(ref).
+
+    The forward probe (blocked.com SNI @ ref IP) still runs — memoization
+    kills only the per-domain baseline round trip. IP is the live example.com
+    edge (23.192.228.84; 93.184.216.34 died with the 2024 readdress).
+    """
+    cache = MagicMock()
+    cache.primary_ip.return_value = "23.192.228.84"
+    cache.resolve.return_value = []  # no blocked IPs → no reverse probes
+    with patch("blockchecks.checkers.ip_block.check_tls") as mock_tls:
+        r = run_ip_block_cross_test(
+            "blocked.com", "ref.com", dns_cache=cache, ref_verified=True
+        )
+    # exactly the forward probe ran; no baseline round trip for ref.com
+    assert [c.args[0] for c in mock_tls.call_args_list] == ["blocked.com"]
+    assert not r.skipped
+    assert r.baseline_ok is True
+    assert r.unblocked_ip == "23.192.228.84"
+    assert len(r.probes) == 1 and "blocked.com SNI" in r.probes[0].label
+
+
+@pytest.mark.unit
+def test_candidates_rotated_on_doh_failure():
+    """AUDIT §2: ref that stops resolving falls through to the next candidate."""
+    cache = MagicMock()
+    cache.primary_ip.side_effect = lambda dom: "" if dom == "dead.ref" else "1.2.3.4"
+    cache.resolve.return_value = []
+    with patch("blockchecks.checkers.ip_block.check_tls", return_value=_tls(True)) as mock_tls:
+        r = run_ip_block_cross_test(
+            "blocked.com",
+            "dead.ref",
+            dns_cache=cache,
+            ref_candidates=["dead.ref", "ripe.net"],
+        )
+    assert r.unblocked_domain == "ripe.net"
+    assert not r.skipped
+    # baseline check_tls ran for the working candidate only (not ref_verified);
+    # the second call is the cross-probe of blocked.com.
+    baseline_calls = [c for c in mock_tls.call_args_list if c.args[0] == "ripe.net"]
+    assert len(baseline_calls) == 1
+
+
+@pytest.mark.unit
+def test_candidates_all_fail_skips_with_last_reason():
+    cache = MagicMock()
+    cache.primary_ip.return_value = ""
+    with patch("blockchecks.checkers.ip_block.check_tls") as mock_tls:
+        r = run_ip_block_cross_test(
+            "blocked.com", "a.ref", dns_cache=cache, ref_candidates=["a.ref", "b.ref"]
+        )
+    assert not mock_tls.call_args_list  # no baseline TLS round trips at all
+    assert r.skipped
+    assert "b.ref does not resolve via DoH" in r.skip_reason

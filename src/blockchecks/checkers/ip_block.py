@@ -56,42 +56,70 @@ def run_ip_block_cross_test(
     unblocked_domain: str | None = None,
     timeout: float = 5.0,
     dns_cache: DnsRunCache | None = None,
+    *,
+    ref_verified: bool = False,
+    ref_candidates: list[str] | None = None,
 ) -> IpBlockReport:
-    """Run IP-block cross-test for one blocked domain."""
-    unblocked = unblocked_domain or UNBLOCKED_DOM
-    report = IpBlockReport(blocked_domain=blocked_domain, unblocked_domain=unblocked)
+    """Run IP-block cross-test for one blocked domain.
 
+    AUDIT §2:
+    - ``ref_verified=True`` — the caller (preflight ``run_unblocked_baseline``)
+      already confirmed the ref this run; the fresh ``check_tls(ref)`` round
+      trip per domain is skipped (DoH resolve still required).
+    - ``ref_candidates`` — ordered fallback list: when a candidate does not
+      resolve (or its baseline fails), the next one is tried instead of a
+      hard skip on the single ref.
+    """
+    candidates: list[str] = []
+    for cand in ([unblocked_domain] if unblocked_domain else []) + (ref_candidates or []):
+        c = cand.strip().rstrip(".")
+        if c and c not in candidates:
+            candidates.append(c)
+    if not candidates:
+        candidates = [UNBLOCKED_DOM]
+
+    report = IpBlockReport(blocked_domain=blocked_domain, unblocked_domain=candidates[0])
     cache = dns_cache or DnsRunCache(doh_server=pick_working_doh(timeout=timeout))
-    report.unblocked_ip = cache.primary_ip(unblocked) or ""
-    if not report.unblocked_ip:
+
+    chosen_ip = ""
+    last_skip = ""
+    for cand in candidates:
+        cand_ip = cache.primary_ip(cand) or ""
+        if not cand_ip:
+            last_skip = f"{cand} does not resolve via DoH"
+            continue
+        if not ref_verified:
+            baseline = check_tls(
+                cand,
+                timeout=timeout,
+                verify_content=False,
+                pre_resolved_ip=cand_ip,
+            )
+            if not baseline.success:
+                last_skip = f"{cand} baseline failed: {baseline.error or baseline.http_status}"
+                continue
+        report.unblocked_domain = cand
+        chosen_ip = cand_ip
+        break
+
+    if not chosen_ip:
         log.warning(
             "%s",
-            f"IP-block cross-test: {unblocked} does not resolve via DoH; "
-            "skipping (no unpinned system-DNS baseline)",
+            f"IP-block cross-test: no usable ref from {candidates}; skipping "
+            f"(last: {last_skip})",
         )
         report.skipped = True
-        report.skip_reason = f"{unblocked} does not resolve via DoH"
+        report.skip_reason = last_skip or "no usable baseline candidate"
         return report
 
-    baseline = check_tls(
-        unblocked,
-        timeout=timeout,
-        verify_content=False,
-        pre_resolved_ip=report.unblocked_ip,
-    )
-    report.baseline_ok = baseline.success
-    if not baseline.success:
-        report.skipped = True
-        report.skip_reason = (
-            f"{unblocked} baseline failed: {baseline.error or baseline.http_status}"
-        )
-        return report
+    report.unblocked_ip = chosen_ip
+    report.baseline_ok = True
 
     report.blocked_ips = cache.resolve(blocked_domain, timeout=timeout)
 
     report.probes.append(
         _probe(
-            f"{blocked_domain} SNI @ {unblocked} IP",
+            f"{blocked_domain} SNI @ {report.unblocked_domain} IP",
             blocked_domain,
             report.unblocked_ip,
             timeout,
@@ -102,8 +130,8 @@ def run_ip_block_cross_test(
 
     for ip in report.blocked_ips[:5]:
         p = _probe(
-            f"{unblocked} SNI @ {blocked_domain} IP {ip}",
-            unblocked,
+            f"{report.unblocked_domain} SNI @ {blocked_domain} IP {ip}",
+            report.unblocked_domain,
             ip,
             timeout,
         )

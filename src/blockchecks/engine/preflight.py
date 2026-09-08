@@ -557,6 +557,11 @@ def _cross_test_or_count(
         unblocked_domain=ref,
         timeout=o.timeout,
         dns_cache=cache,
+        # AUDIT §2: preflight already confirmed the baseline this run —
+        # do not repeat the check_tls(ref) round trip per domain; rotate
+        # through the baseline candidates when the ref stops resolving.
+        ref_verified=bool(ref) and report.baseline_ok,
+        ref_candidates=_baseline_candidates(o.unblocked_dom),
     )
     report.ip_reports.append(ip_r)
     print_ip_block_report(ip_r)
