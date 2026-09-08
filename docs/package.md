@@ -117,7 +117,7 @@ Flags: `--no-fetch-deps`, `--offline`, `--skip-deps-check`.
 ## Import graph
 
 ```
-bs ──► cli.parser (pydantic CliApp) ──► commands + async_runner / service.test_runner
+bs ──► cli.parser + cli.cliapp (argparse) ──► commands + async_runner / service.test_runner
      └── add_campaign_args (scan/pair/full) + profiles.apply_profile
 main ──► RunSpec.from_args ──► CampaignContext ──► async_runner + nfconf
 async_runner ──► service.probe.invoke_curl_probe_worker ──► service.in_ns_workers --mode curl|udp

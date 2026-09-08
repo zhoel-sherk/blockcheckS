@@ -28,16 +28,11 @@ p.add_argument("--my-flag", action="store_true", help="...")
 For `bs full`, campaign flags live in `add_campaign_args(parser, mode="full")`;
 `main.py` calls the same helper — no separate duplicate parser.
 
-> **pydantic CliApp negation (1.3.x):** the main `bs` entry parses via
-> pydantic-settings `CliApp` (models derived from parser actions). A flag named
-> `--no-xxx` is parsed by pydantic as a *negation* (always False). If you add a
-> genuinely-named `--no-<field>` flag, register it in `_NO_PREFIX_FIELDS`
-> (`cli/cliapp.py`), or it will silently never become True.
-
 > **Inverse / protective defaults (1.3.7):** features like AQ, preflight, ECH,
 > and wssize are ON by default. Add `--no-<feature>` to disable; keep a positive
 > alias only when backward compatibility requires it (e.g. `--adaptive` →
-> `dest="no_adaptive", action="store_false"`).
+> `dest="no_adaptive", action="store_false"`). BooleanOptionalAction +
+> `namespace_compat()` set the legacy `no_*` dests.
 
 ## 2. Propagate to runner
 
@@ -56,8 +51,8 @@ Path defaults come from [`engine/paths.py`](../../src/blockchecks/engine/paths.p
 
 User overrides: `~/.config/blockcheckS/config.toml` via
 [`cli/user_config.py`](../../src/blockchecks/cli/user_config.py) — loaded in
-`cliapp.main()` (`load_user_config` → `apply_parser_defaults` → `build_cli_root`);
-`finalize_store_args()` fills `db`/`out_dir` from `[paths]`/XDG on the CliApp path.
+`cliapp.main()` (`load_user_config` → `apply_parser_defaults` → registry);
+`finalize_store_args()` fills `db`/`out_dir` from `[paths]`/XDG.
 
 For machine-specific tool paths, prefer `BLOCKCHECKS_*` in
 [`engine/config.py`](../../src/blockchecks/engine/config.py) or `[tools]` in

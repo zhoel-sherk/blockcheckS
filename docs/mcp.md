@@ -19,8 +19,8 @@ LLM client ──stdio──> bs-mcp (FastMCP) ──Unix socket──> bs serve
 
 ## 1. Установка
 
-Зависимость `mcp` — **опциональная** (extras `[mcp]`), чтобы базовый пакет
-оставался лёгким для роутеров/CI.
+Зависимость `mcp` (и явный pin `pydantic>=2,<3`) — extras `[mcp]`, чтобы
+базовый пакет не тянул pydantic-core.
 
 ```bash
 cd ~/workspace/blockcheckS

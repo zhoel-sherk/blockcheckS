@@ -8,6 +8,7 @@
 | [package.md](package.md) | дерево файлов, LOC, XDG-пути |
 | [database.md](database.md) | схема SQLite, resume SQL, harvest manifest |
 | [custom_lua.md](custom_lua.md) | shm layout, `scan_pick`, Mode A/B backlog |
+| [hostmode.md](hostmode.md) | host-mode (дизайн; isol ≠ backend; схема B = nft skuid/cgroup) |
 | [api.md](api.md) | контракт socket / HTTP / MCP |
 | [mcp.md](mcp.md) / [mcp-skill.md](mcp-skill.md) | установка клиентов, 22 tools |
 | [ci-selfhosted.md](ci-selfhosted.md) | self-hosted `[probe]` runner |
@@ -88,8 +89,8 @@ flowchart TB
 flowchart TB
   subgraph entry ["Entry"]
     bsPy["bs.py"]
-    cliApp["cli.cliapp (pydantic)"]
-    legacyArgparse["cli.parser (BLOCKCHECKS_ARGPARSE=1)"]
+    cliApp["cli.cliapp"]
+    flagParser["cli.parser argparse"]
   end
   subgraph commands ["CLI commands"]
     cmdTcp["commands.tcp"]
@@ -170,7 +171,7 @@ flowchart TB
   end
 
   bsPy --> cliApp
-  bsPy --> legacyArgparse
+  cliApp --> flagParser
   cliApp --> commands
   commands --> engine
   commands --> service
@@ -189,7 +190,8 @@ flowchart TB
 
 ## 3. Вход CLI
 
-Дефолтный парсер — **pydantic CliApp** (`cli/cliapp.py`). Флаги описываются в `cli/parser.py` и валидируются через `RunSpec`. Старый argparse включается переменной `BLOCKCHECKS_ARGPARSE=1`.
+Дефолтный парсер — **argparse** (`cli/parser.py` флаги, `cli/cliapp.py` dispatch).
+Валидация кампании — `RunSpec`. Pydantic только в extra `[mcp]` (FastMCP).
 
 `bs.py` — тонкий entry → `cli.parser.main`. Console scripts: `bs`, `bs-mcp`, `bc-nfconf`, `bc-main`.
 
@@ -409,7 +411,7 @@ flowchart TB
   subgraph hostLayer2 ["Host"]
     sem["AsyncTestRunner Semaphore"]
     pool["NetNsPool bs-p-PID-i"]
-    hostFw["HostFirewall FORWARD MASQUERADE"]
+    hostFw["NetNsPool FORWARD + MASQUERADE"]
     pkill["metrics.pkill_nfqws2_in_ns (PID-scope)"]
   end
   subgraph ns0 ["netns worker 0"]
@@ -442,7 +444,7 @@ flowchart TB
 - q200 = TCP 443 (и :80 в http-фазе), q201 = UDP voice.
 - `--parallel N` = размер пула namespace + semaphore.
 - **NsFirewall** (`ns_firewall.py`) — правила **OUTPUT → NFQUEUE** внутри namespace; правила добавляются один раз при acquire, удаляются через `iptables -D` (не `-F OUTPUT`) при release.
-- **HostFirewall** (`ns_firewall.py`) — правила **FORWARD + MASQUERADE** на хосте для veth/NAT; `service/firewall.py` — deprecated shim `Firewall = HostFirewall`.
+- **HostFirewall** (`ns_firewall.py`) — OUTPUT NFQUEUE на **хосте** (`bs tcp` без `--ns`); без mark это широкий путь, канон сужения — [hostmode.md](hostmode.md). FORWARD+MASQUERADE для veth делает `NetNsPool`, не этот класс. `service/firewall.py` — deprecated shim `Firewall = HostFirewall`.
 - Teardown: PID-scoped `pkill_nfqws2_in_ns`, `iptables -D` для каждого tracked rule, `release_curl_probe_worker(ns)`, `rm -rf /etc/netns/<ns>`.
 - `cleanup_env.sh` полный — только между кампаниями. Во время `week_cov` использовать `--orphans-only --exclude-prefix=bs-p-<pid>-`.
 - veth/NAT **не** является блокером bypass: oneshot в том же namespace даёт HTTP 200 ~70ms. Ложные timeout в campaign historically были из-за IPC worker read loop и EPERM `/proc` у overflow-uid, а не из-за NAT.

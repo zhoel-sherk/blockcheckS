@@ -1,4 +1,4 @@
-"""Parse argv with argparse (build_parser), project to pydantic, dispatch handlers."""
+"""Parse argv with argparse (build_parser) and dispatch handlers."""
 
 from __future__ import annotations
 
@@ -8,10 +8,7 @@ import logging
 import os
 import sys
 from collections.abc import Sequence
-from typing import Any, Literal
-
-import pydantic_core
-from pydantic import BaseModel, Field, create_model
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +16,6 @@ _GENERATE_DEFAULT = "custom,configs"
 
 # Handler registry keyed by subcommand name (tcp, scan, full, …).
 _CMD_HANDLERS: dict[str, Any] = {}
-_MODEL_BY_CMD: dict[str, type[BaseModel]] = {}
 _FULL_RUN_ACTIVE: bool = False
 _USER_CFG: dict[str, Any] | None = None
 
@@ -103,162 +99,63 @@ def collect_cli_shortcuts(*parsers: argparse.ArgumentParser) -> dict[str, str | 
     return {k: (v[0] if len(v) == 1 else v) for k, v in shortcuts.items()}
 
 
-def _is_bool_action(action: argparse.Action) -> bool:
-    if isinstance(action.default, bool):
-        return True
-    return action.nargs == 0 and action.const in (True, False)
-
-
-def _field_type_from_action(action: argparse.Action) -> Any:
-    if _is_bool_action(action):
-        return bool
-    if (chs := action.choices) and all(isinstance(c, str) for c in chs):
-        lit = Literal.__getitem__(tuple(chs))
-        return lit | None if action.default is None and not action.required else lit
-    if action.type is int:
-        return int if action.required else (int | None if action.default is None else int)
-    if action.type is float:
-        return float if action.required else (float | None if action.default is None else float)
-    if isinstance(action, argparse._AppendAction):
-        return list[str] | None if action.default is None else list[str]
-    if action.nargs == "+":
-        return list[str] if action.required else (list[str] | None)
-    if action.nargs in ("*",):
-        return list[str]
-    if action.required:
-        return str
-    if action.default is None:
-        return str | None
-    if isinstance(action.default, bool):
-        return bool
-    if isinstance(action.default, int):
-        return int
-    if isinstance(action.default, float):
-        return float
-    return str
-
-
-def _field_default(action: argparse.Action) -> Any:
-    if _is_bool_action(action) and action.default is argparse.SUPPRESS:
-        return False
-    if action.default is argparse.SUPPRESS:
-        return None
-    return action.default
-
-
-def model_from_parser(name: str, parser: argparse.ArgumentParser) -> type[BaseModel]:
-    """Build a pydantic model from argparse action metadata (public fields only)."""
-    fields: dict[str, Any] = {}
-    for action in parser._actions:
-        if action.dest in ("help", "command") or not action.dest:
-            continue
-        if action.dest in fields:
-            continue
-        ann = _field_type_from_action(action)
-        default = _field_default(action)
-        if action.required:
-            fields[action.dest] = (ann, Field(...))
-        else:
-            fields[action.dest] = (ann, Field(default=default))
-    return create_model(name, __base__=BaseModel, **fields)
-
-
-def _subcommand_blurbs() -> dict[str, str]:
-    from blockchecks.cli.parser import build_parser, iter_subparsers
-
-    blurbs: dict[str, str] = {}
-    for name, sub in iter_subparsers(build_parser()).items():
-        text = (sub.description or "").strip()
-        if not text:
-            for action in sub._actions:
-                if action.dest == "help" and action.help:
-                    text = action.help.strip()
-                    break
-        if text:
-            blurbs[name] = text
-    return blurbs
-
-
-def _register_cmd(name: str, parser: argparse.ArgumentParser, handler, model_name: str) -> None:
-    _CMD_HANDLERS[name] = handler
-    _MODEL_BY_CMD[name] = model_from_parser(model_name, parser)
-
-
 def build_command_registry(cfg: dict[str, Any] | None = None) -> None:
-    """Populate handler + pydantic model maps from build_parser (once per cfg)."""
+    """Populate handler map from build_parser (once per cfg)."""
     from blockchecks.cli.parser import build_parser, iter_subparsers
     from blockchecks.cli.user_config import apply_parser_defaults
-    from blockchecks.main import build_arg_parser
 
     _CMD_HANDLERS.clear()
-    _MODEL_BY_CMD.clear()
 
     subs = iter_subparsers(build_parser())
     if cfg:
         for sub in subs.values():
             apply_parser_defaults(sub, cfg)
-    full_parser = build_arg_parser(cfg)
-    blurbs = _subcommand_blurbs()
 
-    _register_cmd("tcp", subs["tcp"], _run_tcp, "TcpArgs")
-    _register_cmd("udp", subs["udp"], _run_udp, "UdpArgs")
-    _register_cmd("scan", subs["scan"], _run_scan, "ScanArgs")
-    _register_cmd("pair", subs["pair"], _run_pair, "PairArgs")
-    _register_cmd("composite", subs["composite"], _run_composite, "CompositeArgs")
-    _register_cmd("bench-settle", subs["bench-settle"], _run_bench, "BenchArgs")
-    _register_cmd("full", full_parser, _run_full, "FullArgs")
-    _register_cmd("stop", subs["stop"], _run_stop, "StopArgs")
-    _register_cmd("serve", subs["serve"], _run_serve, "ServeArgs")
-    _register_cmd("mcp", subs["mcp"], _run_mcp, "McpArgs")
-    _register_cmd("preflight", subs["preflight"], _run_preflight, "PreflightArgs")
-    _register_cmd("data-block", subs["data-block"], _run_data_block, "DataBlockArgs")
-    _register_cmd("harvest-batch", subs["harvest-batch"], _run_harvest_batch, "HarvestBatchArgs")
-    _register_cmd("gc", subs["gc"], _run_gc, "GcArgs")
-    _ = blurbs  # blurbs retained for help text parity tests
+    _CMD_HANDLERS.update(
+        {
+            "tcp": _run_tcp,
+            "udp": _run_udp,
+            "scan": _run_scan,
+            "pair": _run_pair,
+            "composite": _run_composite,
+            "bench-settle": _run_bench,
+            "full": _run_full,
+            "stop": _run_stop,
+            "serve": _run_serve,
+            "mcp": _run_mcp,
+            "preflight": _run_preflight,
+            "data-block": _run_data_block,
+            "harvest-batch": _run_harvest_batch,
+            "gc": _run_gc,
+        }
+    )
 
 
-def build_cli_root() -> type[BaseModel]:
-    """Backward-compat: return a marker type; parsing uses argparse + model_validate."""
+def build_cli_root() -> None:
+    """Register handlers (compat name; no pydantic model tree)."""
     build_command_registry(_USER_CFG)
-    return _MODEL_BY_CMD.get("scan") or model_from_parser("Empty", argparse.ArgumentParser())
 
 
-def parse_cli_subcommand(argv: list[str], cfg: dict[str, Any] | None = None) -> BaseModel:
-    """Parse argv via argparse and return the validated subcommand pydantic model."""
+def parse_cli_subcommand(argv: list[str], cfg: dict[str, Any] | None = None) -> argparse.Namespace:
+    """Parse argv via argparse and return the subcommand namespace."""
     from blockchecks.cli.parser import parse_cli_argv
 
     cfg = cfg if cfg is not None else (_USER_CFG or {})
     ns, cmd, _ = parse_cli_argv(preprocess_argv(argv), cfg)
     if not cmd:
         raise ValueError("missing subcommand")
-    if cmd not in _MODEL_BY_CMD:
+    if cmd not in _CMD_HANDLERS:
         build_command_registry(cfg)
-    model_cls = _MODEL_BY_CMD[cmd]
-    return model_cls.model_validate(vars(ns))
-
-
-def _to_namespace(model: BaseModel, **extra: Any) -> argparse.Namespace:
-    data = model.model_dump()
-    data.update(extra)
-    ns = argparse.Namespace(**data)
-    from blockchecks.cli.parser import namespace_compat
-
-    namespace_compat(ns)
-    ns._explicit_cli = set(model.model_fields_set)
-    if _USER_CFG is not None:
-        from blockchecks.cli.user_config import finalize_store_args
-
-        finalize_store_args(ns, _USER_CFG)
     return ns
 
 
-def _apply_nfqws2_debug_env(sub: BaseModel | argparse.Namespace) -> None:
+def _apply_nfqws2_debug_env(sub: argparse.Namespace) -> None:
     dbg = getattr(sub, "nfqws2_debug", None)
     if dbg is not None:
         os.environ["BLOCKCHECKS_NFQWS2_DEBUG"] = str(dbg)
 
 
-def _apply_debug_flags(sub: BaseModel | argparse.Namespace) -> None:
+def _apply_debug_flags(sub: argparse.Namespace) -> None:
     if getattr(sub, "debug", False):
         from blockchecks.engine.log import set_debug_mode
 
@@ -267,67 +164,40 @@ def _apply_debug_flags(sub: BaseModel | argparse.Namespace) -> None:
     _apply_nfqws2_debug_env(sub)
 
 
-def _print_validation_error(exc: pydantic_core.ValidationError) -> int:
-    errs = exc.errors()
-    if not errs:
-        print("ERROR: invalid arguments", file=sys.stderr)  # noqa: T201, print
-        return 2
-    e = errs[0]
-    loc = ".".join(str(x) for x in e.get("loc", ()) if x != "__root__")
-    msg = e.get("msg", "invalid value")
-    ctx = e.get("ctx") or {}
-    extra = ""
-    if ctx.get("expected"):
-        extra = f" (expected {ctx['expected']})"
-    if loc:
-        print(f"ERROR: --{loc.replace('.', ' ')}: {msg}{extra}", file=sys.stderr)  # noqa: T201, print
-    else:
-        print(f"ERROR: {msg}{extra}", file=sys.stderr)  # noqa: T201, print
-    return 2
-
-
 def dispatch_parsed(ns: argparse.Namespace, cmd: str) -> int:
-    """Run handler for parsed namespace (pydantic projection + legacy handlers)."""
+    """Run handler for a parsed argparse namespace."""
     _apply_debug_flags(ns)
     if cmd not in _CMD_HANDLERS:
         build_command_registry(_USER_CFG)
     handler = _CMD_HANDLERS.get(cmd)
     if handler is None:
         return 2
-    model_cls = _MODEL_BY_CMD[cmd]
-    try:
-        model = model_cls.model_validate(vars(ns))
-    except pydantic_core.ValidationError as exc:
-        return _print_validation_error(exc)
-    return int(handler(model))
+    return int(handler(ns))
 
 
-def _run_tcp(model: BaseModel) -> int:
+def _run_tcp(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.tcp import cmd_tcp
     from blockchecks.cli.parser import ensure_system_deps_or_exit
 
-    ns = _to_namespace(model)
     ns.command = "tcp"
     code = ensure_system_deps_or_exit(ns)
     return code or cmd_tcp(ns)
 
 
-def _run_udp(model: BaseModel) -> int:
+def _run_udp(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.udp import cmd_udp
     from blockchecks.cli.parser import ensure_system_deps_or_exit
 
-    ns = _to_namespace(model)
     ns.command = "udp"
     code = ensure_system_deps_or_exit(ns)
     return code or cmd_udp(ns)
 
 
-def _run_pair(model: BaseModel) -> int:
+def _run_pair(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.pair import cmd_pair
     from blockchecks.cli.parser import ensure_system_deps_or_exit
     from blockchecks.cli.profiles import apply_profile
 
-    ns = _to_namespace(model)
     ns.command = "pair"
     apply_profile(ns)
     if getattr(ns, "list_presets", False):
@@ -349,13 +219,12 @@ def _run_pair(model: BaseModel) -> int:
     return code or asyncio.run(cmd_pair(ns))
 
 
-def _run_scan(model: BaseModel) -> int:
+def _run_scan(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.pair import cmd_pair
     from blockchecks.cli.parser import ensure_system_deps_or_exit
     from blockchecks.cli.profiles import apply_profile
     from blockchecks.engine.config import CONFIGS_DIR, DEFAULT_VOICE_IP, DEFAULT_VOICE_PORT
 
-    ns = _to_namespace(model)
     ns.command = "scan"
     apply_profile(ns)
     if getattr(ns, "list_presets", False):
@@ -386,11 +255,10 @@ def _run_scan(model: BaseModel) -> int:
     return code or asyncio.run(cmd_pair(ns))
 
 
-def _run_composite(model: BaseModel) -> int:
+def _run_composite(ns: argparse.Namespace) -> int:
     from blockchecks.checkers.composite_runner import run as run_composite
     from blockchecks.cli.parser import ensure_system_deps_or_exit
 
-    ns = _to_namespace(model)
     ns.command = "composite"
     code = ensure_system_deps_or_exit(ns)
     if code:
@@ -402,17 +270,16 @@ def _run_composite(model: BaseModel) -> int:
     )
 
 
-def _run_bench(model: BaseModel) -> int:
+def _run_bench(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.bench_settle import cmd_bench_settle
     from blockchecks.cli.parser import ensure_system_deps_or_exit
 
-    ns = _to_namespace(model)
     ns.command = "bench-settle"
     code = ensure_system_deps_or_exit(ns)
     return code or asyncio.run(cmd_bench_settle(ns))
 
 
-def _run_full(model: BaseModel) -> int:
+def _run_full(ns: argparse.Namespace) -> int:
     global _FULL_RUN_ACTIVE
     from blockchecks.cli.parser import ensure_system_deps_or_exit
     from blockchecks.cli.profiles import apply_profile
@@ -422,7 +289,6 @@ def _run_full(model: BaseModel) -> int:
         log.error("ERROR: nested bs full invocation blocked (VPS-2 guard)")
         return 2
 
-    ns = _to_namespace(model)
     ns.command = "full"
     apply_profile(ns)
     code = ensure_system_deps_or_exit(ns)
@@ -435,32 +301,31 @@ def _run_full(model: BaseModel) -> int:
         _FULL_RUN_ACTIVE = False
 
 
-def _run_stop(model: BaseModel) -> int:
+def _run_stop(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.stop import cmd_stop
 
-    return cmd_stop(_to_namespace(model))
+    return cmd_stop(ns)
 
 
-def _run_serve(model: BaseModel) -> int:
+def _run_serve(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.serve import cmd_serve
 
-    return cmd_serve(_to_namespace(model))
+    return cmd_serve(ns)
 
 
-def _run_mcp(model: BaseModel) -> int:
+def _run_mcp(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.mcp import cmd_mcp
 
-    return cmd_mcp(_to_namespace(model))
+    return cmd_mcp(ns)
 
 
-def _run_preflight(model: BaseModel) -> int:
+def _run_preflight(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.preflight import (
         _keep_json_stdout_clean,
         run_preflight_cmd,
     )
     from blockchecks.cli.parser import ensure_system_deps_or_exit
 
-    ns = _to_namespace(model)
     ns.command = "preflight"
     if getattr(ns, "list_presets", False):
         code = 0
@@ -472,32 +337,29 @@ def _run_preflight(model: BaseModel) -> int:
     return code or run_preflight_cmd(ns)
 
 
-def _run_data_block(model: BaseModel) -> int:
+def _run_data_block(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.data_block import cmd_data_block
 
-    ns = _to_namespace(model)
     ns.command = "data-block"
     return cmd_data_block(ns)
 
 
-def _run_harvest_batch(model: BaseModel) -> int:
+def _run_harvest_batch(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.harvest_batch import cmd_harvest_batch
 
-    ns = _to_namespace(model)
     ns.command = "harvest-batch"
     return cmd_harvest_batch(ns)
 
 
-def _run_gc(model: BaseModel) -> int:
+def _run_gc(ns: argparse.Namespace) -> int:
     from blockchecks.cli.commands.gc import cmd_gc
 
-    ns = _to_namespace(model)
     ns.command = "gc"
     return cmd_gc(ns)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Process entry: argparse → namespace_compat → model_validate → handler."""
+    """Process entry: argparse → namespace_compat → handler."""
     from blockchecks.cli.parser import build_parser, parse_cli_argv
     from blockchecks.cli.user_config import load_user_config
     from blockchecks.engine.paths import (
@@ -518,9 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_user_config()
     global _USER_CFG
     _USER_CFG = cfg
-    # Пересобираем реестр на каждый запуск main(): тесты патчат handler-функции
-    # в модуле ПОСЛЕ первого построения, а замороженные ссылки делают патчи
-    # мёртвыми (ARC-7). Построение дешёвое — это только словарь ссылок.
+    # Rebuild registry each main() so test patches of _run_* are not stale.
     _CMD_HANDLERS.clear()
     build_command_registry(cfg)
 
@@ -561,5 +421,3 @@ def main(argv: list[str] | None = None) -> int:
             print(code, file=sys.stderr)  # noqa: T201, print
             return 1
         return int(code or 0)
-    except pydantic_core.ValidationError as exc:
-        return _print_validation_error(exc)

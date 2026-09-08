@@ -34,7 +34,7 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
 Два независимых шага:
 
 1. **Mode A** — тот же netns, но демон живёт весь прогон, а не батч. Сейчас Mode B: в conf заранее `strategy=1..N`, в файл пишется только id. Mode A: в файл пишется полная строка `fake:blob=stun:…`, Lua разбирает её на лету. См. [custom_lua.md](custom_lua.md) §7.
-2. **Host-mode** — вообще без netns: трафик помечается fwmark / SO_MARK, в NFQUEUE только тестовые пакеты. Референсы: `blockcheck2.sh` (iptables mangle + fwmark) и [blockcheckw](https://github.com/rcd27/blockcheckw) (SO_MARK + nftables vmap).
+2. **Host-mode** — вообще без netns: nft ловит только пробу (`skuid` / cgroup), в NFQUEUE не чужой браузер. Канон: [hostmode.md](hostmode.md) (схема B, не dst-IP как blockcheck2). `--filter-mark` — опциональный второй замок, не блокер v1.0.5. Референсы: `blockcheck2.sh` (mangle + fwmark) и [blockcheckw](https://github.com/rcd27/blockcheckw) (nftables vmap).
 
 - [ ] **Разбор** `strategy.cmd` **в Lua.** Whitelist параметров, без `load()`/`eval`. Результат — таблица для `plan_instance_execute`. Python уже пишет строку при `extra_lua_desync` (`lua_bridge_ipc.py`). Нужен забор поколений (gen), чтобы старая строка не применялась к новому пакету.
 
@@ -42,7 +42,7 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
 
 - [ ] **Lua GC.** На одном daemon тысячи plan-instance не должны течь. Иначе Mode A на 20-часовом прогоне упрётся в память раньше, чем в DPI.
 
-- [ ] **Выбрать схему host-mode.** A: iptables mangle по dst IP + fwmark loop-protection + notrack (как blockcheck2). B: SO_MARK на сокете воркера + nftables vmap (как blockcheckw). Сравнить сложность cleanup и скорость. Флаг вроде `--probe-backend host`.
+- [x] **Выбрать схему host-mode.** Канон: **B** (nft `skuid`/cgroup, не dst IP). Схема A отвергнута. `--filter-mark` ≥ 1.0.5 — defence-in-depth, не строгий блокер. Флаг `--probe-isol=host`, **не** `--probe-backend host`. См. [hostmode.md](hostmode.md).
 
 - [ ] **Не резать чужой трафик.** Если тестируемый IP сейчас использует браузер/VPN на хосте — предупредить или отказать. Снимать только свои правила (`-D` / `nft delete`), никогда `-F OUTPUT`.
 

@@ -821,7 +821,7 @@ CLI: `scan`/`pair`/`full` — `--bridge-batch`, `--lua-extra`. `--classic` depre
 
 `bs full`: sequential + adaptive AQ используют batch service; fan-out остаётся one-shot (WARN once).
 
-Default уже `lua_bridge`; открытый бэклог (early-abort, host-mode): [todo.md](todo.md).
+Default уже `lua_bridge`; открытый бэклог (early-abort, host-mode): [todo.md](todo.md). Канон host-mode (fwmark, не Mode A): [hostmode.md](hostmode.md).
 
 ### 9.2 nfqws2.conf generation (lua_bridge) — ✅ done
 

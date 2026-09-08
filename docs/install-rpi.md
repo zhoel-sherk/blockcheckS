@@ -9,7 +9,7 @@ wheels для armv7l на PyPI.
 | Пакет | armv7l wheel | Статус |
 |---|---|---|
 | `curl-cffi` | ✅ `cp310-abi3-manylinux_2_28_armv7l` | Уже на PyPI (0.15/0.16) |
-| `pydantic-core` | ✅ `cp312-manylinux_2_17_armv7l` | Уже на PyPI |
+| `pydantic-core` | extra `[mcp]` / `[dev]` | Не нужен для `pip install .` |
 | `psutil` | ❌ **0 wheels** → заставлял gcc | **Удалён** из deps, заменён на stdlib `/proc` |
 | `blockchecks` (сам) | чистый Python | Wheel собирается setuptools без native |
 

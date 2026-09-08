@@ -12,14 +12,16 @@ pytestmark = pytest.mark.unit
 
 
 def test_settings_policy_required_fields():
+    from dataclasses import fields
+
     from blockchecks.engine.settings import BlockchecksSettings
 
     cfg = tool_section("tool", "blockchecks", "settings")
     required = cfg.get("required_fields") or []
     assert required
-    fields = BlockchecksSettings.model_fields
+    names = {f.name for f in fields(BlockchecksSettings)}
     for name in required:
-        assert name in fields, f"missing settings field {name}"
+        assert name in names, f"missing settings field {name}"
 
 
 def test_settings_defaults_without_env(monkeypatch):

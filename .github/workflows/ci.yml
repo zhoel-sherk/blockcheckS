@@ -215,7 +215,7 @@ jobs:
   armv7l-smoke:
     # Raspberry Pi 2+ (armv7l) installability: every mandatory dependency must
     # have a prebuilt armv7l wheel so `pip install` never compiles (psutil was
-    # removed; curl-cffi/pydantic-core ship armv7l wheels on PyPI).
+    # removed; curl-cffi ships armv7l wheels. pydantic is extra [mcp]/[dev] only).
     #
     # Temporarily disabled — armv7l smoke is handled separately later.
     if: false

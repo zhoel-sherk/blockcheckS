@@ -1357,7 +1357,7 @@ def parse_cli_argv(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point — argparse parse, pydantic projection, handler dispatch."""
+    """Entry point — argparse parse and handler dispatch."""
     from blockchecks.cli.cliapp import main as cliapp_main
 
     return cliapp_main(argv)

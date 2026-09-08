@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from io import StringIO
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -316,12 +316,9 @@ def test_no_prefix_flags_set_true_by_namespace_compat():
     assert ns.no_quic is True
     captured: dict[str, bool] = {}
 
-    def handler(model):
-        from blockchecks.cli.cliapp import _to_namespace
-
-        n = _to_namespace(model)
-        captured["no_http"] = bool(n.no_http)
-        captured["no_quic"] = bool(n.no_quic)
+    def handler(parsed: argparse.Namespace) -> int:
+        captured["no_http"] = bool(parsed.no_http)
+        captured["no_quic"] = bool(parsed.no_quic)
         return 0
 
     from blockchecks.cli import cliapp as ca
@@ -339,16 +336,15 @@ def test_no_prefix_flags_set_true_by_namespace_compat():
 def test_run_tcp_dispatcher_delegates():
     from blockchecks.cli import cliapp as ca
 
+    ns = argparse.Namespace()
     with (
-        patch("blockchecks.cli.cliapp._to_namespace") as to_ns,
         patch("blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0),
         patch("blockchecks.cli.commands.tcp.cmd_tcp", return_value=3) as cmd,
     ):
-        to_ns.return_value = argparse.Namespace()
-        rc = ca._run_tcp(MagicMock())
+        rc = ca._run_tcp(ns)
     assert rc == 3
     cmd.assert_called_once()
-    assert to_ns.return_value.command == "tcp"
+    assert ns.command == "tcp"
 
 
 @pytest.mark.unit
@@ -356,11 +352,10 @@ def test_run_tcp_dispatcher_deps_short_circuit():
     from blockchecks.cli import cliapp as ca
 
     with (
-        patch("blockchecks.cli.cliapp._to_namespace"),
         patch("blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=5),
         patch("blockchecks.cli.commands.tcp.cmd_tcp") as cmd,
     ):
-        rc = ca._run_tcp(MagicMock())
+        rc = ca._run_tcp(argparse.Namespace())
     assert rc == 5
     cmd.assert_not_called()
 
@@ -369,15 +364,14 @@ def test_run_tcp_dispatcher_deps_short_circuit():
 def test_run_udp_dispatcher_delegates():
     from blockchecks.cli import cliapp as ca
 
+    ns = argparse.Namespace()
     with (
-        patch("blockchecks.cli.cliapp._to_namespace") as to_ns,
         patch("blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0),
         patch("blockchecks.cli.commands.udp.cmd_udp", return_value=1),
     ):
-        to_ns.return_value = argparse.Namespace()
-        rc = ca._run_udp(MagicMock())
+        rc = ca._run_udp(ns)
     assert rc == 1
-    assert to_ns.return_value.command == "udp"
+    assert ns.command == "udp"
 
 
 @pytest.mark.unit
@@ -386,11 +380,10 @@ def test_run_composite_dispatcher_delegates():
 
     ns = argparse.Namespace(config="/tmp/c.conf", domains=["x.com"], parallel=2, timeout=3.0)
     with (
-        patch("blockchecks.cli.cliapp._to_namespace", return_value=ns),
         patch("blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0),
         patch("blockchecks.checkers.composite_runner.run", new=AsyncMock(return_value=4)) as cr,
     ):
-        rc = ca._run_composite(MagicMock())
+        rc = ca._run_composite(ns)
     assert rc == 4
     cr.assert_awaited_once_with("/tmp/c.conf", ["x.com"], 2, 3.0)
 
@@ -399,17 +392,16 @@ def test_run_composite_dispatcher_delegates():
 def test_run_bench_dispatcher_delegates():
     from blockchecks.cli import cliapp as ca
 
+    ns = argparse.Namespace()
     with (
-        patch("blockchecks.cli.cliapp._to_namespace") as to_ns,
         patch("blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0),
         patch(
             "blockchecks.cli.commands.bench_settle.cmd_bench_settle", new=AsyncMock(return_value=2)
         ),
     ):
-        to_ns.return_value = argparse.Namespace()
-        rc = ca._run_bench(MagicMock())
+        rc = ca._run_bench(ns)
     assert rc == 2
-    assert to_ns.return_value.command == "bench-settle"
+    assert ns.command == "bench-settle"
 
 
 @pytest.mark.unit
@@ -417,11 +409,8 @@ def test_run_stop_dispatcher_delegates():
     from blockchecks.cli import cliapp as ca
 
     ns = argparse.Namespace(force=False, wait=120.0)
-    with (
-        patch("blockchecks.cli.cliapp._to_namespace", return_value=ns),
-        patch("blockchecks.cli.commands.stop.cmd_stop", return_value=1) as cmd,
-    ):
-        rc = ca._run_stop(MagicMock())
+    with patch("blockchecks.cli.commands.stop.cmd_stop", return_value=1) as cmd:
+        rc = ca._run_stop(ns)
     assert rc == 1
     cmd.assert_called_once_with(ns)
 
@@ -432,11 +421,10 @@ def test_run_full_delegates_and_guards_nesting():
 
     ns = argparse.Namespace()
     with (
-        patch("blockchecks.cli.cliapp._to_namespace", return_value=ns),
         patch("blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0),
         patch("blockchecks.main.run_full", new=AsyncMock(return_value=0)) as rf,
     ):
-        rc = ca._run_full(MagicMock())
+        rc = ca._run_full(ns)
     assert rc == 0
     rf.assert_awaited_once_with(ns)
 
@@ -444,23 +432,10 @@ def test_run_full_delegates_and_guards_nesting():
     prev_active = ca._FULL_RUN_ACTIVE
     try:
         ca._FULL_RUN_ACTIVE = True
-        rc2 = ca._run_full(MagicMock())
+        rc2 = ca._run_full(argparse.Namespace())
         assert rc2 == 2
     finally:
         ca._FULL_RUN_ACTIVE = prev_active
-
-
-@pytest.mark.unit
-def test_print_validation_error_returns_2():
-    from pydantic_core import ValidationError
-
-    from blockchecks.cli import cliapp as ca
-
-    err = ValidationError.from_exception_data("ScanCmd", [])
-    with patch("sys.stderr", StringIO()) as out:
-        rc = ca._print_validation_error(err)
-    assert rc == 2
-    assert "invalid arguments" in out.getvalue()
 
 
 @pytest.mark.unit

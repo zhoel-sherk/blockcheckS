@@ -174,11 +174,6 @@ class TestDependencies:
 
         assert hasattr(curl_cffi, "requests")
 
-    def test_colorama_available(self):
-        import colorama
-
-        assert hasattr(colorama, "Fore")
-
     def test_aiosqlite_available(self):
         import aiosqlite
 

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from blockchecks.engine.config import ZAPRET2_ROOT
 from blockchecks.engine.paths import CONFIG_FILE
@@ -22,16 +20,45 @@ except ImportError:  # Python < 3.11
 _DEFAULT_NFQWS2 = os.path.join(ZAPRET2_ROOT, "nfq2", "nfqws2")
 _DEFAULT_BLOBS = os.path.join(ZAPRET2_ROOT, "blobs")
 _DEFAULT_LUA = os.path.join(ZAPRET2_ROOT, "lua")
+_TRUE = frozenset({"1", "true", "yes", "on"})
+_FALSE = frozenset({"0", "false", "no", "off"})
 
 
-class BlockchecksSettings(BaseSettings):
+def _parse_bool(raw: str) -> bool:
+    key = raw.strip().lower()
+    if key in _TRUE:
+        return True
+    if key in _FALSE:
+        return False
+    return bool(key)
+
+
+def _env_overrides() -> dict[str, Any]:
+    """BLOCKCHECKS_* values that are set in the process environment."""
+    parsers: dict[str, tuple[str, Any]] = {
+        "nfqws2": ("BLOCKCHECKS_NFQWS2", str),
+        "blobs": ("BLOCKCHECKS_BLOBS", str),
+        "lua_dir": ("BLOCKCHECKS_LUA_DIR", str),
+        "pool": ("BLOCKCHECKS_POOL", int),
+        "secure_dns": ("BLOCKCHECKS_SECURE_DNS", _parse_bool),
+        "doh_server": ("BLOCKCHECKS_DOH_SERVER", str),
+        "proxy": ("BLOCKCHECKS_PROXY", str),
+        "unblocked_dom": ("BLOCKCHECKS_UNBLOCKED_DOM", str),
+        "curl_parallel": ("BLOCKCHECKS_CURL_PARALLEL", int),
+        "wall_slack": ("BLOCKCHECKS_WALL_SLACK", float),
+    }
+    out: dict[str, Any] = {}
+    for field_name, (env_key, conv) in parsers.items():
+        raw = os.environ.get(env_key)
+        if raw is None or raw == "":
+            continue
+        out[field_name] = conv(raw)
+    return out
+
+
+@dataclass
+class BlockchecksSettings:
     """Runtime settings: env BLOCKCHECKS_* wins over config.toml overlays."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="BLOCKCHECKS_",
-        extra="ignore",
-        case_sensitive=False,
-    )
 
     nfqws2: str = _DEFAULT_NFQWS2
     blobs: str = _DEFAULT_BLOBS
@@ -39,12 +66,16 @@ class BlockchecksSettings(BaseSettings):
     pool: int = 4
     secure_dns: bool = True
     doh_server: str = ""
-    doh_servers: list[dict[str, Any]] = Field(default_factory=list)
-    udp_servers: list[dict[str, Any]] = Field(default_factory=list)
+    doh_servers: list[dict[str, Any]] = field(default_factory=list)
+    udp_servers: list[dict[str, Any]] = field(default_factory=list)
     proxy: str = ""
     unblocked_dom: str = "ripe.net"
     curl_parallel: int = 1
     wall_slack: float = 3.0
+
+    def __post_init__(self) -> None:
+        for name, value in _env_overrides().items():
+            setattr(self, name, value)
 
 
 def _load_user_toml(path: Path | None = None) -> dict[str, Any]:

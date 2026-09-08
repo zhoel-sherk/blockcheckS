@@ -45,7 +45,7 @@ Static quality gates (policy in `pyproject.toml`: vulture, McCabe/C90, SIM, ARG,
 pytest -m quality -q
 ```
 
-CLI entry uses **pydantic CliApp** (`blockchecks.cli.cliapp`); flag definitions remain in `cli/parser.py` `add_*` helpers. Legacy argparse entry: `BLOCKCHECKS_ARGPARSE=1`.
+CLI entry uses **argparse** (`blockchecks.cli.parser` flags, `blockchecks.cli.cliapp` dispatch).
 
 Optional mutation testing (scoped via `[tool.mutmut]`, slow; also CI `workflow_dispatch`):
 

@@ -7,10 +7,11 @@ import os
 import sys
 from typing import Any
 
-from colorama import Fore, Style
-from colorama import init as _colorama_init
-
 _INITIALIZED = False
+
+# SGR (POSIX). colorama was only wrapping these for Win32 — this project is Linux.
+_GREEN, _RED, _YELLOW = "\033[32m", "\033[31m", "\033[33m"
+_CYAN, _BLACK, _BRIGHT, _RESET = "\033[36m", "\033[30m", "\033[1m", "\033[0m"
 
 
 def supports_color(stream: Any = None) -> bool:
@@ -34,24 +35,21 @@ def supports_color(stream: Any = None) -> bool:
     return hasattr(target, "isatty") and bool(target.isatty())
 
 
-def init_terminal(stream: Any = None) -> None:
-    """Initialize terminal color handling once at process boundary."""
+def init_terminal(_stream: Any = None) -> None:
+    """CLI boundary hook (idempotent). Colors are raw ANSI; no stream wrap."""
     global _INITIALIZED
     if _INITIALIZED:
         return
-    strip = not supports_color(stream)
-    _colorama_init(autoreset=True, strip=strip, wrap=True)
     _INITIALIZED = True
 
 
-# Standard Color Constants
-GREEN = Fore.GREEN + Style.BRIGHT
-RED = Fore.RED + Style.BRIGHT
-YELLOW = Fore.YELLOW
-CYAN = Fore.CYAN
-GREY = Fore.BLACK + Style.BRIGHT
-RESET = Style.RESET_ALL
-BRIGHT = Style.BRIGHT
+GREEN = _GREEN + _BRIGHT
+RED = _RED + _BRIGHT
+YELLOW = _YELLOW
+CYAN = _CYAN
+GREY = _BLACK + _BRIGHT
+RESET = _RESET
+BRIGHT = _BRIGHT
 
 
 class C:

@@ -68,6 +68,6 @@ cat <<'EOF'
 Probe a strategy (needs root + nfqws2):
   sudo -E .venv/bin/bs tcp -d discord.com -s "fake:blob=stun:repeats=6:tcp_ts=-1000" --skip-deps-check
 
-RPi2: curl-cffi and pydantic-core wheels are on PyPI for armv7l; no compile.
+RPi2: curl-cffi ships armv7l wheels; pydantic-core is extra [mcp]/[dev] only.
 nfqws2 for arm is fetched on first use (system_deps: armv7l → binaries/linux-arm).
 EOF

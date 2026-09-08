@@ -12,6 +12,9 @@
   `site.getuserbase()/blockchecks` — ресурсы (configs/presets/blobs/lua)
   находятся и при `pip install --user`; произвольный `--prefix` явно
   задокументирован как вне поддержки.
+- Runtime core: `curl-cffi` + `aiosqlite` (+ `tomli` on 3.10). Pydantic
+  only in extras `[mcp]` / `[dev]`; CLI dispatch is argparse Namespace.
+  Colorama removed (POSIX ANSI in `terminal.py`).
 - `MANIFEST.in`: `prune` tests/dev/mutants/логов и `global-exclude`
   `__pycache__ *.py[cod]` — sdist не тащит dev-мусор при VCS-finder.
 - zapret2/nfqws2: **не тянем второй zapret2**. Если задан любой из
