@@ -84,12 +84,20 @@ class Nfqws2Manager:
         filter_tcp: str = "443",
         blobs: list[str] | None = None,
         extra_lua_desync: list[str] | None = None,
+        host_mode: bool = False,
+        desync_mark: int = 0,
     ) -> None:
-        """Start nfqws2 with inline strategy (backward compat)."""
+        """Start nfqws2 with inline strategy (backward compat).
+
+        ``host_mode`` (docs/hostmode.md §5): injects the MANDATORY
+        ``--fwmark`` anti-loop line right after ``--qnum`` so rawsend fakes
+        never re-enter the host queue.
+        """
         self.stop()  # clear prior proc/temps before creating a new conf
         self._qnum = qnum
         lines = [
             f"--qnum={qnum}",
+            *( [f"--fwmark={desync_mark:#x}"] if host_mode and desync_mark else [] ),
             f"--filter-tcp={filter_tcp}",
             "--filter-l3=ipv4",
             "--filter-l7=tls",

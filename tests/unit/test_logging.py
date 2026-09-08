@@ -276,7 +276,7 @@ def test_configure_logging_active_run_guard_skips_file(tmp_path, monkeypatch):
     root.handle = lambda record: records.append(record.getMessage())  # type: ignore[method-assign]
 
     try:
-        logmod.configure_logging(level=logging.INFO)
+        logmod.configure_logging(level=logging.INFO, active_run_reader=lambda: active)
         root = logging.getLogger("blockchecks")
         fhs = [h for h in root.handlers if isinstance(h, logging.handlers.RotatingFileHandler)]
         assert fhs == [], "second writer attached during an active campaign"
@@ -298,7 +298,7 @@ def test_configure_logging_own_lock_attaches_file(tmp_path, monkeypatch):
     monkeypatch.setattr(logmod, "RUNTIME_LOGS_DIR", tmp_path)
     old = _reset_handlers()
     try:
-        logmod.configure_logging(level=logging.INFO)
+        logmod.configure_logging(level=logging.INFO, active_run_reader=lambda: active)
         root = logging.getLogger("blockchecks")
         fhs = [h for h in root.handlers if isinstance(h, logging.handlers.RotatingFileHandler)]
         assert fhs and fhs[0].baseFilename == str(tmp_path / "blockchecks.log")

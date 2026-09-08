@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 
 from blockchecks.checkers.curl_probe import repeats_from_args
 from blockchecks.checkers.dns_secure import prepare_dns_for_run
@@ -88,6 +89,39 @@ def cmd_tcp(args):
 
     repeats, parallel_repeats, repeats_mode, quick_break = repeats_from_args(args)
 
+    # Host-mode isolation (docs/hostmode.md §12): resolve + hard guards.
+    from blockchecks.engine.config import HOST_QNUM_TCP, resolve_probe_isol
+    from blockchecks.service import host_isol
+
+    try:
+        probe_isol = resolve_probe_isol(args)
+    except ValueError as exc:
+        error(str(exc))
+        return 1
+    host_qnum = int(getattr(args, "host_qnum", None) or HOST_QNUM_TCP)
+    if probe_isol == "host":
+        from blockchecks.service.run_control import read_active_run
+
+        if args.ns:
+            error("--probe-isol=host conflicts with --ns (host mode runs without netns)")
+            return 1
+        active = read_active_run()
+        if active is not None and active.pid != os.getpid():
+            error(
+                f"probe-isol=host: active campaign run (pid={active.pid}, "
+                f"{active.command}) — two concurrent host isolations are refused"
+            )
+            return 1
+        if errs := host_isol.self_check():
+            for e in errs:
+                error(f"probe-isol=host: {e}")
+            return 1
+        log.info(
+            "%s",
+            f"  Host-mode: qnum={host_qnum} uid={host_isol.HOST_PROBE_USER or 'bcprobe'} "
+            "(nft skuid match; scheme B)",
+        )
+
     runner = TestRunner(
         ns_name=args.ns,
         dns_cache=dns_cache,
@@ -96,6 +130,8 @@ def cmd_tcp(args):
         parallel_repeats=parallel_repeats,
         repeats_mode=repeats_mode,
         quick_break=quick_break,
+        probe_isol=probe_isol,
+        host_qnum=host_qnum,
     )
     total = len(strategies)
     if mode in (CONFIGS_DIR, "config") and strategies:

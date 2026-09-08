@@ -328,7 +328,11 @@ pair = [
     "src/blockchecks/cli/commands/pair_phases.py",
     "src/blockchecks/cli/parser.py",
 ]
-composite = ["src/blockchecks/checkers/composite_runner.py", "src/blockchecks/cli/parser.py"]
+composite = [
+    "src/blockchecks/checkers/composite_runner.py",
+    "src/blockchecks/cli/cliapp.py",
+    "src/blockchecks/cli/parser.py",
+]
 bench-settle = ["src/blockchecks/cli/commands/bench_settle.py"]
 full = ["src/blockchecks/main.py", "src/blockchecks/main_phases.py"]
 stop = ["src/blockchecks/cli/commands/stop.py"]

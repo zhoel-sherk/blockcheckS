@@ -131,7 +131,9 @@ def _keep_json_stdout_clean(args) -> None:
             handler.close()
         except Exception:  # noqa: BLE001
             pass
-    configure_logging(level=level, console="stderr")
+    from blockchecks.service.run_control import read_active_run
+
+    configure_logging(level=level, console="stderr", active_run_reader=read_active_run)
 
 
 def _maybe_skip_fooling_for_lock(args) -> None:

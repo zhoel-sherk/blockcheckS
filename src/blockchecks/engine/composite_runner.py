@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -20,7 +21,11 @@ from blockchecks.service.lua_bridge_ipc import LuaBridge
 from blockchecks.service.netns_pool import NetNsPool
 from blockchecks.service.nfqws2 import start_daemon
 from blockchecks.service.ns_firewall import get_ns_firewall
-from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
+from blockchecks.service.probe import (
+    invoke_curl_probe_worker,
+    probe_request_dict,
+    release_curl_probe_worker,
+)
 from blockchecks.terminal import CYAN, GREEN, RED, RESET
 
 log = logging.getLogger(__name__)
@@ -131,10 +136,71 @@ def _wait_bridge_heartbeat(bridge: LuaBridge, ns_name: str, *, within: float = 1
     return wait_heartbeat_fresh(bridge, within=within, ns_name=ns_name)
 
 
+async def _teardown_composite(
+    host_mode: bool,
+    host_proc: subprocess.Popen | None,
+    slot: str,
+    pool: NetNsPool | None,
+    ns_name: str,
+    mod_conf: str | None,
+) -> None:
+    """Single teardown point for both isolation paths (docs/hostmode.md §7/§18)."""
+    if host_mode:
+        # Kill by PID (canon §18.3/§18.14): no inode pkill on host, no
+        # process-tree guess — the foreground Popen IS the daemon.
+        if host_proc is not None:
+            try:
+                host_proc.terminate()
+                host_proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                host_proc.kill()
+            except (OSError, ProcessLookupError) as exc:
+                log.debug("composite host daemon stop: %s", exc)
+        from blockchecks.service import host_isol
+
+        host_isol.teardown_host_queue(expect_absent=True)
+        release_curl_probe_worker(slot)
+    else:
+        if pool is not None:
+            await pool.release(ns_name)
+        await _stop_pool(pool)
+    if mod_conf:
+        try:
+            os.unlink(mod_conf)
+        except OSError:
+            pass
+
+
+
 async def run(
-    config_path: str, domains: list[str] = None, _parallel: int = 2, timeout: float = 5.0
+    config_path: str,
+    domains: list[str] = None,
+    _parallel: int = 2,
+    timeout: float = 5.0,
+    *,
+    probe_isol: str = "netns",
+    host_qnum: int | None = None,
 ):
     domains = normalize_domains(domains)
+
+    from blockchecks.engine.config import DESYNC_MARK, HOST_QNUM_TCP, host_slot_name
+
+    if probe_isol not in ("netns", "host"):
+        raise ValueError(f"unknown probe_isol {probe_isol!r}")
+    host_mode = probe_isol == "host"
+    from blockchecks.service import host_isol
+
+    host_qnum = int(host_qnum or HOST_QNUM_TCP)
+    slot = ""
+    ns_name = ""
+    pool = None
+    if host_mode:
+        errs = host_isol.self_check()
+        if errs:
+            for e in errs:
+                log.error("probe-isol=host: %s", e)
+            return 1
+        slot = host_slot_name(host_qnum)
 
     config_abs = os.path.abspath(config_path)
     if not os.path.exists(config_abs):
@@ -147,14 +213,18 @@ async def run(
     log.info("")
 
     # One netns + one nfqws2 for ALL domains (NetNsPool only; no AsyncTestRunner).
-    pool = NetNsPool(size=1, base=f"{NETNS_BASE}-{os.getpid() % 10000:04d}")
-    await _start_pool(pool)
-    ns_name = await pool.acquire()
-
-    # IPC: same ACL path as campaign (0770/0660 + setfacl overflow-uid; 0777 only
-    # with warning). Pre-creates events.ndjson + heartbeat sentinel before daemon.
-    bridge = LuaBridge(ns_name)
-    bridge.setup()
+    # Host-mode: no pool at all — a foreground daemon + nft queue + IPC slot.
+    host_proc = None
+    if host_mode:
+        host_isol.attach_host_queue(qnum=host_qnum, desync_mark=DESYNC_MARK)
+        bridge = LuaBridge(slot)
+        bridge.setup()
+    else:
+        pool = NetNsPool(size=1, base=f"{NETNS_BASE}-{os.getpid() % 10000:04d}")
+        await _start_pool(pool)
+        ns_name = await pool.acquire()
+        bridge = LuaBridge(ns_name)
+        bridge.setup()
 
     # Автоинъекция: минимальные .conf без lua-init/qnum, плюс bridge Lua
     # когда в файле уже есть только zapret --lua-init= (heartbeat иначе мёртв).
@@ -163,8 +233,14 @@ async def run(
         conf_text = Path(config_abs).read_text(encoding="utf-8")
         rewritten = overlay_composite_conf(conf_text, bridge.paths.base)
         if rewritten is not None:
+            conf_text = rewritten
+        if host_mode:
+            conf_text = host_isol.hostify_conf_text(
+                conf_text, qnum=host_qnum, desync_mark=DESYNC_MARK
+            )
+        if conf_text != Path(config_abs).read_text(encoding="utf-8"):
             mod_conf = f"{config_abs}.composite.{os.getpid()}.conf"
-            Path(mod_conf).write_text(rewritten, encoding="utf-8")
+            Path(mod_conf).write_text(conf_text, encoding="utf-8")
             log.info("%s", "  composite: wrote overlay conf (writable/lua-init/bridge)")
             config_abs = mod_conf
     except OSError as exc:
@@ -175,26 +251,36 @@ async def run(
     results = []
 
     try:
-        # Start the single nfqws2 instance
-        await asyncio.to_thread(start_daemon, ns_name, config_abs)
+        if host_mode:
+            # Foreground Popen (canonical §18.14 — no --daemon double-fork on
+            # host); kill by PID at teardown, never pkill by host inode.
+            from blockchecks.service.nfqws2_launcher import Nfqws2Launcher
+
+            launch = await asyncio.to_thread(Nfqws2Launcher(None).foreground, config_abs)
+            host_proc = launch.proc
+        else:
+            # Start the single nfqws2 instance
+            await asyncio.to_thread(start_daemon, ns_name, config_abs)
 
         # Ждём ФАКТИЧЕСКОГО бинда очереди: маркер 'setting copy_packet mode'
         # в stdout-захвате демона (надёжен при любом пользователе запуска,
         # в отличие от /proc-скана root-owned процессов). Должен идти ПОСЛЕ
         # start_daemon — до него лог-файла демона ещё нет и цикл всегда
         # вырождался в 12-секундный сон (ложный "probing anyway").
-        _wait_queue_bind(ns_name, deadline_sec=12.0)
+        bind_tag = "host" if host_mode else ns_name
+        _wait_queue_bind(bind_tag, deadline_sec=12.0)
 
-        if not _wait_bridge_heartbeat(bridge, ns_name):
+        if not _wait_bridge_heartbeat(bridge, bind_tag):
             log.warning(
                 "composite: no heartbeat from %s within 1.2s — probing anyway "
                 "(queue-bypass risk)",
-                ns_name,
+                bind_tag,
             )
 
-        fw = get_ns_firewall(ns_name)
-        fw.attach(proto="tcp", port="443", queue=NFQUEUE_TCP)
-        fw.attach(proto="udp", port="50000:50100", queue=NFQUEUE_UDP, multiport=True)
+        if not host_mode:
+            fw = get_ns_firewall(ns_name)
+            fw.attach(proto="tcp", port="443", queue=NFQUEUE_TCP)
+            fw.attach(proto="udp", port="50000:50100", queue=NFQUEUE_UDP, multiport=True)
 
         # Test all domains sequentially (sharing one nfqws2) via JSON worker
         for domain in domains:
@@ -240,7 +326,10 @@ async def run(
                 "quick_break": False,
             }
             wall = worker_wall_timeout(timeout, 1, settle_slack=3.0)
-            data = await asyncio.to_thread(invoke_curl_probe_worker, ns_name, PYTHON, payload, wall)
+            worker_ns = slot if host_mode else ns_name
+            data = await asyncio.to_thread(
+                invoke_curl_probe_worker, worker_ns, PYTHON, payload, wall
+            )
 
             result = TcpTestResult(item=item, domain=domain)
             result.success = data.get("success", False)
@@ -256,13 +345,7 @@ async def run(
             log.info("%s", f"  {tag}  {domain:30s}  {lat:>8s}  {code_str}{err}")
 
     finally:
-        await pool.release(ns_name)
-        if mod_conf:
-            try:
-                os.unlink(mod_conf)
-            except OSError:
-                pass
-        await _stop_pool(pool)
+        await _teardown_composite(host_mode, host_proc, slot, pool, ns_name, mod_conf)
 
     elapsed = time.perf_counter() - t0
     passed = sum(1 for r in results if r.success)

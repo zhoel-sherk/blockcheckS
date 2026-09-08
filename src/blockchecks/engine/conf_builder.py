@@ -367,11 +367,18 @@ def add_blobs_from_strategy(lines: list[str], strategy: str) -> str:
     return apply_blob_renames(strategy, renames)
 
 
-def build_filter_lines(protocol: str) -> list[str]:
-    """Shared nfqws2 filter/payload lines for a protocol (tls|http|quic|udp)."""
+def build_filter_lines(protocol: str, *, qnum: int | None = None) -> list[str]:
+    """Shared nfqws2 filter/payload lines for a protocol (tls|http|quic|udp).
+
+    ``qnum`` overrides the protocol default queue — host-mode slots must
+    never take 200/201 while a foreign nfqws2 may own them (docs/hostmode.md
+    §6); netns campaigns keep their defaults (None).
+    """
+    qnum_tcp = f"--qnum={qnum if qnum is not None else NFQUEUE_TCP}"
+    qnum_udp = f"--qnum={qnum if qnum is not None else NFQUEUE_UDP}"
     by_proto = {
         "http": [
-            f"--qnum={NFQUEUE_TCP}",
+            qnum_tcp,
             "--filter-tcp=80",
             "--filter-l3=ipv4",
             "--filter-l7=http",
@@ -380,7 +387,7 @@ def build_filter_lines(protocol: str) -> list[str]:
             "--payload=http_req",
         ],
         "quic": [
-            f"--qnum={NFQUEUE_UDP}",
+            qnum_udp,
             "--filter-udp=443",
             "--filter-l3=ipv4",
             "--filter-l7=quic",
@@ -389,7 +396,7 @@ def build_filter_lines(protocol: str) -> list[str]:
             "--payload=quic_initial",
         ],
         "udp_voice": [
-            f"--qnum={NFQUEUE_UDP}",
+            qnum_udp,
             f"--filter-udp={VOICE_UDP_FILTER}",
             "--filter-l3=ipv4",
             "--filter-l7=discord,stun",
@@ -398,7 +405,7 @@ def build_filter_lines(protocol: str) -> list[str]:
             "--payload=discord_ip_discovery,stun,unknown",
         ],
         "udp_game": [
-            f"--qnum={NFQUEUE_UDP}",
+            qnum_udp,
             "--filter-udp=1024-65535",
             "--filter-l3=ipv4",
             f"--filter-l7={DEFAULT_UDP_L7}",
@@ -411,7 +418,7 @@ def build_filter_lines(protocol: str) -> list[str]:
         by_proto.get(
             protocol,
             [
-                f"--qnum={NFQUEUE_TCP}",
+                qnum_tcp,
                 "--filter-tcp=443",
                 "--filter-l3=ipv4",
                 "--filter-l7=tls",

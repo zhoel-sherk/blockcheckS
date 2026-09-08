@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR, ensure_dirs, reclaim_sudo_ownership
@@ -205,15 +206,17 @@ def configure_logging(
     level: str | int | None = None,
     console: str = "stdout",
     file_path: str | Path | None = None,
+    active_run_reader: Callable[[], object] | None = None,
 ) -> None:
     """Attach rotating file + stream handlers once; always apply *level*.
 
     AUDIT §15/§1: every process must have at most ONE writer per log file.
     ``file_path`` redirects the rotating handler (``bs mcp`` → its own
-    ``blockchecks_mcp.log``); without it, an active campaign run (run.lock
-    held by another process) skips the file handler entirely — a second
-    RotatingFileHandler on the same file loses the tail on rotation
-    (rename under someone else's fd) on long runs.
+    ``blockchecks_mcp.log``); with ``active_run_reader`` (pass
+    ``service.run_control.read_active_run`` — engine must not import the
+    service layer, arch test store_leaf/generators_leaf), an active campaign
+    run held by ANOTHER process skips the file handler entirely — a second
+    RotatingFileHandler on the same file loses the tail on rotation.
     """
     global _console_stream
     _console_stream = console if console == "stderr" else "stdout"
@@ -231,10 +234,8 @@ def configure_logging(
 
     file_fmt = logging.Formatter(_FILE_FMT)
     attach_file = True
-    if file_path is None:
-        from blockchecks.service.run_control import read_active_run
-
-        active = read_active_run()
+    if file_path is None and active_run_reader is not None:
+        active = active_run_reader()
         if active is not None and active.pid != os.getpid():
             logging.getLogger(LOGGER_NAME).info(
                 "%s",

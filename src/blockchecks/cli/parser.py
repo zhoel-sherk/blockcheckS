@@ -198,8 +198,36 @@ def add_curl_repeats_args(
         )
 
 
+def add_host_isol_args(parser: argparse.ArgumentParser) -> None:
+    """Host-mode isolation flags (docs/hostmode.md §12).
+
+    Where probe packets live: netns (default) vs host+fwmark. NOT
+    ``--probe-backend`` — that axis is lua_bridge vs classic.
+    """
+    g = parser.add_argument_group("host isolation (probe-isol)")
+    g.add_argument(
+        "--probe-isol",
+        choices=("netns", "host"),
+        default=None,
+        metavar="{netns,host}",
+        help="Probe packet isolation: netns (default, mixed hosts) or "
+        "host+fwmark (dedicated box; requires probe uid + nft)",
+    )
+    g.add_argument(
+        "--host-qnum",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Host-mode NFQUEUE TCP number (default 220; never 200/201)",
+    )
+
+
 def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
-    """Campaign TCP uses lua_bridge (scan_pick IPC). ``--classic`` is a no-op map."""
+    """Campaign TCP uses lua_bridge (scan_pick IPC). ``--classic`` is a no-op map.
+
+    Host-isol args are NOT added here: v1 wires --probe-isol on tcp/composite
+    only (dead-flag gate); campaign host pool is v2 (docs/hostmode.md §10).
+    """
     g = parser.add_argument_group("lua bridge (scan_pick IPC)")
     g.add_argument(
         "--classic",
@@ -893,6 +921,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_secure_dns_args(tcp, include_data_block_sync=False)
     add_system_deps_args(tcp)
     add_time_limit_args(tcp)
+    add_host_isol_args(tcp)
     add_curl_repeats_args(tcp)
     tcp.add_argument(
         "--debug",
@@ -1020,6 +1049,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     composite.add_argument("--parallel", type=int, default=effective_default_pool_size())
     composite.add_argument("--timeout", type=float, default=3.0)
+    add_host_isol_args(composite)
     add_system_deps_args(composite)
 
     pair = sub.add_parser("pair", help="TCP x UDP pair matrix (async)")
@@ -1373,7 +1403,9 @@ def _main_argparse(argv: list[str] | None = None) -> int:
 
     apply_pycache_prefix()
     ensure_dirs()
-    configure_logging()
+    from blockchecks.service.run_control import read_active_run
+
+    configure_logging(active_run_reader=read_active_run)
     user_cfg = load_user_config()
     paths_cfg = user_cfg.get("paths") if isinstance(user_cfg.get("paths"), dict) else {}
     if argv is None:

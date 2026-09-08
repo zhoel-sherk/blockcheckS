@@ -256,16 +256,28 @@ def _run_scan(ns: argparse.Namespace) -> int:
 
 
 def _run_composite(ns: argparse.Namespace) -> int:
+    args = ns  # dead-flag gate greps `args.<dest>` readers
     from blockchecks.checkers.composite_runner import run as run_composite
     from blockchecks.cli.parser import ensure_system_deps_or_exit
+    from blockchecks.engine.config import resolve_probe_isol
 
     ns.command = "composite"
     code = ensure_system_deps_or_exit(ns)
     if code:
         return code
+    try:
+        probe_isol = resolve_probe_isol(ns)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)  # noqa: T201, PRINT
+        return 1
     return asyncio.run(
         run_composite(
-            ns.config, getattr(ns, "domains", None), getattr(ns, "parallel", 2), ns.timeout
+            args.config,
+            getattr(args, "domains", None),
+            args.parallel,
+            args.timeout,
+            probe_isol=probe_isol,
+            host_qnum=args.host_qnum,
         )
     )
 
@@ -373,7 +385,9 @@ def main(argv: list[str] | None = None) -> int:
 
     apply_pycache_prefix()
     ensure_dirs()
-    configure_logging()
+    from blockchecks.service.run_control import read_active_run
+
+    configure_logging(active_run_reader=read_active_run)
     from blockchecks.service.netns_pool import NetNsPool
 
     NetNsPool.install_signal_hooks()

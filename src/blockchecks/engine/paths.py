@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -299,11 +300,22 @@ def _reclaim_pycache_tree() -> None:
         _chown_path(p, uid, gid)
 
 
-def configure_logging(*, level: str | int | None = None, console: str = "stdout") -> None:
+def configure_logging(
+    *,
+    level: str | int | None = None,
+    console: str = "stdout",
+    file_path: str | Path | None = None,
+    active_run_reader: Callable[[], object] | None = None,
+) -> None:
     """Delegate to ``blockchecks.engine.log`` (rotating file + operator streams)."""
     from blockchecks.engine.log import configure_logging as _configure
 
-    _configure(level=level, console=console)
+    _configure(
+        level=level,
+        console=console,
+        file_path=file_path,
+        active_run_reader=active_run_reader,
+    )
 
 
 def cwd_db_migrate_enabled(paths_cfg: dict | None = None) -> bool:

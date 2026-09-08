@@ -205,6 +205,56 @@ VOICE_UDP_FILTER = "50000-50100"
 NETNS_BASE = _env_or("BLOCKCHECKS_NETNS_BASE", "bs-p")
 DEFAULT_POOL_SIZE = int(_env_or("BLOCKCHECKS_POOL", "4"))
 
+# Host-mode (fwmark) — canon docs/hostmode.md. Host queues never 200/201
+# (a foreign nfqws2 may own those on a mixed box).
+HOST_QNUM_TCP = int(_env_or("BLOCKCHECKS_HOST_QNUM_TCP", "220"))
+# HOST_QNUM_UDP (221) returns in v2 together with host UDP voice wiring.
+#: nfqws2 ``--fwmark`` anti-loop for rawsend packets (upstream default).
+DESYNC_MARK = int(os.environ.get("BLOCKCHECKS_DESYNC_MARK", "0x40000000"), 0)
+#: PROBE mark set by nft on matched skb — only when the binary knows
+#: ``--filter-mark`` (nfqws2 >= 1.0.5). 0 = off (current binary; warning-only).
+PROBE_MARK = int(os.environ.get("BLOCKCHECKS_PROBE_MARK", "0"), 0)
+#: Dedicated uid the curl worker runs under; nft matches ``meta skuid``.
+HOST_PROBE_USER = os.environ.get("BLOCKCHECKS_HOST_PROBE_USER", "bcprobe")
+#: Host-mode slot name — never a plain "host" (probe.py would netns-exec it).
+def host_slot_name(qnum: int) -> str:
+    return f"host-q{qnum}-{os.getpid()}"
+
+
+def resolve_probe_isol(args) -> str:
+    """``--probe-isol`` / ``BLOCKCHECKS_PROBE_ISOL``: netns (default) | host.
+
+    Hard guards (AUDIT hostmode §12/§18 — error, never silent fallback):
+    - isol=host requires the probe uid to exist (nft skuid matcher);
+    - isol=host with a foreign active run.lock is refused (run_control layer
+      also enforces this via normal lock acquisition);
+    - ``--host-mark`` > 0 without nft mark-set support is an operator choice:
+      the value flows to conf ``--filter-mark``; caller decides when binary
+      lacks the option (warning-only per canon).
+    Unknown value → error. isol=netns ignores all --host-* flags.
+    """
+    requested = (getattr(args, "probe_isol", None) or "").strip().lower()
+    if not requested:
+        requested = os.environ.get("BLOCKCHECKS_PROBE_ISOL", "").strip().lower()
+    if not requested:
+        return "netns"
+    if requested == "netns":
+        return "netns"
+    if requested != "host":
+        raise ValueError(
+            f"--probe-isol: unknown value {requested!r}; allowed: netns, host"
+        )
+    import pwd
+
+    try:
+        pwd.getpwnam(HOST_PROBE_USER)
+    except KeyError:
+        raise ValueError(
+            f"probe-isol=host requires probe uid {HOST_PROBE_USER!r} (useradd -r "
+            f"{HOST_PROBE_USER}); refusing to queue the whole :443 instead"
+        ) from None
+    return "host"
+
 # Lua bridge (/dev/shm IPC)
 SHM_BASE = _env_or("BLOCKCHECKS_SHM_BASE", "/dev/shm/blockchecks")
 DEFAULT_BRIDGE_BATCH = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH", "500"))

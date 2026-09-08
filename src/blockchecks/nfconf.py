@@ -396,8 +396,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
     from blockchecks.engine.log import configure_logging
+    from blockchecks.service.run_control import read_active_run
 
-    configure_logging()
+    configure_logging(active_run_reader=read_active_run)
 
     result = asyncio.run(
         export_configs(

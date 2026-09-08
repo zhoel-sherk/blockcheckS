@@ -1155,7 +1155,13 @@ def test_preflight_json_routes_console_logs_to_stderr(monkeypatch):
 
     calls: dict[str, object] = {}
 
-    def fake_configure(*, level=None, console: str = "stdout") -> None:
+    def fake_configure(
+        *,
+        level=None,
+        console: str = "stdout",
+        file_path=None,
+        active_run_reader=None,
+    ) -> None:
         calls["console"] = console
         calls["level"] = level
 

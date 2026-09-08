@@ -378,14 +378,18 @@ def test_run_udp_dispatcher_delegates():
 def test_run_composite_dispatcher_delegates():
     from blockchecks.cli import cliapp as ca
 
-    ns = argparse.Namespace(config="/tmp/c.conf", domains=["x.com"], parallel=2, timeout=3.0)
+    ns = argparse.Namespace(
+        config="/tmp/c.conf", domains=["x.com"], parallel=2, timeout=3.0, host_qnum=None
+    )
     with (
         patch("blockchecks.cli.parser.ensure_system_deps_or_exit", return_value=0),
         patch("blockchecks.checkers.composite_runner.run", new=AsyncMock(return_value=4)) as cr,
     ):
         rc = ca._run_composite(ns)
     assert rc == 4
-    cr.assert_awaited_once_with("/tmp/c.conf", ["x.com"], 2, 3.0)
+    cr.assert_awaited_once_with(
+        "/tmp/c.conf", ["x.com"], 2, 3.0, probe_isol="netns", host_qnum=None
+    )
 
 
 @pytest.mark.unit

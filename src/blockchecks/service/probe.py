@@ -93,6 +93,24 @@ def _loads_probe_json(out: str | None) -> dict:
 
 
 def _worker_cmd(ns_name: str, py: str) -> list[str]:
+    # Host-mode slot (docs/hostmode.md §8): "host-qN-<pid>" runs WITHOUT
+    # netns exec, under the dedicated probe uid so nft `meta skuid` matches —
+    # a plain "host" name must NEVER appear here (it would netns-exec).
+    if ns_name.startswith("host-q"):
+        from blockchecks.engine.config import HOST_PROBE_USER
+
+        return [
+            "sudo",
+            "-n",
+            "-u",
+            HOST_PROBE_USER,
+            "-E",
+            py,
+            "-m",
+            "blockchecks.service.in_ns_workers",
+            "--mode",
+            "curl",
+        ]
     return [
         "sudo",
         "-E",

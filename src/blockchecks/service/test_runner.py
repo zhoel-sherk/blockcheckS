@@ -7,10 +7,14 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
+from blockchecks.engine.config import DESYNC_MARK, HOST_QNUM_TCP, host_slot_name
+from blockchecks.service import host_isol
 from blockchecks.service.metrics import pkill_nfqws2_in_ns
 from blockchecks.service.nfqws2 import Nfqws2Manager
 from blockchecks.service.ns_firewall import HostFirewall, get_ns_firewall
+from blockchecks.service.probe import _worker_cmd
 
 log = logging.getLogger(__name__)
 
@@ -85,9 +89,21 @@ class TestRunner:
         parallel_repeats: bool = False,
         repeats_mode: str = "fast",
         quick_break: bool = False,
+        probe_isol: str = "netns",
+        host_qnum: int | None = None,
+        desync_mark: int = 0,
     ):
         self.ns_name = ns_name
         self._python = sys.executable  # use same Python that runs the tester
+        # Host-mode (docs/hostmode.md): probe packets on the host netns path
+        # matched by nft skuid; slot name carries qnum + session pid.
+        self.probe_isol = probe_isol
+        self.host_mode = probe_isol == "host"
+        if self.host_mode and ns_name:
+            raise ValueError("--probe-isol=host conflicts with --ns (host runs without netns)")
+        self.host_qnum = int(host_qnum or HOST_QNUM_TCP)
+        self.desync_mark = desync_mark or DESYNC_MARK
+        self.host_slot = host_slot_name(self.host_qnum) if self.host_mode else ""
         self.dns_cache = dns_cache
         self.secure_dns = secure_dns
         from blockchecks.checkers.curl_probe import clamp_repeats
@@ -130,7 +146,10 @@ class TestRunner:
             probe["repeats_mode"] = self.repeats_mode
             probe["quick_break"] = self.quick_break
             payload = json.dumps(probe)
-            if self.ns_name:
+            if self.host_mode:
+                # Host-mode slot: worker runs as the probe uid (nft skuid match).
+                cmd = _worker_cmd(self.host_slot, self._python)
+            elif self.ns_name:
                 cmd = [
                     "sudo",
                     "ip",
@@ -218,13 +237,24 @@ class TestRunner:
 
         nfqws2 = Nfqws2Manager(ns_name=self.ns_name)
         fw = self._host_firewall() if self.ns_name is None else self._ns_firewall()[1]
+        _tmp_conf: str | None = None
 
         try:
-            if self.ns_name:
+            if self.host_mode:
+                host_isol.attach_host_queue(qnum=self.host_qnum, desync_mark=self.desync_mark)
+                nfqws2.start(
+                    strategy,
+                    hostlist=hostlist,
+                    qnum=self.host_qnum,
+                    host_mode=True,
+                    desync_mark=self.desync_mark,
+                )
+            elif self.ns_name:
                 fw.attach(proto="tcp", port="443", queue=qnum, bypass=True)
+                nfqws2.start(strategy, hostlist=hostlist, qnum=qnum)
             else:
                 fw.prepare_tcp(qnum=qnum)
-            nfqws2.start(strategy, hostlist=hostlist, qnum=qnum)
+                nfqws2.start(strategy, hostlist=hostlist, qnum=qnum)
 
             check = self._run_check(domain, timeout)
             result.success = check.success
@@ -237,6 +267,8 @@ class TestRunner:
             nfqws2.stop()
             self._teardown_nfqws2()
             self._teardown_tcp_firewall(fw, qnum)
+            if self.host_mode:
+                host_isol.teardown_host_queue(expect_absent=True)
 
         result.time_total_ms = (time.perf_counter() - t0) * 1000
         return result
@@ -253,13 +285,19 @@ class TestRunner:
 
         nfqws2 = Nfqws2Manager(ns_name=self.ns_name)
         fw = self._host_firewall() if self.ns_name is None else self._ns_firewall()[1]
+        _tmp_conf: str | None = None
 
         try:
-            if self.ns_name:
+            if self.host_mode:
+                host_isol.attach_host_queue(qnum=self.host_qnum, desync_mark=self.desync_mark)
+                _tmp_conf = self._hostify_conf(config_path)
+                nfqws2.start_config(_tmp_conf)
+            elif self.ns_name:
                 fw.attach(proto="tcp", port="443", queue=qnum, bypass=True)
+                nfqws2.start_config(config_path)
             else:
                 fw.prepare_tcp(qnum=qnum)
-            nfqws2.start_config(config_path)
+                nfqws2.start_config(config_path)
 
             check = self._run_check(domain, timeout)
             result.success = check.success
@@ -272,9 +310,45 @@ class TestRunner:
             nfqws2.stop()
             self._teardown_nfqws2()
             self._teardown_tcp_firewall(fw, qnum)
+            if self.host_mode:
+                host_isol.teardown_host_queue(expect_absent=True)
+            if _tmp_conf:
+                try:
+                    os.unlink(_tmp_conf)
+                except OSError:
+                    pass
 
         result.time_total_ms = (time.perf_counter() - t0) * 1000
         return result
+
+    def _hostify_conf(self, config_path: str) -> str:
+        """Rewrite a .conf for the host slot (AUDIT hostmode §6).
+
+        Overrides ``--qnum`` with the host queue, injects the mandatory
+        ``--fwmark`` anti-loop line, strips foreign ``--filter-mark`` (the
+        current binary lacks the option; PROBE_MARK is off in v1).
+        """
+        import tempfile
+
+        lines: list[str] = []
+        inserted = False
+        for raw in Path(config_path).read_text(encoding="utf-8").splitlines():
+            s = raw.strip()
+            if s.startswith("--qnum="):
+                lines.append(f"--qnum={self.host_qnum}")
+                lines.append(f"--fwmark={self.desync_mark:#x}")
+                inserted = True
+                continue
+            if s.startswith("--fwmark=") or s.startswith("--filter-mark="):
+                continue
+            lines.append(raw)
+        if not inserted:
+            lines.insert(0, f"--qnum={self.host_qnum}")
+            lines.insert(1, f"--fwmark={self.desync_mark:#x}")
+        fd, tmp = tempfile.mkstemp(prefix="bs_host_", suffix=".conf")
+        os.close(fd)
+        Path(tmp).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return tmp
 
     def test_sequential(
         self,
@@ -362,6 +436,12 @@ class TestRunner:
         self, config_path: str, ip: str, port: int = 50004, timeout: float = 3.0, qnum: int = 201
     ) -> StrategyResult:
         """Test a UDP nfqws2 config against a voice server IP."""
+        if self.host_mode:
+            # docs/hostmode.md §15: host UDP is out of v1 (bypass=False voice
+            # semantics not ported yet) — refuse instead of silent wide queue.
+            raise NotImplementedError(
+                "probe-isol=host: UDP voice is out of scope for host-mode v1"
+            )
         basename = os.path.basename(config_path).replace(".conf", "")
         result = StrategyResult(strategy=basename, domain=f"{ip}:{port}")
         t0 = time.perf_counter()
