@@ -23,6 +23,7 @@ from blockchecks.engine.config import (
     DOH_SERVERS,
     UDP_DNS_SERVERS,
     UNTRUSTED_DOH_URLS,
+    impersonate_target,
 )
 from blockchecks.terminal import CYAN, GREEN, GREY, RED, RESET, YELLOW
 
@@ -148,7 +149,7 @@ def _doh_json_query(
     """DoH via JSON API (application/dns-json)."""
     start = time.perf_counter()
     try:
-        with curl_cffi.Session(impersonate="chrome124") as session:
+        with curl_cffi.Session(impersonate=impersonate_target()) as session:
             _pin_doh_session(session, doh_url)
             resp = session.get(
                 f"{doh_url}?name={_domain_to_dns_ascii(domain)}&type=A",
@@ -179,7 +180,7 @@ def _doh_wire_query(
     start = time.perf_counter()
     try:
         wire = _build_dns_query(domain)
-        with curl_cffi.Session(impersonate="chrome124") as session:
+        with curl_cffi.Session(impersonate=impersonate_target()) as session:
             _pin_doh_session(session, doh_url)
             resp = session.post(
                 doh_url,

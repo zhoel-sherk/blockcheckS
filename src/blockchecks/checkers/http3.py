@@ -11,7 +11,7 @@ import curl_cffi
 from curl_cffi.requests import RequestsError
 
 from blockchecks.checkers.tcp_tls import classify_http_status
-from blockchecks.engine.config import HTTP3_TIMEOUT
+from blockchecks.engine.config import HTTP3_TIMEOUT, impersonate_target
 
 _HTTP3_PROBE_URL = "https://cloudflare.com"
 
@@ -63,17 +63,20 @@ def supports_http3() -> bool:
 def check_http3(
     domain: str,
     timeout: float = 8.0,
-    impersonate: str = "chrome124",
+    impersonate: str | None = None,
     pre_resolved_ip: str | None = None,
 ) -> Http3Result:
     """Probe domain over HTTP/3 only (QUIC/UDP 443)."""
     result = Http3Result(domain=domain)
     start = time.perf_counter()
     headers = {"Accept": "text/html,application/xhtml+xml"}
+    # AUDIT §12.3/B5: None → env resolver (works inside the netns subprocess
+    # too — env is inherited).
+    imp = impersonate if impersonate is not None else impersonate_target()
 
     try:
         with curl_cffi.Session(
-            impersonate=impersonate,
+            impersonate=imp,
             http_version="v3only",
             headers=headers,
             allow_redirects=False,

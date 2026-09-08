@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import random
@@ -215,7 +216,15 @@ def remember_ggc_ip(host: str, ip: str) -> None:
             entries[host] = {"ip": ip, "ts": time.time()}
             # держим не более 256 свежих записей
             trimmed = dict(sorted(entries.items(), key=lambda kv: -kv[1]["ts"])[:256])
-            _write_ips_cache(trimmed)
+            # AUDIT §12.3/D8: read-modify-write под межпроцессным flock —
+            # без него параллельные процессы (кампания + daemon + dbg-пробы)
+            # затирают записи друг друга (last-writer-wins).
+            path = ips_cache_path()
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            lock_path = path.with_name(f"{path.name}.lock")
+            with open(lock_path, "a+", encoding="utf-8") as lock_fh:
+                fcntl.flock(lock_fh, fcntl.LOCK_EX)
+                _write_ips_cache(trimmed)
     except OSError as exc:
         log.warning("%s", f"  ggc: ips-cache write failed: {exc}")
 

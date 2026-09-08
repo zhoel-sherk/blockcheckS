@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import curl_cffi
 from curl_cffi.requests import RequestsError
 
-from blockchecks.engine.config import MIN_CONTENT_LENGTH
+from blockchecks.engine.config import MIN_CONTENT_LENGTH, impersonate_target
 
 log = logging.getLogger(__name__)
 
@@ -188,7 +188,7 @@ def _classify_tls_error(msg: str, *, elapsed: float, timeout: float) -> str:
 def check_tls(
     domain: str,
     timeout: float = 5.0,
-    impersonate: str = "chrome124",
+    impersonate: str | None = None,
     http_version: int = 2,
     verify_content: bool = True,
     pre_resolved_ip: str | None = None,
@@ -207,13 +207,15 @@ def check_tls(
     """
     result = TlsResult(domain=domain)
     start = time.perf_counter()
+    # AUDIT §12.3/B5: None → env resolver (BLOCKCHECKS_IMPERSONATE).
+    imp = impersonate if impersonate is not None else impersonate_target()
 
     # Omit User-Agent so curl_cffi impersonation supplies a real browser UA
     headers = {"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9"}
 
     try:
         with curl_cffi.Session(
-            impersonate=impersonate,
+            impersonate=imp,
             http_version=http_version,
             headers=headers,
             allow_redirects=False,

@@ -252,6 +252,20 @@ HTTP3_TIMEOUT = float(_env_or("BLOCKCHECKS_HTTP3_TIMEOUT", "3.0"))
 # Composite runner / tcp_tls probe timeout.
 PROBE_DEFAULT_TIMEOUT = float(_env_or("BLOCKCHECKS_PROBE_TIMEOUT", "5.0"))
 
+#: TLS/HTTP fingerprint target for ALL probes (curl_cffi impersonate).
+#: Pinned to chrome124 by default so campaign results stay comparable across
+#: runs; override per-run with BLOCKCHECKS_IMPERSONATE (e.g. "chrome" -> latest
+#: preset). Canonical resolver lives here (leaf module) so every checker can
+#: import it without an import cycle through curl_probe (AUDIT §12.3/B5).
+DEFAULT_IMPERSONATE = "chrome124"
+
+
+def impersonate_target() -> str:
+    """Resolved curl_cffi impersonate target (env override, validated lazily)."""
+    val = (os.environ.get("BLOCKCHECKS_IMPERSONATE") or "").strip()
+    return val or DEFAULT_IMPERSONATE
+
+
 
 def _requested_probe_backend(args) -> str | None:
     """Return the backend the operator asked for, or None for default."""

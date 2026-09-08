@@ -144,14 +144,17 @@ def probe_quic_initial(
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     icmp: socket.socket | None = None
     try:
-        udp.settimeout(timeout)
-        udp.sendto(packet, (ip, port))
-        # ICMP receiver for Port Unreachable (best-effort; raw needs CAP_NET_RAW).
+        # AUDIT §12.3/B6: open the ICMP receiver BEFORE sendto — the host stack
+        # can emit Port Unreachable within microseconds of the datagram; a
+        # socket opened after sendto races and misses it (best-effort; raw
+        # needs CAP_NET_RAW).
         try:
             icmp = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
             icmp.settimeout(timeout)
         except (OSError, PermissionError):
             icmp = None
+        udp.settimeout(timeout)
+        udp.sendto(packet, (ip, port))
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:

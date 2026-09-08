@@ -2,6 +2,7 @@
 STUN Binding (RFC 5389) and Discord IP Discovery are separate packets. No token required.
 """
 
+import logging
 import random
 import socket
 import struct
@@ -10,6 +11,16 @@ import time
 # Discord IP Discovery (docs): Type(2)+Length(2)+SSRC(4)+Address(64)+Port(2) = 74
 IP_DISCOVERY_BODY_LEN = 70
 IP_DISCOVERY_TOTAL = 74
+
+log = logging.getLogger(__name__)
+
+
+def _close_udp(sock: socket.socket) -> None:
+    """Close a probe socket; close errors are non-fatal but logged (AUDIT §12.3/D7)."""
+    try:
+        sock.close()
+    except OSError as exc:
+        log.debug("udp_voice socket close failed: %s", exc)
 
 
 def build_ip_discovery_request(ssrc: int = 0) -> bytes:
@@ -80,10 +91,7 @@ def stun_probe(ip: str, port: int = 50004, timeout: float = 3.0) -> tuple[bool, 
         return False, elapsed, str(e)[:100]
     finally:
         if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
+            _close_udp(sock)
 
 
 def ip_discovery_probe(
@@ -121,10 +129,7 @@ def ip_discovery_probe(
         return False, elapsed, str(e)[:100]
     finally:
         if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
+            _close_udp(sock)
 
 
 def voice_burst_probe(
@@ -202,10 +207,7 @@ def voice_burst_probe(
         return False, elapsed, str(e)[:100]
     finally:
         if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
+            _close_udp(sock)
 
 
 def voice_udp_probe(

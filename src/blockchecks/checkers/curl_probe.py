@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 
@@ -25,19 +24,11 @@ from blockchecks.engine.config import (
     SOCKS5_PROXY,
     THROTTLED_MAX_BPS,
     WALL_SLACK,
+    impersonate_target,
 )
 
-#: TLS/HTTP fingerprint target for all probes. Pinned to chrome124 by default
-#: so campaign results stay comparable across runs; override per-run with
-#: BLOCKCHECKS_IMPERSONATE (e.g. "chrome" -> latest preset, currently chrome150).
-DEFAULT_IMPERSONATE = "chrome124"
-
-
-def impersonate_target() -> str:
-    """Resolved curl_cffi impersonate target (env override, validated lazily)."""
-    val = (os.environ.get("BLOCKCHECKS_IMPERSONATE") or "").strip()
-    return val or DEFAULT_IMPERSONATE
-
+# Canonical resolver + default live in engine/config (leaf); re-exported here
+# for backward compatibility (store_leaf + tests reference curl_probe names).
 
 try:
     CURLOPT_IPRESOLVE = curl_cffi.CurlOpt.IPRESOLVE
@@ -924,7 +915,7 @@ def run_stream_triage_probe(
     *,
     timeout: float = 8.0,
     range_header: str = "bytes=0-262143",
-    impersonate: str = "chrome124",
+    impersonate: str | None = None,
     resolved_ip: str | None = None,
 ) -> StreamTriageResult:
     """Stream a large Range request and measure per-window progress.
@@ -948,9 +939,12 @@ def run_stream_triage_probe(
     window_start = time.perf_counter()
     window_bytes = 0
     peak_window_bps = 0.0
+    # AUDIT §12.3/B5: None → env resolver; the hard "chrome124" default ignored
+    # BLOCKCHECKS_IMPERSONATE in the stream-triage path.
+    imp = impersonate if impersonate is not None else impersonate_target()
 
     try:
-        with curl_cffi.Session(impersonate=impersonate, allow_redirects=False) as session:
+        with curl_cffi.Session(impersonate=imp, allow_redirects=False) as session:
             if resolved_ip:
                 host = url.split("/")[2].split(":")[0]
                 session.curl.setopt(CURLOPT_RESOLVE, [f"{host}:443:{resolved_ip}"])
