@@ -16,6 +16,12 @@
   CACHE/ggc_ips.json (кэш резолва, свежие вперёд) → DEFAULT_LAST_RESORT_IPS
   (ротация). Явный override и dns.db всегда берут голову списка.
 
+Legacy last-resort — round-robin на каждый pick (_rotate_last_resort):
+мёртвый head не залипает, но соседние пробы уходят на разные IP ступени —
+интерпретировать только вместе с tcp_results.probe_host. Пул сам не
+вычёркивает мёртвые IP (prune вручную); «вечные» константы умирают молча
+(урок 25.08: rr5---sn-5goeenes NXDOMAIN, 74.125.108.234 не отвечает).
+
 Выбранный хост возвращается вызывающему и попадает в tcp_results.probe_host.
 """
 

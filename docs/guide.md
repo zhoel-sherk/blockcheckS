@@ -457,6 +457,13 @@ SNI больше не захардкожен: каждая проба берёт
 legacy-константа. **Не доверяйте старым константам узлов**: `rr5---sn-5goeenes`
 давно NXDOMAIN, а `74.125.108.234` мёртв — проверяйте через DoH.
 
+Legacy last-resort **ротируется** (round-robin на каждый pick — мёртвый head
+не залипает навсегда), поэтому соседние пробы могут уходить на разные IP
+этой ступени: смотрите `tcp_results.probe_host` при интерпретации. Пул
+сам мёртвые IP не вычёркивает — prune только вручную (список
+`DEFAULT_LAST_RESORT_IPS` в `engine/ggc_pool.py`); попадание в
+last-resort видно по WARNING «rotating legacy last-resort» в логе.
+
 Переменные: `BLOCKCHECKS_GGC_MODE`, `BLOCKCHECKS_GGC_IPS`,
 `BLOCKCHECKS_GGC_REAL_POOL`, `BLOCKCHECKS_GGC_HOST` (только fixed),
 `BLOCKCHECKS_GGC_IP` (только legacy), `BLOCKCHECKS_PROXY`.

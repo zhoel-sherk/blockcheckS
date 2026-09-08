@@ -1,6 +1,7 @@
 # Package structure — blockcheckS
 
 Аудит layout после 1.4.0 (lua_bridge-only campaign, service split, 2026-08-28).
+Счётчики обновлены 2026-09-08 (волна 1.4.1: аудит §1–§13, mcp/server, gc).
 
 ## Канон
 
@@ -136,52 +137,55 @@ Re-exported from `blockchecks.engine` and `blockchecks.checkers` — see
 ## Repository Structure & Metrics
 
 Full tree with line counts (Python / shell / lua / md; binaries excluded).
-Unit suite: **1938 collected**, quality **165**, integration **22** (sudo E2E).
+Suite: **2291 tests** — unit **2106 collected**, quality **165**, integration **19** (sudo E2E).
 
 ```
-src/blockchecks/                      (≈25 700 строк, 108+ py-файлов)
-├── bs.py 17 | terminal.py 97 | main.py 234 | main_phases.py 1102 | nfconf.py 229
-├── harvest_batch.py 310 | provider_import.py 230 | shortlist_export.py 188 | shortlist_import.py 206
-├── cli/  cliapp.py 602 | parser.py 1293 | profiles.py 46 | presets.py 65 | user_config.py 104
-│   └── commands/  bench_settle 161 | pair 208 | pair_phases 802 | serve 62 |
-│                  stop 14 | tcp 117 | udp 123
-├── checkers/  composite_runner 189 | curl_probe 941 | dns_secure 497 |
-│   http3 92 | ip_block 173 | ip_pin 106 | l3_probe 167 | port_block 76 |
-│   quic_raw 178 | tcp_tls 211 | udp_voice 219 | voice_discovery 342 |
-│   voice_dns 562 | youtube_url 195
-├── data_block/  provider 167 | store 362
-├── engine/  adaptive_queue 468 | adaptive_runner 353 | async_runner 1007 |
-│   bridge_worker_pool 273 | blob_aliases 169 | byedpi_matrix_generator 144 |
-│   byedpi_translator 323 | conf_builder 361 | config 433 | db_logger 22 |
-│   domain_loader 175 | domain_quarantine 168 | fail_phase 128 | family_needs 192 |
-│   ggc_pool 317 | matrix_generator 287 | nfqws_config 94 |
-│   pair_matrix_runner 271 | paths 322 | preflight 487 | probe_executors 531 |
-│   preset_paths 101 | results 82 | run_deadline 144 | run_finalize 154 |
-│   run_spec 185 | secure_io 24 | settings 107 | settle_profile 178 | strategy_loader 64 |
-│   system_deps 489 | tcp_fanout 100 | triage 130
-│   ├── generators/  base 41 | custom 155 | flowseal 335 | standard 882 (facade)
-│   │   └── families/  fake 213 | split 253 | tamper 244 | _helpers 112
-│   └── store/  models 16 | schema 277 | sqlite_store 1269
-├── service/  batch_bridge_probe 186 | batch_models 67 | batch_scheduler 110 |
-│   batch_service 385 | firewall 120 | live_events 211 | lua_bridge_ipc 458 |
-│   lua_conf 112 | lua_netns 82 | lua_session 141 | metrics 334 |
-│   netns_pool 228 | ns_firewall 211 | nfqws2 200 | nfqws2_launcher 370 |
-│   nfqws2_settle 71 | probe 107 | probe_service 219 | run_control 178 | server 181 |
-│   in_ns_workers 842 | test_runner 419
-tests/unit/                        (≈18 600 строк, 141 файла)   — 1938 collected
-tests/integration/                 (≈670 строк, 5 файлов)       — 22 passed (sudo)
-lua/blockchecks/                   (≈200 строк): geneva 65 | scan_bridge 90 |
-                                   write_ipc 44 | init 3
-scripts/                           (≈1 000 строк, 14 скриптов + README) — кампании, install, пресеты
-dev/                               (≈1 700 строк, 19 скриптов + README) — смоки, гейты, бенчи
+src/blockchecks/                      (≈39 100 строк, 143 py-файла)
+├── bs.py 14 | terminal.py 113 | main.py 169 | main_phases.py 1281 | nfconf.py 439
+├── harvest_batch.py 310 | provider_import.py 234 | shortlist_export.py 198 | shortlist_import.py 217
+├── cli/  cliapp.py 423 | parser.py 1409 | profiles.py 107 | presets.py 66 | user_config.py 132
+│   └── commands/  bench_settle 161 | data_block 34 | gc 48 | harvest_batch 71 | mcp 22 |
+│                  pair 246 | pair_phases 1046 | preflight 211 | serve 94 | stop 18 |
+│                  tcp 124 | udp 128
+├── checkers/  composite_runner 10 | curl_probe 1117 | dns_secure 733 | fooling_probe 180 |
+│   http3 158 | ip_block 175 | ip_pin 94 | l3_probe 162 | port_block 79 | quic_raw 199 |
+│   tcp_tls 289 | ttl_probe 121 | udp_voice 246 | voice_discovery 407 | voice_dns 602 |
+│   youtube_url 191
+├── data_block/  export 95 | provider 317 | store 594
+├── engine/  adaptive_queue 657 | adaptive_runner 347 | async_runner 542 | blob_aliases 277 |
+│   blob_filter 140 | bridge_worker_pool 292 | byedpi_matrix_generator 129 | byedpi_translator 334 |
+│   composite_runner 270 | conf_builder 723 | config 507 | db_logger 22 (shim) | dns_pin_service 140 |
+│   domain_loader 243 | domain_quarantine 265 | fail_phase 173 | family_axes 352 | family_needs 202 |
+│   family_registry 199 | family_spec 176 | gc 409 | ggc_pool 345 | ipset_catalog 363 | log 353 |
+│   matrix_generator 350 | nfqws_config 88 | pair_matrix_runner 276 | paths 363 | preflight 959 |
+│   preset_paths 151 | probe_executors 546 | probe_result_logger 190 | results 100 | resume_triage 35 |
+│   run_deadline 149 | run_finalize 212 | run_spec 213 | secure_io 32 | settings 232 |
+│   settle_profile 194 | static_validator 301 | strategy_loader 103 | system_deps 518 |
+│   tcp_fanout 111 | triage 260 | wssize_retry 39
+│   ├── generators/  base 41 | custom 248 | flowseal 369 | standard 262
+│   │   └── families/  fake 293 | split 325 | tamper 332 | _helpers 197
+│   └── store/  models 16 | schema 285 | sqlite_store 1391
+├── mcp/  server 1475
+├── service/  batch_bridge_probe 175 | batch_models 71 | batch_scheduler 125 | batch_service 607 |
+│   firewall 5 | in_ns_workers 854 | live_events 211 | lua_bridge_ipc 473 | lua_conf 126 |
+│   lua_netns 57 | lua_session 192 | metrics 406 | netns_pool 548 | nfqws2 201 |
+│   nfqws2_launcher 389 | nfqws2_settle 193 | ns_firewall 266 | probe 313 | probe_service 219 |
+│   run_control 238 | server 1033 | test_runner 432
+tests/unit/                        (≈33 200 строк, 143 файла)   — 2106 collected
+tests/integration/                 (≈640 строк, 5 файлов)       — 19 (sudo)
+lua/blockchecks/                   (≈310 строк): geneva 76 | scan_bridge 95 | write_ipc 90 |
+                                   init 4 | custom/dupfake 49
+scripts/                           (≈1 600 строк, 16 скриптов) — кампании, install, пресеты
+dev/                               (≈2 800 строк, 27 скриптов) — смоки, гейты, бенчи
 blobs/                             (31 .bin + README 68)  — verify_blobs 31 OK
-presets/                           manifest.toml + domains 11 + strategies 27 + README 180
+presets/                           manifest.toml + domains 12 + strategies 27 + ipset 3 + README
 systemd/                           blockcheck-series.service 18 | blockcheck-serve.service 18
-docs/                              (≈3 560 строк, 9 md + cookbook 5)
+docs/                              (≈5 970 строк, 17 md + cookbook 5)
 ```
 
-Biggest modules: `parser` 1293 | `sqlite_store` 1269 | `main_phases` 1102 | `async_runner` 1007 | `curl_probe` 941 |
-`in_ns_workers` 842 | `pair_phases` 802 | `cliapp` 602 | `system_deps` 489 | `preflight` 487 | `lua_bridge_ipc` 458.
+Biggest modules: `mcp/server` 1475 | `parser` 1409 | `sqlite_store` 1391 | `main_phases` 1281 |
+`curl_probe` 1117 | `dns_secure` 733 | `conf_builder` 723 | `adaptive_queue` 657 |
+`batch_service` 607 | `voice_dns` 602.
 
 ## Quality
 
