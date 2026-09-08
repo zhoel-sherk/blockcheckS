@@ -4,7 +4,7 @@
 
 ## Оглавление
 
-1. [Открытое](#открытое) — конкретная работа в продукте (lua_bridge, host-mode, GP, отложенное).
+1. [Открытое](#открытое) — конкретная работа в продукте (lua_bridge, host-mode, GP, перенос из аудита, отложенное).
 2. [Оптимизация для слабых устройств](#оптимизация-для-слабых-устройств-pi2-старые-cpu) — память и CPU на Pi2 / старых Xeon / MIPS.
 3. [Уголок идей](#уголок-идей) — исследования, не в спринте (в т.ч. [дыры preflight](#preflight-dnsl3geo-ip)).
 4. [RL/ML-подбор стратегий](#rlml-подход-подбора-стратегий) — научить очередь угадывать PASS лучше эвристики.
@@ -65,6 +65,36 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
 - [ ] **Четыре netns на всех.** Пул маленький. Если serve и кто-то ещё дерут одни namespace — явная очередь/отказ через тот же `run_control`, не молчаливая порча iptables.
 
 
+
+### Перенос из аудита 2026-09 (AUDIT §6–§10)
+
+Функциональные/рефакторные хвосты волн аудита; каждый пункт — отдельная волна
+с canary-тестом генераторов и валидатором синтаксиса.
+
+- [ ] **§6.2 Coverage до BC2-набора:** маркерные seqovl-пары для
+  fakedsplit/fakeddisorder/multidisorder (multisplit — только числа,
+  см. AUDIT §6.4-уточнение); `multisplit:blob=X:pos=2:nodrop` (фейк-носитель,
+  BC2 25-fake); tcpseg `pos=0,method+2` (http) и `pos=0,-1:seqovl=…`; faked-
+  позиции до BC2-8 (`sniext+4`, `host+1`, `1,midsld,1220`, длинное комбо);
+  syndata+multidisorder и `fake_default_http`-вариант; hostfake-комбо
+  `nofakeX:midhost=midsld`; `multidisorder_legacy`.
+- [ ] **§6.3 Хардкоды экспандеров → оси/константы:** padencap-комбо
+  (`fake:blob=google` + `pos=10,sniext+1`), companions-гейт `r == 6`,
+  `_ACK_BLOBS` + fool-whitelist в `fake.py`.
+- [ ] **§6.1 P3-гигиена:** честные repeats 100/260 в full-режиме (BC2
+  15-misc) вместо удалённого no-op фильтра; унификация осей `foolings`
+  (TCP) vs `fools` (geneva_fool); типовая гигиена `base.py` (`| None`,
+  `set[str]`).
+- [ ] **§7.3 Worker recycle:** persistent curl worker целиком пересоздаётся
+  на каждой пробе-таймауте — кандидат «recycle по счётчику» (унаследуют
+  host-mode слоты).
+- [ ] **§10.3 `fingerprint_matched`** — к JA4 отношения не имеет; переименовать
+  или задокументировать (ломает MCP-контракт — с версией).
+- [ ] **§8.4 Покрытие checkers:** `tests/unit/test_checkers.py` — 3 smoke-теста
+  на весь слой checkers; расширить (STUN txn-id уже есть).
+- [ ] **§9.3 Гит-археология (опционально):** следующая партия старейших
+  файлов (`test_batch_probe_runner/test_gv_ggc/test_probe_worker`,
+  `scripts/run_week_coverage.sh` — осторожно, активный).
 
 ### Отложено
 
@@ -219,6 +249,33 @@ TTL у нас — не traceroute: [`probe_ttl`](../src/blockchecks/checkers/ttl
 - [ ] **Нулевой PASS.** Если очередь застряла в нуле — расширить луч, взять топ-K модели или пройти семью целиком. Не заканчивать скан с пустым shortlist из-за жадности.
 
 
+
+### Движок подбора: аудит §5.5 (C.1–C.7)
+
+Инженерные редизайны очереди (AUDIT §5.5, перенесено 2026-09-08). Семантика
+вердиктов (THROTTLED-гейт §5.3) уже закрыта в 1.4.1 — здесь только reward/веса.
+
+- [ ] **C.1 FAIL-пенальти/decay.** `mark_done(passed=False)` — no-op; веса —
+  монотонная рапетка до 64, один везучий PASS пинит семью навсегда →
+  attempts-счётчики + EWMA/Beta-постериор на (family, blob, trait).
+- [ ] **C.2 Thompson/UCB** вместо статического ε=0.1 — см. пункт Thompson
+  выше в «Весах внутри очереди» (это тот же пункт).
+- [ ] **C.3 Fanout-evidence.** Fanout/`run_single` = one-shot →
+  `bridge_applied=None` → `boost_pass` размножает HTTP-only пас (captcha)
+  на кластер. Требовать APPLIED для `fanout_on_pass` или verify-метка
+  fanout-джобам.
+- [ ] **C.4 Reward.** Латентность и `throttled` в приоритет: быстрый чистый
+  PASS > медленный; THROTTLED ниже чистого (гейт уже есть).
+- [ ] **C.5 DPI-сигналы в веса.** `rst_in`/`retrans` уже пишутся в events —
+  per-genetics счётчик RST-in → штраф семьям, видимым DPI (карантин сейчас
+  только доменного уровня).
+- [ ] **C.6 Адаптивный ε.** Half-mark метрики (`pass_rate_before_half`,
+  `time_to_first_pass`) считаются, но только для репорта — связать с ε
+  (выше до первого PASS, ниже после).
+- [ ] **C.7 Персистенция весов.** `to_rows/from_rows` без timestamps/attempts
+  — на resume старые бусты живут вечно; добавить дату/attempts + decay при
+  загрузке. Не ломать `ScanWeights`/resume.
+- Примечание: lazy stale-refresh в `pop` корректен — не трогать.
 
 ### Дальний R&D
 
