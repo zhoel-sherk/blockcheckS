@@ -29,7 +29,8 @@ SPLIT_GRID: tuple[tuple[str, str], ...] = (
 BLOB_GRID: tuple[tuple[str, str], ...] = (
     ("stun", "fake:blob=stun:repeats=6:tcp_ts=-1000"),
     ("tls_clienthello", "fake:blob=google:repeats=6:tcp_ts=-1000"),
-    ("empty", "fake:repeats=6:tcp_ts=-1000"),
+    # Upstream fake() errors without blob=; null blob is the BC2 empty-fake form.
+    ("empty", "fake:blob=0x00000000:repeats=6:tcp_ts=-1000"),
 )
 
 ProbeFn = Callable[[str], tuple[bool, str, int]]  # strategy → (ok, error, http)

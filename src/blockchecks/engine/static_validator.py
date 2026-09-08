@@ -75,6 +75,9 @@ def _is_fake_family(strategy: str) -> bool:
 
 def _is_split_family(strategy: str) -> bool:
     fam = _leading_family(strategy)
+    # hostfakesplit splits by the Host marker — pos= is not required.
+    if fam in ("hostfakesplit", "nhostfakesplit"):
+        return False
     if fam in _SPLIT_FAMILIES:
         return True
     # composite families (e.g. fake+multisplit) also carry split semantics
