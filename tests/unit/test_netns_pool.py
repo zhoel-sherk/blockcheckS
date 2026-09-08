@@ -347,3 +347,91 @@ def test_ip_forward_not_saved_when_already_enabled():
         pool.create_all()
         pool.destroy_all()
     assert sysctl_cmds == []
+
+
+def test_forward_rules_idempotent_on_attach():
+    """AUDIT §12.3/A5: -C before -A FORWARD; missing rule → -A, existing → skip."""
+    pool = NetNsPool(size=1, base="bs-t")
+    cmds: list[tuple[str, ...]] = []
+
+    def fake_run(*args, check=True):
+        cmds.append(tuple(args))
+        if args[:2] == ("iptables", "-C"):
+            return MagicMock(returncode=0, stdout="", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(pool, "_run", side_effect=fake_run),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch("blockchecks.service.netns_pool.subprocess.run") as sprun,
+        patch("blockchecks.service.netns_pool.time.sleep"),
+        patch("blockchecks.service.probe.bump_ns_epoch", return_value=1),
+    ):
+        sprun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        pool._create_one(0)
+    appends = [c for c in cmds if c[:2] == ("iptables", "-A") and "FORWARD" in c]
+    checks = [c for c in cmds if c[:2] == ("iptables", "-C") and "FORWARD" in c]
+    assert len(checks) == 2
+    assert appends == []  # rules already present → no duplicates
+
+
+def test_forward_rules_appended_when_missing():
+    """Fresh namespace: -C misses both directions → exactly two -A FORWARD."""
+    pool = NetNsPool(size=1, base="bs-t")
+    cmds: list[tuple[str, ...]] = []
+
+    def fake_run(*args, check=True):
+        cmds.append(tuple(args))
+        if args[:2] == ("iptables", "-C"):
+            return MagicMock(returncode=1, stdout="", stderr="Bad rule")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(pool, "_run", side_effect=fake_run),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch("blockchecks.service.netns_pool.subprocess.run") as sprun,
+        patch("blockchecks.service.netns_pool.time.sleep"),
+        patch("blockchecks.service.probe.bump_ns_epoch", return_value=1),
+    ):
+        sprun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        pool._create_one(0)
+    appends = [c for c in cmds if c[:2] == ("iptables", "-A") and "FORWARD" in c]
+    assert len(appends) == 2
+
+
+def test_run_destroy_missing_dev_quiet(caplog):
+    """AUDIT §12.3/A7: missing host veth on destroy is expected → no warning."""
+    pool = NetNsPool(size=1, base="bs-t")
+
+    def fail_veth(*args, check=True):
+        if args[:3] == ("ip", "link", "delete"):
+            return MagicMock(returncode=1, stdout="", stderr="Cannot find device \"vh-0\"")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(pool, "_run", side_effect=fail_veth),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch("blockchecks.service.metrics.pkill_nfqws2_in_ns"),
+        caplog.at_level("WARNING"),
+    ):
+        pool._destroy_one("bs-t-0", track_lifecycle=False)
+    assert not any("netns destroy rc=1" in r.message for r in caplog.records)
+
+
+def test_run_destroy_real_failure_still_warns(caplog):
+    """Non-missing-device destroy failure keeps its warning."""
+    pool = NetNsPool(size=1, base="bs-t")
+
+    def fail_veth(*args, check=True):
+        if args[:3] == ("ip", "link", "delete"):
+            return MagicMock(returncode=1, stdout="", stderr="Operation not permitted")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(pool, "_run", side_effect=fail_veth),
+        patch.object(pool, "_get_iface", return_value="eth0"),
+        patch("blockchecks.service.metrics.pkill_nfqws2_in_ns"),
+        caplog.at_level("WARNING"),
+    ):
+        pool._destroy_one("bs-t-0", track_lifecycle=False)
+    assert any("netns destroy rc=1" in r.message for r in caplog.records)

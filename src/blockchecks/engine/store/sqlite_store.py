@@ -16,11 +16,21 @@ from typing import Any
 import aiosqlite
 
 from blockchecks import __version__
+from blockchecks.engine.fail_phase import _INFRA_ERROR_MARKERS, INFRA_FAIL_PHASES
 from blockchecks.engine.paths import reclaim_sudo_ownership
 from blockchecks.engine.store.models import Checkpoint
 from blockchecks.engine.store.schema import apply_schema
 
 log = logging.getLogger(__name__)
+
+# Quarantine seed contract (engine/domain_quarantine.py): a domain is
+# quarantined after ``min_attempts`` failed *DPI* probes. Infrastructure
+# failures (dead daemon, dead netns, IPC) prove nothing about DPI and must
+# not inflate the attempt count (AUDIT §12.3/D1: a degraded session could
+# otherwise permanently denylist live domains via ``--resume`` seeding).
+_INFRA_PHASE_SQL = "(" + ",".join(f"'{p.value}'" for p in sorted(INFRA_FAIL_PHASES, key=lambda p: p.value)) + ")"
+_INFRA_LIKE_SQL = " OR ".join(f"IFNULL(error,'') LIKE '%{m}%'" for m in _INFRA_ERROR_MARKERS)
+_INFRA_ROW_SQL = f"(fail_phase IN {_INFRA_PHASE_SQL} OR {_INFRA_LIKE_SQL})"
 
 _TCP_INSERT_SQL = """INSERT INTO tcp_results
    (run_id,strategy_id,domain,status,http_code,latency_ms,
@@ -774,6 +784,9 @@ class SqliteRunStore:
 
         ``total_passed`` counts rows whose status is PASS or THROTTLED (working
         probes), matching latest-row working semantics elsewhere in the store.
+        ``total_attempts`` counts only DPI-shaped failures: infrastructure
+        failures (INFRA_FAIL_PHASES / infra error markers) are excluded — the
+        quarantine module counts *DPI* verdicts, not infra noise (AUDIT §12.3).
         """
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_reader_pragmas(db)
@@ -781,13 +794,17 @@ class SqliteRunStore:
                 f"SELECT domain, COUNT(*), "
                 f"SUM(CASE WHEN status IN {_WORKING_STATUSES} "
                 f"AND (bridge_applied IS NULL OR bridge_applied = 1) THEN 1 ELSE 0 END) "
-                f"FROM tcp_results GROUP BY domain"
+                f"FROM tcp_results WHERE NOT {_INFRA_ROW_SQL} GROUP BY domain"
             )
             rows = await cur.fetchall()
         return [(r[0], int(r[1] or 0), int(r[2] or 0)) for r in rows]
 
     async def domain_dns_resolve_fail_rows(self) -> list[tuple[str, int, int]]:
-        """(domain, dns_resolve FAIL count, passed) for dns-resolve quarantine seed."""
+        """(domain, dns_resolve FAIL count, passed) for dns-resolve quarantine seed.
+
+        Same infra-FAIL exclusion as :meth:`domain_pass_rows`: infra noise must
+        not feed the dns-resolve counter either (AUDIT §12.3).
+        """
         async with aiosqlite.connect(self._path) as db:
             await SqliteRunStore._apply_reader_pragmas(db)
             cur = await db.execute(
@@ -795,7 +812,7 @@ class SqliteRunStore:
                 f"SUM(CASE WHEN fail_phase='dns_resolve' THEN 1 ELSE 0 END), "
                 f"SUM(CASE WHEN status IN {_WORKING_STATUSES} "
                 f"AND (bridge_applied IS NULL OR bridge_applied = 1) THEN 1 ELSE 0 END) "
-                f"FROM tcp_results GROUP BY domain"
+                f"FROM tcp_results WHERE NOT {_INFRA_ROW_SQL} GROUP BY domain"
             )
             rows = await cur.fetchall()
         return [(r[0], int(r[1] or 0), int(r[2] or 0)) for r in rows]

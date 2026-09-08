@@ -245,11 +245,19 @@ class NetNsPool:
             raise RuntimeError(f"cmd failed: {' '.join(args)} → {(r.stderr or '')[:200]!r}")
         return r
 
-    def _run_destroy(self, ns_name: str, *args) -> int:
-        """Run a destroy command; log non-zero rc (including timeout rc=-1)."""
+    def _run_destroy(self, ns_name: str, *args, expect_missing_dev: bool = False) -> int:
+        """Run a destroy command; log non-zero rc (including timeout rc=-1).
+
+        ``expect_missing_dev``: "Cannot find device" is expected on the host
+        veth delete (peer died with the ns, or a prior crash already removed
+        it) → debug, not warning — otherwise every destroy spams (AUDIT §12.3/A7).
+        """
         r = self._run(*args, check=False)
         if r.returncode != 0:
             detail = (r.stderr or r.stdout or "").strip()
+            if expect_missing_dev and "Cannot find device" in detail:
+                log.debug("netns destroy: %s already gone (ns=%s)", " ".join(args), ns_name)
+                return r.returncode
             log.warning(
                 "netns destroy rc=%s ns=%s cmd=%s%s",
                 r.returncode,
@@ -347,9 +355,14 @@ class NetNsPool:
         # Routing
         self._run("ip", "netns", "exec", name, "ip", "route", "add", "default", "via", host_ip)
 
-        # Allow forwarded traffic from veth pairs
-        self._run("iptables", "-A", "FORWARD", "-i", veth_h, "-j", "ACCEPT", check=False)
-        self._run("iptables", "-A", "FORWARD", "-o", veth_h, "-j", "ACCEPT", check=False)
+        # Allow forwarded traffic from veth pairs. Idempotent: -C first so a
+        # SIGKILLed previous run's orphan rule is reused instead of duplicated
+        # (mirrors the NAT pattern below; AUDIT §12.3/A5).
+        for fw_dir in ("-i", "-o"):
+            fw_args = ("FORWARD", fw_dir, veth_h, "-j", "ACCEPT")
+            fw_chk = self._run("iptables", "-C", *fw_args, check=False)
+            if fw_chk.returncode != 0:
+                self._run("iptables", "-A", *fw_args)
         # Idempotent NAT: -C first so a SIGKILLed previous run's orphan rule is
         # reused instead of duplicated (leaked rules piled up 60+ across runs).
         nat_args = (
@@ -414,7 +427,11 @@ class NetNsPool:
 
             drop_ns_firewall(name)
             netns_rc = self._run_destroy(name, "ip", "netns", "delete", name)
-            self._run_destroy(name, "ip", "link", "delete", veth_h)
+            # Host veth delete right after the ns is gone: the peer inside the
+            # ns is destroyed with it, so a *later* delete would always miss
+            # ("Cannot find device" on every destroy). Missing device here
+            # (prior crash cleanup) is expected → debug (AUDIT §12.3/A7).
+            self._run_destroy(name, "ip", "link", "delete", veth_h, expect_missing_dev=True)
             self._run_destroy(name, "iptables", "-D", "FORWARD", "-i", veth_h, "-j", "ACCEPT")
             self._run_destroy(name, "iptables", "-D", "FORWARD", "-o", veth_h, "-j", "ACCEPT")
             self._run_destroy(

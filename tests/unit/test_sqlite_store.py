@@ -948,3 +948,43 @@ async def test_get_best_tcp_slug_resolves_args_via_config_path(tmp_path):
     assert resolved == args
     assert resolved != slug
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_domain_pass_rows_excludes_infra_failures(tmp_path):
+    """AUDIT §12.3/D1: infra FAIL must not feed quarantine seeding.
+
+    A degraded session (dead nfqws2/netns) writes infra-shaped FAILs; without
+    the filter ``--resume`` seeding would permanently denylist live domains.
+    """
+    store = open_run_store(tmp_path / "t.db")
+    await store.init()
+    for i in range(3):
+        await store.log_tcp(f"s{i}", "dead.example", "FAIL", 10.0, fail_phase="sni_rst")
+    await store.log_tcp(
+        "si1", "dead.example", "FAIL", 10.0, error="ns pool exhausted", fail_phase="connect_timeout"
+    )
+    await store.log_tcp("si2", "dead.example", "FAIL", 10.0, error="/dev/shm IPC broken")
+    await store.log_tcp("si3", "dead.example", "FAIL", 10.0, error="Permission denied on shm dir")
+    await store.log_tcp("si4", "dead.example", "FAIL", 10.0, error="batch probe loop failed")
+    await store.log_tcp("si5", "dead.example", "FAIL", 10.0, error="stopped before probe start")
+    await store.log_tcp("sp1", "dead.example", "PASS", 10.0, 200, config_path="fake:blob=stun")
+    rows = await store.domain_pass_rows()
+    by_domain = {d: (total, passed) for d, total, passed in rows}
+    assert by_domain["dead.example"] == (4, 1)
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_domain_dns_resolve_fail_rows_excludes_infra_failures(tmp_path):
+    """Same infra exclusion for the dns-resolve quarantine counter."""
+    store = open_run_store(tmp_path / "t.db")
+    await store.init()
+    await store.log_tcp("s1", "nodata.example", "FAIL", 10.0, fail_phase="dns_resolve")
+    await store.log_tcp(
+        "s2", "nodata.example", "FAIL", 10.0, fail_phase="dns_resolve", error="batch probe loop failed"
+    )
+    rows = await store.domain_dns_resolve_fail_rows()
+    by_domain = {d: (fails, passed) for d, fails, passed in rows}
+    assert by_domain["nodata.example"] == (1, 0)
+    await store.close()
