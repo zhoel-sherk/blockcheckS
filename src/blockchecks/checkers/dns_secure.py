@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 import curl_cffi
 from curl_cffi.requests import RequestsError
 
+from blockchecks.checkers._curl_common import apply_no_env_proxy
 from blockchecks.engine.config import (
     DEFAULT_DOH_SERVER,
     DNS_CACHE_TTL,
@@ -150,6 +151,7 @@ def _doh_json_query(
     start = time.perf_counter()
     try:
         with curl_cffi.Session(impersonate=impersonate_target()) as session:
+            apply_no_env_proxy(session)
             _pin_doh_session(session, doh_url)
             resp = session.get(
                 f"{doh_url}?name={_domain_to_dns_ascii(domain)}&type=A",
@@ -181,6 +183,7 @@ def _doh_wire_query(
     try:
         wire = _build_dns_query(domain)
         with curl_cffi.Session(impersonate=impersonate_target()) as session:
+            apply_no_env_proxy(session)
             _pin_doh_session(session, doh_url)
             resp = session.post(
                 doh_url,

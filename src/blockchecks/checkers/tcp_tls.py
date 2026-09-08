@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import curl_cffi
 from curl_cffi.requests import RequestsError
 
+from blockchecks.checkers._curl_common import apply_no_env_proxy
 from blockchecks.engine.config import MIN_CONTENT_LENGTH, impersonate_target
 
 log = logging.getLogger(__name__)
@@ -220,6 +221,7 @@ def check_tls(
             headers=headers,
             allow_redirects=False,
         ) as session:
+            apply_no_env_proxy(session)
             if pre_resolved_ip:
                 from blockchecks.checkers.dns_secure import apply_curl_resolve
 

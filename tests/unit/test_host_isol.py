@@ -206,3 +206,45 @@ def test_qnum_busy_ignores_our_table():
     ruleset = "table inet blockchecks_host { queue num 220 bypass }"
     with patch.object(host_isol, "_nft", return_value=MagicMock(returncode=0, stdout=ruleset)):
         assert host_isol.qnum_busy(220) is None
+
+
+@pytest.mark.unit
+def test_queue_bound_reads_proc(tmp_path):
+    """Live-bind via /proc portid (AUDIT §16: stdout marker flushes on exit)."""
+    from pathlib import Path
+
+    proc_file = tmp_path / "nfnetlink_queue"
+    monkeypatch_free = patch.dict(
+        "sys.modules", {}
+    )  # placeholder to keep import style; real patch below
+
+    with patch.object(
+        host_isol.Path, "__new__", Path.__new__
+    ):
+        pass
+
+    def fake_read(self):
+        return "220 1081018     0 2 65531     0     0        0  1\n"
+
+    real_path = host_isol.Path
+
+    class FakePath(str):
+        def exists(self):
+            return True
+
+        def read_text(self, *a, **kw):
+            return "220 1081018     0 2 65531     0     0        0  1\n"
+
+    with patch.object(host_isol, "Path", FakePath):
+        assert host_isol.queue_bound(220) is True
+        assert host_isol.queue_bound(221) is False
+
+    class DeadPath(str):
+        def exists(self):
+            return True
+
+        def read_text(self, *a, **kw):
+            return "220 0     0 2 65531     0     0        0  1\n"
+
+    with patch.object(host_isol, "Path", DeadPath):
+        assert host_isol.queue_bound(220) is False

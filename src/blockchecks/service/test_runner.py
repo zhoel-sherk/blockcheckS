@@ -66,9 +66,13 @@ def _check_tls_in_ns(domain: str, timeout: float, resolved_ip: str | None = None
     payloads: list[dict] = []
     if is_ytcdn_domain(domain):
         variants = ytcdn_probe_variants(domain, timeout=timeout, resolved_ip=resolved_ip)
-        payloads = [probe_request_dict(v) for v in variants]
+        # WRAPPED shape ({"mode","request"}) — the stdio worker reads
+        # payload["request"] (AUDIT: flat probe_request_dict regressed this).
+        payloads = [
+            {"mode": "single", "request": probe_request_dict(v)} for v in variants
+        ]
     if not payloads:
-        payloads = [probe_request_dict(req)]
+        payloads = [{"mode": "single", "request": probe_request_dict(req)}]
     return {
         "domain": domain,
         "payload": payloads[0],
@@ -249,6 +253,7 @@ class TestRunner:
                     host_mode=True,
                     desync_mark=self.desync_mark,
                 )
+                self._wait_host_bind()
             elif self.ns_name:
                 fw.attach(proto="tcp", port="443", queue=qnum, bypass=True)
                 nfqws2.start(strategy, hostlist=hostlist, qnum=qnum)
@@ -292,6 +297,7 @@ class TestRunner:
                 host_isol.attach_host_queue(qnum=self.host_qnum, desync_mark=self.desync_mark)
                 _tmp_conf = self._hostify_conf(config_path)
                 nfqws2.start_config(_tmp_conf)
+                self._wait_host_bind()
             elif self.ns_name:
                 fw.attach(proto="tcp", port="443", queue=qnum, bypass=True)
                 nfqws2.start_config(config_path)
@@ -320,6 +326,25 @@ class TestRunner:
 
         result.time_total_ms = (time.perf_counter() - t0) * 1000
         return result
+
+    def _wait_host_bind(self, deadline: float = 10.0) -> None:
+        """AUDIT §16: probe only after a REAL queue bind (/proc portid).
+
+        The nfqws2 stdout marker flushes on exit (full stdio buffering) —
+        probing before bind = queue-bypass raw traffic = false verdicts.
+        """
+        from time import monotonic, sleep
+
+        t0 = monotonic()
+        while monotonic() - t0 < deadline:
+            if host_isol.queue_bound(self.host_qnum):
+                return
+            sleep(0.2)
+        log.warning(
+            "host-mode: queue %d not bound within %.1fs — probing anyway (bypass risk)",
+            self.host_qnum,
+            deadline,
+        )
 
     def _hostify_conf(self, config_path: str) -> str:
         """Rewrite a .conf for the host slot (AUDIT hostmode §6).

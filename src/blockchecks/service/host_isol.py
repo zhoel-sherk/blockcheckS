@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+from pathlib import Path
 
 from blockchecks.engine.config import (
     DESYNC_MARK,
@@ -211,6 +212,27 @@ def hostify_conf_text(conf_text: str, *, qnum: int, desync_mark: int) -> str:
     return "\n".join(lines) + "\n"
 
 
+def queue_bound(qnum: int) -> bool:
+    """True when a listener owns this NFQUEUE (live-bind probe).
+
+    ``/proc/net/netfilter/nfnetlink_queue`` row: portid (2nd column) != 0/−1
+    means a userspace consumer is attached. The stdout-marker alternative is
+    unreliable — nfqws2 writes to a redirected file fully buffered, so the
+    marker only flushes on exit (AUDIT §16 acceptance lesson).
+    """
+    q = Path("/proc/net/netfilter/nfnetlink_queue")
+    if not q.exists():
+        return False
+    try:
+        for line in q.read_text().splitlines():
+            parts = line.split()
+            if parts and parts[0] == str(qnum) and len(parts) > 1 and parts[1] not in ("0", "-1"):
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def teardown_host_queue(*, expect_absent: bool = False) -> bool:
     """Delete OUR table (single teardown contract, §7/§18.2). Never flush.
 
@@ -257,6 +279,7 @@ def self_check() -> list[str]:
 
 __all__ = [
     "NFT_TABLE",
+    "queue_bound",
     "attach_host_queue",
     "build_notrack_rule",
     "build_queue_rules",

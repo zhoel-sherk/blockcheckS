@@ -51,9 +51,10 @@ def test_check_tls_in_ns_ok():
     req.protocol = "tls12"
     with patch("blockchecks.checkers.curl_probe.build_probe_request", return_value=(req, None)):
         info = _check_tls_in_ns("d.com", 3.0)
-    # AUDIT §12.3/B4: payload is a serialized request; "mode" is added by
-    # _run_check, and "payloads" carries the variant list (1 for plain domains).
-    assert info["payload"]["domain"] == "d.com"
+    # AUDIT §12.3/B4: payload is WRAPPED ({"mode","request"}) — the stdio
+    # worker reads payload["request"]; "payloads" carries the variant list.
+    assert info["payload"]["request"]["domain"] == "d.com"
+    assert info["payload"]["mode"] == "single"
     assert info["payloads"] == [info["payload"]]
 
 
@@ -244,7 +245,8 @@ def test_check_tls_in_ns_ytcdn_variants():
     assert info["error_result"] is None
     assert len(info["payloads"]) == 2
     assert info["payload"] is info["payloads"][0]
-    assert all(p["ytcdn"] for p in info["payloads"])
+    assert all(p["request"]["ytcdn"] for p in info["payloads"])
+    assert all(p["mode"] == "single" for p in info["payloads"])
 
 
 def test_run_check_ytcdn_variants_first_success_wins():

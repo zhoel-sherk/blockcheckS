@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import curl_cffi
 from curl_cffi.requests import RequestsError
 
+from blockchecks.checkers._curl_common import apply_no_env_proxy
 from blockchecks.checkers.dns_secure import CURLOPT_RESOLVE
 from blockchecks.checkers.tcp_tls import DPI_FAKE_PATTERNS, classify_http_status
 from blockchecks.engine.config import (
@@ -565,6 +566,7 @@ def _open_curl_session(req: CurlProbeRequest) -> curl_cffi.Session | CurlProbeRe
         headers=headers,
         allow_redirects=False,
     )
+    apply_no_env_proxy(session)
     if req.googlevideo:
         session.curl.setopt(CURLOPT_IPRESOLVE, _CURL_IPRESOLVE_V4)
     _apply_resolve(session, req)
@@ -955,6 +957,7 @@ def run_stream_triage_probe(
 
     try:
         with curl_cffi.Session(impersonate=imp, allow_redirects=False) as session:
+            apply_no_env_proxy(session)
             if resolved_ip:
                 host = url.split("/")[2].split(":")[0]
                 session.curl.setopt(CURLOPT_RESOLVE, [f"{host}:443:{resolved_ip}"])

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import curl_cffi
 from curl_cffi.requests import RequestsError
 
+from blockchecks.checkers._curl_common import apply_no_env_proxy
 from blockchecks.checkers.tcp_tls import classify_http_status
 from blockchecks.engine.config import HTTP3_TIMEOUT, impersonate_target
 
@@ -51,6 +52,7 @@ def supports_http3() -> bool:
     """Return True if curl_cffi can request HTTP/3 (blockcheck2 curl_supports_http3)."""
     try:
         with curl_cffi.Session(http_version="v3only", allow_redirects=False) as session:
+            apply_no_env_proxy(session)
             session.get(_HTTP3_PROBE_URL, timeout=HTTP3_TIMEOUT)
         return True
     except RequestsError as exc:
@@ -81,6 +83,7 @@ def check_http3(
             headers=headers,
             allow_redirects=False,
         ) as session:
+            apply_no_env_proxy(session)
             if pre_resolved_ip:
                 from blockchecks.checkers.dns_secure import apply_curl_resolve
 

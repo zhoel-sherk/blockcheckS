@@ -262,9 +262,11 @@ def test_doh_json_setopt_resolve_bootstrap():
         ips, err, _ = _doh_json_query("example.com", "https://cloudflare-dns.com/dns-query")
     assert ips == ["9.9.9.9"]
     assert not err
-    session.curl.setopt.assert_called_once_with(
-        CURLOPT_RESOLVE, ["cloudflare-dns.com:443:1.1.1.1"]
-    )
+    # call #1 = apply_no_env_proxy (PROXY=""), #2 = the resolve pin
+    assert (
+        "call",
+        (CURLOPT_RESOLVE, ["cloudflare-dns.com:443:1.1.1.1"]),
+    ) in session.curl.setopt.call_args_list
 
 
 @pytest.mark.unit

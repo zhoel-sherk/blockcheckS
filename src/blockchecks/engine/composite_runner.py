@@ -73,11 +73,25 @@ async def _stop_pool(pool: NetNsPool) -> None:
     await asyncio.to_thread(pool.destroy_all)
 
 
-def _wait_queue_bind(ns_name: str, deadline_sec: float) -> bool:
-    """Wait until the composite daemon actually bound its NFQUEUE socket
-    (stdout marker ``setting copy_packet mode``). Returns False on timeout
-    (caller may still probe — but logs the degradation)."""
+def _wait_queue_bind(ns_name: str, deadline_sec: float, *, qnum: int | None = None) -> bool:
+    """Wait until the composite daemon actually bound its NFQUEUE socket.
+
+    Two probes, in order of reliability:
+    - host-mode (qnum given): ``/proc/net/netfilter/nfnetlink_queue`` portid —
+      the stdout marker flushes only on daemon EXIT (full stdio buffering).
+    - netns: stdout marker ``setting copy_packet mode`` (ns daemons run via
+      start_daemon whose captures get flushed by the parent's fd close).
+    Returns False on timeout (caller may still probe — logs the degradation)."""
     from blockchecks.engine.paths import RUNTIME_LOGS_DIR
+    from blockchecks.service.host_isol import queue_bound
+
+    if qnum is not None:
+        deadline = time.perf_counter() + deadline_sec
+        while time.perf_counter() < deadline:
+            if queue_bound(qnum):
+                return True
+            time.sleep(0.2)
+        return False
 
     deadline = time.perf_counter() + deadline_sec
     while time.perf_counter() < deadline:
@@ -102,31 +116,61 @@ def _wait_queue_bind(ns_name: str, deadline_sec: float) -> bool:
 
 
 def overlay_composite_conf(conf_text: str, ipc_dir: Path) -> str | None:
-    """Ensure writable IPC, zapret lua-init, qnum, bind-fix4, and bridge Lua.
+    """Ensure writable IPC, full zapret lua-init set, qnum, bind-fix4, bridge Lua.
 
-    User ``.conf`` files often already have zapret ``--lua-init=``; skipping
-    the whole inject then leaves ``init.lua`` / heartbeat unloaded.
+    User ``.conf`` files often have a PARTIAL ``--lua-init=`` set (lib+antidpi
+    without zapret-auto.lua) — inject by FILE NAME, not by the presence of any
+    --lua-init (AUDIT §16: a champ conf without zapret-auto.lua timed out even
+    through a healthy queue; the auto profile is load-bearing for the TSPU).
+    Also declares referenced blobs via ``--blob=<name>:@<file>`` — operator
+    confs with ``--lua-desync=fake:blob=stun…`` need the blob registered or
+    the desync silently no-ops.
     """
-    from blockchecks.engine.config import NFQUEUE_TCP, get_lua_init_scripts
+    from blockchecks.engine.blob_aliases import (
+        append_blob_cli_lines,
+        apply_blob_renames,
+        extract_blob_names,
+    )
+    from blockchecks.engine.config import (
+        BLOB_DIR,
+        NFQUEUE_TCP,
+        get_lua_init_scripts,
+    )
     from blockchecks.service.lua_conf import stage_blockchecks_lua
 
     prefix: list[str] = []
     suffix: list[str] = []
     if "--writable=" not in conf_text:
         prefix.append(f"--writable={ipc_dir}")
-    if "--lua-init=" not in conf_text:
-        prefix += [f"--lua-init=@{p}" for p in get_lua_init_scripts()]
+    have_inits = {
+        line.strip().split("@", 1)[-1]
+        for line in conf_text.splitlines()
+        if line.strip().startswith("--lua-init=@")
+    }
+    for script in get_lua_init_scripts():
+        if script not in have_inits:
+            prefix.append(f"--lua-init=@{script}")
     if "--qnum=" not in conf_text:
         prefix.append(f"--qnum={NFQUEUE_TCP}")
     if "--bind-fix4" not in conf_text:
         prefix.append("--bind-fix4")
     if "scan_bridge.lua" not in conf_text and "write_ipc.lua" not in conf_text:
         suffix += [f"--lua-init=@{p}" for p in stage_blockchecks_lua(ipc_dir)]
-    if not prefix and not suffix:
-        return None
+
     body = conf_text.rstrip("\n")
-    parts = [*prefix, body, *suffix] if body else [*prefix, *suffix]
-    return "\n".join(parts) + "\n"
+    has_blob_decl = any(
+        line.strip().startswith("--blob=") for line in conf_text.splitlines()
+    )
+    if not has_blob_decl and extract_blob_names(body):
+        blob_lines: list[str] = []
+        renames = append_blob_cli_lines(blob_lines, extract_blob_names(body), BLOB_DIR)
+        if renames:
+            body = apply_blob_renames(body, renames)
+        body = "\n".join([*blob_lines, body])
+
+    if not prefix and not suffix and not has_blob_decl:
+        return None
+    return "\n".join([*prefix, body, *suffix]) + "\n"
 
 
 def _wait_bridge_heartbeat(bridge: LuaBridge, ns_name: str, *, within: float = 1.2) -> bool:
@@ -256,7 +300,11 @@ async def run(
             # host); kill by PID at teardown, never pkill by host inode.
             from blockchecks.service.nfqws2_launcher import Nfqws2Launcher
 
-            launch = await asyncio.to_thread(Nfqws2Launcher(None).foreground, config_abs)
+            # `@` = conf-file reference (same contract as Nfqws2Manager);
+            # a bare path is parsed as an argument → "Need queue number".
+            launch = await asyncio.to_thread(
+                Nfqws2Launcher(None).foreground, f"@{config_abs}"
+            )
             host_proc = launch.proc
         else:
             # Start the single nfqws2 instance
@@ -268,7 +316,7 @@ async def run(
         # start_daemon — до него лог-файла демона ещё нет и цикл всегда
         # вырождался в 12-секундный сон (ложный "probing anyway").
         bind_tag = "host" if host_mode else ns_name
-        _wait_queue_bind(bind_tag, deadline_sec=12.0)
+        _wait_queue_bind(bind_tag, deadline_sec=12.0, qnum=host_qnum if host_mode else None)
 
         if not _wait_bridge_heartbeat(bridge, bind_tag):
             log.warning(
