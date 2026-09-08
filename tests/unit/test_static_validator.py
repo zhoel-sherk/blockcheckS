@@ -135,3 +135,102 @@ def test_custom_lua_allowed_params_clean() -> None:
     result = validate_strategy("dupfake:blob=stun:repeats=6:tcp_ts=-1000")
     assert result.is_valid
     assert not [i for i in result.issues if i.code.startswith("custom_lua")]
+
+
+@pytest.mark.parametrize(
+    "raw,code",
+    [
+        ("", "empty_strategy"),
+        ("   \t ", "empty_strategy"),
+        ('fake:blob="stun', "malformed"),
+        ("fake:blob=stun\nfake:blob=max_ru", "malformed"),
+    ],
+)
+def test_empty_and_malformed_structures(raw, code):
+    from blockchecks.engine.static_validator import validate_strategy
+
+    res = validate_strategy(raw)
+    codes = [i.code for i in res.issues]
+    assert code in codes, codes
+    assert any(i.severity == "error" for i in res.issues)
+    assert res.is_valid is False
+
+
+def test_multicore_literal_backslash_n_is_supported():
+    from blockchecks.engine.static_validator import validate_strategy
+
+    res = validate_strategy("fake:blob=stun\\nfake:blob=max_ru")
+    assert res.is_valid is True
+
+
+@pytest.mark.parametrize(
+    "param_value,expected",
+    [
+        ("ip_ttl=0", []),
+        ("ip_ttl=255", []),
+        ("ip_ttl=-1", ["invalid_ip_ttl"]),
+        ("ip_ttl=256", ["invalid_ip_ttl"]),
+        ("ip_ttl=abc", ["non_numeric_param"]),
+        ("tcp_ts=2147483647", []),
+        ("tcp_ts=-2147483648", []),
+        ("tcp_ts=2147483648", ["invalid_tcp_ts"]),
+        ("tcp_ts=-2147483649", ["invalid_tcp_ts"]),
+        ("tcp_seq=zz", ["non_numeric_param"]),
+    ],
+)
+def test_numeric_param_boundaries(param_value, expected):
+    from blockchecks.engine.static_validator import validate_strategy
+
+    res = validate_strategy(f"fake:blob=stun:{param_value}")
+    codes = [i.code for i in res.issues]
+    for code in expected:
+        assert code in codes, codes
+
+
+@pytest.mark.parametrize(
+    "repeats,error",
+    [
+        ("1", False),
+        ("20", False),
+        ("0", True),
+        ("-3", True),
+    ],
+)
+def test_repeats_range_errors(repeats, error):
+    from blockchecks.engine.static_validator import validate_strategy
+
+    res = validate_strategy(f"fake:blob=stun:repeats={repeats}")
+    codes = [i.code for i in res.issues if i.severity == "error"]
+    assert ("repeats_range" in codes) is error, codes
+
+
+def test_repeats_21_warns_not_errors():
+    from blockchecks.engine.static_validator import validate_strategy
+
+    res = validate_strategy("fake:blob=stun:repeats=21")
+    assert res.is_valid is True
+    assert any(i.code == "repeats_range" and i.severity == "warning" for i in res.issues)
+
+
+def test_split_without_pos_warns():
+    from blockchecks.engine.static_validator import validate_strategy
+
+    res = validate_strategy("multisplit")
+    assert res.is_valid is True
+    assert any(i.code == "split_without_pos" for i in res.issues)
+
+
+def test_fake_without_blob_is_error():
+    from blockchecks.engine.static_validator import validate_strategy
+
+    res = validate_strategy("fake:pos=1")
+    assert any(i.code == "fake_without_blob" for i in res.issues)
+    assert res.is_valid is False
+
+
+def test_none_and_wrong_type_do_not_raise():
+    from blockchecks.engine.static_validator import validate_strategies, validate_strategy
+
+    assert not validate_strategy(None).is_valid
+    results = validate_strategies([None, "fake:blob=stun", ""])
+    assert len(results) == 3

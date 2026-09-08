@@ -406,7 +406,18 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     Synchronizes flag names and default values across all campaign commands.
     """
     if mode in ("scan", "pair"):
-        parser.add_argument("-d", "--domain", default=None, help="Target domain (e.g. youtube.com)")
+        parser.add_argument(
+            "-d",
+            "--domain",
+            action="append",
+            default=None,
+            help="Target domain (repeatable; scan/pair test the whole set)",
+        )
+        parser.add_argument(
+            "--domains-file",
+            default=None,
+            help="Path to domain list file (one FQDN per line; wins over -d/--preset)",
+        )
     else:  # full
         parser.add_argument("-d", "--domain", help="Single domain to test")
         parser.add_argument("--domains-file", help="Path to domain list file")
@@ -724,7 +735,11 @@ def ensure_system_deps_or_exit(args) -> int:
 def warn_live_cli_flags(args) -> None:
     """Human-usage warnings: ignored -d/--preset, deprecated --classic."""
     domains_file = getattr(args, "domains_file", None)
-    domain = (getattr(args, "domain", None) or "").strip()
+    raw_domain = getattr(args, "domain", None)
+    if isinstance(raw_domain, (list, tuple)):
+        domain = ",".join(str(d) for d in raw_domain if str(d).strip())
+    else:
+        domain = str(raw_domain or "").strip()
     preset = getattr(args, "preset", None)
     if domains_file and domain:
         log.warning(
@@ -1172,6 +1187,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def dispatch(args: argparse.Namespace) -> int:  # noqa: C901
+    # Machine contract: bs preflight --json must keep stdout as pure JSON, so
+    # redirect the console stream to stderr BEFORE dependency verification
+    # (its log lines would otherwise precede the JSON object on stdout).
+    if args.command == "preflight" and getattr(args, "json", False):
+        from blockchecks.cli.commands.preflight import _keep_json_stdout_clean
+
+        _keep_json_stdout_clean(args)
+
     if getattr(args, "debug", False):
         from blockchecks.engine.log import set_debug_mode
 

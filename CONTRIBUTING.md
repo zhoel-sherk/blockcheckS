@@ -106,6 +106,9 @@ See [`.gitignore`](.gitignore). Never commit:
 
 ## Install note
 
-Use **editable install** from a git checkout (`pip install -e .`). Strategy
-`.conf` files live in repo-root [`configs/`](configs/), not inside the wheel
-package — see [docs/package.md](docs/package.md).
+A plain `pip install .` wheel is self-sufficient: `[tool.setuptools.data-files]`
+ships `configs/`, `presets/`, `blobs/`, `lua/` and `systemd/`, resolved via
+`PROJECT_DIR` from `sys.prefix[/local]/blockchecks` or
+`~/.local/blockchecks` (see [docs/package.md](docs/package.md)). For
+development use an editable install from a git checkout (`pip install -e .`),
+which resolves `PROJECT_DIR` to the repo root.

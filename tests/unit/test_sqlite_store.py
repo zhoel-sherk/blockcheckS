@@ -923,3 +923,28 @@ async def test_reclaim_skipped_on_hot_write_paths(tmp_path, monkeypatch):
     assert len(calls) == after_init
     await store.close()
     assert len(calls) == after_init + 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_best_tcp_slug_resolves_args_via_config_path(tmp_path):
+    """GP contract: strategies.name is a slug; nfqws2 args live in config_path."""
+    store = open_run_store(tmp_path / "canon.db")
+    await store.init()
+    slug = "std_fake_stun_r6_tcp_ack=-66000"
+    args = "fake:blob=stun:repeats=6:tcp_ack=-66000"
+    await store.log_tcp(
+        slug,
+        "youtube.com",
+        "PASS",
+        80.0,
+        200,
+        config_path=args,
+        bridge_applied=1,
+    )
+    best = await store.get_best_tcp("youtube.com", limit=5)
+    assert best and best[0]["strategy"] == slug
+    resolved = await store.get_strategy_config(slug)
+    assert resolved == args
+    assert resolved != slug
+    await store.close()

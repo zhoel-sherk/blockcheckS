@@ -34,6 +34,7 @@ from blockchecks.engine.domain_loader import (
     auto_enable_gv_ggc,
     filter_probe_domains,
     format_skip_summary,
+    load_domains,
     load_preset,
 )
 from blockchecks.engine.family_needs import run_tcp_with_family_gates
@@ -122,6 +123,34 @@ def resolve_preset_domains(args) -> tuple[list[str], int | None]:
         return preset_domains, 1
     auto_enable_gv_ggc(preset_domains)
     return preset_domains, None
+
+
+def resolve_scan_domains_file(args) -> tuple[list[str], int | None]:
+    """Load --domains-file for scan/pair (file wins over -d/--preset).
+
+    Returns (domains, exit_code); ([], None) when no --domains-file given.
+    """
+    domains_file = getattr(args, "domains_file", None)
+    if not domains_file:
+        return [], None
+    allow_unsafe = getattr(args, "allow_unsafe_domains", False)
+    try:
+        loaded = load_domains(domains_file, allow_unsafe=allow_unsafe)
+    except FileNotFoundError:
+        log.error("%s", f"{RED}ERROR: domains file not found: {domains_file}{RESET}")
+        return [], 1
+    if loaded.skipped:
+        log.info("%s", f"  {YELLOW}{format_skip_summary(loaded.skipped)}{RESET}")
+    domains = filter_probe_domains(list(loaded.domains or []))
+    if not domains:
+        log.error(
+            "%s",
+            f"{RED}ERROR: no domains left after denylist/FQDN filter in {domains_file}{RESET}",
+        )
+        return [], 1
+    auto_enable_gv_ggc(domains)
+    log.info("%s", f"  {CYAN}Domains file '{domains_file}': {len(domains)} domains{RESET}")
+    return domains, None
 
 
 def validate_pair_domain(args, preset_domains: list[str]) -> int | None:
@@ -949,6 +978,7 @@ async def finalize_pair_run(
     tcp_passed: int,
     pairs: list,
     aq_result: Any | None,
+    test_domains: list[str] | None = None,
 ) -> int:
     """Export configs, write summary, and compute final exit code."""
     from blockchecks.engine.run_finalize import (
@@ -965,7 +995,7 @@ async def finalize_pair_run(
                 db,
                 args,
                 primary=args.domain,
-                domains_file=None,
+                domains_file=getattr(args, "domains_file", None),
                 stop_set=stop_event.is_set(),
                 deadline=deadline,
             )
@@ -978,8 +1008,23 @@ async def finalize_pair_run(
             log.info("%s", f"  {GREEN}{export_result['raw']}{RESET}")
             log.info("%s", f"  {GREEN}{export_result['user_list']}{RESET}")
 
+    raw_domain = getattr(args, "domain", None)
+    if isinstance(raw_domain, str):
+        primary_domain = raw_domain
+    elif raw_domain:
+        primary_domain = raw_domain[0]
+    else:
+        primary_domain = None
+    summary_domains = list(
+        dict.fromkeys(
+            list(test_domains or []) + ([primary_domain] if primary_domain else [])
+        )
+    )
     summary_payload = {
         "command": "scan" if getattr(args, "tcp_only", False) else "pair",
+        "run_id": getattr(db, "run_id", None),
+        "domains": summary_domains,
+        "domain": primary_domain,
         "deadline_sec": deadline.budget_sec if deadline else None,
         "stopped_reason": (
             deadline.reason
@@ -988,7 +1033,6 @@ async def finalize_pair_run(
         ),
         "db_path": args.db,
         "export_paths": export_result,
-        "domain": args.domain,
     }
     if aq_result:
         summary_payload["jobs_done"] = aq_result.done

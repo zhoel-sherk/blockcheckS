@@ -60,3 +60,5 @@
 | **stop_campaign** | MCP-инструмент: `bs stop` по `run.lock`; если кампании нет — останавливает демон `bs serve` |
 | **run_id / resume fingerprint** | `runs.id` + fingerprint матрицы; resume skip keys scoped только на этот `run_id`; без `--resume` — новый run_id |
 | **UNIQUE(strategy, domain, protocol)** | Уникальность в `data_block` таблице `pass_strategies`; legacy двух-колоночный unique мигрируется автоматически |
+| **strategies.config_path** | Каноническая строка аргументов nfqws2 (напр. `fake:blob=stun:repeats=6`); `strategies.name` — только слаг. Внешние читатели используют `get_strategy_config()` / `bc-nfconf` |
+| **run_summary_\*.json** | Machine-readable финиш scan/pair/full: `run_id`, `domains`, `db_path` (XDG data dir или `--out-dir`); основа run-scoping для GP/orchestrator |

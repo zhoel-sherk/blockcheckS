@@ -277,3 +277,170 @@ async def test_generate_udp_user_matrix_keeps_when_voice_ok(tmp_path):
         max_count=10,
     )
     assert len(items) == 1
+
+
+class _StubGen:
+    """Stub generator: returns fixed items; echoes accepted kwargs."""
+
+    def __init__(self, *items):
+        self._items = list(items)
+        self.calls = []
+
+    async def generate(self, **kwargs):
+        self.calls.append(kwargs)
+        return list(self._items)
+
+
+def _item(label, strategy, protocol="tls12"):
+    from blockchecks.engine.generators.base import StrategyItem
+
+    return StrategyItem(label=label, strategy=strategy, protocol=protocol)
+
+
+def _mg():
+    from blockchecks.engine.matrix_generator import MatrixGenerator
+
+    return MatrixGenerator()
+
+
+@pytest.mark.asyncio
+async def test_generate_tcp_merges_and_dedupes():
+    from blockchecks.engine.matrix_generator import MatrixGenerator
+
+    gen = MatrixGenerator()
+    a = _StubGen(_item("lab1", "s1"), _item("lab2", "s2"))
+    b = _StubGen(_item("lab3", "s1"), _item("lab4", "s3"))
+    gen.register("a", a)
+    gen.register("b", b)
+    items = await gen.generate_tcp(sources=["a", "b"], max_count=100)
+    assert [i.label for i in items] == ["lab1", "lab2", "lab4"]
+    assert [i.strategy for i in items] == ["s1", "s2", "s3"]
+
+
+@pytest.mark.asyncio
+async def test_generate_tcp_skips_unknown_source():
+    gen = _mg()
+    a = _StubGen(_item("lab1", "s1"))
+    gen.register("a", a)
+    items = await gen.generate_tcp(sources=["a", "does-not-exist"], max_count=10)
+    assert [i.label for i in items] == ["lab1"]
+    assert len(a.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_http_early_return_when_not_blocked():
+    from blockchecks.engine.triage import TriageProfile
+
+    gen = _mg()
+    a = _StubGen(_item("h1", "http:fake"))
+    gen.register("a", a)
+    assert await gen.generate_http(
+        sources=["a"], triage=TriageProfile(http_blocked=False)
+    ) == []
+    assert a.calls == []
+
+
+@pytest.mark.asyncio
+async def test_generate_http_uses_tcp_path_when_blocked():
+    from blockchecks.engine.triage import TriageProfile
+
+    gen = _mg()
+    a = _StubGen(_item("h1", "http:fake"))
+    gen.register("a", a)
+    items = await gen.generate_http(sources=["a"], triage=TriageProfile(http_blocked=True))
+    assert [i.label for i in items] == ["h1"]
+    assert a.calls and a.calls[0]["protocol"] == "http"
+
+
+@pytest.mark.asyncio
+async def test_generate_udp_early_return_when_voice_ok():
+    from blockchecks.engine.triage import TriageProfile
+
+    gen = _mg()
+    a = _StubGen(_item("u1", "udp:x"))
+    gen.register("a", a)
+    prof = TriageProfile(voice_ok=True, udp_blocked=False)
+    assert await gen.generate_udp(sources=["a"], triage=prof) == []
+    assert a.calls == []
+
+
+@pytest.mark.asyncio
+async def test_generate_udp_remap_and_protocol_coercion():
+    gen = _mg()
+    st = _StubGen(_item("v1", "udp:stun", protocol="udp_voice"))
+    game = _StubGen(_item("g1", "udp:game", protocol="udp_game"))
+    wrong = _StubGen(_item("w1", "tcp:wrong", protocol="tls12"))
+    gen.register("standard_udp", st)
+    gen.register("standard_udp_game", game)
+    gen.register("w", wrong)
+    items = await gen.generate_udp(sources=["standard", "game", "w"], max_count=100)
+    assert st.calls[0]["protocol"] == "udp_voice"
+    assert game.calls[0]["protocol"] == "udp_game"
+    labels = [i.label for i in items]
+    assert "v1" in labels and "g1" in labels and "w1" in labels
+    assert all(i.protocol in ("udp_voice", "udp_game") for i in items)
+
+
+@pytest.mark.asyncio
+async def test_generate_quic_coerces_all_protocols():
+    gen = _mg()
+    a = _StubGen(
+        _item("q1", "quic:google", protocol="quic"),
+        _item("x1", "tcp:fake", protocol="tls12"),
+    )
+    gen.register("a", a)
+    items = await gen.generate_quic(sources=["a"], max_count=100)
+    assert {i.label for i in items} == {"q1", "x1"}
+    assert all(i.protocol == "quic" for i in items)
+
+
+@pytest.mark.asyncio
+async def test_generate_pairs_known_tcp_sort_first():
+    from blockchecks.engine.matrix_generator import MatrixGenerator
+    from blockchecks.engine.triage import TriageProfile
+
+    class _State:
+        async def get_working_tcp(self, domain):
+            return ["tcp-known"]
+
+    tcp = _StubGen(
+        _item("tcp-b", "b"),
+        _item("tcp-known", "k"),
+        _item("tcp-a", "a"),
+    )
+    udp = _StubGen(_item("udp-z", "z", protocol="udp_voice"))
+    gen = MatrixGenerator()
+    gen.register("t", tcp)
+    gen.register("u", udp)
+    pairs = await gen.generate_pairs(
+        tcp_sources=["t"],
+        udp_sources=["u"],
+        state_db=_State(),
+        triage=TriageProfile(voice_ok=True, udp_blocked=True),
+        max_tcp=100,
+        max_udp=100,
+    )
+    labels = [p.tcp.label for p in pairs]
+    assert labels[0] == "tcp-known"
+    assert labels[1:] == sorted(labels[1:])
+
+
+@pytest.mark.asyncio
+async def test_generate_pairs_cartesian_labels():
+    from blockchecks.engine.matrix_generator import MatrixGenerator
+    from blockchecks.engine.triage import TriageProfile
+
+    tcp = _StubGen(_item("t1", "a"), _item("t2", "b"))
+    udp = _StubGen(_item("u1", "x", protocol="udp_voice"))
+    gen = MatrixGenerator()
+    gen.register("t", tcp)
+    gen.register("u", udp)
+    pairs = await gen.generate_pairs(
+        tcp_sources=["t"],
+        udp_sources=["u"],
+        state_db=None,
+        triage=TriageProfile(voice_ok=True, udp_blocked=True),
+    )
+    assert sorted(p.tcp.label for p in pairs) == ["t1", "t2"]
+    assert len(pairs) == 2
+    assert all(p.udp.label == "u1" for p in pairs)

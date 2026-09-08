@@ -232,3 +232,5 @@ StandardGenerator.STRATEGY_FAMILIES
 AdaptiveJobQueue.pop_batch
 nfqws2_pid_in_ns
 RunnerProbeDeps.run_tcp_check
+
+compact  # unused method (src/blockchecks/engine/store/sqlite_store.py:229); exercised by unit tests after WAL-close no longer compacts

@@ -71,7 +71,7 @@ def test_collect_cli_shortcuts_includes_domain_and_strategy_preset():
 @pytest.mark.unit
 def test_scan_short_flags_parse_domain_and_preset():
     sub = _parse(["scan", "-d", "discord.com", "-M", "gp-verified", "--max", "1"])
-    assert sub.domain == "discord.com"
+    assert sub.domain == ["discord.com"]
     assert sub.strategy_preset == "gp-verified"
     assert sub.max == 1
 
@@ -535,3 +535,11 @@ def test_require_passwordless_sudo_root_skips(monkeypatch):
 def test_invalid_profile_rejected():
     with pytest.raises(SystemExit):
         _parse(["scan", "--profile", "nope", "-d", "x.com"])
+
+
+@pytest.mark.unit
+def test_warn_live_cli_flags_accepts_repeatable_scan_domain():
+    from blockchecks.cli.parser import warn_live_cli_flags
+
+    ns = _parse(["scan", "-d", "youtube.com", "-d", "discord.com"])
+    warn_live_cli_flags(ns)

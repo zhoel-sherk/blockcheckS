@@ -1,6 +1,6 @@
 # blockcheckS — подбор стратегий обхода DPI
 
-[![version](https://img.shields.io/badge/version-1.4.0-green)](#)
+[![version](https://img.shields.io/badge/version-1.4.1-green)](#)
 [![python](https://img.shields.io/badge/python-3.10%2B-green)](#)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 [![tests](https://img.shields.io/badge/tests-1938%20unit-success)](#)

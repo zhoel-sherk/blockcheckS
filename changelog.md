@@ -1,3 +1,55 @@
+## 1.4.1 — GP-contract: multi-domain scan, run-scoped summary, canonical args (2026-09-03)
+
+Отправная точка связки с GP-control-plane (`discovery_engine=blockchecks`).
+Никаких изменений движка пробы; только внешний контракт и версия.
+
+### Релизная гигиена и machine-контракт (2026-09-06)
+
+- `bs preflight --json`: консольный лог переведён на stderr (и до проверки
+  зависимостей) — **stdout содержит ровно один JSON**; закрывает парсинг у GP
+  (`bs_engine/_triage.py`), который читает stdout только со стартового `{`.
+- Wheel/установка: `PROJECT_DIR` дополнительно пробует
+  `site.getuserbase()/blockchecks` — ресурсы (configs/presets/blobs/lua)
+  находятся и при `pip install --user`; произвольный `--prefix` явно
+  задокументирован как вне поддержки.
+- `MANIFEST.in`: `prune` tests/dev/mutants/логов и `global-exclude`
+  `__pycache__ *.py[cod]` — sdist не тащит dev-мусор при VCS-finder.
+- zapret2/nfqws2: **не тянем второй zapret2**. Если задан любой из
+  `BLOCKCHECKS_NFQWS2/BLOCKCHECKS_ZAPRET2/ZAPRET2_ROOT/BLOCKCHECKS_LUA_DIR`,
+  корень авторитетен: авто-fetch отключён, при отсутствии бинаря — явная
+  ошибка; добавлен кандидат `<root>/binaries/<arch>/nfqws2`; lua не
+  докачивается вторым деревом при найденном nfqws2.
+
+### CLI: мульти-домен scan/pair
+
+- `bs scan` / `bs pair`: `-d/--domain` **повторяемый** — тестируется весь
+  набор (раньше оставался последний). Альтернативы: `--preset`. GP шлёт по
+  `-d` на домен.
+- **`--domains-file`** для scan/pair (зеркало full): bare FQDN-файл, побеждает
+  `-d`/`--preset`; denylist + FQDN-фильтр через `domain_loader`, прокидывается
+  в финальный экспорт. Нужен GP для передачи больших v2fly-списков.
+- Разрешение доменов сложено в единый preset-канал (file > preset > `-d*`),
+  затем фильтр DoH/denylist работает по всему набору.
+
+### Результаты / внешний контракт
+
+- `run_summary_<ts>.json` для scan/pair теперь содержит `run_id` (`runs.id`) и
+  полный `domains` список — оркестратор скоупит чтение либо через `run_id`,
+  либо свежим `--db` на run.
+- Зафиксирован канонический источник аргументов: `strategies.name` = слаг,
+  `strategies.config_path` = строка nfqws2 (`SqliteRunStore.get_strategy_config`);
+  GP-экспорт/harvest обязан брать args из `config_path`/`bc-nfconf`, не из name.
+- Документация: `docs/api.md` §10a (GP-движок, карта «единица → вызов»),
+  `docs/cookbook/gp-bridge.md` (мульти-домен, harvest, engine switch),
+  `docs/database.md` (slug vs args, run_summary).
+
+### Тесты / CI
+
+- Новые unit: повторный `-d` (parser + fold в DNS-набор), канонический
+  slug→config_path. Тест-файлы новые не добавлялись — шард-списки не менялись.
+
+---
+
 ## 1.4.0 — campaign lua_bridge-only, CLI slim, run-scoped resume (2026-08-28)
 
 Campaign TCP is **lua_bridge only**. Classic per-strategy nfqws2 restart is gone

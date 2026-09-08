@@ -116,12 +116,22 @@ def test_check_nfqws2_arch_mismatch(tmp_path, monkeypatch):
 
 
 def test_fetch_deps_enabled(monkeypatch):
-    monkeypatch.delenv("BLOCKCHECKS_FETCH_DEPS", raising=False)
+    for name in ("BLOCKCHECKS_FETCH_DEPS", "BLOCKCHECKS_NFQWS2", "BLOCKCHECKS_ZAPRET2",
+                 "ZAPRET2_ROOT", "BLOCKCHECKS_LUA_DIR"):
+        monkeypatch.delenv(name, raising=False)
     assert sd.fetch_deps_enabled(True) is True
     monkeypatch.setenv("BLOCKCHECKS_FETCH_DEPS", "0")
     assert sd.fetch_deps_enabled(True) is False
     monkeypatch.setenv("BLOCKCHECKS_FETCH_DEPS", "true")
     assert sd.fetch_deps_enabled(False) is True
+
+
+def test_fetch_deps_default_off_when_tool_env_set(monkeypatch):
+    monkeypatch.delenv("BLOCKCHECKS_FETCH_DEPS", raising=False)
+    monkeypatch.setenv("BLOCKCHECKS_ZAPRET2", "/opt/zapret2")
+    assert sd.fetch_deps_enabled(True) is False
+    monkeypatch.setenv("BLOCKCHECKS_FETCH_DEPS", "1")
+    assert sd.fetch_deps_enabled(True) is True
 
 
 def test_deps_report_print(caplog):
@@ -192,6 +202,9 @@ def test_verify_nfqws2_found(monkeypatch, tmp_path):
 
 
 def test_verify_fetch_failure(monkeypatch):
+    for name in ("BLOCKCHECKS_NFQWS2", "BLOCKCHECKS_ZAPRET2", "ZAPRET2_ROOT",
+                 "BLOCKCHECKS_LUA_DIR"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(sd, "sys", __import__("sys"))
     monkeypatch.setattr(sd.sys, "platform", "linux")
     monkeypatch.setattr(sd.shutil, "which", lambda name: None)
@@ -303,6 +316,90 @@ def test_verify_blobs_missing_warns(monkeypatch, tmp_path):
     monkeypatch.setattr(sd.cfg, "BLOB_DIR", str(tmp_path / "blobs-missing"))
     report = sd.verify_system_dependencies(fetch=False)
     assert any("blobs" in w for w in report.warnings)
+
+
+def test_resolve_nfqws2_env_root_binaries_layout(tmp_path, monkeypatch):
+    """Env-configured zapret root using the new binaries/<arch> layout resolves."""
+    root = tmp_path / "root"
+    bin = root / "binaries" / "linux-x86_64" / "nfqws2"
+    bin.parent.mkdir(parents=True)
+    bin.write_text("x")
+    bin.chmod(0o755)
+    monkeypatch.setenv("BLOCKCHECKS_NFQWS2", "")
+    monkeypatch.setattr(sd, "cfg", sd.cfg)
+    monkeypatch.setattr(sd.cfg, "ZAPRET2_ROOT", str(root))
+    monkeypatch.setattr(sd.shutil, "which", lambda _: None)
+    monkeypatch.setattr(sd, "zapret2_arch", lambda: "linux-x86_64")
+    monkeypatch.setattr(sd, "VENDOR_BIN_LINK", Path("/nonexistent/bin/nfqws2"))
+    monkeypatch.setattr(sd, "VENDOR_ROOT", Path("/nonexistent"))
+    assert sd.resolve_nfqws2_bin() == str(bin)
+
+
+def test_verify_no_fetch_when_env_root_lacks_binary(monkeypatch):
+    """An env-configured zapret root is authoritative: never auto-fetch a copy."""
+    monkeypatch.setattr(sd, "sys", __import__("sys"))
+    monkeypatch.setattr(sd.sys, "platform", "linux")
+    monkeypatch.setattr(sd.shutil, "which", lambda name: None)
+    monkeypatch.setenv("BLOCKCHECKS_ZAPRET2", "/opt/some-zapret")
+    monkeypatch.setattr(sd, "resolve_nfqws2_bin", lambda: None)
+    calls: list[str] = []
+
+    def _boom(**kw):
+        calls.append("fetch")
+        raise RuntimeError("should not be called")
+
+    monkeypatch.setattr(sd, "ensure_zapret2_vendor", _boom)
+    report = sd.verify_system_dependencies(fetch=True, offline=False)
+    assert calls == []
+    assert report.ok is False
+    assert any("refusing auto-fetch" in e for e in report.errors)
+
+
+def test_verify_env_nfqws2_never_fetches(monkeypatch, tmp_path):
+    """Working env BLOCKCHECKS_NFQWS2 → verify() must never call vendor fetch."""
+    monkeypatch.setattr(sd, "sys", __import__("sys"))
+    monkeypatch.setattr(sd.sys, "platform", "linux")
+    monkeypatch.setattr(sd.shutil, "which", lambda name: None)
+    bin = tmp_path / "nfqws2"
+    bin.write_text("x")
+    bin.chmod(0o755)
+    monkeypatch.setenv("BLOCKCHECKS_NFQWS2", str(bin))
+    monkeypatch.setattr(sd, "resolve_nfqws2_bin", lambda: str(bin))
+    monkeypatch.setattr(sd, "check_nfqws2_arch", lambda p: None)
+    monkeypatch.setattr(sd, "_path_ok", lambda p: True)
+    calls: list[str] = []
+
+    def _boom(**kw):
+        calls.append("fetch")
+        raise RuntimeError("should not be called")
+
+    monkeypatch.setattr(sd, "ensure_zapret2_vendor", _boom)
+    report = sd.verify_system_dependencies(fetch=True, offline=False)
+    assert calls == []
+    assert report.ok is True
+
+
+def test_verify_lua_env_no_second_fetch(monkeypatch, tmp_path):
+    """BLOCKCHECKS_LUA_DIR set but scripts missing → warn, never fetch a 2nd tree."""
+    monkeypatch.setattr(sd, "sys", __import__("sys"))
+    monkeypatch.setattr(sd.sys, "platform", "linux")
+    monkeypatch.setattr(sd.shutil, "which", lambda name: None)
+    bin = tmp_path / "nfqws2"
+    bin.write_text("x")
+    bin.chmod(0o755)
+    monkeypatch.setattr(sd, "resolve_nfqws2_bin", lambda: str(bin))
+    monkeypatch.setattr(sd, "check_nfqws2_arch", lambda p: None)
+    monkeypatch.setenv("BLOCKCHECKS_LUA_DIR", str(tmp_path / "lua"))
+    calls: list[str] = []
+
+    def _boom(**kw):
+        calls.append("fetch")
+        raise RuntimeError("should not be called")
+
+    monkeypatch.setattr(sd, "ensure_zapret2_vendor", _boom)
+    report = sd.verify_system_dependencies(fetch=True, offline=False)
+    assert calls == []
+    assert any("lua scripts missing" in w for w in report.warnings)
 
 
 # ── ensure_zapret2_vendor full (mocked HTTP, real tar) ────────────────

@@ -106,7 +106,6 @@ class DepsReport:
     nfqws2: str | None = None
     blobs_dir: str | None = None
     lua_dir: str | None = None
-    fetched: bool = False
 
     def print_report(self) -> None:
         try:
@@ -123,12 +122,33 @@ class DepsReport:
             log.info("%s", f"  {g}OK{reset}: nfqws2 → {self.nfqws2}")
 
 
+def tool_env_configured() -> list[str]:
+    """Env vars that pin a local zapret2/nfqws2 tree (authoritative, no fetch)."""
+    return [
+        name
+        for name in (
+            "BLOCKCHECKS_NFQWS2",
+            "BLOCKCHECKS_ZAPRET2",
+            "ZAPRET2_ROOT",
+            "BLOCKCHECKS_LUA_DIR",
+        )
+        if (os.environ.get(name) or "").strip()
+    ]
+
+
 def fetch_deps_enabled(default: bool = True) -> bool:
-    """BLOCKCHECKS_FETCH_DEPS: 1/true on, 0/false off."""
+    """BLOCKCHECKS_FETCH_DEPS: 1/true on, 0/false off.
+
+    When no explicit override is given, auto-fetch is OFF if a local
+    zapret2/nfqws2 tree is pinned via env — honouring the configured root
+    instead of downloading a second copy.
+    """
     v = os.environ.get("BLOCKCHECKS_FETCH_DEPS")
-    if v is None:
-        return default
-    return v.strip().lower() not in ("0", "false", "off", "no")
+    if v is not None:
+        return v.strip().lower() not in ("0", "false", "off", "no")
+    if tool_env_configured():
+        return False
+    return default
 
 
 def zapret2_arch(machine: str | None = None) -> str | None:
@@ -182,15 +202,16 @@ def resolve_nfqws2_bin() -> str | None:
     if which and os.path.isfile(which):
         return which
 
+    arch = zapret2_arch()
     for candidate in (
         os.path.join(cfg.ZAPRET2_ROOT, "nfq2", "nfqws2"),
+        os.path.join(cfg.ZAPRET2_ROOT, "binaries", arch, "nfqws2") if arch else "",
         str(VENDOR_BIN_LINK),
         str(VENDOR_ROOT / "nfq2" / "nfqws2"),
     ):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
 
-    arch = zapret2_arch()
     if arch:
         p = VENDOR_ROOT / "binaries" / arch / "nfqws2"
         if p.is_file() and os.access(p, os.X_OK):
@@ -418,10 +439,10 @@ def verify_system_dependencies(
             )
 
     nfq = resolve_nfqws2_bin()
-    if not nfq and do_fetch and not offline:
+    tool_cfg = tool_env_configured()
+    if not nfq and do_fetch and not offline and not tool_cfg:
         try:
             nfq, blobs, lua = ensure_zapret2_vendor(offline=False)
-            report.fetched = True
             report.nfqws2 = nfq
             report.blobs_dir = blobs
             report.lua_dir = lua
@@ -435,11 +456,19 @@ def verify_system_dependencies(
             return report
     elif not nfq:
         report.ok = False
-        report.errors.append(
-            "nfqws2 not found (PATH, /opt/zapret2/nfq2/nfqws2, "
-            f"{VENDOR_BIN_LINK}). Set BLOCKCHECKS_NFQWS2 or allow fetch "
-            "(default; disable with --no-fetch-deps / BLOCKCHECKS_FETCH_DEPS=0)"
-        )
+        if tool_cfg:
+            report.errors.append(
+                "nfqws2 not found under the configured zapret2 tree "
+                f"(env: {', '.join(tool_cfg)}); refusing auto-fetch because a "
+                "local tool root is set. Check <root>/nfq2/nfqws2 or "
+                "<root>/binaries/<arch>/nfqws2, or unset the env to allow fetch"
+            )
+        else:
+            report.errors.append(
+                "nfqws2 not found (PATH, /opt/zapret2/nfq2/nfqws2, "
+                f"{VENDOR_BIN_LINK}). Set BLOCKCHECKS_NFQWS2 or allow fetch "
+                "(default; disable with --no-fetch-deps / BLOCKCHECKS_FETCH_DEPS=0)"
+            )
         return report
     else:
         report.nfqws2 = nfq
@@ -459,23 +488,17 @@ def verify_system_dependencies(
         report.ok = False
         report.errors.append(arch_msg)
 
-    # Lua
+    # Lua. A found nfqws2 tree (PATH//opt/env/vendor) is authoritative for its
+    # own lua dir — never auto-fetch a SECOND zapret2 copy just to backfill lua.
     lua_dir = os.environ.get("BLOCKCHECKS_LUA_DIR") or cfg.LUA_INIT_DIR
     report.lua_dir = lua_dir
     missing_lua = [n for n in _LUA_REQUIRED if not _path_ok(Path(lua_dir) / n)]
     if missing_lua:
-        if do_fetch and not offline and not report.fetched:
-            try:
-                nfq, blobs, lua = ensure_zapret2_vendor(offline=False)
-                report.fetched = True
-                report.nfqws2 = nfq
-                report.blobs_dir = blobs
-                report.lua_dir = lua
-                missing_lua = [n for n in _LUA_REQUIRED if not _path_ok(Path(lua) / n)]
-            except Exception as e:
-                report.warnings.append(f"lua missing {missing_lua}; fetch failed: {e}")
-        if missing_lua:
-            report.warnings.append(f"lua scripts missing under {lua_dir}: {', '.join(missing_lua)}")
+        report.warnings.append(
+            f"lua scripts missing under {lua_dir}: {', '.join(missing_lua)} "
+            "(set BLOCKCHECKS_LUA_DIR or install a full zapret2 tree; "
+            "auto-fetch skipped when a local tool tree is present)"
+        )
 
     # Blobs
     blobs_dir = os.environ.get("BLOCKCHECKS_BLOBS") or cfg.BLOB_DIR

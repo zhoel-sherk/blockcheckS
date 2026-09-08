@@ -1142,3 +1142,35 @@ def test_maybe_skip_fooling_for_lock(monkeypatch):
     args = Namespace()
     _maybe_skip_fooling_for_lock(args)
     assert args.skip_fooling_grid is True
+
+
+@pytest.mark.unit
+def test_preflight_json_routes_console_logs_to_stderr(monkeypatch):
+    """bs preflight --json must keep stdout clean: console stream goes to stderr."""
+    import logging
+    from argparse import Namespace
+
+    from blockchecks.cli.commands.preflight import _keep_json_stdout_clean
+    from blockchecks.engine.log import LOGGER_NAME
+
+    calls: dict[str, object] = {}
+
+    def fake_configure(*, level=None, console: str = "stdout") -> None:
+        calls["console"] = console
+        calls["level"] = level
+
+    root = logging.getLogger(LOGGER_NAME)
+    root.setLevel(logging.INFO)
+    dummy = logging.StreamHandler()
+    root.handlers[:] = [dummy]
+
+    monkeypatch.setattr("blockchecks.engine.log.configure_logging", fake_configure)
+    _keep_json_stdout_clean(Namespace(json=True))
+
+    assert root.handlers == []
+    assert calls["console"] == "stderr"
+    assert calls["level"] == logging.INFO
+
+    # Non-JSON runs must not touch the console configuration.
+    _keep_json_stdout_clean(Namespace(json=False))
+    assert root.handlers == []

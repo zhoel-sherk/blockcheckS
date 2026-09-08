@@ -43,6 +43,8 @@ from blockchecks.main_phases import (
 )
 from blockchecks.terminal import init_terminal
 
+log = logging.getLogger(__name__)
+
 init_terminal()
 
 
