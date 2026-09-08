@@ -392,10 +392,11 @@ class NetNsPool:
         # Scoped kill (host-wide pkill via netns exec is forbidden — see
         # metrics.pkill_nfqws2_in_ns).
         from blockchecks.service.metrics import pkill_nfqws2_in_ns
-        from blockchecks.service.probe import release_curl_probe_worker
+        from blockchecks.service.probe import drop_ns_epoch, release_curl_probe_worker
 
         try:
             release_curl_probe_worker(name)
+            drop_ns_epoch(name)
             pkill_nfqws2_in_ns(name)
             from blockchecks.service.ns_firewall import drop_ns_firewall
 

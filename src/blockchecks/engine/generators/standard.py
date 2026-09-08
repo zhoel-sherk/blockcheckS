@@ -42,6 +42,20 @@ def _resolve_family_name(name: str) -> str:
     return FAMILY_ALIASES.get(name, name)
 
 
+# Split-position markers are payload-specific: upstream resolve_pos() returns
+# nil on a foreign payload (method+* only exists on http_req, sniext/host+ only
+# on tls_client_hello) and the desync silently no-ops while still writing
+# APPLIED — a false-PASS channel (AUDIT §6.4). Filter axes at generation time.
+_HTTP_ONLY_MARKERS = ("method",)
+_TLS_ONLY_MARKERS = ("sniext", "host+")
+
+
+def _filter_positions_for_protocol(positions, protocol: str) -> list:
+    if protocol == "http":
+        return [p for p in positions if not any(m in str(p) for m in _TLS_ONLY_MARKERS)]
+    return [p for p in positions if not any(m in str(p) for m in _HTTP_ONLY_MARKERS)]
+
+
 def _round_robin(groups: dict[str, list[StrategyItem]], cap: int) -> list[StrategyItem]:
     """Interleave one item per family so a cap cannot starve later families."""
     out, seen_out, idx = [], set(), 0
@@ -66,7 +80,7 @@ def _round_robin(groups: dict[str, list[StrategyItem]], cap: int) -> list[Strate
 
 
 def _mut_full_fake(fam: dict) -> None:
-    fam["repeats"] = [r for r in ALL_REPEATS if r not in (100, 260)]
+    fam["repeats"] = list(ALL_REPEATS)
     fam["foolings"] = ALL_FOOLINGS_TCP + ALL_FOOLINGS_IPV6
     fam["tls_mods"] = TLS_MODS
 
@@ -157,11 +171,11 @@ class StandardGenerator(
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: RunStateStore = None,
+        state_db: RunStateStore | None = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 500,
-        run_set: set = None,
+        run_set: set[str] | None = None,
         triage: "TriageProfile | None" = None,
     ) -> list[StrategyItem]:
         """Generate strategies from specified families, gated by protocol.
@@ -204,6 +218,8 @@ class StandardGenerator(
             if stype not in _family_spec.BY_NAME:
                 continue
             fam = dict(axes_for(stype))
+            if fam.get("positions"):
+                fam["positions"] = _filter_positions_for_protocol(fam["positions"], protocol)
             if mut := _SCAN_MUTATORS.get(scan_level, {}).get(stype):
                 mut(fam)
             if triage is not None:
@@ -244,43 +260,3 @@ class StandardGenerator(
         if key not in seen:
             seen.add(key)
             items.append(StrategyItem(label=label, strategy=strategy, protocol=protocol))
-
-
-async def _std_families(types: list[str], protocol: str = "tls12", **kwargs) -> list[StrategyItem]:
-    kwargs.setdefault("protocol", protocol)
-    return await StandardGenerator(strategy_types=types).generate(**kwargs)
-
-
-class FakeTcpGenerator(StrategyGenerator):
-    """Delegate to StandardGenerator family ``fake``."""
-
-    async def generate(self, protocol: str = "tls12", **kwargs):
-        return await _std_families(["fake"], protocol, **kwargs)
-
-
-class HostfakeTcpGenerator(StrategyGenerator):
-    """Delegate to StandardGenerator family ``hostfake``."""
-
-    async def generate(self, protocol: str = "tls12", **kwargs):
-        return await _std_families(["hostfake"], protocol, **kwargs)
-
-
-class FakedTcpGenerator(StrategyGenerator):
-    """Delegate to StandardGenerator families ``fakedsplit`` + ``fakeddisorder``."""
-
-    async def generate(self, protocol: str = "tls12", **kwargs):
-        return await _std_families(["fakedsplit", "fakeddisorder"], protocol, **kwargs)
-
-
-class FakeMultiGenerator(StrategyGenerator):
-    """Delegate to StandardGenerator family ``multi_fake``."""
-
-    async def generate(self, protocol: str = "tls12", **kwargs):
-        return await _std_families(["multi_fake"], protocol, **kwargs)
-
-
-class FakeSplitComboGenerator(StrategyGenerator):
-    """Delegate to StandardGenerator family ``fake_fakedsplit``."""
-
-    async def generate(self, protocol: str = "tls12", **kwargs):
-        return await _std_families(["fake_fakedsplit"], protocol, **kwargs)

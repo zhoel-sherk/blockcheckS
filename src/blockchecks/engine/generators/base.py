@@ -32,10 +32,10 @@ class StrategyGenerator(ABC):
     async def generate(
         self,
         protocol: str = "tls12",
-        state_db: RunStateStore = None,
+        state_db: RunStateStore | None = None,
         domain: str = "",
         scan_level: str = "fast",
         max_count: int = 100,
-        run_set: set = None,
+        run_set: set[str] | None = None,
         triage: "TriageProfile | None" = None,
     ) -> list[StrategyItem]: ...

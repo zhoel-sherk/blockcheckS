@@ -41,6 +41,12 @@ def bump_ns_epoch(ns_name: str) -> int:
         return epoch
 
 
+def drop_ns_epoch(ns_name: str) -> None:
+    """Forget the epoch counter for a destroyed ns (keeps long-lived daemons lean)."""
+    with _NS_EPOCHS_LOCK:
+        _NS_EPOCHS.pop(ns_name, None)
+
+
 def get_ns_epoch(ns_name: str) -> int:
     """Current pool epoch for *ns_name* (0 when never bumped)."""
     with _NS_EPOCHS_LOCK:
@@ -253,9 +259,14 @@ class _PersistentCurlWorker:
             line = _readline_timed(fd, timeout, self._stdout_buf)
             if line is None:
                 err_tail = self._stderr_buf.decode("utf-8", errors="replace")[-120:]
+                # Poll before the kill: after SIGKILL poll() reports -9 even
+                # for a worker that died naturally, which would mislabel the
+                # failure and poison fail_phase statistics (AUDIT §7.3).
+                poll = proc.poll()
                 self._kill()
-                if proc.poll() is not None and err_tail:
-                    return {**_FAIL, "error": f"worker died: {err_tail}"}
+                if poll is not None:
+                    detail = f": {err_tail}" if err_tail else " (no stderr)"
+                    return {**_FAIL, "error": f"worker died (exit {poll}){detail}"[:160]}
                 return {**_FAIL, "error": f"timeout after {timeout:.0f}s"}
             return _loads_probe_json(line)
 

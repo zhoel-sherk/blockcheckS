@@ -61,6 +61,7 @@ TLS_MODS = [
     "rnd",  # randomize extensions
     "rnd,dupsid",  # + duplicate session ID
     "rnd,dupsid,padencap",  # + pad encapsulation
+    "rnd,dupsid,rndsni",  # + randomize SNI (BC2 24-syndata)
     "rnd,dupsid,sni=www.google.com",  # + SNI substitution
     "rnd,dupsid,sni=fonts.google.com",
     "rnd,dupsid,sni=ya.ru",
@@ -85,6 +86,11 @@ FAST_FOOLINGS_TCP = [
 ]
 FAST_REPEATS = [6, 8, 3, 11, 12, 4, 14]
 
+# Named slices over FAST_FOOLINGS_TCP (order-coupled; keep in sync):
+#   first four = [ts, nofool, md5, badsum], fifth adds the ack/ts_up combo.
+FOOLINGS_WITH_NOFOOL = FAST_FOOLINGS_TCP[:4]
+FOOLINGS_REQUIRED = [f for f in FAST_FOOLINGS_TCP[:5] if f]
+
 
 def _axes(**kwargs: object) -> Mapping[str, object]:
     return MappingProxyType(kwargs)
@@ -104,7 +110,7 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
             send_md5=True,
         ),
         "hostfake": _axes(
-            foolings=[f for f in FAST_FOOLINGS_TCP[:5] if f],
+            foolings=FOOLINGS_REQUIRED,
             variants=["base", "disorder", "nofake1", "midhost=midsld", "nodrop"],
             ttl_static=ALL_TTL,
             ttl_auto=ALL_AUTOTTL,
@@ -114,7 +120,7 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
         "multisplit": _axes(
             repeats=[1, 6, 11],
             positions=ALL_SPLIT_POSITIONS,
-            foolings=FAST_FOOLINGS_TCP[:4],
+            foolings=FOOLINGS_WITH_NOFOOL,
             seqovl=ALL_SEQOVL,
             seqovl_blobs=ALL_BLOBS_TCP,
             ttl_static=ALL_TTL,
@@ -123,14 +129,14 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
         ),
         "multidisorder": _axes(
             positions=["1", "2", "midsld", "method+2", "1,midsld"],
-            foolings=FAST_FOOLINGS_TCP[:4],
+            foolings=FOOLINGS_WITH_NOFOOL,
             seqovl=[664, 681],
             seqovl_blobs=ALL_BLOBS_TCP,
             padencap=True,
         ),
         "syndata": _axes(
             blobs=["0x1603", "fake_default_tls", ""],
-            tls_mods=["", "rnd,dupsid", "rnd,dupsid,sni=www.google.com"],
+            tls_mods=["", "rnd,dupsid", "rnd,dupsid,rndsni", "rnd,dupsid,sni=www.google.com"],
             plus_split=[False, True],
             plus_hostfake=True,
         ),
@@ -201,7 +207,7 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
         "fakedsplit": _axes(
             positions=["1", "midsld", "sniext+1", "method+2"],
             pattern_blobs=ALL_BLOBS_TCP,
-            foolings=[f for f in FAST_FOOLINGS_TCP[:4] if f],
+            foolings=FOOLINGS_REQUIRED,
             repeats=[6, 11],
             ack_drop=True,
             send_md5=True,
@@ -209,7 +215,7 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
         "fakeddisorder": _axes(
             positions=["1", "midsld", "method+2"],
             pattern_blobs=ALL_BLOBS_TCP,
-            foolings=[f for f in FAST_FOOLINGS_TCP[:4] if f],
+            foolings=FOOLINGS_REQUIRED,
             repeats=[6, 11],
             ack_drop=True,
             send_md5=True,
@@ -319,7 +325,7 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
         "http_fake": _axes(
             blobs=["fake_default_http", "0x00000000"],
             repeats=FAST_REPEATS[:4],
-            foolings=FAST_FOOLINGS_TCP[:4],
+            foolings=FOOLINGS_WITH_NOFOOL,
         ),
         "http_tls_dual": _axes(
             http_blobs=["fake_default_http"],

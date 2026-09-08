@@ -123,3 +123,40 @@ def test_filter_none_profile_stun_subset():
 
     out = filter_blob_aliases(None, TriageProfile(viable_blobs=["stun"]))
     assert set(out) == {"stun", "stun2"}
+
+
+def test_blob_class_builtins_and_hex():
+    # AUDIT §7.1: upstream built-ins and null fakes are classifiable.
+    # Bare "" stays "other" (no-blob core), kept via the always-keep list.
+    assert blob_class("fake_default_tls") == "tls_clienthello"
+    assert blob_class("fake_default_http") == "tls_clienthello"
+    assert blob_class("fake_default_quic") == "quic"
+    assert blob_class("0x00000000") == "empty"
+    assert blob_class("0x1603") == "empty"
+
+
+def test_filter_keeps_builtins_and_null_blobs():
+    # With a partially-viable grid (stun only) the families that lean on
+    # upstream defaults / null fakes must survive (AUDIT §7.1).
+    from blockchecks.engine.triage import TriageProfile
+
+    prof = TriageProfile(viable_blobs=["stun"])
+    assert filter_blob_aliases(["fake_default_http", "0x00000000"], prof, protocol="http") == [
+        "fake_default_http",
+        "0x00000000",
+    ]
+    assert filter_blob_aliases(["0x1603", "fake_default_tls", ""], prof) == [
+        "0x1603",
+        "fake_default_tls",
+        "",
+    ]
+    pool = ["0x00000000", "stun", "max_ru", "google", "4pda"]
+    assert filter_blob_aliases(pool, prof) == ["0x00000000", "stun"]
+
+
+def test_filter_quic_keeps_builtin_default():
+    from blockchecks.engine.triage import TriageProfile
+
+    prof = TriageProfile(viable_blobs=["quic"])
+    pool = ["fake_default_quic", "quic_google", "quic_vk"]
+    assert filter_blob_aliases(pool, prof, protocol="quic") == pool

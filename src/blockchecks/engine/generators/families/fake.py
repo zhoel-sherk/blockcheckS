@@ -19,19 +19,19 @@ from blockchecks.engine.generators.families._helpers import (
 _ACK_BLOBS = ("stun", "google", "0x00000000")
 
 
-def _hf_core(variant: str, fool: str) -> str:
-    f = _fooling_clause(fool)
-    return {
-        "base": f"hostfakesplit:nofake2{f}:repeats=1",
-        "disorder": f"hostfakesplit:disorder_after:nofake2{f}:repeats=1",
-    }.get(variant, f"hostfakesplit:{variant}{f}:repeats=1")
+def _hf_line(variant: str, fool: str) -> str:
+    """One hostfakesplit variant mapper for both hostfake and fake_hostfake.
 
-
-def _fake_hf_line(hf: str, fool: str) -> str:
+    base → suppress the second fake; disorder/disorder_after → disorder the
+    faked part; anything else passes through verbatim (nofake1, midhost=…,
+    nodrop). ``fool`` may be empty.
+    """
     f = _fooling_clause(fool)
-    if hf == "base":
+    if variant == "base":
         return f"hostfakesplit:nofake2{f}:repeats=1"
-    return f"hostfakesplit:{hf}:nofake2{f}:repeats=1"
+    if variant == "disorder":
+        variant = "disorder_after"
+    return f"hostfakesplit:{variant}:nofake2{f}:repeats=1"
 
 
 class FakeFamiliesMixin:
@@ -117,7 +117,7 @@ class FakeFamiliesMixin:
             fool, variant = a["fool"], a["variant"]
             return (
                 f"std_hf_{variant}_{fool or 'nofool'}",
-                _hf_core(variant, fool),
+                _hf_line(variant, fool),
             )
 
         cores = expand_axes({"fool": p.foolings, "variant": p.variants}, _core)
@@ -221,7 +221,7 @@ class FakeFamiliesMixin:
                 f"std_fh_{a['blob']}_r{a['r']}_{a['hf']}_{a['fool'] or 'nofool'}",
                 (
                     f"fake:blob={a['blob']}:repeats={a['r']}{_fooling_clause(a['fool'])}\n"
-                    f"{_fake_hf_line(a['hf'], a['fool'])}"
+                    f"{_hf_line(a['hf'], a['fool'])}"
                 ),
             ),
         )

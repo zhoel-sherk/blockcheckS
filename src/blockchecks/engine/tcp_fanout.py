@@ -10,22 +10,33 @@ from blockchecks.engine.config import GOOGLEVIDEO_RANGE_SIZE
 _SPECIAL_DOMAIN_MARKERS = ("googlevideo",)
 
 
+def _is_special(domain: str, *, is_http: bool) -> bool:
+    """googlevideo markers plus ytcdn hosts (per-request probe variants)."""
+    if is_http:
+        return False
+    if any(m in domain for m in _SPECIAL_DOMAIN_MARKERS):
+        return True
+    from blockchecks.checkers.curl_probe import is_ytcdn_domain
+
+    return is_ytcdn_domain(domain)
+
+
 @dataclass(frozen=True)
 class CurlProfile:
     """Per-domain curl options for a fan-out batch."""
 
     use_ech: bool
     headers_extra: str  # fragment inside headers dict, e.g. ', "Range": "bytes=0-1"'
-    special: bool  # must run solo (googlevideo videoplayback curl profile)
+    special: bool  # must run solo (googlevideo/ytcdn curl profile)
 
 
 def curl_profile(domain: str, *, protocol: str = "tls12", disable_ech: bool = False) -> CurlProfile:
     is_http = protocol == "http"
     dom = domain.lower().split("/")[0]
-    is_gv = not is_http and any(m in dom for m in _SPECIAL_DOMAIN_MARKERS)
+    is_gv = _is_special(dom, is_http=is_http)
     use_ech = not is_http and not disable_ech and not is_gv
     headers_extra = ""
-    if is_gv:
+    if is_gv and "googlevideo" in dom:
         range_end = GOOGLEVIDEO_RANGE_SIZE - 1
         headers_extra = f', "Range": "bytes=0-{range_end}"'
     return CurlProfile(use_ech=use_ech, headers_extra=headers_extra, special=is_gv)

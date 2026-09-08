@@ -1,8 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 cd /home/zhoel/workspace/blockcheckS
-sudo -n pkill -9 nfqws2 2>/dev/null || true
-sleep 0.5
+if pgrep -x nfqws2 >/dev/null 2>&1; then
+  echo "WARNING: nfqws2 is running; NOT killing host-wide (would hit nfqws2 in ALL netns — AGENTS.md §8)." >&2
+  echo "WARNING: bs tcp manages its own daemon; if a stale host daemon holds the queue, stop it explicitly." >&2
+fi
 export BLOCKCHECKS_NFQWS2_DEBUG=1
 # First 3 GP-verified strategies
 .venv/bin/bs tcp -d discord.com \

@@ -7,9 +7,8 @@ import tempfile
 
 import pytest
 
+from blockchecks.engine.generators.standard import StandardGenerator
 from blockchecks.engine.matrix_generator import (
-    FakeTcpGenerator,
-    HostfakeTcpGenerator,
     MatrixGenerator,
     UserMatrixGenerator,
 )
@@ -19,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.asyncio
 async def test_single_one_per_generator():
-    gen = FakeTcpGenerator()
+    gen = StandardGenerator(strategy_types=["fake"])
     items = await gen.generate("tls12", scan_level="single", max_count=10)
     assert len(items) == 1
     assert items[0].label.startswith("std_fake_")
@@ -29,7 +28,7 @@ async def test_single_one_per_generator():
 
 @pytest.mark.asyncio
 async def test_single_hostfake():
-    gen = HostfakeTcpGenerator()
+    gen = StandardGenerator(strategy_types=["hostfake"])
     items = await gen.generate("tls12", scan_level="single", max_count=10)
     assert len(items) == 1
     assert items[0].label.startswith("std_hf_")
@@ -40,7 +39,7 @@ async def test_single_hostfake():
 
 @pytest.mark.asyncio
 async def test_fast_multiple():
-    gen = FakeTcpGenerator()
+    gen = StandardGenerator(strategy_types=["fake"])
     items = await gen.generate("tls12", scan_level="fast", max_count=50)
     assert len(items) > 1
     assert all(i.strategy.startswith("fake:blob=") for i in items)
@@ -50,7 +49,7 @@ async def test_fast_multiple():
 @pytest.mark.asyncio
 async def test_fast_skip_with_run_set():
     """Known-working label skips TTL expansions (fast mode), shrinking the matrix."""
-    gen = FakeTcpGenerator()
+    gen = StandardGenerator(strategy_types=["fake"])
     items_full = await gen.generate("tls12", scan_level="fast", max_count=10_000)
     assert items_full
     skip_label = next(

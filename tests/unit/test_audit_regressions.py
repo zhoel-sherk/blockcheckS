@@ -435,9 +435,9 @@ async def test_quic_gv_family_gv5():
 
 @pytest.mark.asyncio
 async def test_faked_tcp_generator_m9_real_fakedsplit():
-    from blockchecks.engine.generators.standard import FakedTcpGenerator
+    from blockchecks.engine.generators.standard import StandardGenerator
 
-    gen = FakedTcpGenerator()
+    gen = StandardGenerator(strategy_types=["fakedsplit", "fakeddisorder"])
     items = await gen.generate("tls12", scan_level="single", max_count=5)
     assert items
     assert "fakedsplit:" in items[0].strategy or "fakeddisorder:" in items[0].strategy
@@ -447,9 +447,9 @@ async def test_faked_tcp_generator_m9_real_fakedsplit():
 
 @pytest.mark.asyncio
 async def test_fake_split_combo_m9():
-    from blockchecks.engine.generators.standard import FakeSplitComboGenerator
+    from blockchecks.engine.generators.standard import StandardGenerator
 
-    gen = FakeSplitComboGenerator()
+    gen = StandardGenerator(strategy_types=["fake_fakedsplit"])
     items = await gen.generate("tls12", scan_level="single", max_count=5)
     assert items
     assert "fakedsplit:" in items[0].strategy

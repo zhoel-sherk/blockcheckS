@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP
@@ -10,6 +11,8 @@ from blockchecks.engine.family_registry import triage_tags
 
 if TYPE_CHECKING:
     from blockchecks.engine.triage import TriageProfile
+
+log = logging.getLogger(__name__)
 
 BLOB_CLASS_MAP: dict[str, str] = {
     "stun": "stun",
@@ -46,11 +49,28 @@ BLOB_CLASS_MAP: dict[str, str] = {
 _QUIC_PREFIX = "quic_"
 _TLS_PREFIX = "tls_"
 
+# Upstream built-ins / null fakes are canonical forms the triage blob-grid
+# cannot represent (it probes classes on TLS payload only). They are never
+# pruned by viable_blobs — AUDIT §7.1: http_fake/syndata emptied entirely,
+# quic_fake lost fake_default_quic, fake lost the null fake.
+_BUILTIN_BLOB_CLASSES: dict[str, str] = {
+    "fake_default_tls": "tls_clienthello",
+    "fake_default_http": "tls_clienthello",
+    "fake_default_quic": "quic",
+}
+_NULL_BLOBS = frozenset({"0x00000000", "0x1603"})
+# Bare "" means "no blob core" (blob_class → "other"), still never pruned.
+_ALWAYS_KEEP = frozenset(_BUILTIN_BLOB_CLASSES) | _NULL_BLOBS | {""}
+
 
 def blob_class(alias: str) -> str:
     """Coarse class for a blob alias (stun / tls_clienthello / quic / …)."""
     if alias in BLOB_CLASS_MAP:
         return BLOB_CLASS_MAP[alias]
+    if alias in _BUILTIN_BLOB_CLASSES:
+        return _BUILTIN_BLOB_CLASSES[alias]
+    if alias in _NULL_BLOBS:
+        return "empty"
     if alias.startswith(_QUIC_PREFIX):
         return "quic"
     if alias.startswith(_TLS_PREFIX):
@@ -60,7 +80,9 @@ def blob_class(alias: str) -> str:
 
 def aliases_for_class(cls: str) -> list[str]:
     """Blob aliases that belong to *cls* (class name itself included)."""
-    return [a for a, c in BLOB_CLASS_MAP.items() if c == cls or a == cls]
+    mapped = [a for a, c in BLOB_CLASS_MAP.items() if c == cls or a == cls]
+    builtins = [a for a, c in _BUILTIN_BLOB_CLASSES.items() if c == cls]
+    return sorted(set([*mapped, *builtins]))
 
 
 def filter_blob_aliases(
@@ -73,18 +95,29 @@ def filter_blob_aliases(
     Empty ``viable_blobs`` → no filter (unknown, keep everything).
     Protocol-aware: TCP TLS blob grid viability (stun, tls_clienthello) applies
     to TLS/HTTP blobs; UDP and QUIC blobs are not pruned by TCP TLS preflight.
+    Built-ins (fake_default_*) and null/hex blobs are always kept — the grid
+    cannot prove them dead (AUDIT §7.1). Warn when the filter would empty a
+    non-empty pool (matrix shrink must stay visible).
     """
     pool = list(aliases) if aliases is not None else list(BLOB_ALIAS_MAP)
     if profile is None or not profile.viable_blobs:
         return pool
     allowed = set(profile.viable_blobs)
-    return [
+    kept = [
         a
         for a in pool
-        if a in allowed
+        if a in _ALWAYS_KEEP
+        or a in allowed
         or blob_class(a) in allowed
         or (protocol in ("udp_voice", "udp_game", "quic") and blob_class(a) in ("discord_udp", "game_udp", "quic"))
     ]
+    if pool and not kept:
+        log.warning(
+            "%s",
+            f"  blob filter: all {len(pool)} blobs pruned by viable_blobs="
+            f"{sorted(allowed)} (protocol={protocol}) — family will be empty",
+        )
+    return kept
 
 
 def lua_entries_for_triage(profile: TriageProfile | None) -> list[dict]:

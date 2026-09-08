@@ -261,7 +261,7 @@ class TamperFamiliesMixin:
             row
             for lab, st in cores
             for row in ttl_companion_rows(
-                lab, st, p.ttl_static, p.ttl_auto, auto_fmt="autottl"
+                lab, st, p.ttl_static, p.ttl_auto, auto_fmt="autottl{ttl}"
             )
         ]
         emit_rows(self._add, items, seen, scan_level, ttl, protocol="udp_voice")

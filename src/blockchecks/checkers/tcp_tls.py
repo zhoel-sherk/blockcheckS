@@ -2,6 +2,7 @@
 Checks status, body size, transfer rate, and DPI stub content.
 """
 
+import logging
 import socket
 import time
 from dataclasses import dataclass, field
@@ -9,13 +10,14 @@ from dataclasses import dataclass, field
 import curl_cffi
 from curl_cffi.requests import RequestsError
 
-# Minimal response size for a real web page.
-# Redirects (301/302), No Content (204), WebSocket upgrades (101), and
-# small API responses are excluded — they are valid but have tiny bodies.
-MIN_CONTENT_LENGTH = 300
+from blockchecks.engine.config import MIN_CONTENT_LENGTH
+
+log = logging.getLogger(__name__)
 
 # Rate to verify we're actually receiving data (bytes/sec).
 # DPI window clamping results in <100 bytes/sec.
+# (config.MIN_READ_RATE_BPS=500 is the campaign throttle classifier —
+# deliberately looser here so slow-but-alive pages still warn, not fail.)
 MIN_BYTES_PER_SEC = 400.0
 
 # HTTP statuses that produce tiny bodies legitimately
@@ -172,9 +174,10 @@ def _validate_content(data: bytes, time_for_read: float, http_status: int = 200)
 def _classify_tls_error(msg: str, *, elapsed: float, timeout: float) -> str:
     """Map curl_cffi transport errors to short tls probe labels."""
     low = msg.lower()
+    is_timeout = "timeout" in low or "timed out" in low
     rules: tuple[tuple[bool, str], ...] = (
-        ("Timeout" in msg and elapsed < timeout * 0.6, "timeout (DPI window clamp?)"),
-        ("Timeout" in msg, "timeout"),
+        (is_timeout and elapsed < timeout * 0.6, "timeout (DPI window clamp?)"),
+        (is_timeout, "timeout"),
         ("reset" in low, "connection reset"),
         ("ssl" in low or "tls" in low, "TLS error"),
         ("resolve" in low, "DNS error"),
@@ -249,6 +252,7 @@ def check_tls(
             str(e), elapsed=time.perf_counter() - start, timeout=timeout
         )
     except Exception as e:
+        log.warning("check_tls(%s): unexpected %s: %s", domain, type(e).__name__, str(e)[:120])
         result.error = str(e)[:120]
 
     result.latency_ms = (time.perf_counter() - start) * 1000
@@ -271,10 +275,13 @@ def resolve_domain(domain: str, nameserver: str | None = None) -> list[str]:
             timeout=5,
         )
         return [line.strip() for line in r.stdout.splitlines() if line.strip()]
-    except Exception:
+    except Exception as exc:
+        log.debug("dig resolve failed for %s (%s); falling back to getaddrinfo", domain, exc)
         try:
             return [
-                a[4][0] for a in socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM)
+                a[4][0]
+                for a in socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM)
             ]
-        except Exception:
+        except Exception as exc2:
+            log.debug("getaddrinfo fallback failed for %s: %s", domain, exc2)
             return []

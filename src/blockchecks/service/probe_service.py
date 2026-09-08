@@ -25,7 +25,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class ProbeResult:
-    """Normalized on-the-fly probe result (JSON-safe contract)."""
+    """Normalized on-the-fly probe result (JSON-safe contract).
+
+    ``evidence="oneshot"``: this path runs without the lua bridge, so PASS is
+    HTTP-only — no APPLIED proof (AUDIT §10.3).
+    """
 
     domain: str
     strategy_id: str
@@ -35,6 +39,7 @@ class ProbeResult:
     http_code: int = 0
     fingerprint_matched: bool = False
     error: str = ""
+    evidence: str = "oneshot"
 
     @classmethod
     def from_tcp_result(cls, r: TcpTestResult) -> ProbeResult:
@@ -61,6 +66,7 @@ class ProbeResult:
             "http_code": self.http_code,
             "fingerprint_matched": self.fingerprint_matched,
             "error": self.error,
+            "evidence": self.evidence,
         }
 
 

@@ -139,7 +139,7 @@ async def run_blob_grid_async(probe_fn) -> list[str]:
         if inspect.isawaitable(out):
             out = await out
         ok, err, code = out
-        if cls != "empty" and (ok or is_fooling_viable(err, code)):
+        if ok or (cls != "empty" and is_fooling_viable(err, code)):
             viable.append(cls)
     return viable
 
