@@ -142,6 +142,9 @@ class PreflightReport:
     skip_domains: set[str] = field(default_factory=set)
     port_reports: list[PortBlockReport] = field(default_factory=list)
     ip_reports: list[IpBlockReport] = field(default_factory=list)
+    #: AUDIT §2: eligible domains that did NOT get an IP-block cross-test
+    #: (prolog skip or --skip-ip-block) — surfaced in the final summary.
+    ip_block_skipped: int = 0
     udp_16kb_blocked: bool = False
     udp_16kb_detail: str = ""
     dpi_diag: Any = None
@@ -431,20 +434,7 @@ async def run_preflight_async(
                     "%s", f"  → skipping strategy tests for {domain} (use --force to override)"
                 )
 
-        if (
-            not o.skip_ip_block
-            and domain not in report.skip_domains
-            and domain.rstrip(".") != ref
-        ):
-            ip_r = run_ip_block_cross_test(
-                domain,
-                unblocked_domain=ref,
-                timeout=o.timeout,
-                dns_cache=cache,
-            )
-            report.ip_reports.append(ip_r)
-            print_ip_block_report(ip_r)
-            _apply_ip_block(triage, domain, ip_r, is_primary=is_primary)
+        _cross_test_or_count(report, triage, o, domain, ref, cache, is_primary=is_primary)
 
         # L3/L4, stream stall, per-domain phase
         if domain not in report.skip_domains and not o.skip_l3_triage:
@@ -473,6 +463,12 @@ async def _finish_preflight(
 ) -> None:
     if o.dpi_diag:
         report.dpi_diag = await _run_dpi_diag_safe(domains, triage, cache, o, dns_rows)
+    # AUDIT §2: surface domains that never got an IP-block cross-test.
+    if report.ip_block_skipped:
+        log.info(
+            "%s",
+            f"  NOTE: {report.ip_block_skipped} domain(s) left without IP-block cross-test",
+        )
     if not o.skip_persist:
         await _persist_triage(triage, primary, o)
 
@@ -538,6 +534,33 @@ def _apply_prolog(triage: TriageProfile, domain: str, tls: TlsResult, *, is_prim
         FailPhase.TLS_SILENT_DROP_AFTER_SNI,
         FailPhase.CONNECT_TIMEOUT,
     )
+
+
+def _cross_test_or_count(
+    report: PreflightReport,
+    triage: TriageProfile,
+    o: PreflightOptions,
+    domain: str,
+    ref: str,
+    cache: Any,
+    *,
+    is_primary: bool,
+) -> None:
+    """AUDIT §2: run the IP-block cross-test or count the skip for the summary."""
+    if domain.rstrip(".") == ref:
+        return
+    if o.skip_ip_block or domain in report.skip_domains:
+        report.ip_block_skipped += 1
+        return
+    ip_r = run_ip_block_cross_test(
+        domain,
+        unblocked_domain=ref,
+        timeout=o.timeout,
+        dns_cache=cache,
+    )
+    report.ip_reports.append(ip_r)
+    print_ip_block_report(ip_r)
+    _apply_ip_block(triage, domain, ip_r, is_primary=is_primary)
 
 
 def _apply_ip_block(
@@ -709,6 +732,21 @@ def _load_prior_triage() -> TriageProfile:
 async def _persist_triage(triage: TriageProfile, primary: str, opts: PreflightOptions) -> None:
     from blockchecks.engine.triage import clustered_primary_domain
 
+    # AUDIT §3: preflight does not hold run.lock, but persist overwrites the
+    # provider triage.toml/hosts of a running campaign — warn loudly (data_block
+    # is shared state; behavior intentionally unchanged).
+    try:
+        from blockchecks.service.run_control import read_active_run
+
+        active = read_active_run()
+        if active is not None and active.pid != os.getpid():
+            log.warning(
+                "%s",
+                f"  WARNING: run.lock active (pid={active.pid}) — "
+                "triage.toml/hosts will be overwritten",
+            )
+    except (OSError, ValueError) as exc:
+        log.debug("run.lock check failed: %s", exc)
     csv_primary = clustered_primary_domain(triage.domain_reports, fallback=primary)
     try:
         from blockchecks.data_block.provider import get_provider_dir

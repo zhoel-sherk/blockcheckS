@@ -4,7 +4,28 @@ from __future__ import annotations
 
 import aiosqlite
 
-INIT_SCRIPT = """
+
+def campaign_applied_clause(alias: str = "") -> str:
+    """Canonical APPLIED-evidence clause (§5.3/§15): oneshot NULL or bridge APPLIED.
+
+    ``alias`` prefixes column refs (``"t."`` for aliased views); bare by default.
+    Keep the literal form stable — ``mcp._strip_applied_clause`` parses it.
+    """
+    c = f"{alias}bridge_applied" if alias else "bridge_applied"
+    return f"({c} IS NULL OR {c} = 1)"
+
+
+def campaign_pass_predicate(alias: str = "t.") -> str:
+    """Strict working-verdict predicate (§5.3): PASS always needs APPLIED;
+    THROTTLED counts as working only with APPLIED (clean-traffic evidence gate)."""
+    s = f"{alias}status" if alias else "status"
+    return (
+        f"({s} = 'PASS' AND {campaign_applied_clause(alias)}) "
+        f"OR ({s} = 'THROTTLED' AND {alias}bridge_applied = 1)"
+    )
+
+
+INIT_SCRIPT = f"""
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL DEFAULT '',
@@ -88,8 +109,7 @@ SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
        t.content_valid, t.timestamp, t.status
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
-WHERE (t.status = 'PASS' AND (t.bridge_applied IS NULL OR t.bridge_applied = 1))
-   OR (t.status = 'THROTTLED' AND t.bridge_applied = 1)
+WHERE {campaign_pass_predicate()}
 ORDER BY t.domain, t.latency_ms;
 CREATE VIEW IF NOT EXISTS v_coverage AS
 SELECT s.name AS strategy, s.proto,
@@ -97,8 +117,7 @@ SELECT s.name AS strategy, s.proto,
        ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
-WHERE (t.status = 'PASS' AND (t.bridge_applied IS NULL OR t.bridge_applied = 1))
-   OR (t.status = 'THROTTLED' AND t.bridge_applied = 1)
+WHERE {campaign_pass_predicate()}
   AND t.id = (
     SELECT t2.id FROM tcp_results t2
     WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
@@ -109,8 +128,7 @@ HAVING domains_passed > 0
 ORDER BY domains_passed DESC;
 CREATE VIEW IF NOT EXISTS v_latest_run AS
 SELECT domain, COUNT(*) AS total,
-       SUM(CASE WHEN (t.status = 'PASS' AND (t.bridge_applied IS NULL OR t.bridge_applied = 1))
-                 OR (t.status = 'THROTTLED' AND t.bridge_applied = 1)
+       SUM(CASE WHEN {campaign_pass_predicate()}
                 THEN 1 ELSE 0 END) AS passed,
        MAX(timestamp) AS last_test
 FROM tcp_results t
@@ -238,7 +256,7 @@ async def apply_schema(db: aiosqlite.Connection) -> None:
     await db.commit()
     # Recreate views so THROTTLED ∈ working (IF NOT EXISTS keeps stale defs)
     await db.executescript(
-        """
+        f"""
         DROP VIEW IF EXISTS v_working_tcp;
         DROP VIEW IF EXISTS v_coverage;
         DROP VIEW IF EXISTS v_latest_run;
@@ -247,8 +265,7 @@ SELECT s.name AS strategy, t.domain, t.http_code, t.latency_ms,
        t.content_valid, t.timestamp, t.status
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
-WHERE (t.status = 'PASS' AND (t.bridge_applied IS NULL OR t.bridge_applied = 1))
-   OR (t.status = 'THROTTLED' AND t.bridge_applied = 1)
+WHERE {campaign_pass_predicate()}
 ORDER BY t.domain, t.latency_ms;
 CREATE VIEW v_coverage AS
 SELECT s.name AS strategy, s.proto,
@@ -256,8 +273,7 @@ SELECT s.name AS strategy, s.proto,
        ROUND(AVG(t.latency_ms), 1) AS avg_latency_ms
 FROM tcp_results t
 JOIN strategies s ON t.strategy_id = s.id
-WHERE (t.status = 'PASS' AND (t.bridge_applied IS NULL OR t.bridge_applied = 1))
-   OR (t.status = 'THROTTLED' AND t.bridge_applied = 1)
+WHERE {campaign_pass_predicate()}
           AND t.id = (
             SELECT t2.id FROM tcp_results t2
             WHERE t2.strategy_id = t.strategy_id AND t2.domain = t.domain
@@ -268,8 +284,7 @@ WHERE (t.status = 'PASS' AND (t.bridge_applied IS NULL OR t.bridge_applied = 1))
         ORDER BY domains_passed DESC;
         CREATE VIEW v_latest_run AS
         SELECT domain, COUNT(*) AS total,
-               SUM(CASE WHEN (t.status = 'PASS' AND (t.bridge_applied IS NULL OR t.bridge_applied = 1))
-                         OR (t.status = 'THROTTLED' AND t.bridge_applied = 1)
+               SUM(CASE WHEN {campaign_pass_predicate()}
                         THEN 1 ELSE 0 END) AS passed,
                MAX(timestamp) AS last_test
         FROM tcp_results t

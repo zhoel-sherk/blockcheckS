@@ -19,7 +19,7 @@ from blockchecks import __version__
 from blockchecks.engine.fail_phase import _INFRA_ERROR_MARKERS, INFRA_FAIL_PHASES
 from blockchecks.engine.paths import reclaim_sudo_ownership
 from blockchecks.engine.store.models import Checkpoint
-from blockchecks.engine.store.schema import apply_schema
+from blockchecks.engine.store.schema import apply_schema, campaign_applied_clause
 
 log = logging.getLogger(__name__)
 
@@ -154,8 +154,8 @@ def _resolve_impersonate() -> str:
 
 
 _WORKING_STATUSES = "('PASS','THROTTLED')"
-# Latest-row harvest/export: keep oneshot (NULL) and APPLIED; drop lua PASS without APPLIED.
-_CAMPAIGN_PASS_TCP = "(t.bridge_applied IS NULL OR t.bridge_applied = 1)"
+# §5.3/§15: canonical predicate lives in store.schema (single source of truth).
+_CAMPAIGN_PASS_TCP = campaign_applied_clause("t.")
 _DEFAULT_FLUSH_INTERVAL_SEC = 15.0
 _WAL_CHECKPOINT_EVERY = 5
 _WAL_CHECKPOINT_ELAPSED_SEC = 60.0
@@ -793,7 +793,7 @@ class SqliteRunStore:
             cur = await db.execute(
                 f"SELECT domain, COUNT(*), "
                 f"SUM(CASE WHEN status IN {_WORKING_STATUSES} "
-                f"AND (bridge_applied IS NULL OR bridge_applied = 1) THEN 1 ELSE 0 END) "
+                f"AND {campaign_applied_clause()} THEN 1 ELSE 0 END) "
                 f"FROM tcp_results WHERE NOT {_INFRA_ROW_SQL} GROUP BY domain"
             )
             rows = await cur.fetchall()
@@ -811,7 +811,7 @@ class SqliteRunStore:
                 f"SELECT domain, "
                 f"SUM(CASE WHEN fail_phase='dns_resolve' THEN 1 ELSE 0 END), "
                 f"SUM(CASE WHEN status IN {_WORKING_STATUSES} "
-                f"AND (bridge_applied IS NULL OR bridge_applied = 1) THEN 1 ELSE 0 END) "
+                f"AND {campaign_applied_clause()} THEN 1 ELSE 0 END) "
                 f"FROM tcp_results WHERE NOT {_INFRA_ROW_SQL} GROUP BY domain"
             )
             rows = await cur.fetchall()

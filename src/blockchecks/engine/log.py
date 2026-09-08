@@ -143,6 +143,11 @@ def python_log_path() -> Path:
     return RUNTIME_LOGS_DIR / "blockchecks.log"
 
 
+def mcp_log_path() -> Path:
+    """Separate channel for the long-lived `bs mcp` writer (AUDIT §15/§1)."""
+    return RUNTIME_LOGS_DIR / "blockchecks_mcp.log"
+
+
 def _newest_glob(directory: Path, pattern: str) -> Path | None:
     matches = sorted(directory.glob(pattern), key=lambda p: p.stat().st_mtime if p.is_file() else 0)
     return matches[-1] if matches else None
@@ -199,8 +204,17 @@ def configure_logging(
     *,
     level: str | int | None = None,
     console: str = "stdout",
+    file_path: str | Path | None = None,
 ) -> None:
-    """Attach rotating file + stream handlers once; always apply *level*."""
+    """Attach rotating file + stream handlers once; always apply *level*.
+
+    AUDIT §15/§1: every process must have at most ONE writer per log file.
+    ``file_path`` redirects the rotating handler (``bs mcp`` → its own
+    ``blockchecks_mcp.log``); without it, an active campaign run (run.lock
+    held by another process) skips the file handler entirely — a second
+    RotatingFileHandler on the same file loses the tail on rotation
+    (rename under someone else's fd) on long runs.
+    """
     global _console_stream
     _console_stream = console if console == "stderr" else "stdout"
     log_level = _parse_level(level)
@@ -216,19 +230,32 @@ def configure_logging(
     root.propagate = False
 
     file_fmt = logging.Formatter(_FILE_FMT)
-    try:
-        RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        path = python_log_path()
-        fh = _FlushRotatingFileHandler(
-            path, maxBytes=_FILE_BYTES, backupCount=_FILE_BACKUPS, encoding="utf-8"
-        )
-        fh.setLevel(log_level)
-        fh.setFormatter(file_fmt)
-        fh.addFilter(_DeferredDebugFilter())
-        root.addHandler(fh)
-        reclaim_sudo_ownership(path)
-    except OSError:
-        pass
+    attach_file = True
+    if file_path is None:
+        from blockchecks.service.run_control import read_active_run
+
+        active = read_active_run()
+        if active is not None and active.pid != os.getpid():
+            logging.getLogger(LOGGER_NAME).info(
+                "%s",
+                f"  active campaign run (pid={active.pid}) — "
+                "file logging skipped (single-writer rule), console only",
+            )
+            attach_file = False
+    if attach_file:
+        try:
+            RUNTIME_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            path = Path(file_path) if file_path is not None else python_log_path()
+            fh = _FlushRotatingFileHandler(
+                path, maxBytes=_FILE_BYTES, backupCount=_FILE_BACKUPS, encoding="utf-8"
+            )
+            fh.setLevel(log_level)
+            fh.setFormatter(file_fmt)
+            fh.addFilter(_DeferredDebugFilter())
+            root.addHandler(fh)
+            reclaim_sudo_ownership(path)
+        except OSError:
+            pass
 
     op_fmt = OperatorFormatter()
     if _console_stream == "stderr":

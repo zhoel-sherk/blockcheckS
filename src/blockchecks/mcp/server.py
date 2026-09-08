@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from blockchecks.engine.config import PROJECT_DIR, ZAPRET2_ROOT
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR, STATE_DIR
+from blockchecks.engine.store.schema import campaign_applied_clause
 
 log = logging.getLogger(__name__)
 
@@ -34,9 +35,10 @@ DEFAULT_SOCKET_PATH = Path(
 )
 DEFAULT_TIMEOUT_SEC = 30.0
 
+# §5.3/§15: canonical predicate from store.schema (single source of truth).
 # Keep oneshot (NULL) and lua APPLIED; drop PASS with bridge_applied=0.
-_CAMPAIGN_PASS = "(bridge_applied IS NULL OR bridge_applied = 1)"
-_CAMPAIGN_PASS_T = "(t.bridge_applied IS NULL OR t.bridge_applied = 1)"
+_CAMPAIGN_PASS = campaign_applied_clause()
+_CAMPAIGN_PASS_T = campaign_applied_clause("t.")
 
 
 def _strip_applied_clause(sql: str) -> str:
@@ -1465,9 +1467,11 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    from blockchecks.engine.log import configure_logging
+    from blockchecks.engine.log import configure_logging, mcp_log_path
 
-    configure_logging(console="stderr")
+    # AUDIT §15/§1: `bs mcp` is a long-lived second writer — its rotating
+    # handler goes to its own file, never to the campaign's blockchecks.log.
+    configure_logging(console="stderr", file_path=mcp_log_path())
     mcp.run()
 
 

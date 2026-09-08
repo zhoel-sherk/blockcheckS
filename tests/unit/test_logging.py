@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 
@@ -220,3 +221,86 @@ def test_share_logs_dir_not_created_by_default(tmp_path, monkeypatch):
     paths.ensure_dirs()
     assert (tmp_path / "state" / "logs").is_dir()
     assert not (tmp_path / "share" / "logs").exists()
+
+
+def _reset_handlers():
+    root = logging.getLogger("blockchecks")
+    old = root.handlers[:]
+    root.handlers = []
+    return old
+
+
+def _restore_handlers(old):
+    logging.getLogger("blockchecks").handlers[:] = old
+
+
+def test_configure_logging_file_path_redirect(tmp_path, monkeypatch):
+    """AUDIT §15/§1: file_path redirects the rotating handler (bs mcp channel)."""
+    from blockchecks.engine.log import configure_logging
+
+    monkeypatch.setenv("BLOCKCHECKS_LOG_LEVEL", "INFO")
+    old = _reset_handlers()
+    try:
+        target = tmp_path / "blockchecks_mcp.log"
+        configure_logging(level=logging.INFO, file_path=target)
+        fhs = [
+            h
+            for h in logging.getLogger("blockchecks").handlers
+            if isinstance(h, logging.handlers.RotatingFileHandler)
+        ]
+        assert [h.baseFilename for h in fhs] == [str(target)]
+        logging.getLogger("blockchecks").info("hello-file-path")
+        for h in logging.getLogger("blockchecks").handlers:
+            h.flush()
+        assert target.exists() and "hello-file-path" in target.read_text(encoding="utf-8")
+    finally:
+        _restore_handlers(old)
+
+
+def test_configure_logging_active_run_guard_skips_file(tmp_path, monkeypatch):
+    """AUDIT §15/§1: active campaign (another pid) → console-only + notice."""
+    from blockchecks.engine import log as logmod
+    from blockchecks.service.run_control import ActiveRunInfo
+
+    monkeypatch.setenv("BLOCKCHECKS_LOG_LEVEL", "INFO")
+    active = ActiveRunInfo(pid=os.getpid() + 1, command="bs full", started_at="x")
+    monkeypatch.setattr("blockchecks.service.run_control.read_active_run", lambda: active)
+    old = _reset_handlers()
+    records: list[str] = []
+    root = logging.getLogger("blockchecks")
+    old_level = root.level
+    root.setLevel(logging.INFO)
+    # Spy on emission without attaching a handler: a non-empty handlers list
+    # would trip configure_logging's idempotent early-return.
+    orig_handle = root.handle
+    root.handle = lambda record: records.append(record.getMessage())  # type: ignore[method-assign]
+
+    try:
+        logmod.configure_logging(level=logging.INFO)
+        root = logging.getLogger("blockchecks")
+        fhs = [h for h in root.handlers if isinstance(h, logging.handlers.RotatingFileHandler)]
+        assert fhs == [], "second writer attached during an active campaign"
+        assert any("file logging skipped" in m for m in records), records
+    finally:
+        root.handle = orig_handle  # type: ignore[method-assign]
+        root.setLevel(old_level)
+        _restore_handlers(old)
+
+
+def test_configure_logging_own_lock_attaches_file(tmp_path, monkeypatch):
+    """The campaign/daemon holding its OWN run.lock still gets the file handler."""
+    from blockchecks.engine import log as logmod
+    from blockchecks.service.run_control import ActiveRunInfo
+
+    monkeypatch.setenv("BLOCKCHECKS_LOG_LEVEL", "INFO")
+    active = ActiveRunInfo(pid=os.getpid(), command="bs full", started_at="x")
+    monkeypatch.setattr("blockchecks.service.run_control.read_active_run", lambda: active)
+    monkeypatch.setattr(logmod, "RUNTIME_LOGS_DIR", tmp_path)
+    old = _reset_handlers()
+    try:
+        logmod.configure_logging(level=logging.INFO)
+        root = logging.getLogger("blockchecks")
+        fhs = [h for h in root.handlers if isinstance(h, logging.handlers.RotatingFileHandler)]
+        assert fhs and fhs[0].baseFilename == str(tmp_path / "blockchecks.log")
+    finally:
+        _restore_handlers(old)
