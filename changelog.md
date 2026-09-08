@@ -46,10 +46,55 @@
   `docs/cookbook/gp-bridge.md` (мульти-домен, harvest, engine switch),
   `docs/database.md` (slug vs args, run_summary).
 
+### Звукость вердиктов и аудит-волна (2026-09-08)
+
+Полный журнал: `AUDIT.md` (§1–§12, локальный бэклог-канон).
+
+- **Строгий вердикт PASS/FAIL** (§5.3): THROTTLED без APPLIED = FAIL
+  (чисто-траффик доказательство); THROTTLED с APPLIED = THROTTLED info-строка
+  (views считают working); oneshot-PASS (NULL) остаётся слабым PASS.
+  Обновлены `campaign_harvest_status` и views (v_working_tcp/v_coverage/
+  v_latest_run).
+- **Blob-триаж больше не убивает живые семьи** (§7.1): upstream built-ins
+  (`fake_default_tls/http/quic`) и null-фейки (`0x00000000`/`0x1603`)
+  классифицируются и не прунятся `viable_blobs`; blob-грид пишет класс
+  `empty`; раньше `http_fake`/`syndata` опустошались целиком при частично
+  живом гриде.
+- **Кросс-протокольные split-маркеры** (§6.4): `method+*` генерится только
+  для http, `sniext/host+` — только для TLS. Раньше неразрешённый pos на TLS
+  означал тихий no-op десинка, который всё ещё писал APPLIED → канал ложных
+  PASS закрыт на этапе генерации.
+- **`disable_ech` был no-op** (§12): `CURLOPT_ECH=""` отклоняется libcurl
+  (только `"false"` выключает) — ECH оставался включён, A/B-детектор
+  ECH-блокировки не срабатывал никогда.
+- **Гонка signal-handler** (§12): SIGINT/SIGTERM во время `create_all()`
+  вешал процесс навсегда (lock в прерванном кадре) — cleanup скипается
+  с warning вместо дедлока.
+- **`CURLOPT_RESOLVE` use-after-free** в repeats-цикле на shared Session
+  (curl_cffi освобождает slist после каждого perform) — ре-пин перед каждой
+  попыткой.
+- **Daemon-путь `generate_router_config`** фильтрует suspicious lua-PASS(0)
+  (паритет с offline-путём) + strip-retry для legacy-DB.
+- Движок подбора: protocol-aware позиции, `rnd,dupsid,rndsni` (BC2 24),
+  делегаты генераторов → лямбды REGISTRY, именованные срезы foolings,
+  снята коллизия меток auto-TTL; pool canary 37026 → 36525.
+- Конфиги/валидатор (§8): мёртвый конфиг починен (`fake:blob=google`),
+  `alt5` пересобран по имени, BLOB_GRID `empty`-строка валидна
+  (`fake:blob=0x00000000`), hostfakesplit без `split_without_pos`.
+- Инфраструктура (§7/§9/§10/§12): signal-handler skip, orphan nfqws2 убивается
+  до raise, `sudo -n` в daemon cmd, eth0/iptables-fallback логируются,
+  `CURLOPT_RESOLVE` UAF, batch flat-failure распределение по доменам,
+  STUN-proof валидируется в voice_burst, ggc-кэш нормализация + логи
+  деградации цепочки IP, sing-box сирота при TimeoutExpired, dev-скрипты без
+  host-wide pkill.
+- Документация: `docs/hostmode.md` — канон host-mode (fwmark), сверен с кодом.
+
 ### Тесты / CI
 
 - Новые unit: повторный `-d` (parser + fold в DNS-набор), канонический
-  slug→config_path. Тест-файлы новые не добавлялись — шард-списки не менялись.
+  slug→config_path, blob-классификация built-ins/hex, THROTTLED-гейт,
+  paren-aware strip-предиката, ECH `"false"`, STUN txn-id proof.
+  Тест-файлы новые не добавлялись — шард-списки не менялись.
 
 ---
 
