@@ -81,12 +81,20 @@ _PROBE_BACKEND_ONESHOT = "oneshot"
 
 
 def campaign_harvest_status(result: TcpTestResult, backend: str) -> str:
-    """SQLite status for campaign rows; harvest counts only lua_bridge APPLIED PASS."""
+    """SQLite status for campaign rows; harvest counts only lua_bridge APPLIED PASS.
+
+    AUDIT §5.3 (approved policy): THROTTLED without APPLIED is clean-traffic
+    evidence → FAIL. THROTTLED with APPLIED stays a THROTTLED info row (views
+    count it as working); SKIPPED passes through for both backends.
+    """
     base = tcp_row_status(result)
-    if base != "PASS":
+    if base == "SKIPPED":
         return base
+    applied = result.bridge_applied is True
     if backend == _PROBE_BACKEND_LUA:
-        return "PASS" if result.success and result.bridge_applied is True else "FAIL"
+        if not applied:
+            return "FAIL"
+        return base
     if backend == _PROBE_BACKEND_ONESHOT:
         return "FAIL"
     log.warning("campaign harvest: unknown probe backend %r — demoting PASS", backend)

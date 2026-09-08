@@ -43,6 +43,28 @@ def test_campaign_harvest_status(backend, bridge_applied, expected):
     assert campaign_harvest_status(_result(bridge_applied=bridge_applied), backend) == expected
 
 
+@pytest.mark.parametrize(
+    ("backend", "bridge_applied", "expected"),
+    [
+        # AUDIT §5.3: THROTTLED without APPLIED is clean-traffic evidence → FAIL.
+        ("lua_bridge", True, "THROTTLED"),
+        ("lua_bridge", False, "FAIL"),
+        ("lua_bridge", None, "FAIL"),
+        ("oneshot", None, "FAIL"),
+    ],
+)
+def test_campaign_harvest_status_throttled(backend, bridge_applied, expected):
+    result = _result(bridge_applied=bridge_applied, throttled=True)
+    assert campaign_harvest_status(result, backend) == expected
+
+
+def test_campaign_harvest_status_skipped_passthrough():
+    from blockchecks.service.batch_service import NS_POOL_EXHAUSTED
+
+    result = _result(error=NS_POOL_EXHAUSTED)
+    assert campaign_harvest_status(result, "lua_bridge") == "SKIPPED"
+
+
 @pytest.mark.asyncio(loop_scope="package")
 async def test_fanout_oneshot_logs_fail_not_pass(mock_runner, monkeypatch):
     """HTTP 200 fan-out rows are stored FAIL + fail_phase=oneshot (not harvest PASS)."""
