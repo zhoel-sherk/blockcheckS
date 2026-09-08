@@ -205,7 +205,10 @@ async def _discover_via_gateway(token: str) -> dict | None:
                 await asyncio.sleep(hi)
                 try:
                     await ws.send_json({"op": 1, "d": None})
-                except Exception:
+                except Exception as exc:
+                    # AUDIT §12.3/D6: heartbeat death used to be silent —
+                    # a stalled gateway then looked like "no events".
+                    log.debug("[discovery] heartbeat send failed: %s", exc)
                     break
 
         hbt = asyncio.create_task(hb())
@@ -233,11 +236,17 @@ async def _discover_via_gateway(token: str) -> dict | None:
                 try:
                     msg = await asyncio.wait_for(ws.receive_json(), 15)
                 except asyncio.TimeoutError:
+                    log.info(
+                        "%s",
+                        "[discovery] gateway: no events within 15s "
+                        f"(got_session={got_session} got_server={got_server})",
+                    )
                     break
 
                 match msg:
                     case {"t": "READY", "d": {"user": {"id": str(uid)}}}:
                         user_id = uid
+                        log.debug("[discovery] READY user=%s", uid)
                         if guild_id and channel_id:
                             await ws.send_json(
                                 {
@@ -253,6 +262,7 @@ async def _discover_via_gateway(token: str) -> dict | None:
                     case {"t": "VOICE_STATE_UPDATE", "d": dict(d)}:
                         session_id = d.get("session_id", "")
                         got_session = bool(session_id)
+                        log.debug("[discovery] VOICE_STATE session_id=%s", session_id or "<none>")
                     case {
                         "t": "VOICE_SERVER_UPDATE",
                         "d": {"endpoint": str(ep), "token": str(tok)},
@@ -260,8 +270,12 @@ async def _discover_via_gateway(token: str) -> dict | None:
                         voice_endpoint = ep
                         voice_token_shard = tok
                         got_server = True
+                        log.debug("[discovery] VOICE_SERVER endpoint=%s", ep)
                     case _:
-                        pass
+                        log.debug(
+                            "[discovery] gateway op ignored: %s",
+                            str(msg.get("t") or f"op={msg.get('op')}")[:60],
+                        )
 
                 if got_session and got_server:
                     break
@@ -272,6 +286,10 @@ async def _discover_via_gateway(token: str) -> dict | None:
             await ws.close()
 
         if not voice_endpoint or not voice_token_shard:
+            missing = [] if voice_endpoint else ["endpoint"]
+            if not voice_token_shard:
+                missing.append("voice token")
+            log.info("%s", f"[discovery] gateway done without {', '.join(missing)}")
             return None
 
         parts = voice_endpoint.rsplit(":", 1)
@@ -310,6 +328,7 @@ async def _discover_via_gateway(token: str) -> dict | None:
                         break
                     case {"op": 9} if op9_retries < 2:
                         op9_retries += 1
+                        log.debug("[discovery] voice WS op9 resume (retry %d)", op9_retries)
                         await vws.send_json(
                             {
                                 "op": 0,

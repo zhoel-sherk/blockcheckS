@@ -348,11 +348,16 @@ def build_probe_request(
     protocol: str = "tls12",
     ggc: bool = False,
 ) -> tuple[CurlProbeRequest, dict | None]:
-    """Resolve googlevideo-specific fields when needed."""
+    """Resolve googlevideo/ytcdn-specific fields when needed."""
     if protocol != "http" and is_googlevideo_domain(domain):
         if ggc:
             return prepare_ggc_probe(domain, timeout=timeout, resolved_ip=resolved_ip)
         return prepare_googlevideo_probe(domain, resolved_ip=resolved_ip, timeout=timeout)
+    if protocol != "http" and is_ytcdn_domain(domain):
+        # AUDIT §12.3/B4: ytcdn hosts need their per-request curl profile too
+        # (priority-1 variant; the full variant list is used by the callers
+        # that loop — bridge batch and TestRunner).
+        return prepare_ytcdn_probe(domain, timeout=timeout, resolved_ip=resolved_ip)
     use_ech_off = disable_ech
     return (
         CurlProbeRequest(

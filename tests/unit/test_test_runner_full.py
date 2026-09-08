@@ -51,8 +51,10 @@ def test_check_tls_in_ns_ok():
     req.protocol = "tls12"
     with patch("blockchecks.checkers.curl_probe.build_probe_request", return_value=(req, None)):
         info = _check_tls_in_ns("d.com", 3.0)
-    assert info["payload"]["mode"] == "single"
-    assert info["payload"]["request"]["domain"] == "d.com"
+    # AUDIT §12.3/B4: payload is a serialized request; "mode" is added by
+    # _run_check, and "payloads" carries the variant list (1 for plain domains).
+    assert info["payload"]["domain"] == "d.com"
+    assert info["payloads"] == [info["payload"]]
 
 
 def test_run_check_success():
@@ -213,3 +215,61 @@ def test_run_stun_check_parse_error():
         data = runner._run_stun_check("1.2.3.4", 50004, 3.0)
     assert data["success"] is False
     assert "parse error" in data["detail"]
+
+
+def test_check_tls_in_ns_ytcdn_variants():
+    """AUDIT §12.3/B4: ytcdn domains get the full variant list."""
+    from blockchecks.checkers.curl_probe import CurlProbeRequest
+    from blockchecks.service.test_runner import _check_tls_in_ns
+
+    v1 = CurlProbeRequest(
+        domain="i.ytimg.com", curl_url="https://i.ytimg.com/", ytcdn=True
+    )
+    v2 = CurlProbeRequest(
+        domain="i.ytimg.com",
+        curl_url="https://i.ytimg.com/vi/dQw4w9WgXcQ/0.jpg",
+        ytcdn=True,
+    )
+    with (
+        patch("blockchecks.checkers.curl_probe.is_ytcdn_domain", return_value=True),
+        patch(
+            "blockchecks.checkers.curl_probe.ytcdn_probe_variants",
+            return_value=[v1, v2],
+        ),
+        patch(
+            "blockchecks.checkers.curl_probe.build_probe_request", return_value=(v1, None)
+        ),
+    ):
+        info = _check_tls_in_ns("i.ytimg.com", 3.0)
+    assert info["error_result"] is None
+    assert len(info["payloads"]) == 2
+    assert info["payload"] is info["payloads"][0]
+    assert all(p["ytcdn"] for p in info["payloads"])
+
+
+def test_run_check_ytcdn_variants_first_success_wins():
+    """bs tcp: second variant's success terminates the loop (and only 2 runs)."""
+    runner = _runner()
+    calls: list[str] = []
+
+    def fake_run(cmd, input=None, **kw):
+        calls.append(input)
+        if len(calls) == 2:
+            return MagicMock(stdout=json.dumps({"success": True, "http_code": 200, "latency_ms": 5}))
+        return MagicMock(stdout=json.dumps({"success": False, "http_code": 0, "error": "timeout"}))
+
+    payloads = [{"mode": "single", "request": {"domain": "i.ytimg.com", "n": 1}}, {"mode": "single", "request": {"domain": "i.ytimg.com", "n": 2}}]
+    with (
+        patch(
+            "blockchecks.service.test_runner._check_tls_in_ns",
+            return_value={"payload": payloads[0], "payloads": payloads, "error_result": None},
+        ),
+        patch(
+            "blockchecks.service.test_runner.subprocess.run",
+            side_effect=fake_run,
+        ),
+    ):
+        result = runner._run_check("i.ytimg.com", 3.0)
+    assert len(calls) == 2
+    assert result.success is True
+    assert result.http_status == 200

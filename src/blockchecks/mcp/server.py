@@ -1,4 +1,12 @@
-"""FastMCP tools over the bs serve Unix socket, plus read-only zapret2 host status."""
+"""FastMCP tools over the bs serve Unix socket, plus read-only zapret2 host status.
+
+Error-shape contract (AUDIT §12.3): two styles, both intentional —
+- **raise** RuntimeError/ValueError for daemon-level failures and invalid
+  input on request-shaped tools (MCP converts to tool errors);
+- **return** ``{"ok": False, "error": ...}`` on best-effort verbs whose
+  failure the caller must inspect (e.g. ``stop_campaign``, ``find_working_strategy``
+  per-attempt rows) instead of aborting the agent turn.
+"""
 
 from __future__ import annotations
 
@@ -362,7 +370,7 @@ async def generate_router_config(
 async def get_service_status() -> dict[str, Any]:
     """
     Retrieves real-time system and operational metrics from the blockcheckS service:
-    netns pool occupancy, active daemon workers, memory usage, and background campaign states.
+    netns pool occupancy, daemon state (started/uptime) and background campaign states.
     """
     response = await _send_daemon_request("status", {}, timeout=10.0)
     if not response.get("ok"):
@@ -1010,8 +1018,11 @@ async def dbg_probe_raw(
 ) -> ProbeResult:
     """
     Executes an isolated, single-shot strategy probe inside a dedicated ephemeral netns.
-    By default (dry_run_db=True), prevents writing debug noise/results to production state.db.
     Returns exact socket timings, HTTP response codes, and DPI TTL signals.
+
+    Note (AUDIT §12.3): ``dry_run_db`` is kept for API compatibility but is a
+    no-op on the daemon path — ``bs serve`` runs without a store, so debug
+    probes never write to production state.db regardless of this flag.
     """
     response = await _send_daemon_request(
         "dbg_probe",
@@ -1417,8 +1428,8 @@ def subprocess_run(args: list[str], timeout: float) -> object:
 async def probe_strategy(domain: str, strategy: str, fake_blob: str | None = None) -> ProbeResult:
     """
     Convenience alias for dbg_probe_raw: single-shot isolated strategy probe
-    (dry_run_db=True default — never writes production state.db). Requires the
-    `bs serve` daemon (root, netns).
+    (serve runs without a store — nothing is written to production state.db).
+    Requires the `bs serve` daemon (root, netns).
     """
     return await dbg_probe_raw(domain, strategy, fake_blob, dry_run_db=True)
 

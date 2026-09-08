@@ -40,32 +40,35 @@ class ScanReport:
 
 
 def _check_tls_in_ns(domain: str, timeout: float, resolved_ip: str | None = None) -> dict:
-    """Build curl probe payload for subprocess execution."""
-    from blockchecks.checkers.curl_probe import build_probe_request
+    """Build curl probe payload(s) for subprocess execution.
+
+    AUDIT §12.3/B4: ytcdn domains get the full variant list (bare → SOCKS →
+    stable-thumb, priority per ``ytcdn_probe_variants``) so ``bs tcp`` matches
+    the bridge-batch verdict quality. ``payload`` stays the first entry for
+    compatibility; ``payloads`` carries the whole list.
+    """
+    from blockchecks.checkers.curl_probe import (
+        build_probe_request,
+        is_ytcdn_domain,
+        ytcdn_probe_variants,
+    )
+    from blockchecks.service.probe import probe_request_dict
 
     req, err = build_probe_request(
         domain, timeout=timeout, resolved_ip=resolved_ip, protocol="tls12"
     )
     if err:
         return {"domain": domain, "payload": None, "error_result": err}
+    payloads: list[dict] = []
+    if is_ytcdn_domain(domain):
+        variants = ytcdn_probe_variants(domain, timeout=timeout, resolved_ip=resolved_ip)
+        payloads = [probe_request_dict(v) for v in variants]
+    if not payloads:
+        payloads = [probe_request_dict(req)]
     return {
         "domain": domain,
-        "payload": {
-            "mode": "single",
-            "request": {
-                "domain": req.domain,
-                "timeout": req.timeout,
-                "resolved_ip": req.resolved_ip,
-                "resolve_name": req.resolve_name,
-                "curl_url": req.curl_url,
-                "disable_ech": req.disable_ech,
-                "googlevideo": req.googlevideo,
-                "ggc": req.ggc,
-                "protocol": req.protocol,
-            },
-            "repeats": 1,
-            "parallel_repeats": False,
-        },
+        "payload": payloads[0],
+        "payloads": payloads,
         "error_result": None,
     }
 
@@ -111,61 +114,71 @@ class TestRunner:
             result.error = data.get("error")
             return result
 
-        payload = json.dumps(info["payload"])
-        probe = json.loads(payload)
-        probe["repeats"] = self.repeats
-        probe["parallel_repeats"] = bool(self.parallel_repeats and self.repeats > 1)
-        probe["repeats_mode"] = self.repeats_mode
-        probe["quick_break"] = self.quick_break
-        payload = json.dumps(probe)
-        if self.ns_name:
-            cmd = [
-                "sudo",
-                "ip",
-                "netns",
-                "exec",
-                self.ns_name,
-                self._python,
-                "-m",
-                "blockchecks.service.in_ns_workers",
-                "--mode",
-                "curl",
-            ]
-        else:
-            cmd = [
-                self._python,
-                "-m",
-                "blockchecks.service.in_ns_workers",
-                "--mode",
-                "curl",
-            ]
-
-        wall = worker_wall_timeout(
-            timeout,
-            self.repeats,
-            n_domains=1,
-            curl_parallel=1,
-            parallel_repeats=self.parallel_repeats,
-            settle_slack=3.0,
-        )
-        r = subprocess.run(
-            cmd,
-            input=payload,
-            capture_output=True,
-            text=True,
-            timeout=wall,
-        )
-
+        # AUDIT §12.3/B4: try every ytcdn variant in order (first success wins);
+        # non-ytcdn domains carry exactly one payload.
+        payloads = info.get("payloads") or []
+        if not payloads and info.get("payload"):
+            payloads = [info["payload"]]
+        if not payloads:
+            payloads = [{"mode": "single", "request": {}}]
         result = StrategyResult(strategy="", domain=domain)
-        try:
-            data = json.loads(r.stdout)
-            result.success = data.get("success", False)
-            result.http_status = data.get("http_code", 0)
-            result.latency_ms = data.get("latency_ms", 0)
-            result.error = data.get("error")
-        except json.JSONDecodeError:
-            result.error = f"parse error: {r.stdout[:100]}"
+        for variant_payload in payloads:
+            payload = json.dumps(variant_payload)
+            probe = json.loads(payload)
+            probe["repeats"] = self.repeats
+            probe["parallel_repeats"] = bool(self.parallel_repeats and self.repeats > 1)
+            probe["repeats_mode"] = self.repeats_mode
+            probe["quick_break"] = self.quick_break
+            payload = json.dumps(probe)
+            if self.ns_name:
+                cmd = [
+                    "sudo",
+                    "ip",
+                    "netns",
+                    "exec",
+                    self.ns_name,
+                    self._python,
+                    "-m",
+                    "blockchecks.service.in_ns_workers",
+                    "--mode",
+                    "curl",
+                ]
+            else:
+                cmd = [
+                    self._python,
+                    "-m",
+                    "blockchecks.service.in_ns_workers",
+                    "--mode",
+                    "curl",
+                ]
 
+            wall = worker_wall_timeout(
+                timeout,
+                self.repeats,
+                n_domains=1,
+                curl_parallel=1,
+                parallel_repeats=self.parallel_repeats,
+                settle_slack=3.0,
+            )
+            r = subprocess.run(
+                cmd,
+                input=payload,
+                capture_output=True,
+                text=True,
+                timeout=wall,
+            )
+
+            result = StrategyResult(strategy="", domain=domain)
+            try:
+                data = json.loads(r.stdout)
+                result.success = data.get("success", False)
+                result.http_status = data.get("http_code", 0)
+                result.latency_ms = data.get("latency_ms", 0)
+                result.error = data.get("error")
+            except json.JSONDecodeError:
+                result.error = f"parse error: {r.stdout[:100]}"
+            if result.success:
+                break
         return result
 
     def _host_firewall(self) -> HostFirewall:

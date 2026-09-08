@@ -871,3 +871,16 @@ def test_open_curl_session_gg_no_ech_error(monkeypatch):
     if hasattr(out, "error"):  # CurlProbeResult = аборт; не должно случиться
         raise AssertionError(f"probe aborted: {out.error!r}")
     out.close()
+
+
+def test_build_probe_request_ytcdn_dispatch():
+    """AUDIT §12.3/B4: ytcdn domains route to prepare_ytcdn_probe."""
+    from blockchecks.checkers.curl_probe import build_probe_request
+
+    with patch(
+        "blockchecks.checkers.curl_probe.prepare_ytcdn_probe", return_value=("REQ", None)
+    ) as m:
+        req, err = build_probe_request("i.ytimg.com", protocol="tls12")
+    m.assert_called_once()
+    assert req == "REQ"
+    assert err is None
