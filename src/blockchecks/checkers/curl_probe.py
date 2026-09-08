@@ -25,10 +25,13 @@ from blockchecks.engine.config import (
     THROTTLED_MAX_BPS,
     WALL_SLACK,
 )
+
 # Canonical resolver + default live in engine/config (leaf); re-exported here
 # for backward compatibility (store_leaf + tests reference curl_probe names).
 from blockchecks.engine.config import (  # noqa: F401  (re-exports)
     DEFAULT_IMPERSONATE as DEFAULT_IMPERSONATE,
+)
+from blockchecks.engine.config import (
     impersonate_target as impersonate_target,
 )
 
