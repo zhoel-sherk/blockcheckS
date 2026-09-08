@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from typing import Any
 
@@ -64,7 +65,16 @@ class C:
     BRIGHT = BRIGHT
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def _emit(level: int, msg: str, *, to_stderr: bool) -> None:
+    # supports_color / NO_COLOR: colors are baked into the constants (raw
+    # ANSI, POSIX-only), so the disabled path strips them at emit time —
+    # module-global rebinding would not propagate to `from terminal import
+    # X` consumers (AUDIT §13: was dead code, vulture gate).
+    if not supports_color():
+        msg = _ANSI_RE.sub("", msg)
     root = logging.getLogger("blockchecks")
     if not root.handlers:
         print(msg, file=sys.stderr if to_stderr else sys.stdout)  # noqa: print
