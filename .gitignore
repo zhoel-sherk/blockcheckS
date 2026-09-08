@@ -67,3 +67,5 @@ AGENTS.md
 # Local agent notes — root /mcp/ only, NOT src/blockchecks/mcp/
 /mcp/
 *_audit.md
+/AUDIT.md
+/.opencode/
