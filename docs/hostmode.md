@@ -1,12 +1,17 @@
 # Host-mode (fwmark) — архитектура
 
-> **Статус:** дизайн, **не реализовано**. Код по-прежнему изолирует кампании в
-> netns. Этот файл — канон *зачем / как / чего не делать*, чтобы люди и агенты
-> не смешивали host-mode с blockcheck2.sh, с Lua Mode A и с экспортом Keenetic.
-> Сверено с кодом 1.4.1 (2026-09-08): символы §3/§11 проверены grep'ом
-> (`start_daemon` → `nfqws2_launcher.py`, `daemon()` ValueError, `_worker_cmd`
-> = netns exec, `worker_cache_key` = (ns, py, epoch), SOCKOPT curl_cffi
-> → `NotImplementedError: Option unsupported: 20148`).
+> **Статус:** **v1 РЕАЛИЗОВАН** (2026-09-09, коммиты 39b2617 + 1ce1eeb) для
+> oneshot (`bs tcp`) и `composite` — `--probe-isol=host`. Файл остаётся каноном
+> *зачем / как / чего не делать*; фактические расхождения править здесь.
+> Кампания (scan/pair/full на K host-слотах) и UDP — **v2, не реализовано**;
+> nfqws2 остаётся 1.4-линия (lua_compat 6): `--fwmark` активен, `--filter-mark`
+> появится с ops-апгрейдом 1.0.5 (PROBE_MARK уже поддержан кодом — env
+> `BLOCKCHECKS_PROBE_MARK`). Принято на живой линии: чемпион через host-слот
+> (nft skuid bcprobe + fwmark, queue 220) PASS 75–135ms HTTP 200; teardown и
+> рестарт после kill -9 — по приёмке §19 (AUDIT §16). Важно: /etc/environment
+> прокси нейтрализуется `apply_no_env_proxy` на всех probe-сессиях; живой bind
+> детектится через `/proc/net/netfilter/nfnetlink_queue` (stdout-маркер
+> флашится только на выходе демона).
 >
 > **Рантайм:** host-mode **не** требует nfqws2 ≥ 1.0.5. Изоляцию очереди
 > делает nft (`skuid` / cgroup / mark), не `--filter-mark`. v1.0.5 полезен
