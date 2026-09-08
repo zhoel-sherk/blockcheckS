@@ -24,11 +24,13 @@ from blockchecks.engine.config import (
     SOCKS5_PROXY,
     THROTTLED_MAX_BPS,
     WALL_SLACK,
-    impersonate_target,
 )
-
 # Canonical resolver + default live in engine/config (leaf); re-exported here
 # for backward compatibility (store_leaf + tests reference curl_probe names).
+from blockchecks.engine.config import (  # noqa: F401  (re-exports)
+    DEFAULT_IMPERSONATE as DEFAULT_IMPERSONATE,
+    impersonate_target as impersonate_target,
+)
 
 try:
     CURLOPT_IPRESOLVE = curl_cffi.CurlOpt.IPRESOLVE
