@@ -132,8 +132,14 @@ if [ "$ORPHANS_ONLY" -eq 0 ]; then
     sudo iptables -t nat -D POSTROUTING $rule 2>/dev/null || true
   done < <(sudo iptables -t nat -S POSTROUTING 2>/dev/null | grep '10\.200\.' | sed 's/^-A POSTROUTING //' || true)
   echo "  /tmp nfqws2 leftovers"
-  sudo rm -f /tmp/bs_nfq_*.conf /tmp/bs_hostlist_* /tmp/bs_nfqws2_*.conf /tmp/bs_discover_udp_* 2>/dev/null || true
+  sudo rm -f /tmp/bs_nfq_*.conf /tmp/bs_hostlist_* /tmp/bs_nfqws2_*.conf /tmp/bs_discover_udp_* /tmp/bs_hostnfq_*.conf /tmp/bs_host_* 2>/dev/null || true
   echo "  shm blockchecks: $(sudo rm -rf /dev/shm/blockchecks 2>/dev/null; echo removed)"
+  # Host-mode leftovers (docs/hostmode.md): daemon procs are killed by the
+  # host-wide pkill above; the nft table is OURS — delete it entirely.
+  if sudo nft list table inet blockchecks_host >/dev/null 2>&1; then
+    echo "  nft delete table blockchecks_host (full reset)"
+    sudo nft delete table inet blockchecks_host 2>/dev/null || true
+  fi
   sudo rm -f "$STATE/run.lock" "$ROOT/run.lock"
   if [ -f "$STATE/ip_forward.restore" ]; then
     prev="$(tr -d '[:space:]' < "$STATE/ip_forward.restore")"
@@ -144,6 +150,17 @@ if [ "$ORPHANS_ONLY" -eq 0 ]; then
     rm -f "$STATE/ip_forward.restore"
   fi
 else
+  # Host-mode orphans: a table with NO listening nfqws2 (canon §18.6 — dead
+  # listener + live rule lets --queue-bypass pass RAW). Only when no run.lock.
+  if [ -z "$lock_pid" ] && sudo nft list table inet blockchecks_host >/dev/null 2>&1; then
+    alive=$(pgrep -c nfqws2 2>/dev/null || echo 0)
+    if [ "${alive:-0}" -eq 0 ]; then
+      echo "  nft delete table blockchecks_host (orphans-only: no listener, no run.lock)"
+      sudo nft delete table inet blockchecks_host 2>/dev/null || true
+    else
+      echo "  keep blockchecks_host: nfqws2 processes still alive (${alive})"
+    fi
+  fi
   echo "  orphans-only: leave NAT/shm/run.lock for live campaign"
 fi
 

@@ -290,6 +290,11 @@ firewall там переживёт netns, а не Wi-Fi. Опасность ра
 Антипетля rawsend — отдельный `--fwmark=0x40000000`
 (`BLOCKCHECKS_DESYNC_MARK`), всегда обязателен в host-конфиге.
 
+MCP-отладка тоже умеет host: `dbg_probe_raw(..., probe_isol="host")` /
+`probe_strategy(..., probe_isol="host")` — одноразовая проба на host-слоте
+через демона `bs serve` (живёт на любой isol, слот снимает за собой).
+Preflight при isol=host остаётся на netns-пуле (canon §12, warning в логе).
+
 Кампании тоже умеют host-слоты (v2): `bs scan/pair/full --probe-isol=host` —
 адаптивный пул слотов (BLOCKCHECKS_HOST_SLOTS=auto|int; auto = min(cpu−1,
 60% MemAvailable/220MiB), cap 16; `--parallel` — только для netns-пулов).

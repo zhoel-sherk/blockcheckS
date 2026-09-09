@@ -44,7 +44,7 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
 
 - [x] **Выбрать схему host-mode.** Канон: **B** (nft `skuid`/cgroup, не dst IP). Схема A отвергнута. `--filter-mark` ≥ 1.0.5 — defence-in-depth, не строгий блокер. Флаг `--probe-isol=host`, **не** `--probe-backend host`. См. [hostmode.md](hostmode.md).
 
-- [ ] **Не резать чужой трафик.** Если тестируемый IP сейчас использует браузер/VPN на хосте — предупредить или отказать. Снимать только свои правила (`-D` / `nft delete`), никогда `-F OUTPUT`.
+- [x] **Не резать чужой трафик.** Схема B (skuid) в очередь пускает только воркер; guard'ы: занят qnum → отказ, чужой run.lock → отказ, teardown только своей таблицы (`nft delete table`), правила слотов — по handle (`detach_host_slot_rule`), cleanup_env сносит таблицу только без run.lock/слушателей (AUDIT §17.6).
 
 - [x] **Сверка host vs netns.** scan discord.com, один сет стратегий, один период ТСПУ: **5/18 = 5/18** (AUDIT §17.3); ручной чемпион 75–135ms стабильно. Бенчмарк wall-time — после недельной серии (не на 18 стратегиях).
 

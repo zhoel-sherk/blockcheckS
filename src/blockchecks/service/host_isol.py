@@ -368,6 +368,13 @@ def _table_has_slot_rule(qnum: int) -> bool:
     return False
 
 
+def udp_qnum_for_slot(qnum: int) -> int:
+    """UDP sibling qnum for a host slot (canon §6: slot i owns TCP 220+2i and
+    UDP 221+2i). Even qnum (TCP slot) → odd next; odd input returned as-is
+    (it is already the UDP side)."""
+    return qnum + 1 if qnum % 2 == 0 else qnum
+
+
 def slot_rule_handle(qnum: int) -> int | None:
     """nft handle of OUR table's queue rule for this qnum (nft -a listing).
 
@@ -492,6 +499,7 @@ __all__ = [
     "NFT_TABLE",
     "detach_host_slot_rule",
     "queue_bound",
+    "udp_qnum_for_slot",
     "teardown_host_queue_if_empty",
     "slot_rule_handle",
     "attach_host_queue",

@@ -540,9 +540,41 @@ class ProbeServer:
         dry = bool(req.get("dry_run_db", True))
         if not dry:
             req["dry_run_db"] = False
+        # Host-mode one-shot (docs/hostmode.md §12/§16): run the single probe
+        # through the host slot lifecycle instead of the netns pool. Still no
+        # store writes — serve has no db regardless of path.
+        if str(req.get("probe_isol") or "").strip().lower() == "host":
+            return await self._handle_dbg_probe_host(req)
         # ProbeService.runner runs without a db (serve creates no store), so
         # debug probes never write to production state.db. Guard for safety.
         return await self._handle_probe(req)
+
+    async def _handle_dbg_probe_host(self, req: dict) -> dict:
+        """One-shot probe on a host slot (kill by PID, rule detached at end)."""
+        import asyncio as _aio
+
+        from blockchecks.engine.config import HOST_QNUM_TCP, host_slot_name
+        from blockchecks.service import in_ns_workers
+
+        domain = (req.get("domains") or [req.get("domain", "")])[0]
+        strategy = (req.get("strategies") or [req.get("strategy", "")])[0]
+        if not domain or not strategy:
+            return self._envelope(
+                {"status": "error", "error": "host probe requires domain and strategy"}
+            )
+        timeout = float(req.get("timeout") or 8.0)
+        slot = host_slot_name(HOST_QNUM_TCP)
+        try:
+            data = await _aio.to_thread(
+                in_ns_workers._run_tcp_check,
+                slot,
+                strategy,
+                domain,
+                timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface, not swallow
+            return self._envelope({"status": "error", "error": f"host probe failed: {exc}"})
+        return self._envelope({"status": "ok", "results": [data]})
 
     async def _handle_dbg_inspect_lua(self, req: dict) -> dict:
         domain = str(req.get("domain") or "").strip()

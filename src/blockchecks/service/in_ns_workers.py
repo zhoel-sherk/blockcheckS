@@ -487,12 +487,16 @@ def _run_tcp_check(
         return data
     finally:
         if host_qnum:
-            from blockchecks.service.host_isol import detach_host_slot_rule
+            from blockchecks.service.host_isol import (
+                detach_host_slot_rule,
+                teardown_host_queue_if_empty,
+            )
             from blockchecks.service.nfqws2_launcher import kill_host_daemon
 
             kill_host_daemon(host_qnum)
             # Dead listener + live rule = --queue-bypass RAW probes (§18.6).
             detach_host_slot_rule(host_qnum)
+            teardown_host_queue_if_empty()
         else:
             fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
             _pkill_nfqws2(ns_name)
@@ -612,6 +616,12 @@ def _run_tcp_check_multi(
     if not domains_active:
         return gv_fail
 
+    # Host-mode slot (docs/hostmode.md §8): qnum from the slot name; conf
+    # hostified; foreground daemon + nft attach; cleanup in finally.
+    host_qnum = 0
+    if ns_name.startswith("host-q"):
+        host_qnum = int(ns_name.split("-")[1][1:])
+
     if is_config:
         import shutil
         import tempfile as _tf
@@ -623,9 +633,6 @@ def _run_tcp_check_multi(
         if extra_lua_desync:
             with open(tmp_conf, "a", encoding="utf-8") as f:
                 f.write(f"\n--lua-desync={extra_lua_desync}\n")
-        settle_elapsed = _nfqws2_daemon(
-            ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
-        )
     else:
         import tempfile as _tf
 
@@ -634,12 +641,31 @@ def _run_tcp_check_multi(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
+
+    if host_qnum:
+        from pathlib import Path as _Path
+
+        from blockchecks.engine.config import DESYNC_MARK, PROBE_MARK
+        from blockchecks.service.host_isol import attach_host_queue, hostify_conf_text
+        from blockchecks.service.nfqws2_launcher import daemon_host
+
+        _Path(tmp_conf).write_text(
+            hostify_conf_text(
+                _Path(tmp_conf).read_text(encoding="utf-8"),
+                qnum=host_qnum,
+                desync_mark=DESYNC_MARK,
+                probe_mark=PROBE_MARK,
+            ),
+            encoding="utf-8",
+        )
+        settle_elapsed, _multi_proc = daemon_host(tmp_conf, qnum=host_qnum)
+        attach_host_queue(qnum=host_qnum, dport=int(dport))
+    else:
         settle_elapsed = _nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
-
-    fw = get_ns_firewall(ns_name)
-    fw.attach(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
+        fw = get_ns_firewall(ns_name)
+        fw.attach(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
 
     for req in probe_requests:
         req.timeout = timeout
@@ -711,8 +737,19 @@ def _run_tcp_check_multi(
         out.update(gv_fail)
         return out
     finally:
-        fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
-        _pkill_nfqws2(ns_name)
+        if host_qnum:
+            from blockchecks.service.host_isol import (
+                detach_host_slot_rule,
+                teardown_host_queue_if_empty,
+            )
+            from blockchecks.service.nfqws2_launcher import kill_host_daemon
+
+            kill_host_daemon(host_qnum)
+            detach_host_slot_rule(host_qnum)
+            teardown_host_queue_if_empty()
+        else:
+            fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
+            _pkill_nfqws2(ns_name)
         if tmp_conf:
             try:
                 os.unlink(tmp_conf)

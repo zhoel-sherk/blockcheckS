@@ -692,6 +692,16 @@ async def _try_live_strategy_probe(domain: str, opts: PreflightOptions, cache: A
             r = await runner.test_tcp(item, domain, timeout=min(opts.timeout, 5.0))
             return bool(r.success), r.error or "", int(r.http_code or 0)
 
+        requested_isol = str(os.environ.get("BLOCKCHECKS_PROBE_ISOL", "") or "").strip().lower()
+        if requested_isol == "host":
+            # Canon §12 (operator decision 2026-09-09): preflight stays on the
+            # netns pool even under --probe-isol=host — say so loudly, the
+            # campaign below still runs on host slots.
+            log.warning(
+                "%s",
+                f"  Triage {domain}: BLOCKCHECKS_PROBE_ISOL=host requested — "
+                "preflight grid stays on netns (canon hostmode.md §12)",
+            )
         log.info("%s", f"  Triage {domain}: live fooling grid (netns)")
         return probe, runner
     except Exception as e:  # noqa: BLE001 — no root / no nfqws2 / pool fail

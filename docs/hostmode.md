@@ -680,7 +680,10 @@ APPLIED» или «порезали Wi‑Fi».
    warning; не chmod живые `bs-p-*`.
 9. **`CancelledError` / голый `except`:** как в AGENTS.md code quality.
 10. **Worker stdout:** только `os.read` + remainder.
-11. **DoH без mark.**
+11. **DoH без mark.** На host-слоте DoH идёт от того же `bcprobe`-воркера и
+    попадает под skuid-правило (дёсинкится наравне с пробой) — это ПАРИТЕТ с
+    netns (там очередь ловит весь ns OUTPUT tcp/443). Не «чинить» выделением
+    второго uid для DoH: пины CURLOPT_RESOLVE живут в том же воркере.
 12. **Blob `4pda` → `b4pda`** в conf-builder — не отключать на host-профиле.
 13. **Не `ns_name="host"`** в `probe.py` / `LuaBridge` — `_worker_cmd` делает
     `ip netns exec`. Слот только `host-qN-<pid>`.

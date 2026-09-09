@@ -1017,10 +1017,13 @@ async def dbg_probe_raw(
     strategy: str,
     fake_blob: str | None = None,
     dry_run_db: bool = True,
+    probe_isol: str | None = None,
 ) -> ProbeResult:
     """
-    Executes an isolated, single-shot strategy probe inside a dedicated ephemeral netns.
-    Returns exact socket timings, HTTP response codes, and DPI TTL signals.
+    Executes an isolated, single-shot strategy probe inside a dedicated ephemeral netns
+    (or, with ``probe_isol="host"``, on a host-mode slot — nft skuid + fwmark,
+    docs/hostmode.md §8). Returns exact socket timings, HTTP response codes,
+    and DPI TTL signals.
 
     Note (AUDIT §12.3): ``dry_run_db`` is kept for API compatibility but is a
     no-op on the daemon path — ``bs serve`` runs without a store, so debug
@@ -1033,8 +1036,9 @@ async def dbg_probe_raw(
             "strategy": strategy,
             "fake_blob": fake_blob,
             "dry_run_db": dry_run_db,
+            "probe_isol": probe_isol,
         },
-        timeout=20.0,
+        timeout=60.0 if (probe_isol or "").lower() == "host" else 20.0,
     )
 
     if not response.get("ok"):
@@ -1427,13 +1431,19 @@ def subprocess_run(args: list[str], timeout: float) -> object:
 
 
 @mcp.tool()
-async def probe_strategy(domain: str, strategy: str, fake_blob: str | None = None) -> ProbeResult:
+async def probe_strategy(
+    domain: str,
+    strategy: str,
+    fake_blob: str | None = None,
+    probe_isol: str | None = None,
+) -> ProbeResult:
     """
     Convenience alias for dbg_probe_raw: single-shot isolated strategy probe
     (serve runs without a store — nothing is written to production state.db).
-    Requires the `bs serve` daemon (root, netns).
+    Requires the `bs serve` daemon (root; netns pool, or host slots with
+    ``probe_isol="host"``).
     """
-    return await dbg_probe_raw(domain, strategy, fake_blob, dry_run_db=True)
+    return await dbg_probe_raw(domain, strategy, fake_blob, dry_run_db=True, probe_isol=probe_isol)
 
 
 @mcp.resource("blockchecks://presets/manifest")

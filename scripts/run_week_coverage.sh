@@ -33,6 +33,11 @@ if [ -z "${BLOCKCHECKS_SETTINGS:-}" ] && [ -f "$ROOT/../dpi-tester/settings.ini"
   export BLOCKCHECKS_SETTINGS="$ROOT/../dpi-tester/settings.ini"
 fi
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
+# Host-mode profile for a DEDICATED box (docs/hostmode.md §10 v2): uncomment
+# to run the whole week coverage on adaptive host slots (no netns).
+# Requires: useradd -r bcprobe + nft. Mixed hosts: keep the netns default.
+# export BLOCKCHECKS_PROBE_ISOL=host
+# export BLOCKCHECKS_HOST_SLOTS=auto
 export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
 export PYTHONUNBUFFERED=1
 export PATH="$ROOT/.venv/bin:$PATH"
@@ -152,6 +157,11 @@ export HOME="$HOME"
 export BLOCKCHECKS_BLOBS="$BLOCKCHECKS_BLOBS"
 export BLOCKCHECKS_SETTINGS="$BLOCKCHECKS_SETTINGS"
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
+# Host-mode profile for a DEDICATED box (docs/hostmode.md §10 v2): uncomment
+# to run the whole week coverage on adaptive host slots (no netns).
+# Requires: useradd -r bcprobe + nft. Mixed hosts: keep the netns default.
+# export BLOCKCHECKS_PROBE_ISOL=host
+# export BLOCKCHECKS_HOST_SLOTS=auto
 export BLOCKCHECKS_LUA_EXTRA="${BLOCKCHECKS_LUA_EXTRA-}"
 export PYTHONUNBUFFERED=1
 export ISP_IFACE="${ISP_IFACE}"
@@ -213,6 +223,11 @@ export HOME="$HOME"
 export BLOCKCHECKS_BLOBS="$BLOCKCHECKS_BLOBS"
 export BLOCKCHECKS_SETTINGS="$BLOCKCHECKS_SETTINGS"
 export BLOCKCHECKS_PROXY="${BLOCKCHECKS_PROXY-}"
+# Host-mode profile for a DEDICATED box (docs/hostmode.md §10 v2): uncomment
+# to run the whole week coverage on adaptive host slots (no netns).
+# Requires: useradd -r bcprobe + nft. Mixed hosts: keep the netns default.
+# export BLOCKCHECKS_PROBE_ISOL=host
+# export BLOCKCHECKS_HOST_SLOTS=auto
 export PYTHONUNBUFFERED=1
 END=\$(( \$(date +%s) + ${hours} * 3600 ))
 echo "=== S5 UDP loop until \$(date -d @\$END -Is 2>/dev/null || date -Is) ==="

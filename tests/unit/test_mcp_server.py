@@ -810,9 +810,13 @@ async def test_probe_strategy_aliases_dbg_probe(monkeypatch):
 
     captured = {}
 
-    async def fake_dbg(domain, strategy, fake_blob, dry_run_db):
+    async def fake_dbg(domain, strategy, fake_blob, dry_run_db, probe_isol=None):
         captured.update(
-            domain=domain, strategy=strategy, fake_blob=fake_blob, dry_run_db=dry_run_db
+            domain=domain,
+            strategy=strategy,
+            fake_blob=fake_blob,
+            dry_run_db=dry_run_db,
+            probe_isol=probe_isol,
         )
         return ms.ProbeResult(domain=domain, strategy=strategy, status="PASS")
 
