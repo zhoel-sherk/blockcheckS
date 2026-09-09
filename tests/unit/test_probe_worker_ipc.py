@@ -102,3 +102,68 @@ def test_persistent_worker_roundtrip_real_pipe(monkeypatch):
     assert out1["success"] is True and out1["http_code"] == 200
     assert out2["success"] is True and out2["http_code"] == 200
     assert n["n"] == 1
+
+
+@pytest.mark.unit
+def test_early_abort_kills_worker_and_bumps_epoch(monkeypatch):
+    """D1: abort_poll True mid-probe → worker SIGKILLed, cache released,
+    epoch bumped, failure-shaped result returned (no partial-line leak)."""
+    import time as _time
+
+    stub = (
+        "import sys, time\n"
+        "line = sys.stdin.readline()\n"
+        "time.sleep(30)\n"
+        "print('{\"success\": true, \"http_code\": 200}')\n"
+        "sys.stdout.flush()\n"
+    )
+    monkeypatch.setattr(
+        probe_mod, "_worker_cmd", lambda _ns, _py: [sys.executable, "-c", stub]
+    )
+    ns, py = "bs-abort-test", sys.executable
+    calls = {"poll": 0, "released": 0}
+
+    monkeypatch.setattr(
+        probe_mod, "release_curl_probe_worker", lambda *a, **k: calls.__setitem__("released", calls["released"] + 1)
+    )
+    payload = {"mode": "single", "request": {"domain": "x"}}
+
+    def poll_true():
+        calls["poll"] += 1
+        return True
+
+    t0 = _time.monotonic()
+    try:
+        out = invoke_curl_probe_worker(ns, py, payload, 20.0, abort_poll=poll_true, poll_interval=0.05)
+    finally:
+        release_curl_probe_worker(ns, py)
+    elapsed = _time.monotonic() - t0
+    assert out["success"] is False
+    assert "aborted by abort_poll" in out["error"]
+    assert elapsed < 3.0, f"abort took {elapsed:.1f}s — poll not firing"
+    assert calls["released"] >= 1
+    assert probe_mod.get_ns_epoch(ns) >= 1
+
+
+@pytest.mark.unit
+def test_early_abort_never_fires_when_poll_false(monkeypatch):
+    """poll=False forever → normal full-timeout path (no kill, no release)."""
+    stub = (
+        "import sys, time\n"
+        "line = sys.stdin.readline()\n"
+        "time.sleep(0.5)\n"
+        "print('{\"success\": true, \"http_code\": 200}')\n"
+        "sys.stdout.flush()\n"
+    )
+    monkeypatch.setattr(probe_mod, "_worker_cmd", lambda _ns, _py: [sys.executable, "-c", stub])
+    ns, py = "bs-abort-neg", sys.executable
+    payload = {"mode": "single", "request": {"domain": "x"}}
+
+    def poll_false():
+        return False
+
+    try:
+        out = invoke_curl_probe_worker(ns, py, payload, 5.0, abort_poll=poll_false, poll_interval=0.05)
+    finally:
+        release_curl_probe_worker(ns, py)
+    assert out["success"] is True and out["http_code"] == 200

@@ -29,6 +29,7 @@ class FailPhase(str, Enum):
     TLS_SILENT_DROP_AFTER_SNI = "tls_silent_drop_after_sni"
     TLS_FAKE_ALERT = "tls_fake_alert"
     TLS_HANDSHAKE_ERROR = "tls_handshake_error"
+    STRATEGY_FAIL = "strategy_fail"  # D1 abort: Lua saw rst_in/retrans already
     CONNECT_TIMEOUT = "connect_timeout"
     CONNECT_REFUSED = "connect_refused"
 
@@ -82,6 +83,7 @@ def http_phase(code: int) -> FailPhase:
 
 _PHASE_PATTERNS: tuple[tuple[FailPhase, re.Pattern], ...] = (
     # Specific stream/injection phases FIRST so broad patterns don't shadow them.
+    (FailPhase.STRATEGY_FAIL, re.compile(r"strategy_fail_abort", re.I)),
     (FailPhase.ZERO_WINDOW_STALL, re.compile(r"zero window|window=0|rwnd", re.I)),
     (FailPhase.H2_RST_STREAM, re.compile(r"http/2.*rst|h2.*stream|RST_STREAM", re.I)),
     (FailPhase.TLS_INJECTED_ALERT, re.compile(r"tls alert|fatal.*alert|alert.*fatal", re.I)),

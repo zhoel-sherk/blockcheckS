@@ -21,7 +21,14 @@
 
 Lua `smart_fallback` уже пишет в `events.ndjson` события вроде `rst_in` / `retrans` — «DPI уже убил поток, ждать curl timeout бессмысленно». Python **ещё не** читает этот поток во время пробы: `ProbeBatchService` ждёт полный curl timeout даже когда Lua уже знает FAIL.
 
-- [ ] **Ранний abort по IPC.** Пока идёт curl, поллить `events.ndjson` (десятки мс). При `STRATEGY_FAIL` оборвать пробу и записать `fail_phase`, не дожидаясь `--timeout`. Код: `service/batch_service.py`, `lua/blockchecks/scan_bridge.lua`. Готово, когда FAIL-тяжёлый `bs scan` заметно короче wall-time и нет ложных PASS из-за гонки.
+- [x] **Ранний abort по IPC** (2026-09-09, AUDIT §19): poll `events.ndjson`
+  между stdout-select шагами воркера; свежий `STRATEGY_FAIL (rst_in/retrans)`
+  → SIGKILL воркера + release из кэша + bump epoch, `fail_phase=strategy_fail`
+  (`strategy_fail_abort (reason)`), retry нет. Live: батчи 48.4s→12.6s и
+  39s→17.9s при тех же 5/18 PASS; ноль ложных PASS. Env:
+  `BLOCKCHECKS_BRIDGE_EARLY_ABORT=0` выключает. Ограничение Fryazino: silent
+  drop без RST/retrans abort не увидит (149 connect_timeout за прогон —
+  честный остаток).
 
 - [x] **Compare убрать с пользовательского CLI.** `--lua-bridge-compare` снят; campaign classic batch вырезан. UDP voice (очередь 201) и unix-socket reload nfqws2 — не этот пункт.
 

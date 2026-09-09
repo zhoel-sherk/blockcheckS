@@ -12,8 +12,30 @@ from blockchecks.checkers.curl_probe import (
     prepare_ytcdn_probe,
     worker_wall_timeout,
 )
+from blockchecks.engine.config import BRIDGE_ABORT_POLL_INTERVAL, BRIDGE_EARLY_ABORT
 from blockchecks.service.lua_session import BridgeSession
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
+
+
+def _make_abort_poll(session: BridgeSession, gen: int, strategy_id: int):
+    """D1 poll: True when a FRESH STRATEGY_FAIL (rst_in/retrans) for our
+    gen/id appeared in events.ndjson while the curl is still waiting."""
+    if not BRIDGE_EARLY_ABORT:
+        return None
+
+    def poll() -> bool:
+        try:
+            events = session.bridge.drain_events(since_gen=gen, expect_id=strategy_id)
+        except OSError:
+            return False
+        for ev in events:
+            if ev.event == "STRATEGY_FAIL" and getattr(ev, "reason", "") in ("rst_in", "retrans"):
+                return True
+            if ev.is_applied():
+                return False  # desync alive — no abort on this probe
+        return False
+
+    return poll
 
 
 def _drain_with_poll(bridge, since_gen: int, expect_id: int) -> list:
@@ -148,7 +170,26 @@ def run_tcp_check_bridge(
             curl_parallel=1,
             parallel_repeats=parallel_repeats,
         )
-        data = invoke_curl_probe_worker(session.ns_name, python_bin, payload, wall)
+        data = invoke_curl_probe_worker(
+            session.ns_name,
+            python_bin,
+            payload,
+            wall,
+            abort_poll=_make_abort_poll(session, gen, strategy_id),
+            poll_interval=BRIDGE_ABORT_POLL_INTERVAL,
+        )
+        if data.get("error") == "aborted by abort_poll":
+            # D1: DPI already killed the flow (rst_in/retrans) — classify as
+            # strategy_fail, attach the triggering events, no retry.
+            events = _drain_with_poll(session.bridge, gen, strategy_id)
+            _attach_bridge_verdict(data, events, session)
+            data["bridge_abort"] = True
+            data["fail_phase"] = "strategy_fail"
+            reason = next(
+                (ev.reason for ev in events if ev.event == "STRATEGY_FAIL"),
+                "unknown",
+            )
+            data["error"] = f"strategy_fail_abort ({reason})"
         data["settle_ms"] = 0.0
         if ip is not None:
             data["used_ip"] = ip

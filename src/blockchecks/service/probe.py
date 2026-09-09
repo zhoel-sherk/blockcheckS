@@ -10,6 +10,7 @@ import signal
 import subprocess as sp
 import threading
 import time
+from collections.abc import Callable
 
 from blockchecks.checkers.curl_probe import CurlProbeRequest
 
@@ -124,6 +125,46 @@ def _worker_cmd(ns_name: str, py: str) -> list[str]:
         "--mode",
         "curl",
     ]
+
+
+#: Sentinel returned by :meth:`_PersistentCurlWorker.invoke` when the caller's
+#: ``abort_poll`` fired (DPI already killed the flow — waiting the full curl
+#: timeout is wasted wall time; AUDIT §19 D1).
+_WORKER_ABORTED = object()
+
+
+def _readline_timed_stepped(
+    fd: int, timeout: float, remainder: bytearray, *, poll: Callable[[], bool] | None, interval: float
+) -> str | object | None:
+    """Like :func:`_readline_timed`, but between select steps the caller's
+    ``abort_poll`` runs; True → worker is SIGKILLed by ``invoke`` and the
+    sentinel ``_WORKER_ABORTED`` is returned. Full-line/EOF semantics match
+    the plain variant (os.read + remainder buffer — §11 lesson)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if (nl := remainder.find(b"\n")) >= 0:
+            line = bytes(remainder[:nl])
+            del remainder[: nl + 1]
+            return line.decode("utf-8", errors="replace")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        ready, _, _ = select.select([fd], [], [], min(remaining, interval))
+        if not ready:
+            if poll is not None and poll():
+                return _WORKER_ABORTED
+            continue
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            return None
+        if not chunk:
+            if not remainder:
+                return None
+            line = bytes(remainder)
+            remainder.clear()
+            return line.decode("utf-8", errors="replace")
+        remainder.extend(chunk)
 
 
 def _readline_timed(fd: int, timeout: float, remainder: bytearray) -> str | None:
@@ -256,25 +297,49 @@ class _PersistentCurlWorker:
         self._proc = None
         self._stdout_buf = bytearray()
 
-    def invoke(self, payload: dict, timeout: float) -> dict:
+    def invoke(
+        self,
+        payload: dict,
+        timeout: float,
+        *,
+        abort_poll: Callable[[], bool] | None = None,
+        poll_interval: float = 0.1,
+    ) -> tuple[dict, bool]:
+        """Run one probe. Returns ``(data, aborted)``.
+
+        ``abort_poll`` (D1 early abort): checked between stdout select steps;
+        True → the worker process is SIGKILLed (its stdout pipe dies with it —
+        no partial-line leak into the next probe) and ``(fail, True)`` is
+        returned. The caller MUST release the worker from the cache and bump
+        the ns epoch so the next probe spawns a fresh process.
+        """
+        aborted = False
         with self._io_lock:
             if self._proc is None or self._proc.poll() is not None:
                 self._start()
             proc = self._proc
             if proc is None or proc.stdin is None or proc.stdout is None:
-                return {**_FAIL, "error": "worker start failed"}
+                return {**_FAIL, "error": "worker start failed"}, False
             try:
                 proc.stdin.write(json.dumps(payload).encode("utf-8") + b"\n")
                 proc.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
                 self._kill()
-                return {**_FAIL, "error": f"worker write: {exc}"[:120]}
+                return {**_FAIL, "error": f"worker write: {exc}"[:120]}, False
             try:
                 fd = proc.stdout.fileno()
             except (AttributeError, OSError, ValueError):
                 self._kill()
-                return {**_FAIL, "error": "worker stdout has no fd"}
-            line = _readline_timed(fd, timeout, self._stdout_buf)
+                return {**_FAIL, "error": "worker stdout has no fd"}, False
+            if abort_poll is not None:
+                line = _readline_timed_stepped(
+                    fd, timeout, self._stdout_buf, poll=abort_poll, interval=poll_interval
+                )
+                if line is _WORKER_ABORTED:
+                    aborted = True
+                    line = None
+            else:
+                line = _readline_timed(fd, timeout, self._stdout_buf)
             if line is None:
                 err_tail = self._stderr_buf.decode("utf-8", errors="replace")[-120:]
                 # Poll before the kill: after SIGKILL poll() reports -9 even
@@ -284,9 +349,11 @@ class _PersistentCurlWorker:
                 self._kill()
                 if poll is not None:
                     detail = f": {err_tail}" if err_tail else " (no stderr)"
-                    return {**_FAIL, "error": f"worker died (exit {poll}){detail}"[:160]}
-                return {**_FAIL, "error": f"timeout after {timeout:.0f}s"}
-            return _loads_probe_json(line)
+                    return {**_FAIL, "error": f"worker died (exit {poll}){detail}"[:160]}, aborted
+                if aborted:
+                    return {**_FAIL, "error": "aborted by abort_poll"}, True
+                return {**_FAIL, "error": f"timeout after {timeout:.0f}s"}, False
+            return _loads_probe_json(line), False
 
     def close(self) -> None:
         with self._io_lock:
@@ -316,16 +383,35 @@ def _get_worker(ns_name: str, py: str) -> _PersistentCurlWorker:
         return worker
 
 
-def invoke_curl_probe_worker(ns_name: str, py: str, payload: dict, timeout: float) -> dict:
+def invoke_curl_probe_worker(
+    ns_name: str,
+    py: str,
+    payload: dict,
+    timeout: float,
+    *,
+    abort_poll: Callable[[], bool] | None = None,
+    poll_interval: float = 0.1,
+) -> dict:
     """Run curl probe via a persistent in-ns worker; JSON-lines per request.
 
     On malformed stdout, returns a failure-shaped dict (never raises JSONDecodeError).
     On subprocess timeout, returns a timeout-shaped failure dict (never raises
     TimeoutExpired) — a hung worker must not lose the whole batch.
     Stderr is kept separate so Python/dependency warnings cannot pollute JSON.
+
+    With ``abort_poll`` (D1): the poll runs between stdout select steps; on
+    True the worker is SIGKILLed, released from the cache and the ns epoch is
+    bumped — the next probe spawns a fresh worker (spawn cost ≈ 0.1s vs the
+    saved curl wall on every FAIL probe).
     """
     try:
-        return _get_worker(ns_name, py).invoke(payload, timeout)
+        data, aborted = _get_worker(ns_name, py).invoke(
+            payload, timeout, abort_poll=abort_poll, poll_interval=poll_interval
+        )
+        if aborted:
+            release_curl_probe_worker(ns_name, py)
+            bump_ns_epoch(ns_name)
+        return data
     except Exception as e:
         log.warning("invoke_curl_probe_worker(%s) failed: %s", ns_name, e)
         return {**_FAIL, "error": str(e)[:120]}

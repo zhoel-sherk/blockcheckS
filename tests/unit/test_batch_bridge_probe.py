@@ -206,3 +206,73 @@ def test_bridge_event_parses_ttl():
     plain = BridgeEvent.from_line('{"event": "APPLIED", "id": 2, "gen": 3}')
     assert plain.is_rst_in() is False
     assert plain.ttl == 0
+
+
+@pytest.mark.unit
+def test_bridge_abort_poll_fires_on_fresh_strategy_fail():
+    """D1: STRATEGY_FAIL (rst_in) with our gen/id → poll True; APPLIED → False;
+    env off → poll disabled (None)."""
+    import json as _json
+    import os as _os
+
+    from blockchecks.engine.config import BRIDGE_EARLY_ABORT
+    from blockchecks.service import batch_bridge_probe as bbp
+
+    class FakeBridge:
+        def __init__(self, lines):
+            self._lines = lines
+
+        def drain_events(self, since_gen=0, expect_id=None):
+            """Mirror the REAL filter (gen>=since OR exact id rescue)."""
+            from blockchecks.service.lua_bridge_ipc import BridgeEvent
+
+            out = []
+            for ln in self._lines:
+                ev = BridgeEvent.from_line(ln)
+                if not ev:
+                    continue
+                if ev.gen >= since_gen or (expect_id is not None and ev.id == expect_id):
+                    out.append(ev)
+            return out
+
+    sess = type("S", (), {})()
+    sess.bridge = FakeBridge(
+        [_json.dumps({"event": "STRATEGY_FAIL", "reason": "rst_in", "gen": 7, "id": 3, "ttl": 64})]
+    )
+    poll = bbp._make_abort_poll(sess, 7, 3)
+    assert poll is not None
+    assert poll() is True
+
+    sess2 = type("S", (), {})()
+    sess2.bridge = FakeBridge([_json.dumps({"event": "APPLIED", "gen": 7, "id": 3, "matched": 1})])
+    poll2 = bbp._make_abort_poll(sess2, 7, 3)
+    assert poll2() is False
+
+    # gen mismatch (stale) → no abort
+    sess3 = type("S", (), {})()
+    sess3.bridge = FakeBridge(
+        [_json.dumps({"event": "STRATEGY_FAIL", "reason": "rst_in", "gen": 1, "id": 3, "ttl": 64})]
+    )
+    poll3 = bbp._make_abort_poll(sess3, 7, 3)
+    # expect_id rescue: id==3 → accepted → True
+    assert poll3() is True
+
+    sess4 = type("S", (), {})()
+    sess4.bridge = FakeBridge(
+        [_json.dumps({"event": "STRATEGY_FAIL", "reason": "rst_in", "gen": 1, "id": 99, "ttl": 64})]
+    )
+    poll4 = bbp._make_abort_poll(sess4, 7, 3)
+    assert poll4() is False
+
+    # env off → None
+    monkey_off = _os.environ.get("BLOCKCHECKS_BRIDGE_EARLY_ABORT")
+    _os.environ["BLOCKCHECKS_BRIDGE_EARLY_ABORT"] = "0"
+    try:
+        bbp.BRIDGE_EARLY_ABORT = False  # module ref refreshed by reimport-free setattr
+        assert bbp._make_abort_poll(sess, 7, 3) is None
+    finally:
+        bbp.BRIDGE_EARLY_ABORT = BRIDGE_EARLY_ABORT
+        if monkey_off is None:
+            _os.environ.pop("BLOCKCHECKS_BRIDGE_EARLY_ABORT", None)
+        else:
+            _os.environ["BLOCKCHECKS_BRIDGE_EARLY_ABORT"] = monkey_off

@@ -283,6 +283,15 @@ AQ_DOMAIN_ISOLATE = _env_or("BLOCKCHECKS_AQ_DOMAIN_ISOLATE", "1").lower() not in
 
 DEFAULT_PROBE_BACKEND = "lua_bridge"  # lua_bridge is the default probe backend
 
+#: D1 early abort: poll bridge events during the curl wait; a fresh
+#: STRATEGY_FAIL (rst_in/retrans) kills the worker instead of waiting the
+#: full curl timeout on an already-dead flow. 0 disables (diagnostics).
+BRIDGE_EARLY_ABORT = _env_or(
+    "BLOCKCHECKS_BRIDGE_EARLY_ABORT", "1"
+).lower() not in ("0", "false", "off", "no")
+#: How often the abort poll reads events.ndjson while curl runs.
+BRIDGE_ABORT_POLL_INTERVAL = float(_env_or("BLOCKCHECKS_BRIDGE_ABORT_POLL_INTERVAL", "0.1"))
+
 # Tuning knobs (configurable: env BLOCKCHECKS_* or [run] in config.toml)
 # Probe / subprocess wall timeouts. Kept here so a throttled ISP run can lower
 # them without code edits.
