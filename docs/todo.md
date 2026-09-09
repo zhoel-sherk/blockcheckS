@@ -88,17 +88,27 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
 - [ ] **§6.3 Хардкоды экспандеров → оси/константы:** padencap-комбо
   (`fake:blob=google` + `pos=10,sniext+1`), companions-гейт `r == 6`,
   `_ACK_BLOBS` + fool-whitelist в `fake.py`.
-- [ ] **§6.1 P3-гигиена:** честные repeats 100/260 в full-режиме (BC2
-  15-misc) вместо удалённого no-op фильтра; унификация осей `foolings`
-  (TCP) vs `fools` (geneva_fool); типовая гигиена `base.py` (`| None`,
-  `set[str]`).
-- [ ] **§7.3 Worker recycle:** persistent curl worker целиком пересоздаётся
-  на каждой пробе-таймауте — кандидат «recycle по счётчику» (унаследуют
-  host-mode слоты).
-- [ ] **§10.3 `fingerprint_matched`** — к JA4 отношения не имеет; переименовать
-  или задокументировать (ломает MCP-контракт — с версией).
-- [ ] **§8.4 Покрытие checkers:** `tests/unit/test_checkers.py` — 3 smoke-теста
-  на весь слой checkers; расширить (STUN txn-id уже есть).
+- [x] **§6.1 P3-гигиена (2026-09-09):** tcpseg уже несёт 100/260 (BC2
+  15-misc), no-op фильтр удалён ранее; делегаты/`_mut_full_fake` удалены
+  ранее; FAST_FOOLINGS-срезы именованы комментарием; `base.py` гигиена
+  (`| None`, `set[str]`) на месте. `foolings` vs `fools` (geneva_fool)
+  оставлены раздельно СОЗНАТЕЛЬНО — geneva-оси семантически другие
+  (флаги/seq Geneva, не TCP-фулинги), переименование ломало бы оси без
+  пользы.
+- [x] **§7.3 Worker recycle (2026-09-09):** recycle по счётчику внедрён —
+  `BLOCKCHECKS_WORKER_RECYCLE_EVERY=N` (0=off): после N инвокаций воркер
+  усыпляется ПОСЛЕ чтения результата (pipe-контракт цел), следующий вызов
+  спавнит свежий. abort-путь (D1) убивает воркер отдельно. Унаследован
+  host-слотами автоматически (один и тот же worker-кэш).
+- [x] **§10.3 `fingerprint_matched` (2026-09-09):** переименован в
+  `content_confirmed` (HTTP body + статус, не JA4); в JSON-выводе оставлен
+  deprecated-алиас `fingerprint_matched` на один цикл (клиенты не ломаются),
+  docstring фиксирует имя-ловушку.
+- [x] **§8.4 Покрытие checkers (2026-09-09):** 3 smoke-теста → 7: +
+  `_hosts_related` (поддомен↔apex, brand-семьи), `is_suspicious_redirect`
+  (блокпейдж vs same-site), ttl-хелперы (`hops_from_ttl`/`autottl_delta`/
+  `ttl_reaches_dpi` — семантика «умирает у DPI»), `quic_subprocess_result`
+  (не-JSON → failure dict). Остальные чекеры покрыты интеграционно.
 - [ ] **§9.3 Гит-археология (опционально):** следующая партия старейших
   файлов (`test_batch_probe_runner/test_gv_ggc/test_probe_worker`,
   `scripts/run_week_coverage.sh` — осторожно, активный).

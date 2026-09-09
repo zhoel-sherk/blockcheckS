@@ -249,6 +249,8 @@ class _PersistentCurlWorker:
         self._stderr_buf = bytearray()
         self._stderr_stop: threading.Event | None = None
         self._stderr_thread: threading.Thread | None = None
+        self._invoke_count = 0
+        self._recycle_every = int(os.environ.get("BLOCKCHECKS_WORKER_RECYCLE_EVERY", "0") or 0)
 
     def _stop_stderr_drain(self) -> None:
         if self._stderr_stop is not None:
@@ -314,6 +316,7 @@ class _PersistentCurlWorker:
         the ns epoch so the next probe spawns a fresh process.
         """
         aborted = False
+        self._invoke_count += 1
         with self._io_lock:
             if self._proc is None or self._proc.poll() is not None:
                 self._start()
@@ -353,7 +356,15 @@ class _PersistentCurlWorker:
                 if aborted:
                     return {**_FAIL, "error": "aborted by abort_poll"}, True
                 return {**_FAIL, "error": f"timeout after {timeout:.0f}s"}, False
-            return _loads_probe_json(line), False
+            data = _loads_probe_json(line)
+            # §7.3 recycle-by-counter: the persistent worker accumulates curl
+            # Sessions/handles across a 20h campaign; respawn after N probes
+            # (env knob, 0 = off). Kill AFTER the result is read — the pipe
+            # contract stays intact, the next invoke spawns a fresh worker.
+            if self._recycle_every and self._invoke_count >= self._recycle_every:
+                self._kill()
+                self._invoke_count = 0
+            return data, False
 
     def close(self) -> None:
         with self._io_lock:

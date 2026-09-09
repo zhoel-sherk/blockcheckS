@@ -37,7 +37,10 @@ class ProbeResult:
     fail_phase: str = ""
     latency_ms: float = 0.0
     http_code: int = 0
-    fingerprint_matched: bool = False
+    #: HTTP body arrived and a status code came back — NOT a JA4/TLS
+    #: fingerprint (the old ``fingerprint_matched`` name was misleading,
+    #: AUDIT §10.3; the JSON key keeps the deprecated alias for one cycle).
+    content_confirmed: bool = False
     error: str = ""
     evidence: str = "oneshot"
 
@@ -52,7 +55,7 @@ class ProbeResult:
             fail_phase="" if r.success else phase.value,
             latency_ms=round(r.latency_ms, 1),
             http_code=r.http_code,
-            fingerprint_matched=bool(r.content_valid and r.http_code),
+            content_confirmed=bool(r.content_valid and r.http_code),
             error=r.error[:200],
         )
 
@@ -64,7 +67,9 @@ class ProbeResult:
             "fail_phase": self.fail_phase,
             "latency_ms": self.latency_ms,
             "http_code": self.http_code,
-            "fingerprint_matched": self.fingerprint_matched,
+            "content_confirmed": self.content_confirmed,
+            # Deprecated alias (AUDIT §10.3): old name implied JA4 matching.
+            "fingerprint_matched": self.content_confirmed,
             "error": self.error,
             "evidence": self.evidence,
         }
