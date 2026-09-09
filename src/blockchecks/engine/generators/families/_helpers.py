@@ -137,6 +137,11 @@ class StrategyParams:
     pattern_blobs: tuple[str, ...] = ()
     seqovl_blobs: tuple[str, ...] = ()
     seqovl: tuple[int, ...] = ()
+    seqovl_markers: tuple[str, ...] = ()
+    seqovl_positions: tuple[str, ...] = ()
+    carrier_blobs: tuple[str, ...] = ()
+    carrier_positions: tuple[str, ...] = ()
+    carrier_nodrop: tuple[bool, ...] = ()
     variants: tuple[str, ...] = ()
     fools: tuple[str, ...] = ()
     out_range: tuple = ()
@@ -156,6 +161,9 @@ class StrategyParams:
         def _pairs(key: str) -> tuple[tuple[str, ...], ...]:
             return tuple(tuple(str(x) for x in row) for row in family.get(key, ()))
 
+        def _bools(key: str) -> tuple[bool, ...]:
+            return tuple(bool(v) for v in family.get(key, ()))
+
         fields = dict(
             protocol=str(overrides.get("protocol", "tls12")),
             scan_level=str(overrides.get("scan_level", "fast")),
@@ -172,6 +180,11 @@ class StrategyParams:
             pattern_blobs=_strs("pattern_blobs"),
             seqovl_blobs=_strs("seqovl_blobs"),
             seqovl=_ints("seqovl"),
+            seqovl_markers=_strs("seqovl_markers"),
+            seqovl_positions=_strs("seqovl_positions"),
+            carrier_blobs=_strs("carrier_blobs"),
+            carrier_positions=_strs("carrier_positions"),
+            carrier_nodrop=_bools("carrier_nodrop"),
             variants=_strs("variants"),
             fools=_strs("fools"),
             out_range=tuple(family.get("out_range", ())),

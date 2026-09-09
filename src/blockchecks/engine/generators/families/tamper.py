@@ -54,6 +54,29 @@ class TamperFamiliesMixin:
                 "std_syn_bare_hf_ts",
                 "syndata\nhostfakesplit:nofake2:tcp_ts=-1000",
             )
+        # BC2 24-syndata HTTP: built-in http-iana request blob (TLS syndata
+        # with an http payload makes no sense — keep it http-gated).
+        if p.protocol == "http":
+            self._add(
+                items,
+                seen,
+                "std_syn_fake_default_http",
+                "syndata:blob=fake_default_http",
+            )
+            if plus_split:
+                self._add(
+                    items,
+                    seen,
+                    "std_syn_fake_default_http_split",
+                    "syndata:blob=fake_default_http\nmultisplit:pos=1,midsld:seqovl=1",
+                )
+        # BC2 24: syndata + multidisorder companion (staggered replay).
+        self._add(
+            items,
+            seen,
+            "std_syn_bare_mdis",
+            "syndata\nmultidisorder:pos=1,midsld",
+        )
         return items
 
     def _fam_tcpseg(self, items, seen, family, scan_level, _known_working):
@@ -73,6 +96,26 @@ class TamperFamiliesMixin:
                 ),
             ),
         )
+        # BC2 15-misc seqovl companion: segment starts one byte into the
+        # payload; seqovl shifts the visible window left (numeric-only —
+        # manual.md tcpseg "seqovl - число").
+        if scan_level != "single" and p.seqovl_positions and p.seqovl:
+            emit_rows(
+                self._add,
+                items,
+                seen,
+                scan_level,
+                expand_axes(
+                    {"pos": p.seqovl_positions, "r": p.repeats, "sv": p.seqovl},
+                    lambda a: (
+                        f"std_tcpseg_p{a['pos'].replace(',', '_')}_s{a['sv']}_r{a['r']}",
+                        (
+                            f"tcpseg:pos={a['pos']}:seqovl={a['sv']}"
+                            f":ip_id={ip_id}:repeats={a['r']}"
+                        ),
+                    ),
+                ),
+            )
         return items
 
     def _fam_oob(self, items, seen, family, scan_level, _known_working):

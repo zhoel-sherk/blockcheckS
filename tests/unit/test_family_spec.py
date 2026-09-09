@@ -63,6 +63,7 @@ def test_tcp_families_order_preserved() -> None:
         "hostfake",
         "multisplit",
         "multidisorder",
+        "multidisorder_legacy",
         "syndata",
         "tcpseg",
         "oob",

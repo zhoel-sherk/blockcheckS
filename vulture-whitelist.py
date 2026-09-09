@@ -242,3 +242,6 @@ HostSlotPool.install_signal_hooks
 HostSlotPool.validate
 HostSlotPool.slot_name
 HOST_QNUM_UDP
+
+# D2 (AUDIT §6.2): family expanders are dispatched via expander-name getattr.
+SplitFamiliesMixin._fam_multidisorder_legacy

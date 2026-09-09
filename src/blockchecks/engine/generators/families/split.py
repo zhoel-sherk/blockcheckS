@@ -92,6 +92,75 @@ class SplitFamiliesMixin:
                     ),
                 ),
             )
+        # BC2 25-fake payload-replacement carrier (AUDIT §6.2): multisplit
+        # replaces the dissected payload with a blob (manual.md §multisplit:
+        # 'blob - заменить текущий пейлоад'), slices per pos; nodrop keeps
+        # reasm-replay segments flowing instead of VERDICT_DROP.
+        if p.carrier_blobs:
+            emit_rows(
+                self._add,
+                items,
+                seen,
+                scan_level,
+                expand_axes(
+                    {
+                        "blob": p.carrier_blobs,
+                        "pos": p.carrier_positions or ("2",),
+                        "nodrop": p.carrier_nodrop or (False,),
+                    },
+                    lambda a: (
+                        (
+                            f"std_carrier_{a['blob']}_p{a['pos']}"
+                            + ("_nodrop" if a["nodrop"] else "")
+                        ),
+                        (
+                            f"multisplit:blob={a['blob']}:pos={a['pos']}"
+                            + (":nodrop" if a["nodrop"] else "")
+                        ),
+                    ),
+                ),
+            )
+        return items
+
+    def _fam_multidisorder_legacy(self, items, seen, family, scan_level, _known_working):
+        """Expand multidisorder_legacy (upstream §multidisorder_legacy).
+
+        The LEGACY disorderer works on the pre-reasm stream and ACCEPTS marker
+        seqovl (manual.md: "seqovl - маркер") — unlike plain multidisorder.
+        """
+        p = StrategyParams.from_family(family, scan_level=scan_level)
+
+        def _bare(a: dict) -> tuple[str, str]:
+            pos, fool, blob = a["pos"], a["fool"], a["blob"]
+            return (
+                f"std_mdisleg_{pos}_{blob}_{fool or 'nofool'}",
+                (
+                    f"multidisorder_legacy:pos={pos}"
+                    f":seqovl_pattern={blob}{_fooling_clause(fool)}"
+                ),
+            )
+
+        if emit_rows(
+            self._add,
+            items,
+            seen,
+            scan_level,
+            expand_axes({"pos": p.positions, "fool": p.foolings, "blob": p.seqovl_blobs}, _bare),
+        ):
+            return items
+        marker_rows = [
+            (
+                f"std_mdisleg_{pos}_sv{seqovl.replace('+', 'p').replace('-', 'm')}_{blob}_{fool or 'nofool'}",
+                (
+                    f"multidisorder_legacy:pos={pos}"
+                    f":seqovl={seqovl}:seqovl_pattern={blob}{_fooling_clause(fool)}"
+                ),
+            )
+            for pos, fool, blob, seqovl in product(
+                p.positions, p.foolings, p.seqovl_blobs, p.seqovl_markers
+            )
+        ]
+        emit_rows(self._add, items, seen, scan_level, marker_rows)
         return items
 
     def _fam_multidisorder(self, items, seen, family, scan_level, _known_working):

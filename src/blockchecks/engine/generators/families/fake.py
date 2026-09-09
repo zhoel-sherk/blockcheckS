@@ -134,6 +134,17 @@ class FakeFamiliesMixin:
         if emit_rows(self._add, items, seen, scan_level, cores):
             return items
 
+        # BC2 35 combo missing from the variant mapper: nofake1 + midhost
+        # WITHOUT nofake2 (_hf_line always appends nofake2 — deliberately).
+        # single-level = exactly one strategy per family — companions off.
+        if scan_level != "single":
+            for fool in p.foolings:
+                self._add(
+                    items,
+                    seen,
+                    f"std_hf_nofake1_midhost_{fool or 'nofool'}",
+                    f"hostfakesplit:nofake1:midhost=midsld{_fooling_clause(fool)}:repeats=1",
+                )
         combos = list(product(p.foolings, p.variants))
         ack = [
             (f"{lab}_ackdrop", _with_ack_drop(st))

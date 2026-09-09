@@ -176,7 +176,7 @@ def test_map_triage_to_generators_rst_at_sni():
     from blockchecks.engine.triage import TriageProfile
 
     result = map_triage_to_generators(TriageProfile(rst_at_sni=True))
-    assert result == ["multisplit", "fakedsplit", "multidisorder"]
+    assert result == ["multisplit", "fakedsplit", "multidisorder", "multidisorder_legacy"]
 
 
 def test_map_triage_to_generators_quic_drop():
@@ -203,6 +203,7 @@ def test_map_triage_to_generators_combined_deduped():
         "multisplit",
         "fakedsplit",
         "multidisorder",
+        "multidisorder_legacy",
         "quic_fake",
         "quic_ipfrag",
     ]

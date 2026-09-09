@@ -119,10 +119,18 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
         ),
         "multisplit": _axes(
             repeats=[1, 6, 11],
-            positions=ALL_SPLIT_POSITIONS,
+            # method+* resolve only on http_req (§6.4 filter drops them from
+            # TLS at generation time) — BC2 20-multi HTTP coverage.
+            positions=ALL_SPLIT_POSITIONS + ["method+2", "method+2,midsld"],
             foolings=FOOLINGS_WITH_NOFOOL,
             seqovl=ALL_SEQOVL,
             seqovl_blobs=ALL_BLOBS_TCP,
+            # BC2 25-fake payload-replacement carrier (AUDIT §6.2): replace the
+            # dissected payload with a blob and slice it; nodrop keeps our
+            # reasm-replay segment order intact.
+            carrier_blobs=[b for b in ALL_BLOBS_TCP if b != "0x00000000"],
+            carrier_positions=["2", "midsld"],
+            carrier_nodrop=[False, True],
             ttl_static=ALL_TTL,
             ttl_auto=ALL_AUTOTTL,
             padencap=True,
@@ -134,6 +142,15 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
             seqovl_blobs=ALL_BLOBS_TCP,
             padencap=True,
         ),
+        # Separate upstream family (manual.md §multidisorder_legacy): the
+        # LEGACY disorderer reorders the pre-reasm stream; here seqovl IS a
+        # marker (unlike plain multidisorder, manual.md line "seqovl - маркер").
+        "multidisorder_legacy": _axes(
+            positions=["1", "2", "midsld", "1,midsld"],
+            seqovl_markers=["1", "midsld-1"],
+            foolings=FOOLINGS_WITH_NOFOOL,
+            seqovl_blobs=ALL_BLOBS_TCP,
+        ),
         "syndata": _axes(
             blobs=["0x1603", "fake_default_tls", ""],
             tls_mods=["", "rnd,dupsid", "rnd,dupsid,rndsni", "rnd,dupsid,sni=www.google.com"],
@@ -141,7 +158,12 @@ FAMILY_AXES: Mapping[str, Mapping[str, object]] = MappingProxyType(
             plus_hostfake=True,
         ),
         "tcpseg": _axes(
-            positions=["0,1", "0,midsld"],
+            # "0,method+2" — http only (§6.4 filter); "0,-1" — segment ends
+            # inside the first byte, seqovl companion shifts the window left
+            # (manual.md tcpseg: seqovl is numeric-only, BC2 15-misc).
+            positions=["0,1", "0,midsld", "0,-1", "0,method+2"],
+            seqovl_positions=["0,-1"],
+            seqovl=[1],
             repeats=[1, 20, 100, 260],
             ip_id="rnd",
         ),

@@ -160,7 +160,10 @@ async def test_pool_sizes_stable():
     items = await gen.generate(protocol="tls12", scan_level="full", max_count=100000)
     # 37026 → 36525: AUDIT §6.2 rndsni axis (+) and §6.4 cross-protocol
     # method+* removal from TLS families (−).
-    assert len(items) == 36525, f"standard full pool changed: {len(items)}"
+    # 36525 → 36798: D2 wave — multisplit carrier blobs (+16), tcpseg pos
+    # 0,-1/0,method+2 + seqovl companions, multidisorder_legacy family
+    # (+240), hostfake nofake1:midhost combo (+4 per fool), syn+mdis (+1).
+    assert len(items) == 36798, f"standard full pool changed: {len(items)}"
     fg = FlowsealGenerator()
     fitems = await fg.generate(protocol="tls12", scan_level="full", max_count=100000)
     assert len(fitems) == 10183, f"flowseal full pool changed: {len(fitems)}"

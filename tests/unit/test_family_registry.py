@@ -26,7 +26,7 @@ def test_families_silent_drop_and_rst():
         "multi_fake",
     ]
     rst = TriageProfile(rst_at_sni=True)
-    assert families_for_profile(rst) == ["multisplit", "fakedsplit", "multidisorder"]
+    assert families_for_profile(rst) == ["multisplit", "fakedsplit", "multidisorder", "multidisorder_legacy"]
 
 
 def test_families_udp_blocked():

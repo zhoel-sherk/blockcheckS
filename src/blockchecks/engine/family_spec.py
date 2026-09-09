@@ -51,7 +51,7 @@ def _f(
 TRIAGE_TO_FAMILIES: dict[str, tuple[str, ...]] = {
     "stall": ("wssize",),
     "silent_drop": ("fake", "hostfake", "fakedsplit", "multisplit", "multi_fake"),
-    "rst_at_sni": ("multisplit", "fakedsplit", "multidisorder"),
+    "rst_at_sni": ("multisplit", "fakedsplit", "multidisorder", "multidisorder_legacy"),
     "quic_drop": ("quic_fake", "quic_ipfrag"),
     "udp_blocked": ("udp_discord",),
 }
@@ -94,6 +94,12 @@ REGISTRY: tuple[FamilySpec, ...] = (
         "multidisorder",
         "tcp",
         prefixes=("std_mdis_", "multidisorder_"),
+        triage=_triage("multidisorder"),
+    ),
+    _f(
+        "multidisorder_legacy",
+        "tcp",
+        prefixes=("std_mdisleg_", "multidisorder_legacy_"),
         triage=_triage("multidisorder"),
     ),
     _f("syndata", "tcp", prefixes=("std_syn_", "std_syndata_")),
