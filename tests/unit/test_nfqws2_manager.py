@@ -474,3 +474,42 @@ def test_open_out_capture_disabled_on_oserror(monkeypatch, caplog):
         fh, path = nfq.open_out_capture("ns-x")
     assert fh is None and path is None
     assert "out-capture disabled" in caplog.text
+
+
+@pytest.mark.unit
+def test_start_host_mode_injects_fwmark_and_filter_mark(tmp_path: Path):
+    """host_mode + probe_mark → both anti-loop and 1.0.5 second lock in conf."""
+    alive = MagicMock()
+    alive.pid = 8888
+    alive.poll.return_value = None
+
+    mgr = Nfqws2Manager(ns_name=None)
+    with (
+        patch("blockchecks.service.nfqws2_launcher.get_nfqws2_bin", return_value="/bin/nfqws2"),
+        patch("blockchecks.service.nfqws2_launcher.subprocess.Popen", return_value=alive) as popen,
+        patch("blockchecks.service.nfqws2_launcher.wait_nfqws2_ready", return_value=0.02),
+        patch("blockchecks.service.nfqws2_launcher.wait_nfqws2_bind_proof", return_value=True),
+        patch("blockchecks.service.nfqws2_launcher.resolve_nfqws2_pids", return_value=[1001]),
+    ):
+        mgr.start("fake:blob=stun:repeats=6", qnum=220, host_mode=True, desync_mark=0x40000000, probe_mark=0x20000000)
+
+    cmd = popen.call_args.args[0]
+    conf_arg = next(str(a) for a in cmd if str(a).startswith("@"))
+    conf_text = Path(conf_arg[1:]).read_text(encoding="utf-8")
+    lines = conf_text.splitlines()
+    assert "--qnum=220" in lines
+    assert "--fwmark=0x40000000" in lines
+    assert "--filter-mark=0x20000000/0x20000000" in lines
+    # netns path (no host_mode) never gets the marks
+    mgr2 = Nfqws2Manager(ns_name="bs-p0")
+    with (
+        patch("blockchecks.service.nfqws2_launcher.get_nfqws2_bin", return_value="/bin/nfqws2"),
+        patch("blockchecks.service.nfqws2_launcher.subprocess.Popen", return_value=alive) as popen2,
+        patch("blockchecks.service.nfqws2_launcher.wait_nfqws2_ready", return_value=0.02),
+        patch("blockchecks.service.nfqws2_launcher.wait_nfqws2_bind_proof", return_value=True),
+        patch("blockchecks.service.nfqws2_launcher.resolve_nfqws2_pids", return_value=[1001]),
+    ):
+        mgr2.start("fake:blob=stun:repeats=6", qnum=200)
+    conf2 = Path(next(str(a) for a in popen2.call_args.args[0] if str(a).startswith("@"))[1:]).read_text(encoding="utf-8")
+    assert "--fwmark" not in conf2
+    assert "--filter-mark" not in conf2

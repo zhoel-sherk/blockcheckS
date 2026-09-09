@@ -86,18 +86,26 @@ class Nfqws2Manager:
         extra_lua_desync: list[str] | None = None,
         host_mode: bool = False,
         desync_mark: int = 0,
+        probe_mark: int = 0,
     ) -> None:
         """Start nfqws2 with inline strategy (backward compat).
 
         ``host_mode`` (docs/hostmode.md §5): injects the MANDATORY
         ``--fwmark`` anti-loop line right after ``--qnum`` so rawsend fakes
-        never re-enter the host queue.
+        never re-enter the host queue. ``probe_mark`` > 0 additionally injects
+        ``--filter-mark`` (binary >= 1.0.5) mirroring the nft ``meta mark set``
+        rule — second defence-in-depth lock, canon §6.
         """
         self.stop()  # clear prior proc/temps before creating a new conf
         self._qnum = qnum
         lines = [
             f"--qnum={qnum}",
             *( [f"--fwmark={desync_mark:#x}"] if host_mode and desync_mark else [] ),
+            *(
+                [f"--filter-mark=0x{probe_mark:x}/0x{probe_mark:x}"]
+                if host_mode and probe_mark
+                else []
+            ),
             f"--filter-tcp={filter_tcp}",
             "--filter-l3=ipv4",
             "--filter-l7=tls",

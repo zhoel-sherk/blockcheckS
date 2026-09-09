@@ -227,7 +227,7 @@ async def run(
 ):
     domains = normalize_domains(domains)
 
-    from blockchecks.engine.config import DESYNC_MARK, HOST_QNUM_TCP, host_slot_name
+    from blockchecks.engine.config import DESYNC_MARK, HOST_QNUM_TCP, PROBE_MARK, host_slot_name
 
     if probe_isol not in ("netns", "host"):
         raise ValueError(f"unknown probe_isol {probe_isol!r}")
@@ -280,7 +280,10 @@ async def run(
             conf_text = rewritten
         if host_mode:
             conf_text = host_isol.hostify_conf_text(
-                conf_text, qnum=host_qnum, desync_mark=DESYNC_MARK
+                conf_text,
+                qnum=host_qnum,
+                desync_mark=DESYNC_MARK,
+                probe_mark=PROBE_MARK,
             )
         if conf_text != Path(config_abs).read_text(encoding="utf-8"):
             mod_conf = f"{config_abs}.composite.{os.getpid()}.conf"

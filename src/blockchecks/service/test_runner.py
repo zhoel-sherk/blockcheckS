@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from blockchecks.engine.config import DESYNC_MARK, HOST_QNUM_TCP, host_slot_name
+from blockchecks.engine.config import DESYNC_MARK, HOST_QNUM_TCP, PROBE_MARK, host_slot_name
 from blockchecks.service import host_isol
 from blockchecks.service.metrics import pkill_nfqws2_in_ns
 from blockchecks.service.nfqws2 import Nfqws2Manager
@@ -252,6 +252,7 @@ class TestRunner:
                     qnum=self.host_qnum,
                     host_mode=True,
                     desync_mark=self.desync_mark,
+                    probe_mark=PROBE_MARK,
                 )
                 self._wait_host_bind()
             elif self.ns_name:

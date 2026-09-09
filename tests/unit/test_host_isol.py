@@ -211,23 +211,6 @@ def test_qnum_busy_ignores_our_table():
 @pytest.mark.unit
 def test_queue_bound_reads_proc(tmp_path):
     """Live-bind via /proc portid (AUDIT §16: stdout marker flushes on exit)."""
-    from pathlib import Path
-
-    proc_file = tmp_path / "nfnetlink_queue"
-    monkeypatch_free = patch.dict(
-        "sys.modules", {}
-    )  # placeholder to keep import style; real patch below
-
-    with patch.object(
-        host_isol.Path, "__new__", Path.__new__
-    ):
-        pass
-
-    def fake_read(self):
-        return "220 1081018     0 2 65531     0     0        0  1\n"
-
-    real_path = host_isol.Path
-
     class FakePath(str):
         def exists(self):
             return True
@@ -248,3 +231,70 @@ def test_queue_bound_reads_proc(tmp_path):
 
     with patch.object(host_isol, "Path", DeadPath):
         assert host_isol.queue_bound(220) is False
+
+
+@pytest.mark.unit
+def test_hostify_conf_text_filter_mark_injection():
+    """PROBE_MARK>0 (binary 1.0.5) adds --filter-mark mirroring the nft mark."""
+    text = "--filter-tcp=443\n--qnum=200\n"
+    out = host_isol.hostify_conf_text(text, qnum=220, desync_mark=0x40000000, probe_mark=0x20000000)
+    assert "--qnum=220" in out
+    assert "--fwmark=0x40000000" in out
+    assert "--filter-mark=0x20000000/0x20000000" in out
+    # no accumulation of foreign mark lines
+    assert out.count("--filter-mark=") == 1
+    # probe_mark=0 → no filter-mark line at all
+    out_off = host_isol.hostify_conf_text(text, qnum=220, desync_mark=0x40000000, probe_mark=0)
+    assert "--filter-mark" not in out_off
+
+
+@pytest.mark.unit
+def test_hostify_conf_text_replaces_foreign_filter_mark():
+    text = "--filter-mark=0x1234\n--qnum=200\n"
+    out = host_isol.hostify_conf_text(text, qnum=220, desync_mark=0x40000000, probe_mark=0)
+    assert "--filter-mark" not in out
+
+
+@pytest.mark.unit
+def test_resolve_probe_isol_rejects_mark_overlap(monkeypatch):
+    """PROBE_MARK & DESYNC_MARK != 0 → hard error (canon §6, no silent fix)."""
+    from blockchecks.engine import config
+
+    class Args:
+        probe_isol = "host"
+
+    monkeypatch.setattr(config, "PROBE_MARK", 0x40000000)
+    monkeypatch.setattr(config, "DESYNC_MARK", 0x40000000)
+    with pytest.raises(ValueError, match="overlaps DESYNC_MARK"):
+        config.resolve_probe_isol(Args())
+
+
+@pytest.mark.unit
+def test_qnum_busy_matches_both_nft_renderings(monkeypatch):
+    """Native rendering is "queue flags bypass to 220", compat is "queue num
+    200" — both must count as busy; our own table never does (AUDIT §16)."""
+    ruleset = "\n".join(
+        [
+            "table ip zapret_200 {",
+            "	chain output {",
+            "		tcp dport 443 counter packets 198902 bytes 137110534 queue num 200 bypass",
+            "	}",
+            "}",
+            "table inet blockchecks_host {",
+            "	chain output {",
+            "		meta skuid 996 tcp dport 443 meta mark & 0x40000000 == 0x00000000 ct original packets 1-15 meta mark set 0x20000000 queue flags bypass to 220",
+            "	}",
+            "}",
+        ]
+    )
+    monkeypatch.setattr(host_isol, "_list_ruleset", lambda: ruleset)
+    # compat rendering of a FOREIGN table → busy
+    assert host_isol.qnum_busy(200) and "zapret_200" in host_isol.qnum_busy(200)
+    # native rendering in OUR table → not busy (attach/teardown own it)
+    assert host_isol.qnum_busy(220) is None
+    # native rendering in a foreign table → busy
+    foreign = ruleset.replace("table inet blockchecks_host", "table inet foreign_host")
+    monkeypatch.setattr(host_isol, "_list_ruleset", lambda: foreign)
+    assert host_isol.qnum_busy(220) and "foreign_host" in host_isol.qnum_busy(220)
+    # absent queue → None
+    assert host_isol.qnum_busy(221) is None

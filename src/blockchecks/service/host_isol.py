@@ -26,6 +26,7 @@ teardown = delete OUR table only; never ``iptables -F``/``flush ruleset``.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -68,18 +69,29 @@ def qnum_busy(qnum: int) -> str | None:
 
     AUDIT hostmode §6: a busy queue is a hard refusal (no silent rotation to
     the next number). Scans the whole ruleset — our own table AND foreign ones
-    (a production nfqws2 on 200 must be visible before we take 220).
+    (a production nfqws2 on 200 must be visible before we take 220). Two
+    renderings exist in ``nft list ruleset`` output:
+    - iptables-nft/legacy-compat rules: ``queue num 200 bypass``
+    - nft-native queue statements: ``queue flags bypass to 220``
+    Rules belonging to OUR table never count as busy (attach/teardown own it).
     """
     ruleset = _list_ruleset()
     if not ruleset:
         return None
     needle = f"queue num {qnum}"
+    to_re = re.compile(rf"\bqueue\b[^;\n]*\bto\s+{qnum}\b")
+    current_table = ""
     for line in ruleset.splitlines():
-        if needle in line:
-            stripped = line.strip()
-            if NFT_TABLE in line:
+        stripped = line.strip()
+        if stripped.startswith("table "):
+            tokens = stripped.split()
+            # "table <family> <name> {" (nft list); single-line compact form
+            # "table <family> <name> { rules }" is handled too (tests, §16).
+            current_table = tokens[2] if len(tokens) > 2 else (tokens[1] if len(tokens) > 1 else "")
+        if needle in line or to_re.search(line):
+            if current_table == NFT_TABLE:
                 continue  # our own table is managed by attach/teardown
-            return stripped[:120]
+            return f"{current_table}: {stripped[:110]}"
     return None
 
 
@@ -186,14 +198,25 @@ def attach_host_queue(
     )
 
 
-def hostify_conf_text(conf_text: str, *, qnum: int, desync_mark: int) -> str:
+def hostify_conf_text(
+    conf_text: str,
+    *,
+    qnum: int,
+    desync_mark: int,
+    probe_mark: int = PROBE_MARK,
+) -> str:
     """Rewrite an operator .conf for the host slot (AUDIT hostmode §6).
 
     Overrides ``--qnum`` with the host queue, injects the mandatory
-    ``--fwmark`` anti-loop line, strips foreign ``--filter-mark`` lines (the
-    current binary lacks the option; PROBE_MARK is off in v1). Pure function
-    — used by composite overlay and TestRunner._hostify_conf.
+    ``--fwmark`` anti-loop line and, when ``probe_mark`` is set, the
+    ``--filter-mark`` second lock (binary >= 1.0.5; must mirror the nft
+    ``meta mark set`` rule — they only work as a pair). Foreign
+    ``--filter-mark``/``--fwmark`` lines are replaced, never accumulated.
+    Pure function — used by composite overlay and TestRunner._hostify_conf.
     """
+    filter_mark_line = (
+        f"--filter-mark=0x{probe_mark:x}/0x{probe_mark:x}" if probe_mark else ""
+    )
     lines: list[str] = []
     inserted = False
     for raw in conf_text.splitlines():
@@ -201,6 +224,8 @@ def hostify_conf_text(conf_text: str, *, qnum: int, desync_mark: int) -> str:
         if s.startswith("--qnum="):
             lines.append(f"--qnum={qnum}")
             lines.append(f"--fwmark={desync_mark:#x}")
+            if filter_mark_line:
+                lines.append(filter_mark_line)
             inserted = True
             continue
         if s.startswith("--fwmark=") or s.startswith("--filter-mark="):
@@ -209,6 +234,8 @@ def hostify_conf_text(conf_text: str, *, qnum: int, desync_mark: int) -> str:
     if not inserted:
         lines.insert(0, f"--qnum={qnum}")
         lines.insert(1, f"--fwmark={desync_mark:#x}")
+        if filter_mark_line:
+            lines.insert(2, filter_mark_line)
     return "\n".join(lines) + "\n"
 
 

@@ -257,6 +257,46 @@ sudo bs scan -d discord.com --generate --max 50
 
 ---
 
+## Host-mode (`--probe-isol=host`)
+
+Host-mode убирает veth+NAT из пути пробы: пакеты идут тем же маршрутом, что
+обычный сокет (тот же WAN/TTL до ТСПУ). Изоляцию делает nft-таблица
+`inet blockchecks_host`: в NFQUEUE попадает **только** curl-воркер пробы
+(`meta skuid bcprobe`), чужой браузер и DoH — мимо. Канон: [hostmode.md](hostmode.md).
+
+```bash
+# oneshot (bs tcp) и composite — host-слот (очередь 220, fwmark-антипетля)
+sudo bs tcp -d discord.com --strategy 'fake:blob=stun:repeats=6:tcp_ts=-1000' \
+    --skip-deps-check --probe-isol=host
+sudo bs composite -c configs/fake_null_r6_ts.conf -d discord.com \
+    --skip-deps-check --probe-isol=host
+# netns (дефолт) — прежнее поведение
+sudo bs tcp -d discord.com --strategy '...' --skip-deps-check
+```
+
+**Требования** (один раз): `useradd -r bcprobe` (uid воркера), nft в PATH,
+право sudo. `nft list table inet blockchecks_host` после прогона должен быть
+пуст — таблица снимается сама (teardown после каждой пробы/композита).
+
+**Где уместен:** выделенная коробка (Pi/VPS/mini-PC, на ней только тестер) —
+экономия CPU/RAM на netns, честный datapath. **На смешанном хосте** (рядом
+opencode, браузер, SSH — как этот Xeon) оставайтесь на netns-дефолте: ошибку
+firewall там переживёт netns, а не Wi-Fi. Опасность размазывается guard'ами:
+нет uid/занята очередь/чужой run.lock → отказ, не «тогда весь :443».
+
+**Второй замок (binary ≥ 1.0.5, deployed 2026-09-09):** nft ставит
+`meta mark set 0x20000000` на пойманный пакет, nfqws2 фильтрует его же
+через `--filter-mark` (env `BLOCKCHECKS_PROBE_MARK`, 0 = выключить оба).
+Антипетля rawsend — отдельный `--fwmark=0x40000000`
+(`BLOCKCHECKS_DESYNC_MARK`), всегда обязателен в host-конфиге.
+
+**Не входит (v2):** кампании `scan`/`pair`/`full` и UDP/voice на host-слотах —
+`--probe-isol` на них ещё не действует. Отладка bind: живая привязка очереди
+проверяется по `/proc/net/netfilter/nfnetlink_queue` (stdout-маркер nfqws2
+флашится только при выходе демона).
+
+---
+
 ## Голос Discord (UDP)
 
 Не путать с HTTPS `curl` на `discord.com`. Три контура:

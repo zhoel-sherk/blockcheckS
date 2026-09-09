@@ -211,9 +211,11 @@ HOST_QNUM_TCP = int(_env_or("BLOCKCHECKS_HOST_QNUM_TCP", "220"))
 # HOST_QNUM_UDP (221) returns in v2 together with host UDP voice wiring.
 #: nfqws2 ``--fwmark`` anti-loop for rawsend packets (upstream default).
 DESYNC_MARK = int(os.environ.get("BLOCKCHECKS_DESYNC_MARK", "0x40000000"), 0)
-#: PROBE mark set by nft on matched skb — only when the binary knows
-#: ``--filter-mark`` (nfqws2 >= 1.0.5). 0 = off (current binary; warning-only).
-PROBE_MARK = int(os.environ.get("BLOCKCHECKS_PROBE_MARK", "0"), 0)
+#: PROBE mark set by nft on matched skb — consumed by nfqws2 ``--filter-mark``
+#: (binary >= 1.0.5, deployed 2026-09-09). Canon docs/hostmode.md §6: defence
+#: in-depth second lock; 0 disables both the nft ``meta mark set`` and the
+#: conf injection. Must never overlap DESYNC_MARK (guard in resolve_probe_isol).
+PROBE_MARK = int(os.environ.get("BLOCKCHECKS_PROBE_MARK", "0x20000000"), 0)
 #: Dedicated uid the curl worker runs under; nft matches ``meta skuid``.
 HOST_PROBE_USER = os.environ.get("BLOCKCHECKS_HOST_PROBE_USER", "bcprobe")
 #: Host-mode slot name — never a plain "host" (probe.py would netns-exec it).
@@ -228,9 +230,10 @@ def resolve_probe_isol(args) -> str:
     - isol=host requires the probe uid to exist (nft skuid matcher);
     - isol=host with a foreign active run.lock is refused (run_control layer
       also enforces this via normal lock acquisition);
-    - ``--host-mark`` > 0 without nft mark-set support is an operator choice:
-      the value flows to conf ``--filter-mark``; caller decides when binary
-      lacks the option (warning-only per canon).
+    - PROBE_MARK & DESYNC_MARK overlap is refused (nft mark-set would fight
+      the rawsend anti-loop). PROBE_MARK != 0 requires binary >= 1.0.5
+      (deployed 2026-09-09): nfqws2 exits loudly on unknown ``--filter-mark``,
+      no silent bypass. Mark the option off by setting the env to 0.
     Unknown value → error. isol=netns ignores all --host-* flags.
     """
     requested = (getattr(args, "probe_isol", None) or "").strip().lower()
@@ -246,6 +249,12 @@ def resolve_probe_isol(args) -> str:
         )
     import pwd
 
+    if PROBE_MARK & DESYNC_MARK:
+        raise ValueError(
+            f"BLOCKCHECKS_PROBE_MARK {PROBE_MARK:#x} overlaps DESYNC_MARK "
+            f"{DESYNC_MARK:#x} — nft mark-set would collide with the rawsend "
+            "anti-loop; fix the env before re-running"
+        )
     try:
         pwd.getpwnam(HOST_PROBE_USER)
     except KeyError:
