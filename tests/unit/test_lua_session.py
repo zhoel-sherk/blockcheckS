@@ -217,6 +217,10 @@ def test_bridge_session_host_boot_conf_and_teardown(tmp_path):
         ) as attach,
         patch("blockchecks.service.nfqws2_launcher.kill_host_daemon") as kill,
         patch(
+            "blockchecks.service.host_isol.detach_host_slot_rule",
+            return_value=True,
+        ) as detach,
+        patch(
             "blockchecks.service.lua_conf.stage_blockchecks_lua",
             return_value=[],
         ),
@@ -238,5 +242,6 @@ def test_bridge_session_host_boot_conf_and_teardown(tmp_path):
 
         s.shutdown()
         kill.assert_called_once_with(220)
+        detach.assert_called_once_with(220)
         assert s.iptables_ready is False
         assert s.conf_path == ""

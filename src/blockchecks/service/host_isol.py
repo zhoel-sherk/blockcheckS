@@ -347,6 +347,54 @@ def _table_has_slot_rule(qnum: int) -> bool:
     return False
 
 
+def slot_rule_handle(qnum: int) -> int | None:
+    """nft handle of OUR table's queue rule for this qnum (nft -a listing).
+
+    Returns None when absent/foreign. Needed to remove a slot's queue rule
+    when its daemon dies (AUDIT §18.6/§9): a rule with a dead listener lets
+    --queue-bypass pass probe traffic RAW — false FAILs for every later
+    slot on the shared skuid.
+    """
+    out = _nft("-a", "list", "table", "inet", NFT_TABLE, check=False)
+    if out.returncode != 0:
+        return None
+    current_chain = ""
+    for line in out.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("chain "):
+            current_chain = stripped.split()[1].rstrip("{").strip()
+        if current_chain != "output":
+            continue
+        if f"queue num {qnum}" in line or re.search(rf"\bqueue\b[^;\n]*\bto\s+{qnum}\b", line):
+            m = re.search(r"handle (\d+)", line)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def detach_host_slot_rule(qnum: int) -> bool:
+    """Remove OUR table's queue rule for qnum (slot daemon teardown).
+
+    Returns True when a rule was removed. Best-effort — a missing rule is
+    not an error (teardown idempotence); a failed delete logs a warning.
+    """
+    handle = slot_rule_handle(qnum)
+    if handle is None:
+        return False
+    out = _nft("delete", "rule", "inet", NFT_TABLE, "output", "handle", str(handle), check=False)
+    if out.returncode == 0:
+        log.info("host queue rule for qnum %d detached (handle %s)", qnum, handle)
+        return True
+    log.warning(
+        "detach host queue rule qnum=%d handle=%s failed rc=%d: %s",
+        qnum,
+        handle,
+        out.returncode,
+        (out.stderr or "").strip()[:120],
+    )
+    return False
+
+
 def teardown_host_queue(*, expect_absent: bool = False) -> bool:
     """Delete OUR table (single teardown contract, §7/§18.2). Never flush.
 
@@ -393,7 +441,9 @@ def self_check() -> list[str]:
 
 __all__ = [
     "NFT_TABLE",
+    "detach_host_slot_rule",
     "queue_bound",
+    "slot_rule_handle",
     "attach_host_queue",
     "build_notrack_rule",
     "build_queue_rules",

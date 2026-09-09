@@ -406,9 +406,12 @@ def _run_tcp_check(
         return data
     finally:
         if host_qnum:
+            from blockchecks.service.host_isol import detach_host_slot_rule
             from blockchecks.service.nfqws2_launcher import kill_host_daemon
 
             kill_host_daemon(host_qnum)
+            # Dead listener + live rule = --queue-bypass RAW probes (§18.6).
+            detach_host_slot_rule(host_qnum)
         else:
             fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
             _pkill_nfqws2(ns_name)

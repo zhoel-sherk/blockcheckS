@@ -95,3 +95,22 @@ def test_pool_destroy_all_releases_workers_and_table():
     assert len(calls) == 2
     th.assert_called_once()
     assert pool._names == []
+
+
+@pytest.mark.unit
+def test_resolve_host_slot_count_env_and_override(monkeypatch):
+    from blockchecks.service import host_slots
+
+    monkeypatch.delenv("BLOCKCHECKS_HOST_SLOTS", raising=False)
+    assert host_slots.resolve_host_slot_count(6) == 6
+    assert host_slots.resolve_host_slot_count("3") == 3
+    monkeypatch.setenv("BLOCKCHECKS_HOST_SLOTS", "5")
+    assert host_slots.resolve_host_slot_count(None) == 5
+    monkeypatch.setenv("BLOCKCHECKS_HOST_SLOTS", "auto")
+    auto = host_slots.resolve_host_slot_count(None)
+    assert 1 <= auto <= host_slots.MAX_SLOTS_CAP
+    with pytest.raises(ValueError, match="expected int"):
+        host_slots.resolve_host_slot_count("many")
+    # None + no env → auto path (formula), not an error
+    monkeypatch.delenv("BLOCKCHECKS_HOST_SLOTS", raising=False)
+    assert 1 <= host_slots.resolve_host_slot_count(None) <= host_slots.MAX_SLOTS_CAP

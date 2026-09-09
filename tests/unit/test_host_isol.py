@@ -360,3 +360,43 @@ def test_attach_host_queue_additive_when_other_slot_present(monkeypatch):
     assert any("queue num 222" in c for c in adds)
     assert not any("delete table" in c for c in calls), calls
     assert not any("notrack" in c for c in adds)  # already present
+
+
+@pytest.mark.unit
+def test_slot_rule_handle_and_detach(monkeypatch):
+    """Dead-listener rules must be detachable by handle (v2 lesson: pin slot
+    rule with dead nfqws2 made --queue-bypass pass later probes RAW)."""
+    listing = (
+        "table inet blockchecks_host { # handle 9\n"
+        "	chain output { # handle 1\n"
+        "		type filter hook output priority mangle; policy accept;\n"
+        "		meta skuid 996 tcp dport 443 meta mark set 0x20000000 queue flags bypass to 220 # handle 4\n"
+        "		meta skuid 996 tcp dport 443 meta mark set 0x20000000 queue flags bypass to 224 # handle 7\n"
+        "	}\n"
+        "}\n"
+    )
+
+    def fake_nft(*args, check=False):
+        return MagicMock(returncode=0, stdout=listing, stderr="")
+
+    monkeypatch.setattr(host_isol, "_nft", fake_nft)
+    assert host_isol.slot_rule_handle(220) == 4
+    assert host_isol.slot_rule_handle(224) == 7
+    assert host_isol.slot_rule_handle(226) is None
+
+    calls = []
+
+    def fake_nft2(*args, check=False):
+        if args and args[0] == "-a":  # listing still served for handle lookup
+            return MagicMock(returncode=0, stdout=listing, stderr="")
+        calls.append(args)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(host_isol, "_nft", fake_nft2)
+    assert host_isol.detach_host_slot_rule(220) is True
+    assert calls[-1][:6] == ("delete", "rule", "inet", "blockchecks_host", "output", "handle")
+    # absent rule → False, no delete call
+    calls.clear()
+    monkeypatch.setattr(host_isol, "slot_rule_handle", lambda q: None)
+    assert host_isol.detach_host_slot_rule(220) is False
+    assert calls == []

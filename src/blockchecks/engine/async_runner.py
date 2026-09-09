@@ -248,11 +248,21 @@ class AsyncTestRunner:
 
         if probe_isol == "host":
             # docs/hostmode.md §10 v2: K host slots, zero netns; same
-            # acquire/release contract so executors stay untouched.
-            from blockchecks.service.host_slots import HostSlotPool
+            # acquire/release contract so executors stay untouched. Slot
+            # count is NOT the netns --parallel: one adaptive knob
+            # (BLOCKCHECKS_HOST_SLOTS, default auto = resource formula) —
+            # operator decision 2026-09-09, slots must not be fixed.
+            from blockchecks.service.host_slots import HostSlotPool, resolve_host_slot_count
 
+            slots = resolve_host_slot_count(None)
+            if slots != pool_size:
+                log.info(
+                    "host slots: %d (adaptive; --parallel %d applies to netns pools only)",
+                    slots,
+                    pool_size,
+                )
             self.pool = HostSlotPool(
-                size=pool_size,
+                size=slots,
                 base_qnum=host_qnum if host_qnum is not None else HOST_QNUM_TCP,
             )
         else:

@@ -105,10 +105,14 @@ class BridgeSession:
 
     def shutdown(self) -> None:
         if self.host_qnum:
+            from blockchecks.service.host_isol import detach_host_slot_rule
             from blockchecks.service.nfqws2_launcher import kill_host_daemon
 
             kill_host_daemon(self.host_qnum)
             self.daemon_proc = None
+            # AUDIT §16 v2 lesson: a queue rule with a DEAD listener lets
+            # --queue-bypass pass probes RAW (false FAILs for other slots).
+            detach_host_slot_rule(self.host_qnum)
         else:
             from blockchecks.service.metrics import pkill_nfqws2_in_ns
 

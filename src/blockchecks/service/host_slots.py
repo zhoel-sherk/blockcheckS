@@ -231,4 +231,70 @@ class HostSlotPool:
         return f"HostSlotPool(size={self.size}, base_qnum={self.base_qnum}, names={self._names})"
 
 
-__all__ = ["HostSlotPool", "SLOT_QNUM_STEP", "slot_name"]
+#: Rough per-slot RAM budget (nfqws2 daemon + persistent curl worker + IPC
+#: headroom). Conservative on purpose: underestimating starves the host.
+PER_SLOT_BUDGET_MIB = 220
+#: Absolute ceiling — AQ efficiency flattens well before this on any box.
+MAX_SLOTS_CAP = 16
+
+
+def _mem_available_mib() -> int:
+    try:
+        with open("/proc/meminfo", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
+
+
+def resolve_host_slot_count(requested: int | str | None = None) -> int:
+    """Slot count for the host pool — AUTO by resource formula, never fixed.
+
+    ``requested``:
+      - ``None``            → env ``BLOCKCHECKS_HOST_SLOTS`` else ``auto``;
+      - ``"auto"``          → resource formula (below);
+      - int (CLI/env)       → operator override, honoured as-is (their box).
+
+    Auto formula: min(cpu-1, 60% of MemAvailable / per-slot budget), clamped
+    to [1, MAX_SLOTS_CAP]. Log both branches — no silent substitution (§18.1).
+    """
+    if requested is None:
+
+        requested = os.environ.get("BLOCKCHECKS_HOST_SLOTS", "auto")
+    if isinstance(requested, int) and not isinstance(requested, bool):
+        log.info("host slots: operator override = %d", requested)
+        return max(1, requested)
+    if str(requested).strip().lower() != "auto":
+        try:
+            n = int(requested)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"BLOCKCHECKS_HOST_SLOTS: expected int or 'auto', got {requested!r}"
+            ) from exc
+        log.info("host slots: operator override = %d", n)
+        return max(1, n)
+
+    cpu_budget = max(1, (os.cpu_count() or 1) - 1)
+    mem = _mem_available_mib()
+    mem_budget = int(mem * 0.6 / PER_SLOT_BUDGET_MIB) if mem > 0 else cpu_budget
+    slots = max(1, min(cpu_budget, mem_budget, MAX_SLOTS_CAP))
+    log.info(
+        "host slots: auto → %d (cpu_budget=%d, mem=%dMiB → mem_budget=%d, cap=%d)",
+        slots,
+        cpu_budget,
+        mem,
+        mem_budget,
+        MAX_SLOTS_CAP,
+    )
+    return slots
+
+__all__ = [
+    "HostSlotPool",
+    "MAX_SLOTS_CAP",
+    "PER_SLOT_BUDGET_MIB",
+    "SLOT_QNUM_STEP",
+    "resolve_host_slot_count",
+    "slot_name",
+]
