@@ -77,9 +77,38 @@ class BridgeSession:
             self.iptables_ready = True
         return settle
 
+    def _daemon_alive(self) -> bool:
+        """One-daemon-per-run (AUDIT §20 D4b): in Mode A the daemon must NOT
+        restart between batches — strategy.cmd swaps plans live. Alive check:
+        host slot = Popen + /proc portid; netns = visible pids + fresh heartbeat."""
+        from blockchecks.engine.config import BRIDGE_MODE
+
+        if BRIDGE_MODE != "A":
+            return False  # Mode B restarts per batch (strategies baked in conf)
+        if self.host_qnum:
+            from blockchecks.service.host_isol import queue_bound
+            from blockchecks.service.nfqws2_launcher import _HOST_PROCS
+
+            proc = _HOST_PROCS.get(self.host_qnum)
+            return (
+                proc is not None and proc.poll() is None and queue_bound(self.host_qnum)
+            )
+        from blockchecks.service.metrics import find_nfqws2_pids
+
+        pids = find_nfqws2_pids(self.ns_name)
+        if not pids:
+            return False
+        try:
+            age = self.bridge.heartbeat_age()
+        except OSError:
+            return False
+        return age is not None and age <= 2.0
+
     def boot(self) -> float:
         from blockchecks.service.nfqws2 import start_daemon
 
+        if self._daemon_alive():
+            return 0.0
         if self.host_qnum:
             return self._boot_host()
         _check_netns_exists(self.ns_name)
@@ -105,18 +134,26 @@ class BridgeSession:
 
     def shutdown(self) -> None:
         if self.host_qnum:
+            from blockchecks.engine.config import BRIDGE_MODE
             from blockchecks.service.host_isol import detach_host_slot_rule
-            from blockchecks.service.nfqws2_launcher import kill_host_daemon
 
-            kill_host_daemon(self.host_qnum)
-            self.daemon_proc = None
-            # AUDIT §16 v2 lesson: a queue rule with a DEAD listener lets
-            # --queue-bypass pass probes RAW (false FAILs for other slots).
-            detach_host_slot_rule(self.host_qnum)
+            if BRIDGE_MODE != "A" or not self._daemon_alive():
+                from blockchecks.service.nfqws2_launcher import kill_host_daemon
+
+                kill_host_daemon(self.host_qnum)
+                self.daemon_proc = None
+                # AUDIT §16 v2 lesson: a queue rule with a DEAD listener lets
+                # --queue-bypass pass probes RAW (false FAILs for other slots).
+                detach_host_slot_rule(self.host_qnum)
+            # Mode A + live daemon: keep it across batches (strategy.cmd swaps
+            # the plan); the rule stays with its LIVE listener. Final kill is
+            # HostSlotPool.destroy_all / bs stop.
         else:
+            from blockchecks.engine.config import BRIDGE_MODE
             from blockchecks.service.metrics import pkill_nfqws2_in_ns
 
-            pkill_nfqws2_in_ns(self.ns_name)
+            if BRIDGE_MODE != "A" or not self._daemon_alive():
+                pkill_nfqws2_in_ns(self.ns_name)
         # Firewall persists per slot (nft table attach-once) / ns (NsFirewall).
         self.iptables_ready = False
         if self.conf_path:

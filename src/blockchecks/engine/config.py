@@ -60,7 +60,13 @@ CONFIGS_DIR = os.path.join(PROJECT_DIR, "configs")
 REPO_BLOBS_DIR = os.path.join(PROJECT_DIR, "blobs")
 REPO_LUA_DIR = os.path.join(PROJECT_DIR, "lua", "blockchecks")
 LUA_CUSTOM_DIR = os.path.join(PROJECT_DIR, "lua", "custom")
-_BLOCKCHECKS_LUA_NAMES = ("write_ipc.lua", "scan_bridge.lua", "init.lua", "geneva.lua")
+_BLOCKCHECKS_LUA_NAMES = (
+    "write_ipc.lua",
+    "strategy_parser.lua",
+    "scan_bridge.lua",
+    "init.lua",
+    "geneva.lua",
+)
 
 
 def _env_or(key, default: str) -> str:
@@ -291,6 +297,17 @@ BRIDGE_EARLY_ABORT = _env_or(
 ).lower() not in ("0", "false", "off", "no")
 #: How often the abort poll reads events.ndjson while curl runs.
 BRIDGE_ABORT_POLL_INTERVAL = float(_env_or("BLOCKCHECKS_BRIDGE_ABORT_POLL_INTERVAL", "0.1"))
+
+#: Bridge strategy mode (AUDIT §20, todo D4a): B = strategies baked into the
+#: conf (strategy=N plan, daemon restart per batch — today's default); A =
+#: conf carries only the orchestrators, the FULL strategy line is published
+#: via strategy.cmd and parsed in Lua (whitelist parser) — the daemon lives
+#: across batches (restart only on recycle/mem-pressure/debug-toggle).
+BRIDGE_MODE = os.environ.get("BLOCKCHECKS_BRIDGE_MODE", "B").strip().upper()
+if BRIDGE_MODE not in ("A", "B"):
+    raise ValueError(
+        f"BLOCKCHECKS_BRIDGE_MODE: unknown value {BRIDGE_MODE!r}; allowed: A, B"
+    )
 
 # Tuning knobs (configurable: env BLOCKCHECKS_* or [run] in config.toml)
 # Probe / subprocess wall timeouts. Kept here so a throttled ISP run can lower

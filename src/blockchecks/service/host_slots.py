@@ -213,6 +213,7 @@ class HostSlotPool:
             self._created = False
             names = list(self._names)
         from blockchecks.service.host_isol import teardown_host_queue
+        from blockchecks.service.nfqws2_launcher import kill_host_daemon
         from blockchecks.service.probe import release_curl_probe_worker
 
         for name in names:
@@ -220,6 +221,13 @@ class HostSlotPool:
                 release_curl_probe_worker(name)
             except Exception as exc:  # noqa: BLE001 — best-effort teardown
                 log.warning("worker release failed for %s: %s", name, exc)
+            # Mode A keepalive: slot daemons live across batches — the pool
+            # teardown is their final kill (bs stop / campaign end).
+            if name.startswith("host-q"):
+                try:
+                    kill_host_daemon(int(name.split("-")[1][1:]))
+                except (IndexError, ValueError):
+                    pass
         try:
             if teardown_host_queue():
                 log.info("host nft table deleted (slot pool teardown)")

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import time
+from pathlib import Path
 
 from blockchecks.checkers.curl_probe import (
     CurlProbeRequest,
@@ -36,6 +38,51 @@ def _make_abort_poll(session: BridgeSession, gen: int, strategy_id: int):
         return False
 
     return poll
+
+
+def _lua_desync_bodies(strategy: str) -> str:
+    """Mode A publish text: lua-desync bodies only (strategy_parser whitelist).
+
+    Some generators bake full CLI strings into item.strategy
+    (``--payload ... --lua-desync=fake:...``); conf items already carry
+    lua-desync lines. Keep lua-desync values verbatim, drop other flags —
+    the Lua whitelist re-checks every key anyway.
+    """
+    text = strategy.strip()
+    if text.endswith(".conf") and os.path.isfile(text):
+        # conf-strategy: item.strategy is the FILE PATH — read its lines.
+        text = Path(text).read_text(encoding="utf-8")
+    out: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("--lua-desync="):
+            out.append(s[len("--lua-desync=") :])
+        elif s.startswith("--"):
+            continue
+        elif s:
+            out.append(s)
+    return "\n".join(out)
+
+
+def _wait_plan_ready(bridge, gen: int, *, timeout: float = 1.5) -> bool:
+    """Mode A fence: probe must not start before the Lua timer rebuilt the
+    dynamic plan from OUR strategy.cmd (50ms timer vs curl start race — a
+    stale plan applied to a fresh probe = wrong desync + false FAIL).
+    PLAN_READY(gen) is written by the parser after each rebuild."""
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        try:
+            if any(
+                ev.event == "PLAN_READY" and ev.gen == gen
+                for ev in bridge.drain_events(since_gen=gen)
+            ):
+                return True
+        except OSError:
+            pass
+        _time.sleep(0.03)
+    return False
 
 
 def _drain_with_poll(bridge, since_gen: int, expect_id: int) -> list:
@@ -106,7 +153,16 @@ def run_tcp_check_bridge(
     is_yt = not is_http and not is_quic and is_ytcdn_domain(domain)
 
     session.bridge.truncate_events()
-    session.bridge.publish(strategy_id, gen, strategy if extra_lua_desync else None)
+    # Mode A: ALWAYS publish the full line — strategy_parser.lua rebuilds the
+    # dynamic plan from it. Mode B: cmd only carries extra lua-desync lines.
+    from blockchecks.engine.config import BRIDGE_MODE as _bm
+
+    if _bm == "A":
+        cmd = _lua_desync_bodies(strategy)
+        session.bridge.publish(strategy_id, gen, cmd)
+        _wait_plan_ready(session.bridge, gen, timeout=1.5)
+    else:
+        session.bridge.publish(strategy_id, gen, strategy if extra_lua_desync else None)
 
     if is_quic:
         data = _run_quic_bridge_probe(session.ns_name, python_bin, domain, timeout, resolved_ip)

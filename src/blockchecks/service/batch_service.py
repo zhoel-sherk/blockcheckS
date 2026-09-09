@@ -33,6 +33,8 @@ from blockchecks.terminal import CYAN, RESET, YELLOW
 
 log = logging.getLogger(__name__)
 
+import blockchecks.engine.config as _cfg_mod  # noqa: E402
+
 #: Max seconds to wait for a free netns before bailing out of a batch. Prevents
 #: a graceful stop (or a hung batch holding the whole pool) from deadlocking
 #: the adaptive/bridge workers on an empty pool queue.
@@ -315,6 +317,11 @@ class ProbeBatchService:
         if ctx.items:
             protocol = getattr(ctx.items[0], "protocol", ctx.protocol) or ctx.protocol
         strat_lines = [strategy_text_from_item(item) for item in ctx.items]
+        if _cfg_mod.BRIDGE_MODE == "A":
+            # Mode A (AUDIT §20): strategy.cmd is parsed by the Lua whitelist
+            # parser — publish ONLY lua-desync bodies (strip --payload/other
+            # CLI flags some generators bake into item.strategy).
+            strat_lines = [_mode_a_cmd_text(item) for item in ctx.items]
         # Direct construction (not the bridge_session_for factory) so tests
         # can keep monkeypatching bp.BridgeSession. Host slot detection is the
         # same canon prefix contract; malformed names are impossible from the
@@ -583,6 +590,26 @@ class ProbeBatchService:
             f"settle={result.settle_ms:.0f}ms wall={result.batch_wall_ms:.0f}ms "
             f"backend={result.backend}{fill}{RESET}",
         )
+
+
+def _mode_a_cmd_text(item) -> str:
+    """Mode A publish text: lua-desync bodies only (strategy_parser whitelist).
+
+    ``strategy_text_from_item`` handles conf items; inline items may carry
+    full CLI strings (``--payload ... --lua-desync=fake:...``) — strip the
+    flags, keep the lua-desync values verbatim (whitelist re-checks anyway).
+    """
+    text = strategy_text_from_item(item)
+    out: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("--lua-desync="):
+            out.append(s[len("--lua-desync=") :])
+        elif s.startswith("--"):
+            continue
+        elif s:
+            out.append(s)
+    return "\n".join(out)
 
 
 def _bridge_silent(data: dict) -> bool:

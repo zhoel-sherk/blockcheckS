@@ -1,4 +1,6 @@
 -- blockcheckS scan_pick orchestrator + ClientHello / HTTP request poll
+-- Mode A (AUDIT §20): strategy.cmd drives a dynamic whitelist-parsed plan;
+-- Mode B (default): the conf carries strategy=N instances, id published via shm.
 
 _G.bs_active_id = 1
 _G.bs_active_gen = 0
@@ -25,15 +27,32 @@ function scan_pick(ctx, desync)
 		_G.bs_active_id = id
 		if gen then _G.bs_active_gen = gen end
 	end
+
+	-- Mode A: the conf carries no strategy=N instances; the FULL strategy
+	-- line arrives via strategy.cmd and is parsed by the 200ms timer into
+	-- _G.bs_dyn_plan (no per-packet io — packets flow continuously). Falls
+	-- back to the Mode B conf-plan path when no cmd has ever been published.
+	if _G.bs_dyn_plan then
+		desync.plan = bs_copy_plan(_G.bs_dyn_plan)
+		orchestrate_apply_dynamic(ctx, desync)
+		return bs_finish_pick(desync, id)
+	end
+
 	orchestrate(ctx, desync)
-	local id = tonumber(_G.bs_active_id) or 1
+	return bs_finish_pick(desync, id)
+end
+
+-- Shared tail: execute the plan instances and write APPLIED (matched != 0).
+function bs_finish_pick(desync, id)
 	local verdict = VERDICT_PASS
 	local matched = 0
 	while true do
 		local inst = plan_instance_pop(desync)
 		if not inst then break end
 		local strat = tonumber(inst.arg.strategy)
-		if strat and strat == id then
+		-- Mode A plans carry no arg.strategy — execute unconditionally;
+		-- Mode B conf plans filter by the published id.
+		if not strat or strat == id then
 			verdict = plan_instance_execute(desync, verdict, inst)
 			matched = matched + 1
 		end
@@ -47,12 +66,20 @@ function scan_pick(ctx, desync)
 	return verdict
 end
 
+-- Mode A equivalent of orchestrate(): the plan table is already built —
+-- execution_plan(ctx) (C-side, config-only) must NOT be consulted.
+function orchestrate_apply_dynamic(_ctx, desync)
+	desync.plan = desync.plan or {}
+end
+
 function bs_timer_poll_strategy(name, data)
 	local id, gen = bs_read_strategy_ipc()
 	if id then
 		_G.bs_active_id = id
 		if gen then _G.bs_active_gen = gen end
 	end
+	-- Mode A: refresh the dynamic plan (file io ONLY here, never per packet).
+	bs_poll_strategy_cmd()
 end
 
 function smart_fallback(ctx, desync)

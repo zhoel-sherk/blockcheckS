@@ -27,6 +27,8 @@ from blockchecks.engine.config import (
 
 log = logging.getLogger(__name__)
 
+import blockchecks.engine.config as _cfg_mod  # noqa: E402
+
 
 def stage_blockchecks_lua(ipc_dir: Path, extra: list[str] | None = None) -> list[Path]:
     """Copy bridge Lua into WRITABLE tree (nfqws2 drops privs; repo paths may be unreadable)."""
@@ -72,7 +74,14 @@ def build_bridge_conf(
     protocol: str = "tls12",
     extra_lua_init: list[str] | None = None,
 ) -> str:
-    """Build nfqws2 flat conf: writable + scan_pick batch with strategy=1..N."""
+    """Build nfqws2 flat conf: writable + scan_pick batch with strategy=1..N.
+
+    Mode A (``BRIDGE_MODE == "A"``, AUDIT §20): the conf carries ONLY the
+    orchestrators — the full strategy line is published per-probe via
+    strategy.cmd and parsed in Lua. Blob declarations cover the WHOLE catalog
+    (a Mode A cmd may reference any blob, not just this batch's).
+    """
+    mode_a = bool(getattr(_cfg_mod, "BRIDGE_MODE", "B") == "A")
     lines: list[str] = [
         f"--writable={ipc_dir}",
     ]
@@ -86,10 +95,30 @@ def build_bridge_conf(
     lines.append("--lua-desync=smart_fallback")
     lines.append("--lua-desync=scan_pick")
 
-    all_blob_names: list[str] = []
-    for strat in strategies:
-        all_blob_names.extend(extract_blob_names(strat))
-    renames = append_blob_cli_lines(lines, all_blob_names, BLOB_DIR)
+    if mode_a:
+        # Full catalog: every file blob + every alias name (google/max_ru/4pda
+        # resolve through BLOB_ALIAS_MAP, not the dir listing — a Mode A cmd
+        # may reference ANY blob) + built-ins (always resolvable by nfqws2).
+        from blockchecks.engine.blob_aliases import BLOB_ALIAS_MAP
+
+        all_blob_names = sorted(
+            p.stem for p in Path(BLOB_DIR).glob("*.bin")
+        ) if Path(BLOB_DIR).is_dir() else []
+        all_blob_names += list(BLOB_ALIAS_MAP.keys())
+        all_blob_names += ["fake_default_tls", "fake_default_http", "fake_default_quic"]
+        renames = append_blob_cli_lines(lines, sorted(set(all_blob_names)), BLOB_DIR)
+        unresolvable = sorted(n for n, safe in renames.items() if not safe)
+        if unresolvable:
+            log.warning(
+                "%s",
+                f"  WARNING: bridge conf (mode A) has unresolvable blobs {unresolvable} "
+                "— strategies referencing them fail per-packet",
+            )
+    else:
+        all_blob_names = []
+        for strat in strategies:
+            all_blob_names.extend(extract_blob_names(strat))
+        renames = append_blob_cli_lines(lines, all_blob_names, BLOB_DIR)
     unresolvable = sorted(n for n, safe in renames.items() if not safe)
     if unresolvable:
         log.warning(
@@ -104,8 +133,9 @@ def build_bridge_conf(
             f"{ {k: v for k, v in renames.items() if k != v and v} }",
         )
 
-    for i, strat in enumerate(strategies, start=1):
-        _append_strategy_desyncs(lines, apply_blob_renames(strat, renames), i)
+    if not mode_a:
+        for i, strat in enumerate(strategies, start=1):
+            _append_strategy_desyncs(lines, apply_blob_renames(strat, renames), i)
 
     return "\n".join(lines) + "\n"
 
