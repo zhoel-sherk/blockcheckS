@@ -18,7 +18,7 @@
 
 - **Passwordless sudo (`sudo -n`)** — почти все смоки вызывают его без пароля.
 - nfqws2 на хосте (`/opt/zapret2/nfq2/nfqws2`) + сеть.
-- ⚠️ `smoke_full_quick.sh`, `smoke_20min.sh`, `functional_smoke.sh`,
+- ⚠️ `smoke_full_quick.sh`, `smoke_long.sh`, `functional_smoke.sh`,
   `smoke_all.sh` стартуют с **host-wide reset** (`cleanup_env.sh` /
   `bs stop --force`) — **не** запускать при живом `run.lock` (week_cov).
   Скрипты сами выходят с кодом 2, если lock есть.
@@ -48,7 +48,7 @@ bash dev/mutmut_gate.sh
 | `smoke_flags.sh` | CLI `-h` + reject + live флаги + gc/harvest-batch + serve HTTP | 15–30 мин | `bs stop --force` между шагами |
 | `smoke_all.sh` | gate_all → flags pytest → smoke_full_quick → functional_smoke → smoke_flags → backend_matrix → … | до 90 мин | отказ при `run.lock` |
 | `functional_smoke.sh` | Все подкоманды + `tcp --ns` + harvest APPLIED + gc/harvest/карантин | 6–15 мин | отказ при `run.lock` |
-| `smoke_20min.sh` | 9 шагов: backend-matrix, TLS 4xx, прогресс, export, `--resume`, GV1, UDP, HTTP, serve | 20–35 мин | `stop --force` на старте |
+| `smoke_long.sh` (ex-`smoke_long.sh`) | 10 шагов: backend-matrix, TLS 4xx, прогресс, export, `--resume`, GV1, UDP, HTTP, serve, **host-mode** (oneshot+scan+teardown) | бюджет `SMOKE_LONG_BUDGET_SEC` (2700s, шаги после дедлайна SKIP) | `stop --force` на старте |
 | `release_smoke.sh` | Релизный `bs full --fan-out` → shortlist round-trip | ~20 мин | fan-out жёстче к хосту |
 | `voice_smoke.sh` | UDP голос `--discover-dns` + `discord_udp` | 1–2 мин | от юзера (sudo внутри) |
 | `gv1_smoke.sh` | googlevideo через `bs full` | 2–4 мин | `logs/gv1_smoke.db` |
@@ -70,9 +70,9 @@ SMOKE_ALL_BUDGET_SEC=7200 bash dev/smoke_all.sh
 | Переменная | Где используется | По умолчанию |
 |---|---|---|
 | `SMOKE_ALL_BUDGET_SEC` | smoke_all.sh — общий бюджет оркестратора | `5400` |
-| `BS`, `PY`, `NF` | переопределение путей к `.venv/bin/bs`, python, nfqws2 в release_smoke/smoke_20min | из репо/PATH |
+| `BS`, `PY`, `NF` | переопределение путей к `.venv/bin/bs`, python, nfqws2 в release_smoke/smoke_long | из репо/PATH |
 | `UDP_CONF`, `DISCOVER_N` | voice_smoke.sh — конфиг UDP-пробы и число DNS-discover | `configs/udp_voice__fake_r6.conf`, `2` |
-| `BLOCKCHECKS_GV_GGC=0` | gv1/smoke_20min — откат GGC-детектора на yt-dlp | `1` (GGC) |
+| `BLOCKCHECKS_GV_GGC=0` | gv1/smoke_long — откат GGC-детектора на yt-dlp | `1` (GGC) |
 | `DPI_TESTER_SETTINGS` | voice_smoke.sh — где искать Discord-токен для опционального `--full-voice` | env или `settings.ini` рядом |
 
 ### Не покрыто смоками
