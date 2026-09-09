@@ -1,3 +1,22 @@
+## 1.4.2 — D-волна: early abort, smoke_long, BC2-coverage, Mode A (2026-09-09/10)
+
+- **D1 Early abort (lua_bridge):** poll events.ndjson между stdout-select шагами;
+  свежий `STRATEGY_FAIL (rst_in/retrans)` -> SIGKILL воркера + release + epoch bump,
+  `fail_phase=strategy_fail`, без retry. Батчи 48.4s->12.6s при тех же вердиктах; env
+  `BLOCKCHECKS_BRIDGE_EARLY_ABORT=0` выключает.
+- **smoke_20min -> smoke_long:** честный бюджет `SMOKE_LONG_BUDGET_SEC` (2700s),
+  per-step elapsed, SKIP после дедлайна, компрессия шагов, НОВЫЙ шаг 10 — host-mode
+  (чемпион oneshot + adaptive-slot scan + teardown-инварианты). Реальный wall ~20 мин.
+- **D2 BC2-coverage:** multisplit carrier-блобы, новая семья `multidisorder_legacy`
+  (маркерный seqovl — manual.md), tcpseg `pos=0,-1`+seqovl и `pos=0,method+2` (http),
+  multisplit `method+2(,midsld)` (http), syndata http-блоб + syn+mdis, hostfake
+  `nofake1:midhost`. Пул 36525->36798. WONTFIX: маркерный seqovl не-legacy семей.
+- **D3 гигиена:** `fingerprint_matched`->`content_confirmed` (+deprecated-алиас),
+  worker recycle по счётчику (`BLOCKCHECKS_WORKER_RECYCLE_EVERY`), checkers 3->7 тестов.
+- **D4 Mode A (`BLOCKCHECKS_BRIDGE_MODE=A`):** strategy.cmd + Lua-whitelist-парсер
+  (без load/eval), fence `PLAN_READY(gen)`, один демон на прогон. A/B паритет host
+  1/18==1/18 и 4/18==B-период. Дефолт остаётся B до Lua GC-замера на 20h.
+
 ## 1.4.1 — GP-contract: multi-domain scan, run-scoped summary, canonical args (2026-09-03)
 
 Отправная точка связки с GP-control-plane (`discovery_engine=blockchecks`).

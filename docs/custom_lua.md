@@ -821,7 +821,41 @@ CLI: `scan`/`pair`/`full` — `--bridge-batch`, `--lua-extra`. `--classic` depre
 
 `bs full`: sequential + adaptive AQ используют batch service; fan-out остаётся one-shot (WARN once).
 
-Default уже `lua_bridge`; открытый бэклог (early-abort, host-mode): [todo.md](todo.md). Канон host-mode (fwmark, не Mode A): [hostmode.md](hostmode.md).
+## 7. Mode A: динамический план из strategy.cmd (1.4.2, AUDIT §20)
+
+`BLOCKCHECKS_BRIDGE_MODE=A` (дефолт — `B`, legacy-путь нетронут):
+
+- Python публикует **полный** desync-текст стратегии в `strategy.cmd`
+  (`_lua_desync_bodies` нормализует CLI-префиксы и конфиг-пути: генераторы
+  пекут полные CLI-строки и пути .conf в `item.strategy`).
+- `lua/blockchecks/strategy_parser.lua` разбирает строку whitelist-ом:
+  семьи строго из zapret-antidpi (`fake/multisplit/multidisorder{,_legacy}/
+  hostfakesplit/fakedsplit/fakeddisorder/tcpseg/oob/wsize{,ss}/rst/synack*/
+  http_*/udplen/dht_dn/pktmod`); ключи аргументов проверяются только по
+  форме (`[a-z0-9_]+`), значения — инертные строки; неизвестные ключи
+  игнорируются, как в C-парсере (conf операторов несёт ключи вне любого
+  фиксированного списка). Никаких `load()`/`eval`.
+- План — инстансы `{func, arg, payload_filter, range}`; потребляется
+  `plan_instance_execute` без изменений. Rebuild — по смене cmd в 50ms
+  таймере (единственный io на кадр); свежая копия на каждый пакет
+  (`plan_instance_pop` мутирует план).
+- Fence: парсер пишет `PLAN_READY(gen)` после rebuild; Python ждёт его
+  перед пробой (иначе таймер опаздывает против curl-старта → старый план
+  на свежей пробе → ложный FAIL; воспроизведено живо).
+- Conf Mode A несёт только оркестраторы + ПОЛНЫЙ blob-каталог (файлы +
+  имена `BLOB_ALIAS_MAP` + built-ins): cmd может ссылаться на любой блоб
+  (`blob 'google' unavailable` — воспроизведено, закрыто).
+- **Один демон на прогон:** `shutdown` оставляет живого демона Mode A
+  (правило остаётся с живым слушателем — дыра мёртвого слушателя §17.3
+  не образуется); boot skip по `_daemon_alive` (host: Popen + /proc
+  portid; netns: pids + свежий heartbeat ≤2s); финальный kill —
+  `HostSlotPool.destroy_all` / `bs stop`.
+- Приёмка: single 1/1; 3-матрица со сменой планов 2/3; A/B back-to-back
+  host **1/18 == 1/18**, позже A 4/18 EXIT=0, teardown чист. Дефолт на
+  Mode A переключится после Lua GC-замера на 20h-профиле (todo).
+
+Default уже `lua_bridge`; открытый бэклог: [todo.md](todo.md). Канон
+host-mode (fwmark): [hostmode.md](hostmode.md).
 
 ### 9.2 nfqws2.conf generation (lua_bridge) — ✅ done
 

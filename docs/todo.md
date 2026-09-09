@@ -43,9 +43,22 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
 1. **Mode A** — тот же netns, но демон живёт весь прогон, а не батч. Сейчас Mode B: в conf заранее `strategy=1..N`, в файл пишется только id. Mode A: в файл пишется полная строка `fake:blob=stun:…`, Lua разбирает её на лету. См. [custom_lua.md](custom_lua.md) §7.
 2. **Host-mode** — вообще без netns: nft ловит только пробу (`skuid` / cgroup), в NFQUEUE не чужой браузер. Канон: [hostmode.md](hostmode.md) (схема B, не dst-IP как blockcheck2). `--filter-mark` — опциональный второй замок, не блокер v1.0.5. Референсы: `blockcheck2.sh` (mangle + fwmark) и [blockcheckw](https://github.com/rcd27/blockcheckw) (nftables vmap).
 
-- [ ] **Разбор** `strategy.cmd` **в Lua.** Whitelist параметров, без `load()`/`eval`. Результат — таблица для `plan_instance_execute`. Python уже пишет строку при `extra_lua_desync` (`lua_bridge_ipc.py`). Нужен забор поколений (gen), чтобы старая строка не применялась к новому пакету.
+- [x] **Разбор** `strategy.cmd` **в Lua** (2026-09-09, AUDIT §20): whitelist
+  семей zapret-antidpi (аргументы — shape-only `[a-z0-9_]+`, значения
+  инертные строки; неизвестные ключи игнорируются как в C-парсере), без
+  `load()`/`eval`; план — инстансы `{func,arg,payload_filter,range}`,
+  rebuild по смене cmd (50ms-таймер), fence `PLAN_READY(gen)` перед пробой
+  (гонка «таймер vs curl-старт» → ложный FAIL старым планом — воспроизведена
+  и закрыта). Gen-забор — через PLAN_READY, не старую строку.
 
-- [ ] **Один nfqws2 на весь прогон.** Правила iptables/nft ставятся один раз. Замерить очередь NFQUEUE на сотнях стратегий (`--queue-bypass` должен спасать). Не держать демон, если растёт RSS Lua (см. следующий пункт).
+- [x] **Один nfqws2 на весь прогон** (2026-09-09, Mode A): daemon-alive skip
+  между батчами (host: Popen+/proc portid; netns: pids+heartbeat); shutdown
+  оставляет живого демона Mode A, финальный kill — `HostSlotPool.destroy_all`
+  / `bs stop`; recycle-бэктопы: §7.3 счётчик + mem-pressure reboot.
+- [ ] **Lua GC-замер на длинном прогоне.** Инструмент: RSS-сэмплер с фильтром
+  краткоживущих PID (pgrep -x гонит обёртки sudo/env — первый замер дал мусор
+  3KiB). Бэктоп уже есть: §7.3 recycle + MemoryMonitor reboot. Замерить RSS
+  nfqws2 на 20h-профиле Mode A перед тем, как объявлять Mode A дефолтом.
 
 - [ ] **Lua GC.** На одном daemon тысячи plan-instance не должны течь. Иначе Mode A на 20-часовом прогоне упрётся в память раньше, чем в DPI.
 

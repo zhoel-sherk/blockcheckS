@@ -79,7 +79,7 @@
 |---|---|
 | Обязательный дефолт вместо netns | На смешанном хосте netns безопаснее; isol=host — явный флаг / env |
 | Паритет с `blockcheck2.sh` | У BC2 очередь по **dst IP**; у нас — только сокет пробы |
-| Lua Mode A | Разбор `strategy.cmd` в Lua — отдельный эпик в [todo.md](todo.md) / [custom_lua.md](custom_lua.md) |
+| Lua Mode A | Реализован (1.4.2, `BLOCKCHECKS_BRIDGE_MODE=A`): план в Lua, один демон на прогон — [custom_lua.md](custom_lua.md) §7 |
 | Экспорт `--filter-mark` на Keenetic | Другой hop, другой смысл fwmark (PBR роутера) |
 | Второй HTTP-клиент | Проба остаётся curl_cffi + JA4 + DoH pin |
 
@@ -765,7 +765,7 @@ APPLIED» или «порезали Wi‑Fi».
 | **HostFirewall (код сейчас)** | OUTPUT NFQUEUE на хосте **без** mark; подлежит сужению |
 | **HostFirewall (architecture.md §пул)** | путаница: FORWARD/MASQUERADE для veth делает `NetNsPool` |
 | **слот host-qN** | Синтетическое имя вместо netns: shm + qnum + PID демона |
-| **Mode A** | Lua парсит полную строку стратегии из `strategy.cmd` — не host-mode |
+| **Mode A** | Lua парсит полную строку стратегии из `strategy.cmd` (`BLOCKCHECKS_BRIDGE_MODE=A`), демон живёт весь прогон — реализован 1.4.2 (AUDIT §20) |
 | **Mode B (lua)** | В conf заранее `strategy=1..N`, в файл пишется id — текущий bridge |
 | **v1 / v2** | Один демон vs K демонов на хосте |
 
