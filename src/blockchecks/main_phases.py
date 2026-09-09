@@ -523,9 +523,19 @@ def build_matrix_fingerprint(ctx: FullRunContext) -> str:
 
 def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
     args = ctx.args
+    # Literal args.probe_isol read: dead-flag gate + netns fast path (canon §12).
+    from blockchecks.engine.config import resolve_probe_isol
+
+    probe_isol = (
+        resolve_probe_isol(args)
+        if (args.probe_isol or os.environ.get("BLOCKCHECKS_PROBE_ISOL"))
+        else "netns"
+    )
     return AsyncTestRunner(
         pool_size=ctx.parallel,
         db=ctx.db,
+        probe_isol=probe_isol,
+        host_qnum=args.host_qnum,
         secure_dns=ctx.secure_dns,
         dns_cache=ctx.dns_cache,
         dns_audit={r.domain: r for r in ctx.dns_audits},

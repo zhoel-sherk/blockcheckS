@@ -328,13 +328,15 @@ pair = [
     "src/blockchecks/cli/commands/pair_phases.py",
     "src/blockchecks/cli/parser.py",
 ]
+# probe-isol readers are inside build_pair_runner / build_async_runner (args.probe_isol
+# resolved via resolve_probe_isol); command entry files stay listed for the gate.
 composite = [
     "src/blockchecks/checkers/composite_runner.py",
     "src/blockchecks/cli/cliapp.py",
     "src/blockchecks/cli/parser.py",
 ]
 bench-settle = ["src/blockchecks/cli/commands/bench_settle.py"]
-full = ["src/blockchecks/main.py", "src/blockchecks/main_phases.py"]
+full = ["src/blockchecks/main.py", "src/blockchecks/main_phases.py"]  # probe_isol read in build_async_runner
 stop = ["src/blockchecks/cli/commands/stop.py"]
 serve = ["src/blockchecks/cli/commands/serve.py", "src/blockchecks/service/server.py", "src/blockchecks/service/probe_service.py"]
 preflight = [

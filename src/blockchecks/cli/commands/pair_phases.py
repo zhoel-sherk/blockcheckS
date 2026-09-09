@@ -303,9 +303,20 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         )
     except Exception as exc:
         log.warning("%s", f"  WARNING: triage lua extra skipped ({exc})")
+    # Literal read keeps the dead-flag gate honest: host-mode only when the
+    # operator asked for it (flag or env), guards run only on that path.
+    from blockchecks.engine.config import resolve_probe_isol
+
+    probe_isol = (
+        resolve_probe_isol(args)
+        if (args.probe_isol or os.environ.get("BLOCKCHECKS_PROBE_ISOL"))
+        else "netns"
+    )
     return AsyncTestRunner(
         pool_size=pool_size,
         db=db,
+        probe_isol=probe_isol,
+        host_qnum=args.host_qnum,
         disable_ech=disable_ech_from(args, getattr(args, "triage", None)),
         secure_dns=secure_dns,
         dns_cache=dns_cache,

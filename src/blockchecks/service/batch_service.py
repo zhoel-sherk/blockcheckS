@@ -25,7 +25,10 @@ from blockchecks.service.lua_bridge_ipc import (
     LuaBridge,
     wait_heartbeat_fresh,
 )
-from blockchecks.service.lua_session import BridgeSession, strategy_text_from_item
+from blockchecks.service.lua_session import (
+    BridgeSession,
+    strategy_text_from_item,
+)
 from blockchecks.terminal import CYAN, RESET, YELLOW
 
 log = logging.getLogger(__name__)
@@ -312,12 +315,20 @@ class ProbeBatchService:
         if ctx.items:
             protocol = getattr(ctx.items[0], "protocol", ctx.protocol) or ctx.protocol
         strat_lines = [strategy_text_from_item(item) for item in ctx.items]
+        # Direct construction (not the bridge_session_for factory) so tests
+        # can keep monkeypatching bp.BridgeSession. Host slot detection is the
+        # same canon prefix contract; malformed names are impossible from the
+        # HostSlotPool but cheap to guard here too.
+        host_qnum = 0
+        if ns_name.startswith("host-q"):
+            host_qnum = int(ns_name.split("-")[1][1:])
         session = BridgeSession(
             ns_name=ns_name,
             strategies=strat_lines,
             bridge=LuaBridge(ns_name),
             protocol=protocol,
             extra_lua_init=self.deps.lua_extra or None,
+            host_qnum=host_qnum,
         )
         results: list = []
         settle_ms = 0.0
@@ -326,7 +337,7 @@ class ProbeBatchService:
             settle_ms = session.boot() * 1000
             self._bridge_ready_fence(session, ctx, timeout, resolved_by_domain)
             boot_debug = _debug_env()
-            self._record_daemon_mem(ns_name)
+            self._record_daemon_mem(ns_name, session)
             for idx, (item, dom) in enumerate(
                 zip(ctx.items, ctx.item_domains(), strict=True), start=1
             ):
@@ -524,10 +535,20 @@ class ProbeBatchService:
         self._wait_heartbeat(session)
         return settle
 
-    def _record_daemon_mem(self, ns_name: str) -> None:
+    def _record_daemon_mem(self, ns_name: str, session=None) -> None:
+        """Sample daemon RSS. Host slots (host-q<N>-…) have no /var/run/netns
+        entry — pass the live daemon PID from the session instead, otherwise
+        every sample logs a misleading 'netns missing' warning."""
         if self.memory_monitor is None or self.config.backend != "lua_bridge":
             return
         if not self.memory_monitor.should_sample():
+            return
+        if ns_name.startswith("host-q") and session is not None:
+            proc = getattr(session, "daemon_proc", None)
+            if proc is not None and proc.poll() is None:
+                self.memory_monitor.record_ns(ns_name, pids=[proc.pid])
+                return
+            self.memory_monitor.record_ns(ns_name, pids=[])
             return
         self.memory_monitor.record_ns(ns_name)
         if self.memory_monitor.worker_over_limit():
@@ -541,7 +562,7 @@ class ProbeBatchService:
         """Recycle the nfqws2 daemon when the memory monitor flags a leak."""
         if self.memory_monitor is None or self.config.backend != "lua_bridge":
             return False
-        self._record_daemon_mem(ns_name)
+        self._record_daemon_mem(ns_name, session)
         candidates = self.memory_monitor.recycle_candidates()
         if not candidates:
             return False
@@ -551,7 +572,7 @@ class ProbeBatchService:
                 "%s", f"  {YELLOW}[mem] recycle nfqws2 pid={pid} ({reason}) in {ns_name}{RESET}"
             )
         self._reboot_daemon(session)
-        self._record_daemon_mem(ns_name)
+        self._record_daemon_mem(ns_name, session)
         return True
 
     def _log_batch(self, ctx: BatchContext, ns_name: str, result: BatchProbeResult) -> None:

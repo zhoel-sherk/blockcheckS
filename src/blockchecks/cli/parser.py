@@ -432,7 +432,9 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     """Unified argument builder for scan, pair, and full matrix campaigns.
 
     Synchronizes flag names and default values across all campaign commands.
+    Includes ``--probe-isol/--host-qnum`` (host-mode v2 slots, docs/hostmode.md).
     """
+    add_host_isol_args(parser)
     if mode in ("scan", "pair"):
         parser.add_argument(
             "-d",

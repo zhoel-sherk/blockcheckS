@@ -25,7 +25,12 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class BridgeSession:
-    """Per-netns bridge state: one daemon + iptables for a strategy batch."""
+    """Per-slot bridge state: one daemon + firewall for a strategy batch.
+
+    ``ns_name`` is either a netns (``bs-p-…``, default isolation) or a
+    host-mode slot (``host-q<N>-<pid>``, docs/hostmode.md §9) — detected by
+    the canon ``host-q`` prefix, the same convention as ``_worker_cmd``.
+    """
 
     ns_name: str
     strategies: list[str]
@@ -34,10 +39,49 @@ class BridgeSession:
     iptables_ready: bool = False
     protocol: str = "tls12"
     extra_lua_init: list[str] | None = None
+    host_qnum: int = 0
+    daemon_proc: object | None = None
+
+    @property
+    def is_host(self) -> bool:
+        return bool(self.host_qnum)
+
+    def _boot_host(self) -> float:
+        """Host slot boot (docs/hostmode.md §18.6): bind proof FIRST, then
+        the nft queue attach — with --queue-bypass a dead daemon would else
+        pass clean traffic straight through."""
+        from blockchecks.service.nfqws2_launcher import daemon_host
+
+        self.bridge.setup()
+        if self.conf_path:
+            try:
+                os.unlink(self.conf_path)
+            except OSError:
+                pass
+        self.conf_path = write_bridge_conf(
+            self.strategies,
+            self.bridge.paths.base,
+            protocol=self.protocol,
+            extra_lua_init=self.extra_lua_init,
+            tag=self.ns_name,
+            host_qnum=self.host_qnum,
+        )
+        settle, self.daemon_proc = daemon_host(self.conf_path, qnum=self.host_qnum)
+        if not self.iptables_ready:
+            from blockchecks.service.host_isol import DEFAULT_DPORT, attach_host_queue
+
+            attach_host_queue(
+                qnum=self.host_qnum,
+                dport=80 if self.protocol == "http" else DEFAULT_DPORT,
+            )
+            self.iptables_ready = True
+        return settle
 
     def boot(self) -> float:
         from blockchecks.service.nfqws2 import start_daemon
 
+        if self.host_qnum:
+            return self._boot_host()
         _check_netns_exists(self.ns_name)
         self.bridge.setup()
         if self.conf_path:
@@ -60,10 +104,16 @@ class BridgeSession:
         return settle
 
     def shutdown(self) -> None:
-        from blockchecks.service.metrics import pkill_nfqws2_in_ns
+        if self.host_qnum:
+            from blockchecks.service.nfqws2_launcher import kill_host_daemon
 
-        pkill_nfqws2_in_ns(self.ns_name)
-        # NFQUEUE rules persist in the pool namespace (NsFirewall attach-once).
+            kill_host_daemon(self.host_qnum)
+            self.daemon_proc = None
+        else:
+            from blockchecks.service.metrics import pkill_nfqws2_in_ns
+
+            pkill_nfqws2_in_ns(self.ns_name)
+        # Firewall persists per slot (nft table attach-once) / ns (NsFirewall).
         self.iptables_ready = False
         if self.conf_path:
             try:

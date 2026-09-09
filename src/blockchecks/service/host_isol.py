@@ -29,6 +29,7 @@ import logging
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 from blockchecks.engine.config import (
@@ -150,6 +151,32 @@ def attach_host_queue(
             f"probe-isol=host requires probe uid {skuid!r} for the nft skuid match; "
             "refusing to queue the whole :443 (scheme A rejected)"
         ) from None
+    with _ATTACH_LOCK:
+        _attach_host_queue_locked(
+            skuid=skuid,
+            qnum=qnum,
+            desync_mark=desync_mark,
+            probe_mark=probe_mark,
+            dport=dport,
+            max_pkt_out=max_pkt_out,
+        )
+
+
+#: Serializes table create/recreate inside one process. Concurrent slot boots
+#: (live scan: batch on q224 while q226 boots) used to delete the table under
+#: the OTHER slot mid-batch — the recreated rules stopped its queue flow.
+_ATTACH_LOCK = threading.Lock()
+
+
+def _attach_host_queue_locked(
+    *,
+    skuid: str,
+    qnum: int,
+    desync_mark: int,
+    probe_mark: int,
+    dport: int,
+    max_pkt_out: int,
+) -> None:
     owner = qnum_busy(qnum)
     if owner:
         raise RuntimeError(
@@ -158,8 +185,34 @@ def attach_host_queue(
         )
 
     if table_exists():
-        log.warning("host nft table %s left from a previous session — recreating", NFT_TABLE)
-        _nft("delete", "table", "inet", NFT_TABLE)
+        if _table_has_slot_rule(qnum):
+            # AUDIT §16 v2 lesson: another slot booted a moment ago — our rule
+            # (same table) is already in place. Recreating would briefly drop
+            # the other slot's queue mid-batch. Idempotent no-op instead.
+            log.info("host nft table %s already has qnum %d rule — reuse", NFT_TABLE, qnum)
+            return
+        # Table is OURS (per-slot boot) but this qnum's rule is missing: ADD
+        # it — a recreate here would silently drop the OTHER slots' rules
+        # (each attach writes only its own queue rule). Additive is the v2
+        # contract: one table, one rule per slot, teardown deletes it all.
+        notrack = build_notrack_rule(desync_mark)
+        if not _table_has_notrack():
+            _nft("add", "rule", "inet", NFT_TABLE, "predefrag", notrack, check=True)
+        for rule in build_queue_rules(
+            skuid=skuid,
+            qnum=qnum,
+            desync_mark=desync_mark,
+            probe_mark=probe_mark,
+            dport=dport,
+            max_pkt_out=max_pkt_out,
+        ):
+            _nft("add", "rule", "inet", NFT_TABLE, "output", rule, check=True)
+        log.info(
+            "host queue rule added to existing %s table: qnum=%d (additive, other slots untouched)",
+            NFT_TABLE,
+            qnum,
+        )
+        return
 
     _nft("create", "table", "inet", NFT_TABLE, check=True)
     _nft(
@@ -257,6 +310,40 @@ def queue_bound(qnum: int) -> bool:
                 return True
     except OSError:
         return False
+    return False
+
+
+def _table_has_notrack() -> bool:
+    """True when OUR table already carries the predefrag notrack rule."""
+    in_table = False
+    for line in _list_ruleset().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("table "):
+            tokens = stripped.split()
+            current = tokens[2] if len(tokens) > 2 else (tokens[1] if len(tokens) > 1 else "")
+            in_table = current == NFT_TABLE
+            continue
+        if in_table and "notrack" in line:
+            return True
+    return False
+
+
+def _table_has_slot_rule(qnum: int) -> bool:
+    """True when OUR table already queues this qnum (any slot boot before us).
+
+    ``nft list ruleset`` puts the table header and rules on separate lines —
+    track the current table like qnum_busy does (live dump lesson, §16)."""
+    current_table = ""
+    for line in _list_ruleset().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("table "):
+            tokens = stripped.split()
+            current_table = tokens[2] if len(tokens) > 2 else (tokens[1] if len(tokens) > 1 else "")
+        if (
+            current_table == NFT_TABLE
+            and (f"queue num {qnum}" in line or re.search(rf"\bqueue\b[^;\n]*\bto\s+{qnum}\b", line))
+        ):
+            return True
     return False
 
 

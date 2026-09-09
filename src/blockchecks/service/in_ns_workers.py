@@ -301,6 +301,13 @@ def _run_tcp_check(
             disable_ech=disable_ech,
             protocol=protocol,
         )
+    # Host-mode slot (docs/hostmode.md §8, oneshot path — same contract the
+    # campaign BridgeSession follows): qnum from the slot name, conf gets
+    # --fwmark/--filter-mark, daemon is a foreground Popen killed at the end.
+    host_qnum = 0
+    if ns_name.startswith("host-q"):
+        host_qnum = int(ns_name.split("-")[1][1:])
+
     if is_config:
         src = os.path.abspath(strategy) if not os.path.isabs(strategy) else strategy
         # Copy user conf — inject daemon/debug without mutating the original
@@ -313,9 +320,6 @@ def _run_tcp_check(
         if extra_lua_desync:
             with open(tmp_conf, "a", encoding="utf-8") as f:
                 f.write(f"\n--lua-desync={extra_lua_desync}\n")
-        settle_elapsed = _nfqws2_daemon(
-            ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
-        )
     else:
         config_lines = _build_inline_nfqws_lines(strategy, protocol, extra_lua_desync)
         import tempfile as _tf
@@ -324,12 +328,35 @@ def _run_tcp_check(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
+
+    if host_qnum:
+        from pathlib import Path as _Path
+
+        from blockchecks.engine.config import DESYNC_MARK, PROBE_MARK
+        from blockchecks.service.host_isol import hostify_conf_text
+
+        _conf_text = _Path(tmp_conf).read_text(encoding="utf-8")
+        _Path(tmp_conf).write_text(
+            hostify_conf_text(
+                _conf_text,
+                qnum=host_qnum,
+                desync_mark=DESYNC_MARK,
+                probe_mark=PROBE_MARK,
+            ),
+            encoding="utf-8",
+        )
+        from blockchecks.service.nfqws2_launcher import daemon_host
+
+        settle_elapsed, _host_proc = daemon_host(tmp_conf, qnum=host_qnum)
+        from blockchecks.service.host_isol import attach_host_queue
+
+        attach_host_queue(qnum=host_qnum, dport=int(dport))
+    else:
         settle_elapsed = _nfqws2_daemon(
             ns_name, tmp_conf, settle_max=settle_max, settle_poll=settle_poll
         )
-
-    fw = get_ns_firewall(ns_name)
-    fw.attach(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
+        fw = get_ns_firewall(ns_name)
+        fw.attach(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
 
     probe_req.timeout = timeout
     # Retry-on-next-IP: when the resolved IP fails but nfqws2 is already
@@ -378,8 +405,13 @@ def _run_tcp_check(
             data["used_ip"] = used_ip
         return data
     finally:
-        fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
-        _pkill_nfqws2(ns_name)
+        if host_qnum:
+            from blockchecks.service.nfqws2_launcher import kill_host_daemon
+
+            kill_host_daemon(host_qnum)
+        else:
+            fw.detach_one(proto="tcp", port=dport, queue=NFQUEUE_TCP, bypass=True)
+            _pkill_nfqws2(ns_name)
         if tmp_conf:
             try:
                 os.unlink(tmp_conf)

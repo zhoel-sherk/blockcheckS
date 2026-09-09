@@ -387,3 +387,104 @@ def start_daemon(
         settle_poll=settle_poll,
         min_procs=min_procs,
     )
+
+
+# --------------------------------------------------------------------------
+# Host-mode daemon (docs/hostmode.md §9/§18.14): foreground Popen, no
+# --daemon double-fork — kill by PID, never pkill by host inode. One live
+# process per qnum; BridgeSession boots/kills per batch exactly like the
+# netns lifecycle (pkill in shutdown there, kill_host_daemon here).
+_HOST_PROCS: dict[int, subprocess.Popen] = {}
+
+HOST_BIND_MAX_WAIT = 15.0
+
+
+def kill_host_daemon(qnum: int) -> None:
+    """Kill the foreground host nfqws2 for this qnum (TERM → 3s → KILL)."""
+    proc = _HOST_PROCS.pop(int(qnum), None)
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+    except OSError as exc:
+        log.warning("kill_host_daemon(qnum=%s): %s", qnum, exc)
+
+
+def daemon_host(
+    config_path: str,
+    *,
+    qnum: int,
+    kill_existing: bool = True,
+    bind_max_wait: float = HOST_BIND_MAX_WAIT,
+) -> tuple[float, subprocess.Popen]:
+    """Launch nfqws2 on the host as a foreground root process.
+
+    Canon §18.14: NO ``--daemon`` (double-fork breaks PID tracking); the
+    returned Popen is the kill handle. Bind proof is the LIVE /proc portid
+    (host_isol.queue_bound) — the stdout marker flushes only on daemon exit
+    (full stdio buffering, AUDIT §16). Retry on bind failure (EPERM race on
+    nfq_create_queue, upstream #300) with the netns launcher's attempt cap.
+    Returns ``(settle_seconds, proc)``.
+    """
+    from blockchecks.engine.config import get_nfqws2_bin
+    from blockchecks.service.host_isol import queue_bound
+
+    if kill_existing:
+        kill_host_daemon(qnum)
+
+    fd, tmp_conf = tempfile.mkstemp(prefix="bs_hostnfq_", suffix=".conf")
+    os.close(fd)
+    dbg, dbg_path = nfqws2_debug_conf_line(tag=f"host-q{qnum}")
+    try:
+        lines = Path(config_path).read_text(encoding="utf-8").splitlines()
+        if dbg and not any(ln.startswith("--debug=") for ln in lines):
+            lines.insert(0, dbg)
+            if dbg_path:
+                log.info("%s", f"  [nfqws2 debug] {dbg_path}")
+        Path(tmp_conf).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        cmd = [get_nfqws2_bin(), f"@{tmp_conf}"]
+        out_fh, out_path = open_out_capture(f"host-q{qnum}")
+        t0 = time.monotonic()
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=out_fh if out_fh is not None else subprocess.DEVNULL,
+                stderr=subprocess.STDOUT if out_fh is not None else subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        finally:
+            if out_fh is not None:
+                out_fh.close()
+        _HOST_PROCS[int(qnum)] = proc
+
+        deadline = time.monotonic() + bind_max_wait
+        while time.monotonic() < deadline:
+            if queue_bound(qnum):
+                settle = time.monotonic() - t0
+                try:
+                    os.unlink(tmp_conf)
+                except OSError:
+                    pass
+                return settle, proc
+            if proc.poll() is not None:
+                break
+            time.sleep(0.2)
+        # Bind failed — read the capture tail for the reason (EPERM etc.).
+        tail = _read_out_tail(out_path)
+        kill_host_daemon(qnum)
+        raise RuntimeError(
+            f"host nfqws2 did not bind queue {qnum} within {bind_max_wait:.0f}s "
+            f"(out: {out_path}); tail: {tail[-400:]}"
+        )
+    finally:
+        try:
+            os.unlink(tmp_conf)
+        except OSError:
+            pass

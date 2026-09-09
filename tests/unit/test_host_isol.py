@@ -298,3 +298,65 @@ def test_qnum_busy_matches_both_nft_renderings(monkeypatch):
     assert host_isol.qnum_busy(220) and "foreign_host" in host_isol.qnum_busy(220)
     # absent queue → None
     assert host_isol.qnum_busy(221) is None
+
+
+@pytest.mark.unit
+def test_attach_host_queue_reuses_existing_slot_rule(monkeypatch):
+    """Concurrent slot boots must not recreate the table (v2 lesson: the
+    recreate briefly dropped the OTHER slot's queue mid-batch)."""
+    calls = []
+
+    def fake_nft(*args, check=False):
+        calls.append(" ".join(str(a) for a in args))
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(host_isol, "nft_available", lambda: True)
+    monkeypatch.setattr(host_isol, "_nft", fake_nft)
+    monkeypatch.setattr(host_isol, "qnum_busy", lambda q: None)
+    monkeypatch.setattr(host_isol, "table_exists", lambda: True)
+    ruleset = (
+        "table inet blockchecks_host {\n"
+        "  meta skuid 996 tcp dport 443 meta mark set 0x20000000 queue flags bypass to 220\n"
+        "}\n"
+    )
+    monkeypatch.setattr(host_isol, "_list_ruleset", lambda: ruleset)
+
+    host_isol.attach_host_queue(qnum=220)
+    # only the busy-scan nft list ran; no create/delete issued
+    assert not any("delete table" in c or "create table" in c for c in calls)
+
+    # foreign table with same qnum still refused
+    ruleset_foreign = "table inet foreign { ... queue flags bypass to 220 }\n"
+    monkeypatch.setattr(host_isol, "_list_ruleset", lambda: ruleset_foreign)
+    monkeypatch.setattr(host_isol, "qnum_busy", lambda q: "inet foreign: queue to 220")
+    with pytest.raises(RuntimeError, match="already queued"):
+        host_isol.attach_host_queue(qnum=220)
+
+
+@pytest.mark.unit
+def test_attach_host_queue_additive_when_other_slot_present(monkeypatch):
+    """Table exists with another slot's rule → ADD ours, never recreate
+    (recreate dropped the other slot's queue rules — v2 live scan lesson)."""
+    calls = []
+
+    def fake_nft(*args, check=False):
+        calls.append(" ".join(str(a) for a in args))
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(host_isol, "nft_available", lambda: True)
+    monkeypatch.setattr(host_isol, "_nft", fake_nft)
+    monkeypatch.setattr(host_isol, "qnum_busy", lambda q: None)
+    monkeypatch.setattr(host_isol, "table_exists", lambda: True)
+    ruleset = (
+        "table inet blockchecks_host {\n"
+        "  meta skuid 996 tcp dport 443 queue flags bypass to 224\n"
+        "  meta mark & 0x40000000 != 0 notrack\n"
+        "}\n"
+    )
+    monkeypatch.setattr(host_isol, "_list_ruleset", lambda: ruleset)
+
+    host_isol.attach_host_queue(qnum=222)
+    adds = [c for c in calls if "add rule" in c]
+    assert any("queue num 222" in c for c in adds)
+    assert not any("delete table" in c for c in calls), calls
+    assert not any("notrack" in c for c in adds)  # already present

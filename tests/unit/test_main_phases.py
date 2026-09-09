@@ -111,6 +111,8 @@ def _args(**over):
         lua_extra=None,
     )
     base.update(over)
+    base.setdefault("probe_isol", "netns")
+    base.setdefault("host_qnum", 220)
     return SimpleNamespace(**base)
 
 

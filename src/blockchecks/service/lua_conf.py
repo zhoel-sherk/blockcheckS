@@ -117,9 +117,22 @@ def write_bridge_conf(
     protocol: str = "tls12",
     extra_lua_init: list[str] | None = None,
     tag: str = "bridge",
+    host_qnum: int = 0,
 ) -> str:
-    """Write bridge conf to a temp file; return path."""
+    """Write bridge conf to a temp file; return path.
+
+    ``host_qnum`` > 0 rewrites the conf for a host-mode slot (docs/hostmode.md
+    §6): ``--qnum`` override + mandatory ``--fwmark`` anti-loop +
+    ``--filter-mark`` second lock via the tested ``hostify_conf_text``.
+    """
     text = build_bridge_conf(strategies, ipc_dir, protocol=protocol, extra_lua_init=extra_lua_init)
+    if host_qnum:
+        from blockchecks.engine.config import DESYNC_MARK, PROBE_MARK
+        from blockchecks.service.host_isol import hostify_conf_text
+
+        text = hostify_conf_text(
+            text, qnum=host_qnum, desync_mark=DESYNC_MARK, probe_mark=PROBE_MARK
+        )
     fd, path = tempfile.mkstemp(prefix=f"bs_{tag}_", suffix=".conf")
     os.close(fd)
     Path(path).write_text(text, encoding="utf-8")

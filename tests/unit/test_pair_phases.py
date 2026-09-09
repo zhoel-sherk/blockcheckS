@@ -50,6 +50,8 @@ def _args(**over):
         parallel=2,
         scan_level="fast",
         max=10,
+        probe_isol="netns",
+        host_qnum=220,
         generate=True,
         user_matrix="",
         strategy_preset=None,

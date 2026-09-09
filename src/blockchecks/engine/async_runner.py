@@ -241,13 +241,25 @@ class AsyncTestRunner:
         bridge_batch: int = 500,
         lua_extra: list[str] | None = None,
         netns_base: str | None = None,
+        probe_isol: str = "netns",
+        host_qnum: int | None = None,
     ):
-        from blockchecks.engine.config import NETNS_BASE
+        from blockchecks.engine.config import HOST_QNUM_TCP, NETNS_BASE
 
-        self.pool = NetNsPool(
-            size=pool_size,
-            base=netns_base or f"{NETNS_BASE}-{os.getpid() % 10000:04d}",
-        )
+        if probe_isol == "host":
+            # docs/hostmode.md §10 v2: K host slots, zero netns; same
+            # acquire/release contract so executors stay untouched.
+            from blockchecks.service.host_slots import HostSlotPool
+
+            self.pool = HostSlotPool(
+                size=pool_size,
+                base_qnum=host_qnum if host_qnum is not None else HOST_QNUM_TCP,
+            )
+        else:
+            self.pool = NetNsPool(
+                size=pool_size,
+                base=netns_base or f"{NETNS_BASE}-{os.getpid() % 10000:04d}",
+            )
         self.semaphore = asyncio.Semaphore(pool_size)
         self.db = db
         self.python = python_path or PYTHON_BIN

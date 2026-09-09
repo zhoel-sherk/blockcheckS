@@ -234,3 +234,10 @@ nfqws2_pid_in_ns
 RunnerProbeDeps.run_tcp_check
 
 compact  # unused method (src/blockchecks/engine/store/sqlite_store.py:229); exercised by unit tests after WAL-close no longer compacts
+
+# host-mode v2 (docs/hostmode.md §10): BridgeSession host slot state.
+BridgeSession.daemon_proc
+BridgeSession.is_host
+HostSlotPool.install_signal_hooks
+HostSlotPool.validate
+HostSlotPool.slot_name

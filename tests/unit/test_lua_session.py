@@ -160,3 +160,83 @@ def test_bridge_worker_session_context():
         with bridge_worker_session("bs-p0", ["fake:blob=stun:repeats=6"], protocol="tls12") as s:
             assert s is inst
         inst.shutdown.assert_called_once()
+
+
+@pytest.mark.unit
+def test_bridge_session_host_qnum_from_slot_name():
+    from blockchecks.service.lua_session import BridgeSession
+
+    s = BridgeSession(
+        ns_name=f"host-q222-{os.getpid()}",
+        strategies=["fake:blob=stun:repeats=6"],
+        bridge=MagicMock(),
+        host_qnum=222,
+    )
+    assert s.is_host and s.host_qnum == 222
+
+
+@pytest.mark.unit
+def test_bridge_session_netns_default():
+    from blockchecks.service.lua_session import BridgeSession
+
+    s = BridgeSession(
+        ns_name="bs-p-0001-0",
+        strategies=["fake:blob=stun:repeats=6"],
+        bridge=MagicMock(),
+    )
+    assert not s.is_host and s.host_qnum == 0
+
+
+@pytest.mark.unit
+def test_bridge_session_host_boot_conf_and_teardown(tmp_path):
+    """Host boot: conf carries qnum/fwmark/filter-mark; daemon killed by PID
+    on shutdown; nft attached once after bind (canon §18.6)."""
+    from blockchecks.service.lua_session import BridgeSession
+
+    s = BridgeSession(
+        ns_name=f"host-q220-{os.getpid()}",
+        strategies=["fake:blob=stun:repeats=6"],
+        bridge=MagicMock(),
+        protocol="tls12",
+        host_qnum=220,
+    )
+    captured = {}
+
+    def fake_daemon_host(conf_path, *, qnum, **kw):
+        captured["conf"] = Path(conf_path).read_text(encoding="utf-8")
+        captured["qnum"] = qnum
+        return 0.12, MagicMock(pid=777)
+
+    with (
+        patch(
+            "blockchecks.service.nfqws2_launcher.daemon_host",
+            side_effect=fake_daemon_host,
+        ),
+        patch(
+            "blockchecks.service.host_isol.attach_host_queue"
+        ) as attach,
+        patch("blockchecks.service.nfqws2_launcher.kill_host_daemon") as kill,
+        patch(
+            "blockchecks.service.lua_conf.stage_blockchecks_lua",
+            return_value=[],
+        ),
+        patch(
+            "blockchecks.service.lua_conf.get_lua_init_scripts",
+            return_value=[],
+        ),
+    ):
+        settle = s.boot()
+        assert settle == 0.12
+        assert captured["qnum"] == 220
+        conf = captured["conf"]
+        assert "--qnum=220" in conf
+        assert "--fwmark=0x40000000" in conf
+        assert "--filter-mark=0x20000000/0x20000000" in conf
+        assert "--writable=" in conf
+        attach.assert_called_once()
+        assert s.iptables_ready is True
+
+        s.shutdown()
+        kill.assert_called_once_with(220)
+        assert s.iptables_ready is False
+        assert s.conf_path == ""
