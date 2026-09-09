@@ -290,8 +290,11 @@ firewall там переживёт netns, а не Wi-Fi. Опасность ра
 Антипетля rawsend — отдельный `--fwmark=0x40000000`
 (`BLOCKCHECKS_DESYNC_MARK`), всегда обязателен в host-конфиге.
 
-**Не входит (v2):** кампании `scan`/`pair`/`full` и UDP/voice на host-слотах —
-`--probe-isol` на них ещё не действует. Отладка bind: живая привязка очереди
+Кампании тоже умеют host-слоты (v2): `bs scan/pair/full --probe-isol=host` —
+адаптивный пул слотов (BLOCKCHECKS_HOST_SLOTS=auto|int; auto = min(cpu−1,
+60% MemAvailable/220MiB), cap 16; `--parallel` — только для netns-пулов).
+UDP: voice-слоты идут БЕЗ `--queue-bypass` (§18.15), QUIC — с ним; oneshot
+UDP/QUIC снимает пустую таблицу. Отладка bind: живая привязка очереди
 проверяется по `/proc/net/netfilter/nfnetlink_queue` (stdout-маркер nfqws2
 флашится только при выходе демона).
 

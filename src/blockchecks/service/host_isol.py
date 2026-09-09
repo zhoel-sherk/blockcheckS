@@ -104,19 +104,30 @@ def build_queue_rules(
     probe_mark: int = PROBE_MARK,
     dport: int = DEFAULT_DPORT,
     max_pkt_out: int = DEFAULT_MAX_PKT_OUT,
+    proto: str = "tcp",
+    bypass: bool | None = None,
 ) -> list[str]:
     """OUTPUT queue rules (pure builder — unit-tested).
 
     ``probe_mark`` adds ``meta mark set`` on the matched skb — only useful
     together with nfqws2 ``--filter-mark`` (v1.0.5). On the current binary
     probe_mark stays 0 → mark is never set, pure skuid matching.
+
+    ``bypass``: None → tcp=True / udp=False (canon §15/§18.15: voice UDP
+    must NOT bypass — a dead listener would silently pass clean traffic and
+    fake PASS; TCP keeps bypass so a dead daemon degrades to raw pass-through
+    instead of a hang). QUIC on a host slot passes bypass=True explicitly
+    (parity with the netns NsFirewall attach).
     """
     mark_ok = f"meta mark and 0x{desync_mark:x} == 0"
     pkt_window = f"ct original packets 1-{max_pkt_out}"
     mark_set = f"meta mark set 0x{probe_mark:x} " if probe_mark else ""
+    if bypass is None:
+        bypass = proto == "tcp"
+    tail = "bypass" if bypass else ""
     return [
-        f"meta skuid {skuid} tcp dport {dport} {mark_ok} {pkt_window} "
-        f"{mark_set}queue num {qnum} bypass",
+        f"meta skuid {skuid} {proto} dport {dport} {mark_ok} {pkt_window} "
+        f"{mark_set}queue num {qnum} {tail}".rstrip(),
     ]
 
 
@@ -132,6 +143,8 @@ def attach_host_queue(
     probe_mark: int = PROBE_MARK,
     dport: int = DEFAULT_DPORT,
     max_pkt_out: int = DEFAULT_MAX_PKT_OUT,
+    proto: str = "tcp",
+    bypass: bool | None = None,
 ) -> None:
     """Create/recreate ``inet blockchecks_host`` with the scheme-B queue rule.
 
@@ -159,6 +172,8 @@ def attach_host_queue(
             probe_mark=probe_mark,
             dport=dport,
             max_pkt_out=max_pkt_out,
+            proto=proto,
+            bypass=bypass,
         )
 
 
@@ -176,6 +191,8 @@ def _attach_host_queue_locked(
     probe_mark: int,
     dport: int,
     max_pkt_out: int,
+    proto: str = "tcp",
+    bypass: bool | None = None,
 ) -> None:
     owner = qnum_busy(qnum)
     if owner:
@@ -205,6 +222,8 @@ def _attach_host_queue_locked(
             probe_mark=probe_mark,
             dport=dport,
             max_pkt_out=max_pkt_out,
+            proto=proto,
+            bypass=bypass,
         ):
             _nft("add", "rule", "inet", NFT_TABLE, "output", rule, check=True)
         log.info(
@@ -242,11 +261,13 @@ def _attach_host_queue_locked(
         probe_mark=probe_mark,
         dport=dport,
         max_pkt_out=max_pkt_out,
+        proto=proto,
+        bypass=bypass,
     ):
         _nft("add", "rule", "inet", NFT_TABLE, "output", rule, check=True)
     log.info(
         "%s",
-        f"host queue attached: table={NFT_TABLE} qnum={qnum} skuid={skuid} "
+        f"host queue attached: table={NFT_TABLE} qnum={qnum} proto={proto} skuid={skuid} "
         f"probe_mark={f'0x{probe_mark:x}' if probe_mark else 'off'}",
     )
 
@@ -395,6 +416,34 @@ def detach_host_slot_rule(qnum: int) -> bool:
     return False
 
 
+def teardown_host_queue_if_empty() -> bool:
+    """Drop our table when it carries no rules left (oneshot cleanup).
+
+    Detach removes per-slot rules; an oneshot run leaves an empty table
+    behind otherwise. Only OUR table is considered — never flush anything.
+    """
+    if not table_exists():
+        return False
+    in_ours = False
+
+    def _iter_ours():
+        nonlocal in_ours
+        for line in _list_ruleset().splitlines():
+            stripped = line.strip()
+            if stripped.startswith("table "):
+                tokens = stripped.split()
+                current = tokens[2] if len(tokens) > 2 else (tokens[1] if len(tokens) > 1 else "")
+                in_ours = current == NFT_TABLE
+                continue
+            if in_ours:
+                yield line
+
+    has_rules = any("queue" in line for line in _iter_ours())
+    if has_rules:
+        return False
+    return teardown_host_queue()
+
+
 def teardown_host_queue(*, expect_absent: bool = False) -> bool:
     """Delete OUR table (single teardown contract, §7/§18.2). Never flush.
 
@@ -443,6 +492,7 @@ __all__ = [
     "NFT_TABLE",
     "detach_host_slot_rule",
     "queue_bound",
+    "teardown_host_queue_if_empty",
     "slot_rule_handle",
     "attach_host_queue",
     "build_notrack_rule",

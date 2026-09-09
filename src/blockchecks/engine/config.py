@@ -208,7 +208,9 @@ DEFAULT_POOL_SIZE = int(_env_or("BLOCKCHECKS_POOL", "4"))
 # Host-mode (fwmark) — canon docs/hostmode.md. Host queues never 200/201
 # (a foreign nfqws2 may own those on a mixed box).
 HOST_QNUM_TCP = int(_env_or("BLOCKCHECKS_HOST_QNUM_TCP", "220"))
-# HOST_QNUM_UDP (221) returns in v2 together with host UDP voice wiring.
+#: Host-mode UDP queue — odd qnum next to the TCP slot (canon §6: slot i owns
+#: TCP 220+2i and UDP 221+2i). Never 200/201 (foreign nfqws2 territory).
+HOST_QNUM_UDP = int(_env_or("BLOCKCHECKS_HOST_QNUM_UDP", "221"))
 #: nfqws2 ``--fwmark`` anti-loop for rawsend packets (upstream default).
 DESYNC_MARK = int(os.environ.get("BLOCKCHECKS_DESYNC_MARK", "0x40000000"), 0)
 #: PROBE mark set by nft on matched skb — consumed by nfqws2 ``--filter-mark``

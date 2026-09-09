@@ -400,3 +400,28 @@ def test_slot_rule_handle_and_detach(monkeypatch):
     monkeypatch.setattr(host_isol, "slot_rule_handle", lambda q: None)
     assert host_isol.detach_host_slot_rule(220) is False
     assert calls == []
+
+
+@pytest.mark.unit
+def test_teardown_host_queue_if_empty_ignores_notrack_only(monkeypatch):
+    """notrack without queue rules = an empty table semantically — drop it."""
+    monkeypatch.setattr(host_isol, "table_exists", lambda: True)
+    ruleset = (
+        "table inet blockchecks_host {\n"
+        "	chain predefrag {\n"
+        "		meta mark & 0x40000000 != 0 notrack\n"
+        "	}\n"
+        "}\n"
+    )
+    monkeypatch.setattr(host_isol, "_list_ruleset", lambda: ruleset)
+    with patch.object(host_isol, "teardown_host_queue", return_value=True) as td:
+        assert host_isol.teardown_host_queue_if_empty() is True
+        td.assert_called_once()
+
+    ruleset_busy = ruleset.replace(
+        "}\n", "		queue flags bypass to 224\n	}\n", 1
+    )
+    monkeypatch.setattr(host_isol, "_list_ruleset", lambda: ruleset_busy)
+    with patch.object(host_isol, "teardown_host_queue") as td2:
+        assert host_isol.teardown_host_queue_if_empty() is False
+        td2.assert_not_called()

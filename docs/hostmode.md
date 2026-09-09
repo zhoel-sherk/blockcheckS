@@ -1,12 +1,13 @@
 # Host-mode (fwmark) — архитектура
 
-> **Статус:** **v1 РЕАЛИЗОВАН** (2026-09-09, коммиты 39b2617 + 1ce1eeb) для
-> oneshot (`bs tcp`) и `composite` — `--probe-isol=host`. Файл остаётся каноном
-> *зачем / как / чего не делать*; фактические расхождения править здесь.
-> Кампания (scan/pair/full на K host-слотах) и UDP — **v2, не реализовано**;
-> nfqws2 остаётся 1.4-линия (lua_compat 6): `--fwmark` активен, `--filter-mark`
-> появится с ops-апгрейдом 1.0.5 (PROBE_MARK уже поддержан кодом — env
-> `BLOCKCHECKS_PROBE_MARK`). Принято на живой линии: чемпион через host-слот
+> **Статус:** **v1 + v2 РЕАЛИЗОВАНЫ** (2026-09-09: 39b2617+1ce1eeb v1; d5da9d5
+> бинар 1.0.5.1 + PROBE_MARK; 82857ca v2a кампания; ce90c3b v2b адаптивный пул +
+> detach правил; UDP/QUIC host — v2 UDP волна). `--probe-isol=host` работает на
+> oneshot, composite, scan/pair/full; UDP voice (bypass=False) и QUIC
+> (bypass=True) идут через UDP-слоты 221+2i. Канон разделов *зачем/как/чего не
+> делать* остаётся; расхождения править здесь.
+> Бинар: nfqws2 1.0.5.1 (lua_compat 6), `--fwmark` + `--filter-mark`
+> (PROBE_MARK=0x20000000, nft `meta mark set` — пара, не по отдельности). Принято на живой линии: чемпион через host-слот
 > (nft skuid bcprobe + fwmark, queue 220) PASS 75–135ms HTTP 200; teardown и
 > рестарт после kill -9 — по приёмке §19 (AUDIT §16). Важно: /etc/environment
 > прокси нейтрализуется `apply_no_env_proxy` на всех probe-сессиях; живой bind
@@ -309,11 +310,12 @@ curl worker      ┤  uid=bcprobe | cgroup slice
 
 **Очереди host-mode** — отдельный диапазон, не 200/201:
 
-| Env | Предложение | Роль |
+| Env | Значение | Роль |
 |---|---|---|
-| `BLOCKCHECKS_HOST_QNUM_TCP` | 220 | TLS/HTTP host-mode |
-| `BLOCKCHECKS_HOST_QNUM_UDP` | 221 | QUIC/voice host-mode |
-| v2 worker *i* | 220+2*i, 221+2*i | слоты пула без netns |
+| `BLOCKCHECKS_HOST_QNUM_TCP` | 220 | TLS/HTTP host-mode (слот 0) |
+| `BLOCKCHECKS_HOST_QNUM_UDP` | 221 | QUIC/voice host-mode (слот 0) |
+| слот *i* | 220+2*i (TCP), 221+2*i (UDP) | пул без netns, `HostSlotPool` |
+| `BLOCKCHECKS_HOST_SLOTS` | auto\|N | размер пула: auto = min(cpu−1, 60% MemAvailable / 220 MiB), cap 16 |
 
 Перед bind: если qnum уже слушает чужой nfqws2 — **отказ**, не «следующий
 свободный» втихую (запрет silent fallback). Можно *явно* `--host-qnum=` после
@@ -470,18 +472,34 @@ Heartbeat fence (`init.lua` 200ms, `wait_heartbeat_fresh`) — без измен
 concurrency=1 (медленно, но на выделенном Pi это валидный выбор оператора
 для дымового `full`, не для week_cov).
 
-### v2 — параллелизм без veth = кампания на host
+### v2 — параллелизм без veth = кампания на host (**РЕАЛИЗОВАНО** 2026-09-09)
 
-K слотов = K qnum = K nfqws2 на хосте = K `LuaBridge("host-q…")`.  
-Поверх — тот же `AsyncTestRunner` / AQ, пул **не** создаёт ns.
+K слотов = K qnum = K nfqws2 на хосте = K `LuaBridge("host-q…")`  
+(`service/host_slots.py: HostSlotPool` — тот же acquire/release контракт, что у
+`NetNsPool`, но без ns). Поверх — тот же `AsyncTestRunner` / AQ. Размер пула —
+**адаптивный** (`BLOCKCHECKS_HOST_SLOTS=auto|N`; auto = min(cpu−1, 60%
+MemAvailable / 220 MiB на слот), cap 16) — решение оператора 2026-09-09:
+«слоты не делать фиксированными». `--parallel` остаётся ручкой netns-пулов.
 
-Это целевой режим **выделенного** тестера: `bs full`, `pair`, week_cov
-с `--probe-isol=host` (или env). Смешанный Xeon может так и остаться на
-netns — снова выбор оператора, не догма.
+**Уроки живой приёмки v2 (больше не «теория»):**
+- Правило слота с мёртвым демоном = `--queue-bypass` пропускает пробы RAW
+  (pin-проба оставила правило 220 → все пробы уходили в мёртвую очередь →
+  0/18 при живом чемпионе). Лечится `detach_host_slot_rule(qnum)` при
+  каждом kill демона (§18.6 усилен).
+- Recreate таблицы на каждом boot рвал соседние слоты дважды: transient
+  (правило удалено → очередь пуста) и permanent (каждый attach писал только
+  СВОЁ правило). Итог: attach идемпотентный + **additive** (`_ATTACH_LOCK`),
+  teardown — только `nft delete table` целиком.
+- Живой bind — только `/proc/net/netfilter/nfnetlink_queue` portid; stdout-
+  маркер флашится на выходе демона.
+- Память-монитор для слота — по PID демона (`daemon_proc.pid`), не по
+  `/var/run/netns/<name>` (его нет).
+- Паритет вердиктов host vs netns подтверждён: scan discord.com,
+  одинаковый сет стратегий, один период ТСПУ: **5/18 = 5/18**.
 
-v2 начинать только когда v1 не врёт по APPLIED и немеченый трафик не
-меняет HTTP (на Pi немеченого может не быть — сверка тогда с netns-прогоном
-на той же линии или с эталоном стратегий).
+UDP (§15): voice — правило **без bypass** на qnum 221+2i; QUIC — **с bypass**
+(parity с NsFirewall); oneshot UDP/QUIC снимает пустую таблицу
+(`teardown_host_queue_if_empty`).
 
 ---
 

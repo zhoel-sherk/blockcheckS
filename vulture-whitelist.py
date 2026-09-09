@@ -241,3 +241,4 @@ BridgeSession.is_host
 HostSlotPool.install_signal_hooks
 HostSlotPool.validate
 HostSlotPool.slot_name
+HOST_QNUM_UDP

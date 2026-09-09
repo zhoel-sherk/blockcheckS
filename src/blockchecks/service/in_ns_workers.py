@@ -22,7 +22,7 @@ from blockchecks.checkers.curl_probe import (
     worker_wall_timeout,
     ytcdn_probe_variants,
 )
-from blockchecks.engine.config import RETRY_IP_TIMEOUT
+from blockchecks.engine.config import HOST_PROBE_USER, RETRY_IP_TIMEOUT
 
 log = logging.getLogger(__name__)
 
@@ -178,6 +178,12 @@ def _run_quic_check(
     py = python_bin or PYTHON_BIN
     tmp_conf = None
 
+    # Host-mode slot: qnum from the slot name (UDP sibling per canon §6);
+    # QUIC keeps bypass=True (netns parity — voice is the no-bypass case).
+    host_qnum = 0
+    if ns_name.startswith("host-q"):
+        host_qnum = int(ns_name.split("-")[1][1:])
+
     if is_config:
         import shutil
         import tempfile as _tf
@@ -186,7 +192,6 @@ def _run_quic_check(
         _tf_fd, tmp_conf = _tf.mkstemp(prefix="bs_async_quic_", suffix=".conf")
         os.close(_tf_fd)
         shutil.copy2(src, tmp_conf)
-        _nfqws2_daemon(ns_name, tmp_conf)
     else:
         import tempfile as _tf
 
@@ -195,6 +200,49 @@ def _run_quic_check(
         os.close(_tf_fd)
         with open(tmp_conf, "w") as f:
             f.write("\n".join(config_lines))
+
+    if host_qnum:
+        from pathlib import Path as _Path
+
+        from blockchecks.engine.config import DESYNC_MARK, PROBE_MARK
+        from blockchecks.service.host_isol import (
+            attach_host_queue,
+            hostify_conf_text,
+            teardown_host_queue_if_empty,
+        )
+        from blockchecks.service.nfqws2_launcher import daemon_host, kill_host_daemon
+
+        _Path(tmp_conf).write_text(
+            hostify_conf_text(
+                _Path(tmp_conf).read_text(encoding="utf-8"),
+                qnum=host_qnum,
+                desync_mark=DESYNC_MARK,
+                probe_mark=PROBE_MARK,
+            ),
+            encoding="utf-8",
+        )
+        daemon_host(tmp_conf, qnum=host_qnum)
+        attach_host_queue(qnum=host_qnum, dport=443, proto="udp", bypass=True)
+        try:
+            return _quic_host_result(ns_name, py, domain, timeout, resolved_ip)
+        finally:
+            from blockchecks.service.host_isol import (
+                detach_host_slot_rule,
+                teardown_host_queue_if_empty,
+            )
+
+            kill_host_daemon(host_qnum)
+            detach_host_slot_rule(host_qnum)
+            teardown_host_queue_if_empty()
+            if tmp_conf:
+                try:
+                    os.unlink(tmp_conf)
+                except OSError:
+                    pass
+
+    if is_config:
+        _nfqws2_daemon(ns_name, tmp_conf)
+    else:
         _nfqws2_daemon(ns_name, tmp_conf)
 
     fw = get_ns_firewall(ns_name)
@@ -210,6 +258,39 @@ def _run_quic_check(
                 os.unlink(tmp_conf)
             except OSError:
                 pass
+
+
+def _quic_host_result(
+    _ns_name: str, py: str, domain: str, timeout: float, resolved_ip: str | None
+) -> dict:
+    """QUIC probe on a host slot: same check code, no netns exec (§8 uid).
+
+    ``_ns_name`` kept for call-site parity with ``quic_subprocess_result``.
+    """
+    from blockchecks.checkers.http3 import _QUIC_FAIL
+
+    resolved_ip_lit = repr(resolved_ip) if resolved_ip else "None"
+    check_code = f"""
+import json
+from blockchecks.checkers.http3 import check_http3, http3_result_dict
+r = check_http3({domain!r}, {timeout}, pre_resolved_ip={resolved_ip_lit})
+print(json.dumps(http3_result_dict(r)))
+"""
+    try:
+        proc = sp.run(
+            ["sudo", "-n", "-u", HOST_PROBE_USER, "-E", py, "-c", check_code],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,
+        )
+        try:
+            return json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return {**_QUIC_FAIL, "error": f"parse: {(proc.stdout or '')[:100]}"}
+    except sp.TimeoutExpired:
+        return {**_QUIC_FAIL, "error": "timeout"}
+    except (OSError, ValueError) as exc:
+        return {**_QUIC_FAIL, "error": str(exc)[:120]}
 
 
 def _is_quic_dropped(error: str) -> bool:
@@ -660,15 +741,44 @@ def _run_udp_check(
 
     py = python_bin or PYTHON_BIN
     tmp_conf = _materialize_udp_conf(strategy, port, is_config=is_config)
+
+    # Host-mode slot (docs/hostmode.md §15): odd qnum next to the TCP slot,
+    # queue rule WITHOUT bypass (§18.15 — voice must not silently pass).
+    host_qnum = 0
+    if ns_name.startswith("host-q"):
+        host_qnum = int(ns_name.split("-")[1][1:])
+        from pathlib import Path as _Path
+
+        from blockchecks.engine.config import DESYNC_MARK, PROBE_MARK
+        from blockchecks.service.host_isol import hostify_conf_text
+
+        _conf_text = _Path(tmp_conf).read_text(encoding="utf-8")
+        _Path(tmp_conf).write_text(
+            hostify_conf_text(
+                _conf_text,
+                qnum=host_qnum,
+                desync_mark=DESYNC_MARK,
+                probe_mark=PROBE_MARK,
+            ),
+            encoding="utf-8",
+        )
     fw = get_ns_firewall(ns_name)
     try:
-        _nfqws2_daemon(
-            ns_name,
-            tmp_conf,
-            kill_existing=not coexist,
-            min_procs=2 if coexist else 1,
-        )
-        _attach_udp_queue(ns_name, port, coexist=coexist)
+        if host_qnum:
+            from blockchecks.service.nfqws2_launcher import daemon_host
+
+            settle_elapsed, _udp_proc = daemon_host(tmp_conf, qnum=host_qnum)
+            from blockchecks.service.host_isol import attach_host_queue
+
+            attach_host_queue(qnum=host_qnum, dport=int(port), proto="udp")
+        else:
+            _nfqws2_daemon(
+                ns_name,
+                tmp_conf,
+                kill_existing=not coexist,
+                min_procs=2 if coexist else 1,
+            )
+            _attach_udp_queue(ns_name, port, coexist=coexist)
 
         probe_code = f"""
 import json, os
@@ -685,16 +795,29 @@ print(json.dumps({{"success": ok, "latency_ms": lat,
             "yes",
         )
         try:
-            r = _sudo(
-                "ip",
-                "netns",
-                "exec",
-                ns_name,
-                py,
-                "-c",
-                probe_code,
-                timeout=timeout * (3 if burst else 2) + 3,
-            )
+            if host_qnum:
+                # No netns — same uid contract as the TCP host worker (§8).
+                r = _sudo(
+                    "-n",
+                    "-u",
+                    HOST_PROBE_USER,
+                    "-E",
+                    py,
+                    "-c",
+                    probe_code,
+                    timeout=timeout * (3 if burst else 2) + 3,
+                )
+            else:
+                r = _sudo(
+                    "ip",
+                    "netns",
+                    "exec",
+                    ns_name,
+                    py,
+                    "-c",
+                    probe_code,
+                    timeout=timeout * (3 if burst else 2) + 3,
+                )
             try:
                 return json.loads(r.stdout)
             except json.JSONDecodeError:
@@ -706,8 +829,19 @@ print(json.dumps({{"success": ok, "latency_ms": lat,
                 "detail": "TimeoutExpired: probe subprocess timeout",
             }
     finally:
-        fw.detach_one(proto="udp", port=str(port), queue=NFQUEUE_UDP, bypass=False)
-        _pkill_nfqws2(ns_name)
+        if host_qnum:
+            from blockchecks.service.host_isol import (
+                detach_host_slot_rule,
+                teardown_host_queue_if_empty,
+            )
+            from blockchecks.service.nfqws2_launcher import kill_host_daemon
+
+            kill_host_daemon(host_qnum)
+            detach_host_slot_rule(host_qnum)
+            teardown_host_queue_if_empty()
+        else:
+            fw.detach_one(proto="udp", port=str(port), queue=NFQUEUE_UDP, bypass=False)
+            _pkill_nfqws2(ns_name)
         try:
             os.unlink(tmp_conf)
         except OSError:
