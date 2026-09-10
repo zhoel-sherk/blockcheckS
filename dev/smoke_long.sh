@@ -14,6 +14,7 @@
 #   8. HTTP plaintext              (conservative 200..399 only)
 #   9. HTTP service layer (bs serve) — auth, /api/* routes
 #  10. host-mode (AUDIT §16/§17)   (oneshot champion + campaign scan + teardown clean)
+#  11. inproc probe worker (AUDIT §21) (stability: RSS/fd/netns-inode, no workers)
 #
 # Budget: SMOKE_LONG_BUDGET_SEC (default 2700s). Steps past the deadline are
 # SKIPPED (exit 0 only if nothing FAILED). Needs: sudo + nfqws2 + blobs + nft
@@ -288,6 +289,77 @@ run_step 8 "HTTP plaintext (conservative 200..399)" step_body_step_8
 
 run_step 9 "HTTP service layer (bs serve — auth + /api/* + SSE)" step_body_step_9
 
+step_body_11() {
+# ── inproc probe worker stability (AUDIT §21, P2): scan with
+# --probe-worker=inproc while dev/step11_snap.py samples the runner:
+# VmHWM growth (leak), fd growth (setns fd leak), per-thread netns inodes
+# (a thread stuck in the probe ns = restore leak), and zero persistent
+# curl workers after the dns-pin phase. ──
+LOG11="$DIR/step11_inproc.log"
+SNAPLOG="$DIR/step11_snap.log"
+: > "$SNAPLOG"
+sudo -n "$BS" scan -d discord.com --generate --max 8 --parallel 2 \
+  --probe-worker=inproc --timeout 4 --skip-deps-check --skip-dns-audit \
+  2>&1 | tee "$LOG11" >/dev/null &
+SCAN_PID=$!
+"$PY" "$ROOT/dev/step11_snap.py" "$SNAPLOG" &
+SNAP_PID=$!
+wait $SCAN_PID || true
+wait $SNAP_PID 2>/dev/null || true
+SCAN_SUM=$(grep -a "TCP discord" "$LOG11" | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "TCP [a-z.]+: [0-9]+/[0-9]+ passed" || true)
+if [[ -n "$SCAN_SUM" ]]; then
+  ok "inproc scan completed"
+else
+  bad "inproc scan failed"; tail -6 "$LOG11"
+fi
+if grep -aq "abort_poll ignored" "$LOG11" && ! grep -aq "inproc setns: EPERM" "$LOG11"; then
+  ok "inproc path active (no EPERM fallback)"
+else
+  bad "inproc not active or fell back (EPERM)"; grep -a "inproc" "$LOG11" | tail -2
+fi
+F1=$(grep -a "FINAL" "$SNAPLOG" | tail -1 || true)
+HWM_A=$(echo "$F1" | sed -n 's/.*hwm_first=\([0-9]*\).*/\1/p')
+HWM_B=$(echo "$F1" | sed -n 's/.*hwm_last=\([0-9]*\).*/\1/p')
+# fd: plateau of the last 3 samples vs the first 3 (runner fd count flaps
+# with transient subprocess fds — single-point compare false-positives).
+FD_A=$(sed -n '1,3{s/.*fd=\([0-9]*\).*/\1/p}' "$SNAPLOG" | sort -n | sed -n '2p' || true)
+FD_B=$(grep -a "^snap " "$SNAPLOG" | sed -n 's/.*fd=\([0-9]*\).*/\1/p' | sort -n | tail -2 | sed -n '1p' || true)
+STUCK=$(echo "$F1" | sed -n 's/.*stuck_ns_total=\([0-9]*\).*/\1/p')
+# RSS: plateau comparison (median of first 3 vs last 3 samples) — the raw
+# first→last delta includes one-time warm-up (lazy curl_cffi import in the
+# probe thread, ~25 MiB) and would false-positive (2026-09-10 smoke).
+# head/sed SIGPIPE-safe forms only: with `set -o pipefail` a short-read
+# `head -3` kills the producer (grep) with 141 and set -e aborts the smoke
+# (2026-09-10: EXIT=141 right after "inproc path active").
+PLAT_A=$(sed -n '1,3{s/.*hwm_kib=\([0-9]*\).*/\1/p}' "$SNAPLOG" | sort -n | sed -n '2p' || true)
+PLAT_B=$(grep -a "^snap " "$SNAPLOG" | sed -n 's/.*hwm_kib=\([0-9]*\).*/\1/p' | sort -n | tail -2 | sed -n '1p' || true)
+if [[ -n "$PLAT_A" && -n "$PLAT_B" && $((PLAT_B - PLAT_A)) -le 15360 ]]; then
+  ok "no RSS leak (plateau +$(( (PLAT_B - PLAT_A) / 1024 )) MiB)"
+else
+  bad "RSS plateau growth suspicious: ${PLAT_A:-?}KiB -> ${PLAT_B:-?}KiB"
+fi
+if [[ -n "$FD_A" && -n "$FD_B" && $((FD_B - FD_A)) -le 16 ]]; then
+  ok "no fd leak (fd $FD_A -> $FD_B)"
+else
+  bad "fd growth suspicious: first=${FD_A:-?} last=${FD_B:-?}"
+fi
+# A thread inside the probe netns DURING a probe is expected (that is the
+# design); a restore leak shows up as an explicit error line in the scan log.
+if grep -aq "setns back to host ns failed" "$LOG11"; then
+  bad "setns restore error present"
+else
+  ok "all setns restores clean (no 'setns back to host ns failed')"
+fi
+ALIVE=$(echo "$F1" | sed -n 's/.*workers_final=\([0-9]*\).*/\1/p')
+if [[ "${ALIVE:-99}" -le 0 ]]; then
+  ok "no persistent curl workers (real=$ALIVE)"
+else
+  bad "persistent curl workers alive: $ALIVE"
+fi
+}
+
 run_step 10 "host-mode slots (oneshot champion + campaign + teardown clean)" step_body_10
+
+run_step 11 "inproc probe worker stability (scan + RSS/fd leak + no workers)" step_body_11
 
 run_result

@@ -38,6 +38,7 @@ class DnsPinService:
         disable_ech: bool = False,
         acquire_ns: Callable[[], Awaitable[str]],
         release_ns: Callable[[str], Awaitable[None]],
+        worker_mode: str = "subprocess",
     ) -> None:
         self.dns_cache = dns_cache
         self.pinned_path = pinned_path
@@ -45,6 +46,13 @@ class DnsPinService:
         self.disable_ech = disable_ech
         self._acquire_ns = acquire_ns
         self._release_ns = release_ns
+        #: P2 (AUDIT §21): inherit the runner's probe executor; closes the
+        #: last residual per-netns worker tail (auto-pin probes).
+        self.worker_mode = worker_mode if worker_mode in ("subprocess", "inproc") else "subprocess"
+        #: netns the pin probes touched (release their persistent workers at
+        #: the end of the cycle — otherwise 31 MiB per probed ns outlives the
+        #: pin phase for the whole campaign; observed 2026-09-10 smoke step 11).
+        self._used_ns: set[str] = set()
 
     async def auto_pin_ips(
         self,
@@ -99,6 +107,14 @@ class DnsPinService:
                     f"(no working fallback){RESET}",
                 )
 
+        # Release the persistent workers the pin phase spawned (subprocess
+        # mode only; inproc has no processes — release is a registry no-op).
+        from blockchecks.service.probe import release_curl_probe_worker
+
+        for ns in self._used_ns:
+            release_curl_probe_worker(ns)
+        self._used_ns.clear()
+
         if not self.pinned_path:
             return
 
@@ -115,6 +131,7 @@ class DnsPinService:
     async def probe_pin_ip(self, domain: str, ip: str) -> bool:
         """Return True when ``fake:blob=stun`` passes to *domain* via *ip*."""
         ns = await self._acquire_ns()
+        self._used_ns.add(ns)
         try:
             data = await asyncio.to_thread(
                 _run_tcp_check,
@@ -134,6 +151,7 @@ class DnsPinService:
                 None,
                 "fast",
                 False,
+                worker_mode=self.worker_mode,
             )
             return bool(data.get("success"))
         finally:

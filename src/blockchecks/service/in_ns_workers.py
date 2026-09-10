@@ -347,8 +347,15 @@ def _run_tcp_check(
     repeats_mode: str = "fast",
     quick_break: bool = False,
     resolved_ips: list[str] | None = None,
+    worker_mode: str = "subprocess",
 ) -> dict:
-    """Start nfqws2 in ns, run curl_cffi check, return result dict."""
+    """Start nfqws2 in ns, run curl_cffi check, return result dict.
+
+    ``worker_mode`` (P2, AUDIT §21): forward to the curl worker —
+    subprocess (default, per-netns python process) or inproc (per-thread
+    setns in the runner). Callers without the kwarg keep subprocess
+    semantics (executors, MCP probes, bench_settle).
+    """
     from blockchecks.engine.config import NFQUEUE_TCP, PYTHON_BIN
     from blockchecks.engine.nfqws_config import _build_inline_nfqws_lines
     from blockchecks.service.ns_firewall import get_ns_firewall
@@ -474,7 +481,9 @@ def _run_tcp_check(
                     curl_parallel=1,
                     parallel_repeats=parallel_repeats,
                 )
-                data = invoke_curl_probe_worker(ns_name, py, payload, wall)
+                data = invoke_curl_probe_worker(
+                    ns_name, py, payload, wall, worker_mode=worker_mode
+                )
                 data["settle_ms"] = round(settle_elapsed * 1000, 1)
                 used_ip = ip
                 if data.get("success"):

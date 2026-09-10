@@ -310,6 +310,9 @@ class AsyncTestRunner:
             if dns_cache is not None
             else None
         )
+        # P2: the pin service inherits the runner's probe executor mode.
+        if self._dns_pin is not None:
+            self._dns_pin.worker_mode = self.worker_mode
         self._tcp_executor = TcpProbeExecutor(self, self.pool, self.semaphore, self._result_logger)
         self._quic_executor = QuicProbeExecutor(self, self.pool, self.semaphore, self._result_logger)
         self._udp_executor = UdpProbeExecutor(self, self.pool, self.semaphore, self._result_logger)

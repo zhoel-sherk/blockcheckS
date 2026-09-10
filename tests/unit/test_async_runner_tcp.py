@@ -132,7 +132,7 @@ def test_run_tcp_check_retry_on_next_ip():
 
     calls: list[str] = []
 
-    def fake_worker(ns, py, payload, wall):
+    def fake_worker(ns, py, payload, wall, *, worker_mode="subprocess"):
         ip = payload["request"].get("resolved_ip")
         calls.append(ip)
         if ip == "1.1.1.1":

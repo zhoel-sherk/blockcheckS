@@ -229,3 +229,113 @@ def test_resolve_probe_worker_defaults_and_guards():
         else:
             os.environ["BLOCKCHECKS_PROBE_WORKER"] = old
     del monkeypatch_env
+
+@pytest.mark.unit
+def test_run_tcp_check_forwards_worker_mode():
+    """_run_tcp_check accepts worker_mode and forwards it to the invoke site."""
+    import pathlib as _pl
+
+    from blockchecks.service import in_ns_workers as inw
+
+    src = _pl.Path(inw.__file__).read_text(encoding="utf-8")
+    assert 'worker_mode: str = "subprocess"' in src
+    assert "worker_mode=worker_mode" in src  # invoke call site forwards the kwarg
+
+
+@pytest.mark.unit
+def test_dns_pin_service_inherits_runner_mode(monkeypatch):
+    """DnsPinService forwards worker_mode into the _run_tcp_check call."""
+    import asyncio
+
+    import blockchecks.engine.dns_pin_service as dps
+
+    captured: dict = {}
+
+    def fake_check(*args, **kwargs):
+        # to_thread calls this SYNC function in a thread
+        captured["worker_mode"] = kwargs.get("worker_mode")
+        return {"success": True}
+
+    monkeypatch.setattr(dps, "_run_tcp_check", fake_check)
+
+    class Cache:
+        def pins(self):
+            return {}
+
+        def domains(self):
+            return ["example.com"]
+
+        def candidates(self, domain):
+            return ["192.0.2.1"]
+
+        def set_pins(self, pins):
+            pass
+
+        def pinned_ip(self, domain):
+            return None
+
+        def add_pin(self, domain, ip):
+            pass
+
+    svc = dps.DnsPinService(
+        dns_cache=Cache(),
+        pinned_path="",
+        acquire_ns=_async_noop_acquire,
+        release_ns=_async_noop_release,
+        worker_mode="inproc",
+    )
+    ok = asyncio.run(svc.probe_pin_ip("example.com", "192.0.2.1"))
+    assert ok is True
+    assert captured["worker_mode"] == "inproc"
+
+
+async def _async_noop_acquire():
+    return "bs-p-fake"
+
+
+async def _async_noop_release(ns):
+    pass
+
+
+@pytest.mark.unit
+def test_dns_pin_service_default_is_subprocess(monkeypatch):
+    """Without an explicit mode the pin service keeps the subprocess contract."""
+    import asyncio
+
+    import blockchecks.engine.dns_pin_service as dps
+
+    captured: dict = {}
+
+    def fake_check(*args, **kwargs):
+        captured["worker_mode"] = kwargs.get("worker_mode")
+        return {"success": False}
+
+    monkeypatch.setattr(dps, "_run_tcp_check", fake_check)
+
+    class Cache:
+        def pins(self):
+            return {}
+
+        def domains(self):
+            return ["example.com"]
+
+        def candidates(self, domain):
+            return ["192.0.2.1"]
+
+        def set_pins(self, pins):
+            pass
+
+        def pinned_ip(self, domain):
+            return None
+
+        def add_pin(self, domain, ip):
+            pass
+
+    svc = dps.DnsPinService(
+        dns_cache=Cache(),
+        pinned_path="",
+        acquire_ns=_async_noop_acquire,
+        release_ns=_async_noop_release,
+    )
+    asyncio.run(svc.probe_pin_ip("example.com", "192.0.2.1"))
+    assert captured["worker_mode"] == "subprocess"
