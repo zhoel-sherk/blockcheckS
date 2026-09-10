@@ -172,7 +172,9 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
   экономии; host-слоты/не-root — guard на subprocess; DNS-pin под-пробы остаются
   subprocess (v1). Ранний abort в inproc невозможен (curl_cffi без
   XFERINFOFUNCTION) — на FAIL-тяжёлых прогонах subprocess быстрее. Замер Pi —
-  следующий шаг (ожидание: ещё заметнее).
+  следующий шаг (ожидание: ещё заметнее). DNS-pin: наследует worker_mode,
+  релизит свои воркеры после цикла пина; стабильность зафиксирована шагом 11
+  smoke_long (RSS/fd плато +2–4 MiB, restores чисты, 0 воркеров).
 
 - [ ] **Проба без тела.** Для «прошёл TLS или нет» достаточно CONNECT + handshake + заголовков (`session.head` / `--no-body`). Тело HTML не качать. **Исключение:** googlevideo — нужен `Range` и кусок медиа, HEAD там бесполезен.
 

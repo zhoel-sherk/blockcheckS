@@ -16,7 +16,9 @@
 - **P2 in-process probe worker (`--probe-worker=inproc`):** per-thread setns
   вместо per-netns python-воркера (≈31 MiB × K netns экономии RSS); opt-in,
   дефолт subprocess; host-слоты и не-root — guard на subprocess; ранний abort
-  (D1) — только subprocess (curl_cffi 0.16.1 без XFERINFOFUNCTION).
+  (D1) — только subprocess (curl_cffi 0.16.1 без XFERINFOFUNCTION). DNS-pin
+  под-пробы наследуют режим и релизят свои воркеры; smoke шаг 11 — inproc
+  stability (RSS/fd плато, setns restores, 0 воркеров).
 - **D4 Mode A (`BLOCKCHECKS_BRIDGE_MODE=A`):** strategy.cmd + Lua-whitelist-парсер
   (без load/eval), fence `PLAN_READY(gen)`, один демон на прогон. A/B паритет host
   1/18==1/18 и 4/18==B-период. Дефолт остаётся B до Lua GC-замера на 20h.
