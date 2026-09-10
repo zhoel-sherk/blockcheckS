@@ -312,11 +312,20 @@ def build_pair_runner(args, db, dns_cache, dns_audits, pool_size: int) -> AsyncT
         if (args.probe_isol or os.environ.get("BLOCKCHECKS_PROBE_ISOL"))
         else "netns"
     )
+    # Literal args.probe_worker read: dead-flag gate + subprocess fast path (P2).
+    from blockchecks.engine.config import resolve_probe_worker
+
+    worker_mode = (
+        resolve_probe_worker(args)
+        if (args.probe_worker or os.environ.get("BLOCKCHECKS_PROBE_WORKER"))
+        else "subprocess"
+    )
     return AsyncTestRunner(
         pool_size=pool_size,
         db=db,
         probe_isol=probe_isol,
         host_qnum=args.host_qnum,
+        worker_mode=worker_mode,
         disable_ech=disable_ech_from(args, getattr(args, "triage", None)),
         secure_dns=secure_dns,
         dns_cache=dns_cache,

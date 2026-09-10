@@ -52,6 +52,7 @@ def _args(**over):
         max=10,
         probe_isol="netns",
         host_qnum=220,
+        probe_worker="subprocess",
         generate=True,
         user_matrix="",
         strategy_preset=None,

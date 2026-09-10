@@ -69,3 +69,5 @@ class RunnerProbeDeps:
     acquire_ns: Callable[[], Awaitable[str]]
     release_ns: Callable[[str], Awaitable[None]]
     secure_dns: bool = False
+    #: P2 probe executor: subprocess (default) | inproc (per-thread setns).
+    worker_mode: str = "subprocess"

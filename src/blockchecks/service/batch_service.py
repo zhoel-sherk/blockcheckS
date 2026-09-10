@@ -336,6 +336,7 @@ class ProbeBatchService:
             protocol=protocol,
             extra_lua_init=self.deps.lua_extra or None,
             host_qnum=host_qnum,
+            worker_mode=getattr(self.deps, "worker_mode", "subprocess"),
         )
         results: list = []
         settle_ms = 0.0

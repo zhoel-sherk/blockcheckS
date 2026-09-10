@@ -113,6 +113,7 @@ def _args(**over):
     base.update(over)
     base.setdefault("probe_isol", "netns")
     base.setdefault("host_qnum", 220)
+    base.setdefault("probe_worker", "subprocess")
     return SimpleNamespace(**base)
 
 

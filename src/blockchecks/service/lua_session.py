@@ -41,6 +41,9 @@ class BridgeSession:
     extra_lua_init: list[str] | None = None
     host_qnum: int = 0
     daemon_proc: object | None = None
+    #: P2 probe executor mode (subprocess | inproc); host slots force
+    #: subprocess inside invoke_curl_probe_worker (skuid guard).
+    worker_mode: str = "subprocess"
 
     @property
     def is_host(self) -> bool:

@@ -374,6 +374,28 @@ bs data-block --out ./data_block --git
 
 ---
 
+## Probe worker (P2, opt-in)
+
+`--probe-worker {subprocess,inproc}` (или env `BLOCKCHECKS_PROBE_WORKER`) — кто
+исполняет curl-пробу кампании (scan/pair/full):
+
+- **subprocess** (дефолт) — persistent python-воркер в netns (~31 MiB peak RSS
+  каждый, JSON-lines по пайпу). Поддерживает **D1 ранний abort** (kill воркера
+  по STRATEGY_FAIL-событиям).
+- **inproc** — проба выполняется в самом раннере: поток делает
+  `setns(CLONE_NEWNET)` в целевой netns, зовёт тот же payload-контракт и
+  возвращает host-ns в `finally`. Нет воркер-процессов: экономия ≈ 31 MiB ×
+  K netns (при `--parallel 4` ≈ 125–150 MiB дерева, замер 2026-09-10).
+  Осторожно: **ранний abort недоступен** (curl_cffi 0.16.1 не поддерживает
+  XFERINFOFUNCTION) — FAIL-пробы живут до полного таймаута; D1 остаётся фичей
+  subprocess-режима.
+- Guard'ы: host-слоты (`--probe-isol=host`) всегда subprocess (nft `meta skuid`
+  матчит uid bcprobe); не-root раннер — inproc setns EPERM → явный логированный
+  фолбэк на subprocess. DNS-pin под-пробы остаются subprocess в v1 (краткоживущие
+  oneshot вне горячего цикла кампании).
+
+Вердикты и латентность — паритет (A/B 2026-09-10: 4/18 == 4/18, wall ±5%).
+
 ## Повторы curl
 
 Совместимость с blockcheck2 / GP. Это **не** `--curl-parallel` (тот — несколько

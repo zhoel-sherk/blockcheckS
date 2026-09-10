@@ -222,6 +222,7 @@ def add_host_isol_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+
 def add_lua_bridge_args(parser: argparse.ArgumentParser) -> None:
     """Campaign TCP uses lua_bridge (scan_pick IPC). ``--classic`` is a no-op map.
 
@@ -435,6 +436,16 @@ def add_campaign_args(parser: argparse.ArgumentParser, *, mode: str = "full") ->
     Includes ``--probe-isol/--host-qnum`` (host-mode v2 slots, docs/hostmode.md).
     """
     add_host_isol_args(parser)
+    g = parser.add_argument_group("probe worker (P2 in-process)")
+    g.add_argument(
+        "--probe-worker",
+        choices=("subprocess", "inproc"),
+        default=None,
+        metavar="{subprocess,inproc}",
+        help="Probe executor: subprocess (default, per-netns python worker; "
+        "supports D1 early abort) or inproc (per-thread setns, no worker "
+        "process ~31 MiB each; no early abort; host slots always subprocess)",
+    )
     if mode in ("scan", "pair"):
         parser.add_argument(
             "-d",

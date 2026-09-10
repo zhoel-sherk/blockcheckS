@@ -371,6 +371,105 @@ class _PersistentCurlWorker:
             self._kill()
 
 
+_INPROC_EPERM_WARNED = False
+
+
+class _InprocCurlWorker:
+    """Probe curl calls in-process via per-thread ``setns`` (P2, AUDIT §21).
+
+    Netns is a process-wide property on Linux, BUT ``setns(CLONE_NEWNET)`` is
+    per-thread on modern kernels (verified 2026-09-10: two threads held two
+    distinct netns concurrently while the main thread stayed on the host ns).
+    A probe thread enters the target netns, runs the SAME
+    ``run_curl_worker_payload`` contract the subprocess worker executes, and
+    restores the host ns in ``finally`` — sockets created by libcurl inherit
+    the calling thread's nsproxy, so TLS/JA4/DoH-pin semantics are identical.
+
+    Differences from :class:`_PersistentCurlWorker` (opt-in mode):
+    - no subprocess: no per-netns python RSS (~31 MiB peak each, measured);
+    - ``abort_poll`` (D1) is IGNORED — curl_cffi 0.16.1 does not support
+      XFERINFOFUNCTION (setopt error 20219), so an in-flight transfer cannot
+      be cleanly interrupted; D1 stays a subprocess-mode feature. Warned once.
+    - §7.3 recycle counter does not apply (no accumulating process; Sessions
+      are created and closed per probe inside the checker).
+    """
+
+    def __init__(self, ns_name: str, py: str) -> None:
+        self.ns_name = ns_name
+        self.py = py
+        self._io_lock = threading.Lock()
+        self._invoke_count = 0
+
+    @staticmethod
+    def _host_ns_fd() -> int:
+        # Called from the invoking thread while it is still on the host ns —
+        # thread-self points at THIS thread's ns (never another worker's).
+        return os.open("/proc/thread-self/ns/net", os.O_RDONLY)
+
+    def invoke(
+        self,
+        payload: dict,
+        timeout: float,
+        *,
+        abort_poll: Callable[[], bool] | None = None,
+        poll_interval: float = 0.1,
+    ) -> tuple[dict, bool]:
+        """Run one probe in-process inside the netns. Returns ``(data, aborted)``.
+
+        The (data, aborted) contract mirrors the subprocess worker so callers
+        stay unchanged; inproc never aborts (see class docstring).
+        ``timeout`` bounds nothing here directly — the checker applies its own
+        per-request timeouts (the subprocess wall budget is only about the
+        worker process, which does not exist in this mode).
+        """
+        global _INPROC_EPERM_WARNED
+        del timeout, poll_interval
+        if abort_poll is not None and not _INPROC_EPERM_WARNED:
+            # D1 early abort is a subprocess-mode feature (see class docstring);
+            # say it once, do not spam per probe.
+            _INPROC_EPERM_WARNED = True
+            log.info(
+                "probe-worker=inproc: abort_poll ignored (curl_cffi 0.16.1 has no "
+                "XFERINFOFUNCTION — D1 early abort stays a subprocess-mode feature)"
+            )
+        self._invoke_count += 1
+        with self._io_lock:
+            from blockchecks.service.in_ns_workers import run_curl_worker_payload
+
+            host_fd = self._host_ns_fd()
+            try:
+                ns_fd = os.open(f"/var/run/netns/{self.ns_name}", os.O_RDONLY)
+            except OSError as exc:
+                os.close(host_fd)
+                return {**_FAIL, "error": f"inproc netns fd: {exc}"[:120]}, False
+            try:
+                os.setns(ns_fd, os.CLONE_NEWNET)
+            except OSError as exc:
+                os.close(ns_fd)
+                os.close(host_fd)
+                if exc.errno == 1:  # EPERM: non-root runner — caller falls back
+                    return {**_FAIL, "error": "inproc setns: EPERM"}, False
+                return {**_FAIL, "error": f"inproc setns: {exc}"[:120]}, False
+            try:
+                os.close(ns_fd)
+                data = run_curl_worker_payload(payload)
+                return data, False
+            except Exception as exc:  # noqa: BLE001 — probe must not kill the runner
+                log.warning("inproc probe payload failed: %s", exc)
+                return {**_FAIL, "error": f"inproc: {exc}"[:120]}, False
+            finally:
+                try:
+                    os.setns(host_fd, os.CLONE_NEWNET)
+                except OSError as exc:
+                    log.error("inproc setns back to host ns failed: %s", exc)
+                finally:
+                    os.close(host_fd)
+
+    def close(self) -> None:
+        # No process to kill; release just drops the registry entry.
+        self._invoke_count = 0
+
+
 def release_curl_probe_worker(ns_name: str, py: str | None = None) -> None:
     """Stop the persistent curl worker for *ns_name* (best-effort, all epochs)."""
     with _WORKERS_LOCK:
@@ -384,12 +483,15 @@ def release_curl_probe_worker(ns_name: str, py: str | None = None) -> None:
                 worker.close()
 
 
-def _get_worker(ns_name: str, py: str) -> _PersistentCurlWorker:
+def _get_worker(ns_name: str, py: str, worker_mode: str = "subprocess") -> object:
     key = worker_cache_key(ns_name, py)
     with _WORKERS_LOCK:
         worker = _WORKERS.get(key)
         if worker is None:
-            worker = _PersistentCurlWorker(ns_name, py)
+            if worker_mode == "inproc":
+                worker = _InprocCurlWorker(ns_name, py)
+            else:
+                worker = _PersistentCurlWorker(ns_name, py)
             _WORKERS[key] = worker
         return worker
 
@@ -402,6 +504,7 @@ def invoke_curl_probe_worker(
     *,
     abort_poll: Callable[[], bool] | None = None,
     poll_interval: float = 0.1,
+    worker_mode: str = "subprocess",
 ) -> dict:
     """Run curl probe via a persistent in-ns worker; JSON-lines per request.
 
@@ -413,9 +516,43 @@ def invoke_curl_probe_worker(
     With ``abort_poll`` (D1): the poll runs between stdout select steps; on
     True the worker is SIGKILLed, released from the cache and the ns epoch is
     bumped — the next probe spawns a fresh worker (spawn cost ≈ 0.1s vs the
-    saved curl wall on every FAIL probe).
+    saved curl wall on every FAIL probe). Subprocess mode only — inproc mode
+    cannot interrupt an in-flight transfer (no XFERINFOFUNCTION in
+    curl_cffi 0.16.1) and ignores the poll (logged once).
+
+    ``worker_mode="inproc"`` (opt-in, P2): runs the probe payload in-process
+    via per-thread setns — no per-netns python process (~31 MiB peak RSS
+    each). Host slots force subprocess (skuid bcprobe guard).
     """
+    global _INPROC_EPERM_WARNED
+    mode = worker_mode if worker_mode in ("subprocess", "inproc") else "subprocess"
+    if worker_mode not in ("subprocess", "inproc"):
+        log.warning("unknown worker_mode %r — subprocess worker", worker_mode)
+    # Guard (P2): host slots MUST keep the subprocess worker — the nft
+    # ``meta skuid`` rule matches the dedicated probe uid (bcprobe); an
+    # in-process probe runs as the runner uid and would take the raw path
+    # (false FAILs). docs/hostmode.md §8.
+    if mode == "inproc" and ns_name.startswith("host-q"):
+        log.warning("probe-worker=inproc unsupported for host slots (skuid bcprobe) — subprocess")
+        mode = "subprocess"
     try:
+        if mode == "inproc":
+            data, aborted = _get_worker(ns_name, py, "inproc").invoke(
+                payload, timeout, abort_poll=abort_poll, poll_interval=poll_interval
+            )
+            if data.get("error") == "inproc setns: EPERM":
+                # Explicit fallback (never silent): non-root runner cannot
+                # setns — the subprocess worker goes through sudo inside the
+                # engine, as before. Warn once per process.
+                if not _INPROC_EPERM_WARNED:
+                    _INPROC_EPERM_WARNED = True
+                    log.warning(
+                        "probe-worker=inproc: setns EPERM (non-root) — subprocess worker"
+                    )
+            elif aborted:
+                release_curl_probe_worker(ns_name, py)
+                bump_ns_epoch(ns_name)
+            return data
         data, aborted = _get_worker(ns_name, py).invoke(
             payload, timeout, abort_poll=abort_poll, poll_interval=poll_interval
         )

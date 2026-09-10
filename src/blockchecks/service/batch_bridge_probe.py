@@ -233,6 +233,7 @@ def run_tcp_check_bridge(
             wall,
             abort_poll=_make_abort_poll(session, gen, strategy_id),
             poll_interval=BRIDGE_ABORT_POLL_INTERVAL,
+            worker_mode=getattr(session, "worker_mode", "subprocess"),
         )
         if data.get("error") == "aborted by abort_poll":
             # D1: DPI already killed the flow (rst_in/retrans) — classify as

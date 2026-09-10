@@ -243,6 +243,7 @@ class AsyncTestRunner:
         netns_base: str | None = None,
         probe_isol: str = "netns",
         host_qnum: int | None = None,
+        worker_mode: str = "subprocess",
     ):
         from blockchecks.engine.config import HOST_QNUM_TCP, NETNS_BASE
 
@@ -292,6 +293,7 @@ class AsyncTestRunner:
         self.lua_bridge = lua_bridge
         self.bridge_batch = max(1, bridge_batch)
         self.lua_extra = list(lua_extra or [])
+        self.worker_mode = worker_mode if worker_mode in ("subprocess", "inproc") else "subprocess"
         self._probe_gen = 0
         self._batch_id = 0
         self.memory_monitor = None
@@ -351,6 +353,7 @@ class AsyncTestRunner:
             acquire_ns=self.pool.acquire,
             release_ns=self.pool.release,
             secure_dns=bool(self.secure_dns),
+            worker_mode=self.worker_mode,
         )
 
     def _probe_service(self, backend: str) -> ProbeBatchService:

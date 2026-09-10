@@ -167,7 +167,12 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
 
 Каждая classic-проба часто делает `sudo ip netns exec … python -m …` — на Pi это секунды импорта, не сеть.
 
-- [ ] **Curl в том же процессе.** Внутри уже настроенного netns звать `run_curl_probe` через `asyncio.to_thread`, не новый интерпретатор. Если curl_cffi уронит процесс — откатиться на subprocess. Код: `service/probe.py`, `engine/async_runner.py`. На Xeon ~1.2–1.5×; на Pi разница больше.
+- [x] **Curl в том же процессе** (2026-09-10, v1 кампании): `--probe-worker=inproc`
+  (AUDIT §21) — per-thread setns, тот же payload-контракт; ≈31 MiB × K netns
+  экономии; host-слоты/не-root — guard на subprocess; DNS-pin под-пробы остаются
+  subprocess (v1). Ранний abort в inproc невозможен (curl_cffi без
+  XFERINFOFUNCTION) — на FAIL-тяжёлых прогонах subprocess быстрее. Замер Pi —
+  следующий шаг (ожидание: ещё заметнее).
 
 - [ ] **Проба без тела.** Для «прошёл TLS или нет» достаточно CONNECT + handshake + заголовков (`session.head` / `--no-body`). Тело HTML не качать. **Исключение:** googlevideo — нужен `Range` и кусок медиа, HEAD там бесполезен.
 

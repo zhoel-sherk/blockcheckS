@@ -531,11 +531,20 @@ def build_async_runner(ctx: FullRunContext) -> AsyncTestRunner:
         if (args.probe_isol or os.environ.get("BLOCKCHECKS_PROBE_ISOL"))
         else "netns"
     )
+    # Literal args.probe_worker read: dead-flag gate + subprocess fast path (P2).
+    from blockchecks.engine.config import resolve_probe_worker
+
+    worker_mode = (
+        resolve_probe_worker(args)
+        if (args.probe_worker or os.environ.get("BLOCKCHECKS_PROBE_WORKER"))
+        else "subprocess"
+    )
     return AsyncTestRunner(
         pool_size=ctx.parallel,
         db=ctx.db,
         probe_isol=probe_isol,
         host_qnum=args.host_qnum,
+        worker_mode=worker_mode,
         secure_dns=ctx.secure_dns,
         dns_cache=ctx.dns_cache,
         dns_audit={r.domain: r for r in ctx.dns_audits},

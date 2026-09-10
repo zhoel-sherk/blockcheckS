@@ -272,6 +272,32 @@ def resolve_probe_isol(args) -> str:
         ) from None
     return "host"
 
+
+def resolve_probe_worker(args) -> str:
+    """``--probe-worker`` / ``BLOCKCHECKS_PROBE_WORKER``: subprocess | inproc.
+
+    P2 (AUDIT §21): in-process probes via per-thread setns — no per-netns
+    python worker process (~31 MiB peak RSS each, measured 2026-09-10).
+    Default stays subprocess (opt-in mode). Guards:
+    - host slots always run the subprocess worker (nft ``meta skuid`` matches
+      the dedicated probe uid; in-process would take the raw path);
+    - D1 early abort is a subprocess-mode feature (curl_cffi 0.16.1 has no
+      XFERINFOFUNCTION) — inproc ignores abort_poll (logged once);
+    - non-root runner: inproc setns EPERM → explicit logged fallback to the
+      subprocess worker per probe.
+    Unknown value → error (never silent).
+    """
+    requested = (getattr(args, "probe_worker", None) or "").strip().lower()
+    if not requested:
+        requested = os.environ.get("BLOCKCHECKS_PROBE_WORKER", "").strip().lower()
+    if not requested or requested == "subprocess":
+        return "subprocess"
+    if requested != "inproc":
+        raise ValueError(
+            f"--probe-worker: unknown value {requested!r}; allowed: subprocess, inproc"
+        )
+    return "inproc"
+
 # Lua bridge (/dev/shm IPC)
 SHM_BASE = _env_or("BLOCKCHECKS_SHM_BASE", "/dev/shm/blockchecks")
 DEFAULT_BRIDGE_BATCH = int(_env_or("BLOCKCHECKS_BRIDGE_BATCH", "500"))
