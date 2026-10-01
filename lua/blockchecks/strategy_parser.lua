@@ -164,6 +164,8 @@ function bs_poll_strategy_cmd()
 	local g = io.open(gen_path, "r")
 	local gen = g and tonumber(g:read("*l")) or nil
 	if g then g:close() end
-	bs_write_ipc({ event = "PLAN_READY", gen = gen or 0 })
+	-- epoch = rebuild counter (AUDIT §22): lets Python norm RSS/latency per
+	-- plan rebuild and count rebuilds without re-reading strategy.cmd.
+	bs_write_ipc({ event = "PLAN_READY", gen = gen or 0, epoch = _G.bs_dyn_epoch })
 	return true
 end

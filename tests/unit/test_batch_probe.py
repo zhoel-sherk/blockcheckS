@@ -200,6 +200,11 @@ async def test_probe_batch_service_recycles_on_memory_flag() -> None:
         def clear(self, pid=None) -> None:
             pass
 
+        def slow_leak_candidates(self):
+            return []
+
+        slow_leak_slope = 0.2
+
     import blockchecks.service.batch_service as bp
 
     original = bp.BridgeSession
@@ -420,6 +425,11 @@ async def test_recycle_preserves_strategy_idx_and_events() -> None:
 
         def clear(self, pid=None) -> None:
             pass
+
+        def slow_leak_candidates(self):
+            return []
+
+        slow_leak_slope = 0.2
 
     import blockchecks.service.batch_service as bp
 
@@ -790,6 +800,11 @@ async def test_reboot_daemon_waits_heartbeat_after_recycle() -> None:
 
         def clear(self, pid=None) -> None:
             pass
+
+        def slow_leak_candidates(self):
+            return []
+
+        slow_leak_slope = 0.2
 
     import blockchecks.service.batch_service as bp
 

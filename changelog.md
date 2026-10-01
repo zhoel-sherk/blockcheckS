@@ -22,6 +22,12 @@
 - **D4 Mode A (`BLOCKCHECKS_BRIDGE_MODE=A`):** strategy.cmd + Lua-whitelist-парсер
   (без load/eval), fence `PLAN_READY(gen)`, один демон на прогон. A/B паритет host
   1/18==1/18 и 4/18==B-период. Дефолт остаётся B до Lua GC-замера на 20h.
+- **Lua GC-замер Mode A (§22, 2026-10-01):** live netns + `BLOCKCHECKS_LUA_GC_SEC`
+  (инжект `--lua-gc`) + сэмплер `dev/step12_nfqws2_snap.py`. Lua heap после GC
+  плоский (260K→260K / 302K→260K), RSS 7.0→3.6 MiB, 0 mem-reboot, 0 fence timeout —
+  план-инстансы не текут; гейт дефолта снят (дефолт остаётся B по решению). По пути
+  исправлен дефект: runtime-DLOG nfqws2 терялся после droproot (`_relax_debug_log`
+  релаксит ancestor+файл). Smoke-шаг 12 фиксирует критерии в каноне.
 
 ## 1.4.1 — GP-contract: multi-domain scan, run-scoped summary, canonical args (2026-09-03)
 

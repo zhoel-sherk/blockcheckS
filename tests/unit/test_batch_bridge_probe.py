@@ -276,3 +276,54 @@ def test_bridge_abort_poll_fires_on_fresh_strategy_fail():
             _os.environ.pop("BLOCKCHECKS_BRIDGE_EARLY_ABORT", None)
         else:
             _os.environ["BLOCKCHECKS_BRIDGE_EARLY_ABORT"] = monkey_off
+
+
+@pytest.mark.unit
+def test_wait_plan_ready_returns_tuple_success():
+    """AUDIT §22: _wait_plan_ready returns (ok, latency_ms), not a bare bool."""
+    from blockchecks.service import batch_bridge_probe as bbp
+
+    bridge = MagicMock()
+    bridge.drain_events.return_value = [MagicMock(event="PLAN_READY", gen=5)]
+    ok, latency = bbp._wait_plan_ready(bridge, 5, timeout=1.5)
+    assert ok is True
+    assert 0.0 <= latency < 1000.0
+
+
+@pytest.mark.unit
+def test_wait_plan_ready_returns_tuple_timeout():
+    """Fence timeout must report (False, elapsed) — previously a bare bool was
+    silently discarded by the caller."""
+    from blockchecks.service import batch_bridge_probe as bbp
+
+    bridge = MagicMock()
+    bridge.drain_events.return_value = []  # never PLAN_READY
+    ok, latency = bbp._wait_plan_ready(bridge, 99, timeout=0.12)
+    assert ok is False
+    assert latency >= 0.0
+
+
+@pytest.mark.unit
+def test_mode_a_records_plan_latency_ms(monkeypatch):
+    """Mode A probe result carries plan_latency_ms (rebuild-cost metric)."""
+
+    s = _session()
+    # drain_events must return PLAN_READY for gen=1 first (fence), then the
+    # probe's APPLIED events.
+    bridge = s.bridge
+    bridge.drain_events.side_effect = [
+        [MagicMock(event="PLAN_READY", gen=1)],
+        [MagicMock(event="APPLIED", gen=1, matched=2)],
+        [MagicMock(event="APPLIED", gen=1, matched=2)],
+    ]
+    monkeypatch.setattr("blockchecks.engine.config.BRIDGE_MODE", "A")
+    with patch(
+        "blockchecks.service.batch_bridge_probe.invoke_curl_probe_worker",
+        return_value={"success": True, "http_code": 200, "latency_ms": 50},
+    ):
+        data = run_tcp_check_bridge(
+            s, 1, 1, "fake:blob=stun:repeats=6:tcp_ts=-1000", "discord.com", 5.0, "py"
+        )
+    assert data["plan_latency_ms"] >= 0.0
+    assert data["bridge_gen"] == 1
+    assert data["success"] is True

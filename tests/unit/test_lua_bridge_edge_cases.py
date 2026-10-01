@@ -46,6 +46,17 @@ class TestBridgeEventParsing:
     def test_invalid_json_returns_none(self):
         assert BridgeEvent.from_line("not json") is None
         assert BridgeEvent.from_line("") is None
+
+    def test_plan_ready_carries_epoch(self):
+        # AUDIT §22: PLAN_READY now carries the rebuild counter — the raw
+        # event must not drop it (Python norms RSS/latency per rebuild).
+        line = json.dumps({"event": "PLAN_READY", "gen": 12, "epoch": 9})
+        evt = BridgeEvent.from_line(line)
+        assert evt is not None
+        assert evt.event == "PLAN_READY"
+        assert evt.gen == 12
+        assert evt.raw is not None
+        assert evt.raw.get("epoch") == 9
         assert BridgeEvent.from_line("{broken") is None
 
     def test_event_without_gen(self):

@@ -307,3 +307,34 @@ def test_bridge_event_matched_semantics() -> None:
 
     fail = BridgeEvent.from_line('{"event":"STRATEGY_FAIL","reason":"retrans"}')
     assert fail is not None and fail.is_applied() is False
+
+
+@pytest.mark.unit
+def test_build_bridge_conf_lua_gc_off_by_default(tmp_path: Path) -> None:
+    """AUDIT §22: LUA_GC_SEC default 0 → no --lua-gc line (upstream 60s)."""
+    from blockchecks.service.lua_conf import build_bridge_conf
+
+    ipc = tmp_path / "bs-p-0"
+    conf = build_bridge_conf(["fake:blob=stun"], ipc, protocol="tls12")
+    assert "--lua-gc=" not in conf
+
+
+@pytest.mark.unit
+def test_build_bridge_conf_lua_gc_injected(tmp_path: Path, monkeypatch) -> None:
+    """BLOCKCHECKS_LUA_GC_SEC=N → conf carries --lua-gc=N."""
+    monkeypatch.setenv("BLOCKCHECKS_LUA_GC_SEC", "10")
+    import importlib
+
+    import blockchecks.engine.config as cfg
+    import blockchecks.service.lua_conf as lc
+
+    importlib.reload(cfg)
+    importlib.reload(lc)
+    try:
+        ipc = tmp_path / "bs-p-0"
+        conf = lc.build_bridge_conf(["fake:blob=stun"], ipc, protocol="tls12")
+        assert "--lua-gc=10" in conf
+    finally:
+        monkeypatch.delenv("BLOCKCHECKS_LUA_GC_SEC", raising=False)
+        importlib.reload(cfg)
+        importlib.reload(lc)

@@ -12,10 +12,12 @@ from typing import NamedTuple
 from blockchecks.engine.config import (
     MEM_MONITOR_ENABLED,
     MEM_MONITOR_LEAK_SLOPE,
+    MEM_MONITOR_LEAK_SLOPE_SLOW,
     MEM_MONITOR_MAX_MIB,
     MEM_MONITOR_POLL,
     MEM_MONITOR_PY_MAX_MIB,
     MEM_MONITOR_WINDOW,
+    MEM_MONITOR_WINDOW_SLOW,
 )
 
 log = logging.getLogger(__name__)
@@ -322,6 +324,8 @@ class MemoryMonitor:
         py_max_mib: float | None = None,
         window: int | None = None,
         poll: float | None = None,
+        slow_leak_slope: float | None = None,
+        slow_window: int | None = None,
     ) -> None:
         self.enabled = enabled and MEM_MONITOR_ENABLED
         self.max_mib = MEM_MONITOR_MAX_MIB if max_mib is None else float(max_mib)
@@ -329,7 +333,12 @@ class MemoryMonitor:
         self.py_max_mib = MEM_MONITOR_PY_MAX_MIB if py_max_mib is None else float(py_max_mib)
         self.window = MEM_MONITOR_WINDOW if window is None else int(window)
         self.poll = MEM_MONITOR_POLL if poll is None else float(poll)
+        self.slow_leak_slope = (
+            MEM_MONITOR_LEAK_SLOPE_SLOW if slow_leak_slope is None else float(slow_leak_slope)
+        )
+        self.slow_window = MEM_MONITOR_WINDOW_SLOW if slow_window is None else int(slow_window)
         self._windows: dict[int, _Window] = {}
+        self._slow_windows: dict[int, _Window] = {}
         self._last_py_sample: MemorySample | None = None
         self._last_check = float("-inf")
 
@@ -347,8 +356,10 @@ class MemoryMonitor:
         """Drop tracked windows (after a daemon recycle)."""
         if pid is None:
             self._windows.clear()
+            self._slow_windows.clear()
             return
         self._windows.pop(pid, None)
+        self._slow_windows.pop(pid, None)
 
     def record_pid(self, pid: int) -> None:
         """Sample one daemon PID; called between probes / after settle."""
@@ -357,8 +368,11 @@ class MemoryMonitor:
         rss = process_rss_bytes(pid)
         if rss <= 0:
             return
+        s = MemorySample(time.monotonic(), rss)
         w = self._windows.setdefault(pid, _Window())
-        w.push(MemorySample(time.monotonic(), rss), self.window)
+        w.push(s, self.window)
+        sw = self._slow_windows.setdefault(pid, _Window())
+        sw.push(s, self.slow_window)
 
     def record_ns(self, ns_name: str, pids: list[int] | None = None) -> None:
         """Sample all nfqws2 daemons in *ns_name* (default: discover via pgrep)."""
@@ -395,6 +409,24 @@ class MemoryMonitor:
             slope = compute_leak_slope(w.samples)
             if slope > self.leak_slope:
                 out.append((pid, f"leak={slope:.1f}MiB/s > {self.leak_slope:.1f}MiB/s"))
+        return out
+
+    def slow_leak_candidates(self) -> list[tuple[int, float]]:
+        """LOG-ONLY slow-growth detection (AUDIT §22). Returns ``(pid, slope)``
+        for daemons whose LONG-window slope exceeds ``slow_leak_slope``.
+
+        The fast ``recycle_candidates`` (default 8 MiB/s over ~24 s) is blind
+        to a slow Mode A Lua leak (e.g. 1 MiB/min → ~0.017 MiB/s) that would
+        still blow a 20h run. This method NEVER recycles — callers log a
+        warning only, so a healthy-but-verbose daemon is not force-restarted
+        and a long-run smoke gate ("0 reboots") stays meaningful."""
+        out: list[tuple[int, float]] = []
+        for pid, w in self._slow_windows.items():
+            if len(w.samples) < 2:
+                continue
+            slope = compute_leak_slope(w.samples)
+            if slope > self.slow_leak_slope:
+                out.append((pid, slope))
         return out
 
     def summary(self) -> dict:

@@ -469,6 +469,14 @@ class ProbeBatchService:
                 results.append(result)
         finally:
             session.shutdown()
+        # AUDIT §22: daemon reboot counter must be observable — a long Mode A
+        # run with 0 reboots is evidence of no memory leak (mem-reboot by
+        # MemoryMonitor is the only forced restart on a live run).
+        if recycled:
+            log.info(
+                "%s",
+                f"  {YELLOW}[mem] daemon reboots total={recycled} in {ns_name}{RESET}",
+            )
         return BatchProbeResult(
             results=results,
             settle_ms=settle_ms,
@@ -564,6 +572,15 @@ class ProbeBatchService:
                 "%s",
                 f"  {YELLOW}[mem] python worker RSS over threshold "
                 f"(see BLOCKCHECKS_MEM_PY_MAX_MIB){RESET}",
+            )
+        # AUDIT §22: slow-leak is LOG-ONLY — never recycle from here, a long
+        # Mode A run must not be force-restarted by a slow-but-healthy curve.
+        for pid, slope in self.memory_monitor.slow_leak_candidates():
+            log.warning(
+                "%s",
+                f"  {YELLOW}[mem] slow growth pid={pid} slope={slope:.3f}MiB/s "
+                f"> {self.memory_monitor.slow_leak_slope:.1f}MiB/s (log only, "
+                f"no recycle){RESET}",
             )
 
     def _maybe_recycle(self, ns_name: str, session: BridgeSession) -> bool:

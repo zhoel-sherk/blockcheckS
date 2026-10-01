@@ -55,12 +55,17 @@ Lua `smart_fallback` уже пишет в `events.ndjson` события вро�
   между батчами (host: Popen+/proc portid; netns: pids+heartbeat); shutdown
   оставляет живого демона Mode A, финальный kill — `HostSlotPool.destroy_all`
   / `bs stop`; recycle-бэктопы: §7.3 счётчик + mem-pressure reboot.
-- [ ] **Lua GC-замер на длинном прогоне.** Инструмент: RSS-сэмплер с фильтром
-  краткоживущих PID (pgrep -x гонит обёртки sudo/env — первый замер дал мусор
-  3KiB). Бэктоп уже есть: §7.3 recycle + MemoryMonitor reboot. Замерить RSS
-  nfqws2 на 20h-профиле Mode A перед тем, как объявлять Mode A дефолтом.
+- [x] **Lua GC-замер** (2026-10-01, AUDIT §22): live netns Mode A + `--lua-gc=10`
+  (`BLOCKCHECKS_LUA_GC_SEC`) + сэмплер `dev/step12_nfqws2_snap.py` — Lua heap
+  после GC плоский (260K→260K, 29 выб.; 302K→260K, 52 выб.), RSS 7.0→3.6 MiB,
+  0 mem-reboot, 0 fence timeout. План-инстансы не текут; smoke-шаг 12 фиксирует
+  это в каноне. Дефолт Mode A остаётся B (решение пользователя).
 
-- [ ] **Lua GC.** На одном daemon тысячи plan-instance не должны течь. Иначе Mode A на 20-часовом прогоне упрётся в память раньше, чем в DPI.
+- [x] **Lua GC.** На одном daemon тысячи plan-instance не текут (замер §22:
+  `LUA GARBAGE COLLECT` после-GC плоский на 52 выборках; allocation churn от
+  `bs_copy_plan`+`deepcopy(instance.arg)` собирается штатным `--lua-gc`).
+  Остаточный риск медленной утечки ловится `BLOCKCHECKS_MEM_LEAK_SLOPE_SLOW`
+  (лог-only) и явным «0 mem-reboot» на длинном прогоне.
 
 - [x] **Выбрать схему host-mode.** Канон: **B** (nft `skuid`/cgroup, не dst IP). Схема A отвергнута. `--filter-mark` ≥ 1.0.5 — defence-in-depth, не строгий блокер. Флаг `--probe-isol=host`, **не** `--probe-backend host`. См. [hostmode.md](hostmode.md).
 

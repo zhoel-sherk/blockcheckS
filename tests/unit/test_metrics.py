@@ -342,6 +342,43 @@ def test_monitor_clear_resets_window():
     assert mon.recycle_candidates() == []
 
 
+def test_monitor_slow_leak_log_only_flags_growth():
+    """AUDIT §22: slow-leak detector uses a LONG window and never enters
+    recycle_candidates (log-only by design)."""
+    mon = MemoryMonitor(enabled=True, max_mib=1000, leak_slope=8, slow_leak_slope=0.2, slow_window=50)
+    # +200 MiB over 40 s = 5 MiB/s: way above fast slope too — check both
+    # paths agree on a blatant leak.
+    seq = [100 * 1024 * 1024, 300 * 1024 * 1024, 500 * 1024 * 1024, 700 * 1024 * 1024]
+    with patch("blockchecks.service.metrics.time.monotonic", side_effect=[1, 11, 21, 31]):
+        with patch("blockchecks.service.metrics.process_rss_bytes", side_effect=seq):
+            for _ in seq:
+                mon.record_pid(7)
+    slow = mon.slow_leak_candidates()
+    assert any(pid == 7 for pid, _ in slow)
+    # slow detection must be reachable even when the FAST slope is under the
+    # recycle bar (the reason this path exists).
+    mon2 = MemoryMonitor(enabled=True, max_mib=1000, leak_slope=1000, slow_leak_slope=0.2, slow_window=50)
+    seq2 = [100 * 1024 * 1024, 110 * 1024 * 1024, 120 * 1024 * 1024, 130 * 1024 * 1024]
+    with patch("blockchecks.service.metrics.time.monotonic", side_effect=[1, 11, 21, 31]):
+        with patch("blockchecks.service.metrics.process_rss_bytes", side_effect=seq2):
+            for _ in seq2:
+                mon2.record_pid(8)
+    assert mon2.recycle_candidates() == []
+    assert any(pid == 8 for pid, _ in mon2.slow_leak_candidates())
+
+
+def test_monitor_slow_leak_silent_on_flat():
+    mon = MemoryMonitor(enabled=True, slow_leak_slope=0.2, slow_window=50)
+    with patch("blockchecks.service.metrics.time.monotonic", side_effect=[1, 2, 3, 4]):
+        with patch(
+            "blockchecks.service.metrics.process_rss_bytes",
+            return_value=500 * 1024 * 1024,
+        ):
+            for _ in range(4):
+                mon.record_pid(9)
+    assert mon.slow_leak_candidates() == []
+
+
 def test_monitor_disabled_skips_sampling():
     mon = MemoryMonitor(enabled=False)
     with patch("blockchecks.service.metrics.process_rss_bytes", return_value=999 * 1024 * 1024):

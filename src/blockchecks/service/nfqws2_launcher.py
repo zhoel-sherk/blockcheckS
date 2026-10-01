@@ -86,6 +86,60 @@ def _reclaim_debug_log(dbg_path: str | None) -> None:
         log.warning("nfqws2 debug log reclaim failed (%s): %s", dbg_path, exc)
 
 
+def _relax_debug_log(dbg_path: str | None) -> None:
+    """Make the nfqws2 --debug log writable AFTER privilege drop.
+
+    nfqws2 drops to the overflow uid (2147483647) before the runtime loop
+    (nfq_main, AUDIT §22 2026-10-01). The debug log is created as the
+    launching user (0644) during option parse — the init DLOG lines land,
+    but every RUNTIME line (incl. ``LUA GARBAGE COLLECT``) silently fails to
+    append. Two permission layers both need relaxing: the PARENT dir (XDG
+    state dirs are 0700 and the ancestor chain may be 0750/0700 too) and the
+    file itself. Relaxed like the IPC shm dirs (setfacl first, world-writable
+    fallback). This runs ONLY when --debug is explicitly enabled, so the
+    privacy chmod (0700 logs dir) stays intact for normal runs.
+    """
+    if not dbg_path:
+        return
+    from blockchecks.service.lua_bridge_ipc import NFQWS2_OVERFLOW_UID
+
+    # Traversal for the dropped uid through every ancestor up to the fs root,
+    # so DLOG can reopen the file after droproot. Best-effort per level.
+    cur = Path(dbg_path).parent
+    for _ in range(8):
+        if cur.parent == cur:
+            break
+        try:
+            cur.chmod((cur.stat().st_mode & 0o777) | 0o011)  # add x for all
+        except OSError as exc:
+            log.debug("debug log ancestor chmod %s skipped (%s)", cur, exc)
+        try:
+            from blockchecks.service.lua_bridge_ipc import _apply_setfacl
+
+            if _apply_setfacl(cur, is_dir=True):
+                pass
+        except Exception as exc:  # noqa: BLE001 — best-effort per level, logged
+            log.debug("debug log ancestor setfacl %s skipped (%s)", cur, exc)
+        cur = cur.parent
+
+    try:
+        os.chmod(dbg_path, 0o644)
+    except OSError as exc:
+        log.warning("debug log chmod %s failed (%s)", dbg_path, exc)
+    try:
+        from blockchecks.service.lua_bridge_ipc import _apply_setfacl
+
+        if _apply_setfacl(Path(dbg_path), is_dir=False):
+            return
+    except Exception as exc:
+        log.warning("debug log setfacl %s failed (%s)", dbg_path, exc)
+    try:
+        os.chmod(dbg_path, 0o666)
+        log.warning("debug log %s world-writable (no ACL for overflow uid %d)", dbg_path, NFQWS2_OVERFLOW_UID)
+    except OSError as exc:
+        log.warning("debug log world-chmod %s failed (%s)", dbg_path, exc)
+
+
 def open_out_capture(tag: str):
     """Open stdout/stderr capture file for an nfqws2 launch.
 
@@ -177,7 +231,18 @@ class Nfqws2Launcher:
         for attempt in range(1, max_bind_attempts + 1):
             out_fh, out_path = open_out_capture(self.ns_name or "host")
             self.last_out_log = out_path
-            self.last_debug_log = out_path
+            # Real debug path from the conf (--debug=@path), not the out capture.
+            conf_txt = ""
+            try:
+                conf_txt = Path(config_arg).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+            dbg_path: Path | None = None
+            for ln in conf_txt.splitlines():
+                if ln.startswith("--debug=@"):
+                    dbg_path = Path(ln[len("--debug=@") :].strip())
+                    break
+            self.last_debug_log = dbg_path or out_path
             try:
                 proc = subprocess.Popen(
                     _build_cmd(self.ns_name, config_arg),
@@ -235,6 +300,12 @@ class Nfqws2Launcher:
                     pid = real[0]
             else:
                 time.sleep(0.1)
+            # AUDIT §22: relax AFTER nfqws2 created the file (option parse) so
+            # runtime DLOG after droproot can append (GC line, per-packet debug).
+            # Only when this launch actually carries a --debug=@path (distinct
+            # from the out capture) — avoids ACL churn on the capture file.
+            if self.last_debug_log is not None and self.last_debug_log != self.last_out_log:
+                _relax_debug_log(str(self.last_debug_log))
             _reclaim_debug_log(str(self.last_debug_log) if self.last_debug_log else None)
 
             if proc.poll() is None:
@@ -334,6 +405,9 @@ class Nfqws2Launcher:
                 settle = wait_nfqws2_ready(
                     ns_name, max_wait=settle_max, poll_interval=settle_poll, min_procs=min_procs
                 )
+                # AUDIT §22: relax AFTER nfqws2 created the debug file (option
+                # parse) so runtime DLOG after droproot can append.
+                _relax_debug_log(dbg_path)
                 _reclaim_debug_log(dbg_path)
                 out_txt = _read_out_tail(out_path)
                 alive = NFQWS2_BIND_MARKER in out_txt or bool(resolve_nfqws2_pids(ns_name, baseline))
@@ -472,6 +546,9 @@ def daemon_host(
                     os.unlink(tmp_conf)
                 except OSError:
                     pass
+                # AUDIT §22: relax after nfqws2 created the debug file so the
+                # runtime loop (post-droproot) can append DLOG lines.
+                _relax_debug_log(dbg_path)
                 return settle, proc
             if proc.poll() is not None:
                 break

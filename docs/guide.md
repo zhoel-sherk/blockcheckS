@@ -426,16 +426,25 @@ sudo bs scan --preset pi2 -M timeout-benchmark \
 ```
 
 Монитор RSS lua_bridge (`service/metrics.py`) перезапускает демон при утечке.
-На ~256 MiB свободной RAM:
+На ~256 MiB свободной RAM пороги ставь КАК ДОЛЮ доступной памяти, не
+фиксированно: для Python-раннера 256 MiB потолка уже хватает, для демона —
+запас под Lua-heap и netns:
 
 ```bash
-export BLOCKCHECKS_MEM_MAX_MIB=256
+export BLOCKCHECKS_MEM_MAX_MIB=384
 export BLOCKCHECKS_MEM_LEAK_SLOPE=8
-export BLOCKCHECKS_MEM_PY_MAX_MIB=2048
+export BLOCKCHECKS_MEM_PY_MAX_MIB=256
 export BLOCKCHECKS_MEM_MONITOR=1
 ```
 
-Дефолты: MAX 512, slope 8, PY 2048, window 12, poll 2s. `MONITOR=0` выключает.
+**Не ставь `BLOCKCHECKS_MEM_PY_MAX_MIB` больше доступной RAM** (старый рецепт
+«2048 на 1 GB» был дед-порогом: на Pi2 сторож просто не сработал бы). Дефолт
+PY = 512 MiB; на слабых устройствах занижай под реальный `MemAvailable`.
+
+Дефолты: MAX 512, slope 8, PY 512, window 12, poll 2s. `MONITOR=0` выключает.
+Медленная утечка (slope < 8 MiB/s, `BLOCKCHECKS_MEM_LEAK_SLOPE_SLOW`, дефолт
+0.2 MiB/s по 5-минутному окну) только логируется — демон не перезапускается
+(AUDIT §22: гейт «0 reboots» на длинном прогоне).
 
 Больше воркеров = больше netns×nfqws2. На Xeon сначала поднимай `--parallel`,
 не nftables vmap.

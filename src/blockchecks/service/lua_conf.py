@@ -85,6 +85,13 @@ def build_bridge_conf(
     lines: list[str] = [
         f"--writable={ipc_dir}",
     ]
+    # AUDIT §22: optional forced-Lua-GC cadence for memory measurement. Off by
+    # default (nfqws2 default 60s). Env BLOCKCHECKS_LUA_GC_SEC=N injects
+    # --lua-gc=N so a measurement run gets dense LUA GARBAGE COLLECT samples
+    # without changing default daemon behavior.
+    lua_gc_sec = _cfg_mod.LUA_GC_SEC
+    if lua_gc_sec and lua_gc_sec > 0:
+        lines.append(f"--lua-gc={int(lua_gc_sec)}")
     for lua in get_lua_init_scripts():
         if os.path.isfile(lua):
             lines.append(f"--lua-init=@{lua}")

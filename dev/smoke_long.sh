@@ -362,4 +362,83 @@ run_step 10 "host-mode slots (oneshot champion + campaign + teardown clean)" ste
 
 run_step 11 "inproc probe worker stability (scan + RSS/fd leak + no workers)" step_body_11
 
+step_body_12() {
+# ── Mode A daemon memory (AUDIT §22): netns Mode A scan with debug +
+# --lua-gc=10 while dev/step12_nfqws2_snap.py samples daemon RSS and parses
+# LUA GARBAGE COLLECT pairs. Pass criteria: Lua heap AFTER GC is flat
+# (plan instances do not accumulate), RSS plateau, no mem-reboot, no
+# plan_ready fence timeouts. SKIP when BLOCKCHECKS_SKIP_STEP12=1 (needs
+# sudo + a full Mode A run; the 20h-profile confirmation is separate). ──
+if [[ "${BLOCKCHECKS_SKIP_STEP12:-0}" == "1" ]]; then
+  echo "SKIP: step 12 — BLOCKCHECKS_SKIP_STEP12=1"
+  SKIP_COUNT=$((SKIP_COUNT+1)); return 0
+fi
+LOG12="$DIR/step12_modea.log"
+SNAPLOG="$DIR/step12_snap.log"
+MATRIX="$DIR/step12_matrix.txt"
+: > "$SNAPLOG"
+cat > "$MATRIX" << 'EOF'
+fake:blob=stun:repeats=6:tcp_ts=-1000
+fake:blob=max_ru:repeats=6:tcp_ts=-1000
+fake:blob=google:repeats=6:tcp_ts=-1000
+fake:blob=b4pda:repeats=6:tcp_ts=-1000
+fake:blob=stun:repeats=6
+fake:blob=max_ru:repeats=6
+hostfakesplit:disorder_after:nofake2:tcp_ack=-66000:tcp_ts_up:repeats=1
+fakedsplit:disorder_after:nofake2:disorder_1
+syndata:pos=1
+EOF
+sudo -n -E env BLOCKCHECKS_BRIDGE_MODE=A BLOCKCHECKS_NFQWS2_DEBUG=1 \
+  BLOCKCHECKS_LUA_GC_SEC=10 "$BS" scan -d discord.com --user-matrix "$MATRIX" \
+  --max 18 --timeout 6 --skip-deps-check --skip-dns-audit \
+  --scan-level fast --parallel 1 --repeats 3 2>&1 | tee "$LOG12" >/dev/null &
+SCAN_PID=$!
+UH="${SUDO_USER:+$(eval echo "~$SUDO_USER")}"; UH="${UH:-$HOME}"
+sudo -n "$PY" "$ROOT/dev/step12_nfqws2_snap.py" "$SNAPLOG" \
+  --logdir "$UH/.local/state/blockcheckS/logs" --interval 5 --deadline 600 \
+  --marker "@/tmp/bs_" &
+SNAP_PID=$!
+wait $SCAN_PID || true
+wait $SNAP_PID 2>/dev/null || true
+SCAN_SUM=$(grep -a "TCP discord" "$LOG12" | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "TCP [a-z.]+: [0-9]+/[0-9]+ passed" || true)
+if [[ -n "$SCAN_SUM" ]]; then
+  ok "Mode A scan completed"
+else
+  bad "Mode A scan failed"; tail -8 "$LOG12"
+fi
+F1=$(grep -a "FINAL" "$SNAPLOG" | tail -1 || true)
+GC=$(echo "$F1" | sed -n 's/.*gc_count=\([0-9]*\).*/\1/p')
+GAF=$(echo "$F1" | sed -n 's/.*gc_after_first=\([0-9]*\).*/\1/p')
+GAL=$(echo "$F1" | sed -n 's/.*gc_after_last=\([0-9]*\).*/\1/p')
+PLAT_A=$(echo "$F1" | sed -n 's/.*rss_first=\([0-9]*\).*/\1/p')
+PLAT_B=$(echo "$F1" | sed -n 's/.*rss_last=\([0-9]*\).*/\1/p')
+if [[ "${GC:-0}" -ge 2 ]]; then
+  ok "gc samples present ($GC)"
+else
+  bad "expected >=2 LUA GARBAGE COLLECT samples, got ${GC:-0}"
+fi
+if [[ -n "$GAF" && -n "$GAL" && $((GAL)) -le $((GAF * 15 / 10 + 64)) ]]; then
+  ok "Lua heap after GC flat (${GAF}K -> ${GAL}K)"
+else
+  bad "Lua heap after GC grew: ${GAF:-?}K -> ${GAL:-?}K"
+fi
+if [[ -n "$PLAT_A" && -n "$PLAT_B" && $((PLAT_B - PLAT_A)) -le 15360 ]]; then
+  ok "RSS plateau (+$(( (PLAT_B - PLAT_A) / 1024 )) MiB)"
+else
+  bad "RSS growth suspicious: ${PLAT_A:-?}KiB -> ${PLAT_B:-?}KiB"
+fi
+if grep -aq "daemon reboots total=" "$LOG12"; then
+  bad "daemon reboots present"; grep -a "reboots total=" "$LOG12"
+else
+  ok "no daemon mem-reboots"
+fi
+if grep -aq "plan_ready fence TIMEOUT" "$LOG12"; then
+  bad "plan_ready fence timeouts present"; grep -a "plan_ready fence TIMEOUT" "$LOG12" | head -2
+else
+  ok "no plan_ready fence timeouts"
+fi
+}
+
+run_step 12 "Mode A daemon memory (RSS plateau + Lua GC flat + no reboots)" step_body_12
+
 run_result

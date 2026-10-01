@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -17,6 +18,8 @@ from blockchecks.checkers.curl_probe import (
 from blockchecks.engine.config import BRIDGE_ABORT_POLL_INTERVAL, BRIDGE_EARLY_ABORT
 from blockchecks.service.lua_session import BridgeSession
 from blockchecks.service.probe import invoke_curl_probe_worker, probe_request_dict
+
+log = logging.getLogger(__name__)
 
 
 def _make_abort_poll(session: BridgeSession, gen: int, strategy_id: int):
@@ -64,25 +67,31 @@ def _lua_desync_bodies(strategy: str) -> str:
     return "\n".join(out)
 
 
-def _wait_plan_ready(bridge, gen: int, *, timeout: float = 1.5) -> bool:
+def _wait_plan_ready(bridge, gen: int, *, timeout: float = 1.5) -> tuple[bool, float]:
     """Mode A fence: probe must not start before the Lua timer rebuilt the
     dynamic plan from OUR strategy.cmd (50ms timer vs curl start race — a
     stale plan applied to a fresh probe = wrong desync + false FAIL).
-    PLAN_READY(gen) is written by the parser after each rebuild."""
+    PLAN_READY(gen) is written by the parser after each rebuild.
+
+    Returns ``(ok, latency_ms)`` — the latency feeds AUDIT §22 (plan rebuild
+    cost under Mode A; a daemon that can no longer rebuild in budget is
+    either Lua-wedged or under GC pressure).
+    """
     import time as _time
 
-    deadline = _time.monotonic() + timeout
+    t0 = _time.monotonic()
+    deadline = t0 + timeout
     while _time.monotonic() < deadline:
         try:
             if any(
                 ev.event == "PLAN_READY" and ev.gen == gen
                 for ev in bridge.drain_events(since_gen=gen)
             ):
-                return True
+                return True, (_time.monotonic() - t0) * 1000.0
         except OSError:
             pass
         _time.sleep(0.03)
-    return False
+    return False, (_time.monotonic() - t0) * 1000.0
 
 
 def _drain_with_poll(bridge, since_gen: int, expect_id: int) -> list:
@@ -157,10 +166,18 @@ def run_tcp_check_bridge(
     # dynamic plan from it. Mode B: cmd only carries extra lua-desync lines.
     from blockchecks.engine.config import BRIDGE_MODE as _bm
 
+    plan_latency_ms: float = 0.0
     if _bm == "A":
         cmd = _lua_desync_bodies(strategy)
         session.bridge.publish(strategy_id, gen, cmd)
-        _wait_plan_ready(session.bridge, gen, timeout=1.5)
+        ready, plan_latency_ms = _wait_plan_ready(session.bridge, gen, timeout=1.5)
+        if not ready:
+            log.warning(
+                "Mode A plan_ready fence TIMEOUT gen=%d latency=%.1fms — probe "
+                "will run against the previous plan (false-FAIL risk)",
+                gen,
+                plan_latency_ms,
+            )
     else:
         session.bridge.publish(strategy_id, gen, strategy if extra_lua_desync else None)
 
@@ -169,6 +186,7 @@ def run_tcp_check_bridge(
         data["settle_ms"] = 0.0
         data["bridge_gen"] = gen
         data["bridge_id"] = strategy_id
+        data["plan_latency_ms"] = plan_latency_ms
         events = _drain_with_poll(session.bridge, gen, strategy_id)
         data["bridge_events"] = [e.event for e in events]
         _attach_bridge_verdict(data, events, session)
@@ -254,6 +272,7 @@ def run_tcp_check_bridge(
             break
     data["bridge_gen"] = gen
     data["bridge_id"] = strategy_id
+    data["plan_latency_ms"] = plan_latency_ms
     events = _drain_with_poll(session.bridge, gen, strategy_id)
     data["bridge_events"] = [e.event for e in events]
     _attach_bridge_verdict(data, events, session)

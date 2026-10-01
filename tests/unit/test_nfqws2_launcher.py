@@ -138,3 +138,26 @@ def test_daemon_host_raises_when_never_binds(tmp_path):
         with pytest.raises(RuntimeError, match="did not bind queue 220"):
             L.daemon_host(str(conf), qnum=220, bind_max_wait=0.3)
     assert L._HOST_PROCS == {}
+
+
+def test_relax_debug_log_adds_overflow_uid_acl(tmp_path: Path):
+    """AUDIT §22: the debug log must be writable after nfqws2 droproot —
+    runtime DLOG (LUA GARBAGE COLLECT, per-packet debug) otherwise silently
+    fails to append (init lines only)."""
+    from blockchecks.service.nfqws2_launcher import _relax_debug_log
+
+    dbg = tmp_path / "nfqws2_dbg.log"
+    dbg.write_text("init\n", encoding="utf-8")
+    _relax_debug_log(str(dbg))
+    # ACL should grant the overflow uid write access (or world-writable
+    # fallback) — both make the runtime append possible.
+    import subprocess
+
+    out = subprocess.run(["getfacl", str(dbg)], capture_output=True, text=True)
+    assert "2147483647" in out.stdout or "user::rw" in out.stdout
+
+
+def test_relax_debug_log_none_is_noop():
+    from blockchecks.service.nfqws2_launcher import _relax_debug_log
+
+    _relax_debug_log(None)  # must not raise

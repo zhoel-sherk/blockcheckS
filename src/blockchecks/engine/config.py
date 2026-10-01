@@ -571,6 +571,14 @@ NFQWS2_SETTLE_MIN = float(_env_or("BLOCKCHECKS_NFQWS2_SETTLE_MIN", "0"))
 MEM_MONITOR_MAX_MIB = float(_env_or("BLOCKCHECKS_MEM_MAX_MIB", "512"))
 # Leak slope threshold (MiB/s over the sampling window); recycle when exceeded.
 MEM_MONITOR_LEAK_SLOPE = float(_env_or("BLOCKCHECKS_MEM_LEAK_SLOPE", "8"))
+# Slow-leak logging threshold (MiB/s over the LONG window). The fast slope
+# (above, default 8 MiB/s with a 24s window) is blind to a slow Mode A Lua
+# leak (e.g. 1 MiB/min) that would still blow a 20h run. This threshold is
+# LOG-ONLY — it never recycles the daemon (AUDIT §22; the smoke step 12 gate
+# is "0 reboots on a clean run", so a forced reboot must not come from here).
+MEM_MONITOR_LEAK_SLOPE_SLOW = float(_env_or("BLOCKCHECKS_MEM_LEAK_SLOPE_SLOW", "0.2"))
+# Slow-leak window (samples; at poll 2.0s ≈ 150 → 5 min of history).
+MEM_MONITOR_WINDOW_SLOW = int(_env_or("BLOCKCHECKS_MEM_WINDOW_SLOW", "150"))
 # RSS ceiling for the Python worker (MiB); log warning (no recycle — process owner).
 MEM_MONITOR_PY_MAX_MIB = float(_env_or("BLOCKCHECKS_MEM_PY_MAX_MIB", "512"))
 # Sampling window size (samples) for the sliding-window slope estimate.
@@ -587,6 +595,10 @@ MAX_CURL_PARALLEL = int(_env_or("BLOCKCHECKS_CURL_PARALLEL_MAX", "8"))
 # nfqws2 debug
 # BLOCKCHECKS_NFQWS2_DEBUG: empty/0=off, 1=file under logs/, syslog, @path, or path
 NFQWS2_DEBUG = os.environ.get("BLOCKCHECKS_NFQWS2_DEBUG", "").strip()
+
+# AUDIT §22: forced Lua GC cadence for bridge confs (seconds; 0/empty = default
+# 60s upstream). Measurement-only knob for dense LUA GARBAGE COLLECT samples.
+LUA_GC_SEC = int(_env_or("BLOCKCHECKS_LUA_GC_SEC", "0"))
 
 from blockchecks.engine.paths import RUNTIME_LOGS_DIR  # noqa: E402
 
